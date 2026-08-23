@@ -1,0 +1,782 @@
+# Mock Stock Trading Service — API Spec (Week-1 MVP)
+
+> **Version**: Week-1 MVP · 26.08.20 ~ 08.25 · derived from the ERD and wireframe · **Auth is NOT implemented in week 1** — the server runs against a single seed user (`user_id = 1`)
+>
+> **Badges**: 17 endpoints · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
+
+## Contents
+- [Common Rules](#common-rules)
+- [Auth & Member](#auth--member)
+- [Market](#market)
+- [Stocks](#stocks)
+- [Trading](#trading)
+- [Accounts](#accounts)
+- [Screen ↔ API Mapping](#screen--api-mapping)
+- [Polling Policy](#polling-policy)
+- [Open Decisions](#open-decisions)
+- [Week 2+](#week-2)
+
+---
+
+## Common Rules
+
+### Base URL
+| | |
+|---|---|
+| dev | `http://localhost:8080/api` |
+| prod | `https://{domain}/api` |
+
+### Auth
+
+After login, send the token in the header:
+```
+Authorization: Bearer {accessToken}
+```
+
+- **Week 1 does NOT implement auth.** Signup/login screens are UX-only; the server runs against a **fixed seed user (`user_id = 1`)**, operating as if that user is logged in (`AUTH_ENABLED=false` in `.env`). The 🔒 endpoints below also work without a token in week 1 — the server uses the fixed user's account.
+- **Decide the auth method (JWT vs session cookie) in week 2.** With Next.js, putting a **Route Handler as a BFF and storing the token in an httpOnly cookie** is safest — the token never reaches browser JS.
+
+| Scope | Target |
+|---|---|
+| public (no login) | rankings · search · stock detail · chart · FX · guide |
+| 🔒 login required | orders · account · holdings · ledger · portfolio reset |
+
+### Response Format
+
+Successful responses return the data directly; collections carry a cursor alongside.
+```json
+{
+  "items": [ ... ],
+  "nextCursor": "eyJ0YSI6IjEyNDAwMDAwMDAwMDAiLCJpZCI6MTAyNH0",
+  "hasNext": true
+}
+```
+
+### Error Format
+
+```json
+{
+  "error": {
+    "code": "INSUFFICIENT_CASH",
+    "message": "주문가능금액이 부족합니다.",
+    "data": { "required": "2415242", "available": "1200000" }
+  }
+}
+```
+`message` is written as a sentence that can be shown to the user verbatim.
+
+### Representation Rules
+
+| Item | Rule | Example |
+|---|---|---|
+| amounts · quantities | string | `"241500"`, `"0.5"` |
+| timestamps | ISO 8601 + offset | `"2026-08-11T12:36:59+09:00"` |
+| dates | YYYY-MM-DD | `"2026-08-11"` |
+| change rate | decimal-ratio string | `"0.0231"` = +2.31% |
+| currency | ISO 4217 | `"KRW"`, `"USD"` |
+
+**Never send amounts as numbers.** JavaScript's `number` is binary floating point, so large amounts or fractional orders drift. It's the same reason Toss returns prices as strings. On the frontend, use Decimal.js or display the string as-is.
+
+### Cursor Pagination
+
+```
+GET /stocks/rankings?market=KR&size=20
+→ { "items": [...], "nextCursor": "abc", "hasNext": true }
+GET /stocks/rankings?market=KR&size=20&cursor=abc
+```
+Rankings reorder, so OFFSET duplicates or drops items. **`cursor` is an opaque server-encoded string the client never interprets.**
+
+**Cursor payload — carry the sort axis itself**
+The only ranking sort is trading-amount descending, so the cursor carries that value.
+```js
+// what the cursor holds
+{ "ta": "1240000000000", "id": 1024 }   tradingAmount · stockId
+// Base64URL-encoded when sent down
+"eyJ0YSI6IjEyNDAwMDAwMDAwMDAiLCJpZCI6MTAyNH0"
+```
+```sql
+-- next page
+SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
+ WHERE s.is_ranked AND s.market_country = :market
+   AND (s.trading_amount, s.stock_id) < (:ta, :id)   -- tuple comparison
+ ORDER BY s.trading_amount DESC, s.stock_id DESC
+ LIMIT :size + 1;
+```
+**Always include `stock_id`.** If two stocks share the exact trading amount, trading-amount alone makes order at that boundary change every query, duplicating or dropping items. `stock_id` as the secondary sort key makes the order unique. PostgreSQL's `(a, b) < (:a, :b)` tuple comparison saves writing `a < :a OR (a = :a AND b < :b)`, and it rides the `(trading_amount DESC, stock_id DESC)` composite index directly.
+
+**What if the universe refreshes mid-cursor?** If the user flips to page 2 exactly as the Monday 08:00 batch runs, the new universe queries in and some stocks drop out or appear. Leave it in week 1 — it's a weekly refresh, so it virtually never hits, and it's not an error, just "ranks changed in between". To be strict, pack a universe version (refresh time) into the cursor and return 409 on mismatch to restart from page 1 — a week-2 task.
+
+**Don't use `rank_no` as the cursor.** It's fully rewritten by the batch, so right after refresh the same number points at a different stock. Display rank only; anchor pagination on trading amount + stock_id.
+
+---
+
+## Auth & Member
+
+### `POST /auth/signup`
+Signup + account opening + mock-funding deposit
+
+**Request**
+```json
+{
+  "email": "user@example.com",
+  "password": "********",
+  "nickname": "홍길동"
+}
+```
+
+**Response · 201**
+```json
+{
+  "userId": 1,
+  "nickname": "홍길동",
+  "accessToken": "eyJhbGciOi...",
+  "account": {
+    "accountId": 1,
+    "roundNo": 1,
+    "initialCash": "50000000",
+    "cashBalance": "50000000"
+  }
+}
+```
+Signup opens an account and deposits 50M at once. **`users` INSERT → `account` INSERT → `ledger_entry(INITIAL_DEPOSIT)` INSERT must be one transaction.**
+
+| Error code | When |
+|---|---|
+| `DUPLICATE_EMAIL` | email already registered |
+| `INVALID_PASSWORD` | password policy not met |
+
+### `POST /auth/login`
+**Request**
+```json
+{ "email": "user@example.com", "password": "********" }
+```
+Response has the same shape as signup.
+
+| Error code | When |
+|---|---|
+| `LOGIN_FAILED` | email or password mismatch |
+
+### `GET /users/me` 🔒
+My info
+```json
+{ "userId": 1, "email": "user@example.com", "nickname": "홍길동" }
+```
+
+---
+
+## Market
+
+### `GET /market/status`
+Session status — decides whether the trade button is enabled
+
+```json
+{
+  "markets": [
+    {
+      "marketCountry": "KR",
+      "open": true,
+      "opensAt": "2026-08-11T09:00:00+09:00",
+      "closesAt": "2026-08-11T15:30:00+09:00",
+      "nextOpensAt": null
+    },
+    {
+      "marketCountry": "US",
+      "open": false,
+      "opensAt": null,
+      "closesAt": null,
+      "nextOpensAt": "2026-08-11T22:30:00+09:00"
+    }
+  ],
+  "serverTime": "2026-08-11T12:36:59+09:00"
+}
+```
+The frontend decides trade-button enablement and the "실시간 / 종가" label from this response. Computed from the Toss `/market-calendar` response cached once daily.
+**US regular-session hours shift 1 hour with DST** — DST (2nd Sun of Mar ~ 1st Sun of Nov) 22:30 ~ 05:00 KST ← now (Aug) / Standard (1st Sun of Nov ~ 2nd Sun of Mar) 23:30 ~ 06:00 KST. Hardcoding would **block trading for an hour after open in the 1st week of Nov.**
+
+### `GET /exchange-rates/latest`
+FX banner on the rankings page
+
+| Param | Req | Description |
+|---|---|---|
+| `base` | — | default USD |
+| `quote` | — | default KRW |
+
+```json
+{
+  "baseCurrency": "USD",
+  "quoteCurrency": "KRW",
+  "rate": "1398.50",
+  "changeRate": "0.0016",
+  "rateAt": "2026-08-11T15:00:00+09:00"
+}
+```
+Served from the latest `exchange_rate` row. **Stored hourly, so hourly frontend polling is enough** — more frequent calls return the same value. FX moves only 0.3–0.5%/day.
+**The execution rate is a different path.** Orders use a separate **1-min TTL memory cache** — never fill against a rate up to an hour old.
+
+### `GET /exchange-rates/history`
+FX trend chart
+
+| Param | Value |
+|---|---|
+| `period` | `1d` · `1w` · `1m` · `3m` · `1y` |
+
+```json
+{
+  "items": [
+    { "rateAt": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
+    { "rateAt": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
+  ]
+}
+```
+Aggregated from the `exchange_rate` table (stored every hour on the hour).
+
+---
+
+## Stocks
+
+### `GET /stocks/rankings`
+Top 100 by trading amount · cursor pagination
+
+| Param | Req | Description |
+|---|---|---|
+| `market` | O | `KR` / `US` |
+| `size` | — | default 20, max 100 |
+| `cursor` | — | next-page cursor — trading amount + stockId encoded (see Common Rules) |
+
+**The selected market provides 100 ranked stocks in five pages of 20 by default.** Send the opaque cursor from each response to request the next page; the cursor remains an opaque `(tradingAmount, stockId)` tuple.
+
+**The only sort axis is trading-amount descending.** No `sort` param in week 1 — when sort axes multiply, the cursor payload must differ per axis, so fixing one axis keeps both implementation and docs simple. Change-rate/volume sorts come in week 2.
+
+**Response**
+```json
+{
+  "items": [
+    {
+      "rank": 1,
+      "symbol": "005930",
+      "name": "삼성전자",
+      "market": "KOSPI",
+      "category": "INDIVIDUAL",
+      "isDividend": false,
+      "leverageFactor": null,
+      "currency": "KRW",
+      "lastPrice": "241500",
+      "prevClose": "236050",
+      "changeAmount": "5450",
+      "changeRate": "0.0231",
+      "tradingAmount": "1240000000000",
+      "quoteAt": "2026-08-11T12:36:59+09:00",
+      "realtime": true
+    }
+  ],
+  "nextCursor": "eyJ0YSI6IjEyNDAwMDAwMDAwMDAiLCJpZCI6MTAyNH0",
+  "hasNext": true
+}
+```
+- `realtime` — `quoteAt` within the current regular session → `true`. The basis for the frontend's "12:36:59 기준 · 실시간" vs "8월 11일 종가" distinction.
+- **Screen column mapping** — name · symbol · category · lastPrice · (changeAmount, changeRate) · tradingAmount.
+- `tradingAmount` is **trailing one week** (`duration=1w`). The selection criterion is the displayed value, so users understand "why this order" — label it "최근 1주 거래대금".
+
+### `GET /stocks/search`
+Partial match on Korean name · English name · ticker
+
+| Param | Req | Description |
+|---|---|---|
+| `q` | O | query (2+ chars) |
+| `size` | — | default 10 |
+
+```json
+{
+  "items": [
+    {
+      "symbol": "005930",
+      "name": "삼성전자",
+      "englishName": "SamsungElec",
+      "market": "KOSPI",
+      "marketCountry": "KR",
+      "category": "INDIVIDUAL"
+    }
+  ]
+}
+```
+**Search scope is confirmed: all stocks (~8,500).** The entire `stock` table is in scope regardless of top-100 status, and clicking a result opens the detail page normally — the only difference is realtime vs prior close.
+**Off-universe stocks have an empty `quote_snapshot`** — the scheduler only covers the top 100. On entering the detail page, call `/prices` and `/candles` together, fill it, and UPSERT into `quote_snapshot`. Once queried, the stock comes from the DB thereafter. To show prices in the result list, fetch 20 rows in **one `/prices` batch call** (per-stock = 20 calls = rate limit). For week 1, showing the name first and filling the price after click is simpler.
+**Toss gives Korean names for US stocks, so "엔비디아" matches too.** English names are inconsistent (SamsungElec, HyundaiMtr, KIA CORP.) — strip whitespace + lowercase, then partial-match; a generated column for the search key is convenient.
+**Week-1 implementation is `LIKE '%q%'`** — at 8,500 rows a full scan is milliseconds. But leading/trailing `%` skips indexes; when data grows, switch to **`pg_trgm` + GIN index** — same query, just add the index.
+**Sort order: exact match → prefix match → partial match.** Typing "삼성" must put 삼성전자 above 미래에셋삼성...
+
+| Error code | When |
+|---|---|
+| `INVALID_QUERY` | query under 2 chars |
+
+### `GET /stocks/{symbol}`
+Stock detail — all stocks in scope
+
+Where the price comes from depends on **whether that stock's own market is open** — not the viewer's viewpoint. Opening NVDA in the Korean daytime returns the prior close because the US market is closed.
+
+| Situation | Price | Chart |
+|---|---|---|
+| that market's regular session + top 100 | **5s realtime** · `quote_snapshot` · `realtime: true` | 1-min scheduler collection |
+| market closed · foreign-market stock · or outside top 100 | prior close · `realtime: false` | last session's minute candles (on-demand + 60s cache) |
+
+```json
+{
+  "symbol": "005930",
+  "name": "삼성전자",
+  "englishName": "SamsungElec",
+  "market": "KOSPI",
+  "marketCountry": "KR",
+  "currency": "KRW",
+  "isinCode": "KR7005930003",
+  "category": "INDIVIDUAL",
+  "leverageFactor": null,
+  "isDividend": false,
+  "price": {
+    "lastPrice": "241500",
+    "prevClose": "236050",
+    "changeAmount": "5450",
+    "changeRate": "0.0231",
+    "upperLimit": "313500",
+    "lowerLimit": "169500",
+    "quoteAt": "2026-08-11T12:36:59+09:00",
+    "realtime": true
+  },
+  "info": {
+    "marketCap": "1441000000000000",
+    "sharesOutstanding": "5969782550",
+    "listDate": "1975-06-11"
+  },
+  "warnings": [
+    { "type": "INVESTMENT_WARNING", "label": "투자경고" }
+  ],
+  "tradable": true,
+  "tradableReason": null
+}
+```
+
+**Key fields**
+| Field | Meaning |
+|---|---|
+| `tradable` | whether this stock can be traded right now |
+| `tradableReason` | reason code when `tradable=false` |
+
+**`tradableReason` values**
+| Code | Screen text |
+|---|---|
+| `MARKET_CLOSED` | 장 마감 · 09:00~15:30 거래 가능 |
+| `NOT_IN_UNIVERSE` | 이 종목은 아직 거래를 지원하지 않아요 |
+| `SUSPENDED` | 거래정지 종목 |
+| `LIQUIDATION` | 정리매매 종목 |
+
+Since `quote_snapshot` covers all stocks, this one endpoint answers every stock's detail regardless of top-100 status — the only difference is the `realtime` and `tradable` flags, so the frontend needs no branching.
+
+| Error code | When |
+|---|---|
+| `STOCK_NOT_FOUND` | symbol doesn't exist |
+
+### `GET /stocks/{symbol}/candles`
+Daily & minute chart
+
+| Param | Req | Value |
+|---|---|---|
+| `interval` | O | time unit per candle — `1m` · `5m` · `10m` · `1d` · `1w` |
+| `range` | O | period — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
+
+**Valid combinations — anything else rejected with 400**
+
+| interval | allowed ranges | # candles | data source |
+|---|---|---|---|
+| `1m` | `1D` | ~390 | top 100: 1-minute scheduler · other stocks: on-demand Toss `/candles?interval=1m` |
+| `5m` | `1D` · `1W` | 78 / 390 | aggregate 1-min |
+| `10m` | `1W` | 195 | aggregate 1-min |
+| `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
+| `1w` | `3Y` | 156 | aggregate daily |
+
+**Toss provides only `1m` and `1d`** — 5m·10m·1w must be aggregated by us (group 1-min candles in fives → 40 five-min candles). **Must block combos like `1m` + `1Y`** — a year of 1-min candles is 120k rows.
+
+**Response**
+```json
+{
+  "symbol": "005930",
+  "interval": "1d",
+  "range": "6M",
+  "currency": "KRW",
+  "items": [
+    {
+      "at": "2026-08-11T00:00:00+09:00",
+      "open": "237000",
+      "high": "242500",
+      "low": "236500",
+      "close": "241500",
+      "volume": "12345678"
+    }
+  ]
+}
+```
+
+**The last candle is refreshed to the current price.** Mid-session today's candle isn't finalized, so append a today-candle built from past `daily_candle` rows + `quote_snapshot.last_price` — the endpoint stays alive without the frontend re-fetching.
+**Our API has no 200-candle cap.** Toss's `count` ceiling of 200 applies only at collection time (200 daily ≈ 10 months, so a 1-year chart is fetched in two `before` calls). Once stored in `daily_candle`, serve all 250 candles directly.
+
+| Error code | When |
+|---|---|
+| `INVALID_INTERVAL_RANGE` | disallowed interval × range combination |
+| `STOCK_NOT_FOUND` | symbol doesn't exist |
+
+**Week-1 scope is `1d` and `1m` only.** Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 5 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
+
+**Minute candles: scheduled for the ranked universe + on-demand cache elsewhere**
+```
+// week-1 minute-candle flow
+GET /stocks/NVDA/candles?interval=1m&range=1D
+   ↓
+is there data within 60s in minute_candle?
+   ├ yes → return from the DB directly                  no Toss call
+   └ no  → call Toss /candles?interval=1m&count=200 (off-universe or off-hours detail)
+             ↓  UPSERT with ON CONFLICT DO NOTHING
+             return from the DB
+```
+**Off-hours or foreign-market stocks behave the same.** Calling `/candles` on a closed market returns the last session's candles as-is — opening NVDA in the Korean daytime shows the prior close + the last US session's minute chart. The frontend just flips the "실시간/종가" label from `realtime`; the chart itself needs no branching. An empty chart reads as "broken screen" — **always separate "not tradable" from "not viewable"**.
+The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 5 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination and 5m/10m aggregation.
+**200 candles per call.** KR regular session 09:00~15:30 = 330 minutes, so a full day needs `before` × 2. With the week-1 chart as "last 200 minutes", 1 call suffices — keep 1 call as the default and use 2 only when "view all" is pressed.
+**Needs measurement** — whether `before` is inclusive, and whether the closing-auction (15:30) candle exists. Without a 15:30 candle it's 329, not 330. Overlapping boundary candles are filtered by `ON CONFLICT DO NOTHING` on `(stock_id, candle_at)`.
+
+---
+
+## Trading
+
+### `GET /orders/quote` 🔒
+Fee & tax preview
+
+```
+?symbol=005930&side=BUY&quantity=10
+```
+
+**Response**
+```json
+{
+  "symbol": "005930",
+  "side": "BUY",
+  "quantity": "10",
+  "executedPrice": "241500",
+  "exchangeRate": "1",
+  "grossAmount": "2415000",
+  "fee": "242",
+  "tax": "0",
+  "netAmount": "2415242",
+  "availableCash": "48240000",
+  "quoteAt": "2026-08-11T12:36:59+09:00",
+  "executable": true,
+  "reason": null
+}
+```
+
+**Calculation rules**
+```
+buy   netAmount = grossAmount + fee           (deducted from deposit)
+sell  netAmount = grossAmount − fee − tax     (credited to deposit)
+grossAmount = executedPrice × quantity × exchangeRate
+fee         = grossAmount × 0.0001   trading fee 0.01% (buy & sell)
+  tax         = KR grossAmount × 0.002                 (KR sell only)
+             = max(USD grossAmount × 0.0000206, $0.01) (US SEC fee, sell only)
+```
+**Example — 삼성전자 10주 @ 241,500**
+```
+buy   gross 2,415,000 + fee   242              = 2,415,242 deducted
+sell  gross 2,415,000 − fee   242 − tax 4,830  = 2,409,928 credited
+```
+- **Market-specific rates are config (`.env`). Never hardcode.** KR sell tax is 0.2%; US sell tax is replaced by the SEC fee rate `0.0000206` with a USD `0.01` minimum. The trading fee remains 0.01% for both markets.
+- **Round twice.** For US orders, calculate in USD, round to cents (including the `$0.01` minimum), then convert the final amount to KRW and round to whole won with **HALF_UP**. For KR orders, round the KRW gross amount first, calculate fee/tax from that value, then round again. Keep final ledger amounts as integers so the invariant holds exactly.
+- **Price can move between quote and fill.** The quote is a reference; the server recomputes at fill time.
+
+### `POST /orders` 🔒
+Buy / sell (market immediate fill)
+
+**Request**
+```json
+{
+  "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
+  "symbol": "005930",
+  "side": "BUY",
+  "quantity": "10"
+}
+```
+`clientOrderId` is generated by the frontend with UUID v4 — created once on entering the order screen, reissued after success. **Re-sending the same value returns the existing order result instead of double-filling** — blocks both double-click and network retry.
+
+**Response · 201**
+```json
+{
+  "orderId": 1024,
+  "status": "FILLED",
+  "symbol": "005930",
+  "side": "BUY",
+  "quantity": "10",
+  "executedPrice": "241500",
+  "exchangeRate": "1",
+  "grossAmount": "2415000",
+  "fee": "242",
+  "tax": "0",
+  "netAmount": "2415242",
+  "quoteAt": "2026-08-11T12:36:59+09:00",
+  "orderedAt": "2026-08-11T12:37:02+09:00",
+  "account": {
+    "cashBalance": "45824758",
+    "totalAsset": "50412300"
+  }
+}
+```
+Including the updated account summary means the frontend doesn't re-fetch.
+
+**Server processing order · one transaction**
+```
+① SELECT ... FROM account WHERE account_id = ? FOR UPDATE
+② validate — session · is_ranked · suspension · quote freshness · deposit/quantity
+③ INSERT trade_order       (clientOrderId unique violation → duplicate request)
+④ UPDATE account.cash_balance
+⑤ INSERT ledger_entry       (append only)
+⑥ UPSERT holding            (moving-average cost recompute)
+```
+
+**Errors**
+| Code | HTTP | Screen text |
+|---|---|---|
+| `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
+| `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
+| `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
+| `INSUFFICIENT_CASH` | 422 | 주문가능금액이 부족해요 |
+| `INSUFFICIENT_QUANTITY` | 422 | 보유 수량이 부족해요 |
+| `STALE_QUOTE` | 422 | 시세 정보가 오래되었어요. 다시 시도해주세요 |
+| `INVALID_QUANTITY` | 400 | 수량은 1주 이상의 정수로 입력해주세요 |
+
+`STALE_QUOTE` — reject when `quote_at` is >15s old. Filling at a stale price breaks the ledger's credibility.
+
+---
+
+## Accounts · My Page
+
+### `GET /accounts/me` 🔒
+Account summary
+
+```json
+{
+  "accountId": 1,
+  "roundNo": 1,
+  "initialCash": "50000000",
+  "cashBalance": "48240000",
+  "stockValue": "2172300",
+  "totalAsset": "50412300",
+  "unrealizedPnl": "137300",
+  "unrealizedPnlRate": "0.0675",
+  "exchangeRate": "1398.50",
+  "asOf": "2026-08-11T12:36:59+09:00"
+}
+```
+**Week 1 offers unrealized P&L only.** Realized P&L splits out in week 2 once fills accumulate. `stockValue` = holding × `quote_snapshot.last_price`, FX-converted to KRW for foreign stocks.
+
+### `GET /accounts/me/holdings` 🔒
+Holdings
+
+```json
+{
+  "items": [
+    {
+      "symbol": "005930",
+      "name": "삼성전자",
+      "currency": "KRW",
+      "quantity": "6",
+      "avgBuyPrice": "228000",
+      "avgExchangeRate": "1",
+      "lastPrice": "241500",
+      "evaluationAmount": "1449000",
+      "unrealizedPnl": "81000",
+      "unrealizedPnlRate": "0.0592",
+      "realtime": true
+    }
+  ],
+  "asOf": "2026-08-11T12:36:59+09:00"
+}
+```
+**A held stock must keep collecting quotes even after dropping out of the rankings** — otherwise its valuation freezes at that point, reading as an obvious bug.
+
+### `GET /accounts/me/ledger` 🔒
+Order history — ledger-based · cursor pagination
+
+Shows the ledger (`ledger_entry`), not the order list — "**how the money moved**", not "what was bought". Initial funding and portfolio reset come in as single rows, making it the account's full history; printing `balanceAfter` lets the user follow the balance change by eye.
+
+| Param | Req | Description |
+|---|---|---|
+| `cursor` | — | `nextCursor` from the previous response |
+| `size` | — | default 20 |
+| `entryType` | — | filter; omit for all |
+
+**Response**
+```json
+{
+  "items": [
+    {
+      "entryId": 3041,
+      "entryType": "BUY",
+      "amount": "-2415242",        // gross 2,415,000 + fee 242
+      "balanceAfter": "47584758",
+      "exchangeRate": "1",
+      "memo": "삼성전자 10주 @ 241,500 (수수료 포함)",
+      "orderId": 1024,
+      "symbol": "005930",
+      "name": "삼성전자",
+      "occurredAt": "2026-08-11T12:37:02+09:00"
+    },
+    {
+      "entryId": 3040,
+      "entryType": "INITIAL_DEPOSIT",
+      "amount": "50000000",
+      "balanceAfter": "50000000",
+      "exchangeRate": "1",
+      "memo": "모의투자금 지급",
+      "orderId": null,
+      "symbol": null,
+      "name": null,
+      "occurredAt": "2026-08-10T09:00:00+09:00"
+    }
+  ],
+  "nextCursor": "eyJlbnRyeUlkIjozMDQwfQ",
+  "hasNext": false
+}
+```
+
+**`entryType` — only three**
+| Code | Sign | Screen text | amount |
+|---|---|---|---|
+| `INITIAL_DEPOSIT` | + | 모의투자금 지급 | `initial_cash` |
+| `BUY` | − | 매수 | `−(gross + fee)` |
+| `SELL` | + | 매도 | `+(gross − fee − tax)` |
+
+**Fees and taxes are not split into separate rows — included in the buy/sell amounts.** One ledger line corresponds to one `trade_order.net_amount`, so the list is half as long and cursor handling is simpler. When the fee total is ever needed, `SUM(trade_order.fee)` retrieves it. **No `RESET` entry either** — reset creates a new account, and the new account's `INITIAL_DEPOSIT` row fills that role.
+**`exchangeRate`** — FX at fill time. 1 for KRW stocks, that moment's USD/KRW for US stocks. Not used in math (`amount` is already KRW-converted) — it's the audit field that answers "at what rate was this trade made" from the ledger alone. Not shown in the week-1 screen, but **unrecoverable if omitted now**.
+**Cursor on `entryId` — not `occurredAt`.** Consecutive orders can share a timestamp within TIMESTAMPTZ precision, and at that boundary items duplicate or loop infinitely. `entryId` increases monotonically, so both are structurally impossible. Newest first — query with `WHERE account_id = ? AND entry_id < :cursor ORDER BY entry_id DESC LIMIT :size + 1`, and decide `hasNext` from the existence of the `size + 1`-th row.
+**Rejected orders don't land in the ledger** — money didn't move. To explain "why it failed", either add a `trade_order`-based order-history tab or defer to week 2. Week 1's screen only needs the ledger.
+
+### `POST /accounts/me/reset` 🔒
+Portfolio reset
+
+```json
+{
+  "accountId": 2,
+  "roundNo": 2,
+  "initialCash": "50000000",
+  "cashBalance": "50000000"
+}
+```
+
+**Server processing**
+```
+UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id = current;
+INSERT INTO account (user_id, round_no, ...) VALUES (?, prev+1, 50000000, 50000000);
+INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
+```
+**Not a delete — a new-round account opening.** The prior ledger, fills, and holdings stay preserved; queries run against the new `account_id`, so the screen clears automatically. Extensible to "past round scores" later. **The frontend must show a confirmation modal.**
+
+---
+
+## Screen ↔ API Mapping
+
+| Screen | APIs called |
+|---|---|
+| Main | `/market/status` (optional) |
+| Stock Rankings | `/exchange-rates/latest` · `/stocks/rankings` · `/stocks/search` |
+| Stock Detail | `/stocks/{symbol}` · `/stocks/{symbol}/candles` |
+| Trade Panel | `/orders/quote` · `POST /orders` |
+| My Page | `/accounts/me` · `/accounts/me/holdings` · `/accounts/me/ledger` |
+| Portfolio Reset | `POST /accounts/me/reset` |
+| Guide | none (static content) |
+| Signup Funnel | no calls in week 1 — UX only · `/auth/*` attaches in week 2 |
+
+## Polling Policy
+
+### Server collection schedule (confirmed)
+
+The frontend polls **our** API; our server calls Toss on the cadence below. **The two are fully decoupled — even 100 users leave Toss call volume unchanged.**
+
+| Time (KST) | Cadence | Task |
+|---|---|---|
+| Mon 07:00 | weekly | full stock-master refresh — `/stocks/all` + `/stocks` batches |
+| Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call |
+| Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open |
+| 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together |
+| 09:00 ~ 15:30 | 5s | KR top-100 current price — `/prices` 1 batch call (1.3% of limit) |
+| 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
+| 15:40 | daily | KR daily-candle storage — 10 min after close |
+| 22:00 * | daily | US `prev_close` refresh — 30 min before regular open |
+| 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter |
+| 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
+| 05:10 * | daily | US daily-candle storage — 10 min after close. 06:10 in winter |
+| every hour on the hour | hourly | FX storage — 24 calls/day |
+
+**KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
+\* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.
+**Not in the scheduler** — off-universe quotes and off-hours minute charts are filled on-demand when the user opens a detail page. Top-100 minute-candle collection is part of the MVP scheduler; week 2 adds limit-order fill determination and aggregation.
+
+### Client polling policy
+
+| Target | Cadence | Endpoint |
+|---|---|---|
+| rankings list | 5s | `/stocks/rankings` |
+| stock detail | 5s | `/stocks/{symbol}` |
+| my page | 10s | `/accounts/me` + `/holdings` |
+| chart | 60s | `/stocks/{symbol}/candles` |
+| FX banner | 1h | `/exchange-rates/latest` |
+
+**Three must-haves.**
+① **Pause polling in background tabs** — checking `document.visibilityState` alone cuts real traffic nearly in half.
+② **Stop polling at market close** — if `/market/status` `open` is `false`, there's nothing to refresh. The collector stops too, so `quote_snapshot.last_price` keeps the close and serves as the prior close automatically. The chart just shows the last session's candles stored in `minute_candle`.
+③ **Return a next-update hint** — when the server's collection cadence (5s) and the client's polling cadence misalign, latency accumulates. Include `nextUpdateAt` and re-request right after it to pin the latency.
+```json
+{ "asOf": "...", "nextUpdateAt": "2026-08-11T12:37:04+09:00", "items": [...] }
+```
+
+---
+
+## Open Decisions
+
+Decide these in one team meeting before starting — it avoids mid-implementation stalls. **The confirmed items below were resolved and removed from this list.**
+
+**Confirmed**
+| Item | Decision |
+|---|---|
+| search scope | all stocks (~8,500) · `LIKE '%q%'` |
+| fee & tax rates | fee 0.01% (buy & sell) · securities transaction tax 0.2% (sell only) |
+| auth | not implemented in week 1 — fixed seed user |
+| fractional trading | week 2 — whole shares only in week 1. **The toggle was removed from the screen entirely** |
+| order history | ledger-based `GET /accounts/me/ledger` |
+| ledger entries | buy · sell · initial-funding only. Fees/taxes included in the amounts (one line) |
+| ranking sort & cursor | trading-amount descending · cursor is `(tradingAmount, stockId)` |
+| minute-candle collection | top 100 every minute via sequential 20-stock groups at 5 TPS; off-universe detail is on-demand + 60s cache |
+| universe refresh | Monday KR 08:00 · US 21:00 |
+| dividend determination | disabled in week 1 |
+
+**Still to decide**
+| Item | Options |
+|---|---|
+| `before` boundary | measure whether Toss `/candles` `before` is inclusive and whether the closing-auction (15:30) candle exists |
+| `STALE_QUOTE` threshold | whether 15s is appropriate |
+| auth method (week 2) | JWT vs session cookie |
+| fractional digits (week 2) | US minimum order unit (0.1? 0.001?) |
+
+---
+
+## Week 2+
+
+| Endpoint | Content |
+|---|---|
+| `POST /auth/signup` · `/auth/login` | implement auth — week 1 has screens only, server is seed-user fixed |
+| `POST /orders` | limit orders (`limitPrice`, `PENDING` status) |
+| `POST /orders` (fractional) | open US fractional orders. Add `allowsFractional` to the detail response; change the input unit for US stocks only |
+| `GET /accounts/me/orders` | order-history tab — includes rejected orders (they don't land in the ledger) |
+| `DELETE /orders/{id}` | order cancel |
+| `GET /accounts/me/assets/history` | asset trend chart (daily snapshots) |
+| `GET /accounts/me/report` | investment-habit diagnosis |
+| `GET /stocks/{symbol}/orderbook` | order book |
+| WebSocket | realtime quote push (replaces polling) |
+
+Not built yet, but the URL design reserves the slots so nothing collides.
+
+---
+> Mock Stock Trading Service · Week-1 MVP API Spec · see also `erd.md` · `wireframe.md`

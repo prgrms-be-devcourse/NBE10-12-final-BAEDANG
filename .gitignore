@@ -1,0 +1,102 @@
+# ============================================================================
+#  모의 주식 트레이딩 서비스 — .gitignore
+#  루트 하나로 front / back / infra 를 전부 커버합니다.
+# ============================================================================
+
+# ── 비밀값 ───────────────────────────────────────────────────────────────────
+#   .env 에는 토스 API 키와 DB 비밀번호가 들어갑니다. 절대 커밋하지 마세요.
+#   .env.example 은 "어떤 키가 필요한지"를 알려주는 템플릿이라 커밋합니다.
+.env
+.env.local
+.env.*.local
+!.env.example
+
+#   실수로 키를 커밋했다면 삭제 커밋만으로는 부족합니다.
+#   히스토리에 남으므로 토스 콘솔에서 키를 즉시 재발급하세요.
+
+
+# ── Java / Gradle (back/) ────────────────────────────────────────────────────
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.gradle/
+out/
+bin/
+*.class
+*.jar
+*.war
+!gradle-wrapper.jar
+hs_err_pid*
+replay_pid*
+
+#   Gradle Wrapper 는 커밋합니다.
+#   팀원마다 Gradle 버전이 달라지는 걸 막아주는 파일이라 빼면 안 됩니다.
+!gradlew
+!gradlew.bat
+!gradle/wrapper/gradle-wrapper.properties
+
+
+# ── Node / Next.js (front/) ──────────────────────────────────────────────────
+node_modules/
+.next/
+next-env.d.ts
+.turbo/
+dist/
+.vercel
+
+#   npm / yarn / pnpm 중 하나만 골라 그 lock 파일만 커밋하세요.
+#   두 개가 섞이면 팀원마다 의존성 트리가 달라집니다.
+yarn.lock
+pnpm-lock.yaml
+#   package-lock.json 은 커밋합니다 (npm 기준)
+
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+
+# ── IntelliJ IDEA ────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+
+#   .idea 를 통째로 무시합니다. 팀원마다 SDK 경로·창 배치가 달라
+#   커밋하면 매번 충돌합니다. 공유가 필요한 설정(코드 스타일 등)이 생기면
+#   그때 .idea/codeStyles 만 예외로 푸세요.
+
+
+# ── VS Code (프론트 작업용) ──────────────────────────────────────────────────
+.vscode/
+!.vscode/extensions.json
+
+
+# ── Docker / DB (infra/) ─────────────────────────────────────────────────────
+#   docker compose 볼륨은 이름 있는 볼륨이라 레포에 안 생기지만,
+#   로컬에서 bind mount 로 바꾸는 경우를 대비해 막아둡니다.
+pgdata/
+infra/pgdata/
+*.dump
+*.sql.gz
+
+
+# ── 토스 API 탐색 스크립트 출력 ──────────────────────────────────────────────
+#   응답 원본에 계좌 정보가 섞일 수 있어 커밋하지 않습니다.
+toss_out/
+infra/probe/toss_out/
+infra/probe/.venv/
+__pycache__/
+*.pyc
+
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+# ── 로그 / 임시 파일 ─────────────────────────────────────────────────────────
+*.log
+logs/
+tmp/
+*.tmp
+*~

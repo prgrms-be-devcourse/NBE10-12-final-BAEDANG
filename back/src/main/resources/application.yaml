@@ -1,0 +1,121 @@
+# ============================================================================
+#  모의 주식 트레이딩 서비스 — 공통 설정
+#
+#  [값이 두 곳에 나뉘어 있는 이유]
+#    비밀값(토스 키·DB 비밀번호)은 .env 로 주입받고, 여기엔 기본값만 둡니다.
+#    거래 요율은 비밀이 아니라 "정책"이라 기본값을 여기에 박아둡니다 —
+#    팀원마다 .env 가 달라서 같은 주문인데 금액이 달라지는 사고를 막습니다.
+#    .env 에 값을 넣으면 그쪽이 이깁니다.
+#
+#  [.env 를 자동으로 읽지는 않습니다]
+#    Spring Boot 는 .env 파일을 기본으로 읽지 않습니다. 셋 중 하나를 쓰세요.
+#      ① IntelliJ 실행 구성 → Environment variables 에 직접 입력 (가장 간단)
+#      ② IntelliJ EnvFile 플러그인으로 .env 지정
+#      ③ Docker 로 앱까지 띄울 때는 compose 의 env_file 이 알아서 넣어줍니다
+#    아무것도 안 하면 아래 기본값으로 동작합니다. 토스 키만 없을 뿐입니다.
+# ============================================================================
+
+spring:
+  application:
+    name: trading
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/trading}
+    username: ${DB_USERNAME:trading}
+    password: ${DB_PASSWORD:trading}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 3000
+
+  jpa:
+    hibernate:
+      # !! create / update 로 바꾸지 마세요.
+      #    스키마의 진실은 infra/schema.sql 하나입니다.
+      #    validate 는 "엔티티와 실제 테이블이 어긋나면 기동을 거부"합니다.
+      #    update 로 두면 Hibernate 가 조용히 컬럼을 만들어버려서,
+      #    내 PC 에서만 되는 상태가 됩니다.
+      #    스키마를 바꿨다면 infra 에서 docker compose down -v && up -d
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+        # 금액은 전부 NUMERIC 이라 BigDecimal 로 매핑됩니다.
+        # 로그에 바인딩 값까지 보고 싶으면 아래 logging 설정을 켜세요.
+        jdbc:
+          time_zone: UTC
+    open-in-view: false
+    # open-in-view=false 인 이유: 기본값(true)이면 컨트롤러가 응답을 다 쓸 때까지
+    # DB 커넥션을 붙잡고 있습니다. 폴링이 5초마다 들어오는 서비스라
+    # 커넥션 풀이 금방 마릅니다. 지연 로딩이 필요하면 서비스 계층에서 처리하세요.
+
+  jackson:
+    # 금액을 숫자로 내리면 프론트의 number 가 배정밀도 부동소수라 오차가 납니다.
+    # BigDecimal 을 문자열로 직렬화합니다. 토스 API 가 그렇게 주는 것과 같은 이유입니다.
+    generator:
+      write-bigdecimal-as-plain: true
+    default-property-inclusion: non_null
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+# ── 토스증권 Open API ────────────────────────────────────────────────────────
+#   키가 비어 있으면 수집기를 끄고 Fake 어댑터로 돕니다.
+#   수집기 담당자만 .env 를 채우면 나머지 팀원은 키 없이도 앱이 뜹니다.
+toss:
+  base-url: https://openapi.tossinvest.com
+  client-id: ${TOSS_CLIENT_ID:}
+  client-secret: ${TOSS_CLIENT_SECRET:}
+  enabled: ${TOSS_ENABLED:false}
+
+# ── 거래 정책 ────────────────────────────────────────────────────────────────
+#   요율은 DB 에 저장하지 않습니다. 여기가 유일한 정의 지점이고,
+#   테이블에는 계산 결과값(trade_order.fee / trade_order.tax)만 들어갑니다.
+#
+#     매수         net = gross + fee
+#     매도(국내)   net = gross - fee - k_tax
+#     매도(미국)   net = gross - fee - a_tax
+#
+#       fee   = gross x fee-rate
+#       k_tax = gross x k-tax-rate
+#       a_tax = max(gross x a-tax-rate, a-tax-min-usd x 환율)
+trading:
+  initial-cash: ${INITIAL_CASH:50000000}
+
+  # 거래 수수료 0.01% — 매수·매도 공통, 국내·미국 공통
+  fee-rate: ${FEE_RATE:0.0001}
+
+  # 한국 증권거래세 0.2% — 매도 시에만.
+  #   실제 국내 세율은 0.15% 지만 모의투자임을 분명히 하려고 다르게 잡았습니다.
+  k-tax-rate: ${K_TAX_RATE:0.002}
+
+  # 미국 증권거래세(SEC Fee, Section 31) — 매도 시에만.
+  #   $20.60 per million = 0.0000206 (FY2026 기준, SEC 가 연 1회 조정).
+  #   최소 $0.01 이 있어서 $485.44 미만 매도는 전부 최소액이 적용됩니다.
+  a-tax-rate: ${A_TAX_RATE:0.0000206}
+  a-tax-min-usd: ${A_TAX_MIN_USD:0.01}
+
+  # 이 시간(초)보다 오래된 시세로는 체결하지 않습니다 → STALE_QUOTE
+  quote-max-staleness-seconds: ${QUOTE_MAX_STALENESS_SECONDS:15}
+
+  # 시세 수집 주기(초)와 대상 종목 수
+  quote-poll-interval-seconds: ${QUOTE_POLL_INTERVAL_SECONDS:5}
+  universe-size: ${QUOTE_UNIVERSE_SIZE:100}
+
+# ── 1주차 임시 설정 ──────────────────────────────────────────────────────────
+#   인증을 1주차에 붙이지 않으므로, 로그인하지 않은 요청은 시드 사용자로 봅니다.
+#   회원가입·로그인 API 는 동작하지만 토큰을 발급하지 않습니다.
+#   2주차에 JWT 를 붙이면 이 블록을 지우세요.
+auth:
+  enabled: ${AUTH_ENABLED:false}
+  dev-fixed-user-id: ${DEV_FIXED_USER_ID:1}
+
+logging:
+  level:
+    com.baedang: DEBUG
+    org.hibernate.SQL: DEBUG
+    # 바인딩 파라미터까지 보고 싶을 때만 켜세요. 로그가 매우 길어집니다.
+    # org.hibernate.orm.jdbc.bind: TRACE
+

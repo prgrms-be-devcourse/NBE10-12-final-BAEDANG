@@ -1,0 +1,82 @@
+# 모의 주식 트레이딩 서비스 — 로컬 개발 환경
+#
+#   docker compose up -d        기동
+#   docker compose logs -f      로그 확인
+#   docker compose down         중지 (데이터 유지)
+#   docker compose down -v      중지 + 데이터 삭제  ← 스키마 바뀌면 이걸로 재생성
+#
+# [스키마 관리 — Flyway 미도입]
+#   schema.sql 이 유일한 진실입니다. 변경했다면:
+#       docker compose down -v && docker compose up -d
+#   볼륨이 남아 있으면 초기화 스크립트가 실행되지 않으니 -v 를 꼭 붙이세요.
+#   팀원에게는 "스키마 바뀜, down -v 하고 다시 올리세요" 를 공지해야 합니다.
+#
+# 접속 정보
+#   host      localhost:5432
+#   database  trading
+#   user      trading / trading
+#
+# JDBC URL:  jdbc:postgresql://localhost:5432/trading
+
+services:
+  postgres:
+    # ── TimescaleDB 를 쓸 경우 (daily_candle 하이퍼테이블 + 주봉 연속 집계) ──
+    #   timescale/timescaledb 이미지에는 PostgreSQL 이 함께 들어 있습니다.
+    #   태그의 pg17 은 내장된 PostgreSQL 버전이며, TimescaleDB 가 지원하는
+    #   최신 PG 버전을 쓰세요 (PG18 태그가 나왔는지 Docker Hub 에서 확인).
+    image: timescale/timescaledb:latest-pg17
+    #
+    # ── TimescaleDB 없이 순수 PostgreSQL 로 갈 경우 ──
+    #   위 image 를 지우고 아래를 쓰면서, volumes 의 02-timescale.sql 줄도 지우세요.
+    #   daily_candle 이 일반 테이블로 남을 뿐 나머지는 전부 그대로 동작합니다.
+    # image: postgres:18-alpine
+    container_name: trading-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: trading
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading
+      TZ: Asia/Seoul
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      # 데이터 영속화 (컨테이너를 지워도 테이블이 남음)
+      - pgdata:/var/lib/postgresql/data
+
+      # ── 최초 기동 시 자동 실행 (이름순) ────────────────────────────────
+      #   Flyway 를 안 쓰므로 여기가 스키마 관리 지점입니다.
+      #   !! 이미 볼륨이 있으면 실행되지 않습니다.
+      #      스키마를 바꿨다면 반드시 `docker compose down -v` 후 재기동하세요.
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      # TimescaleDB 하이퍼테이블 지정 (daily_candle + 주봉 연속 집계).
+      #   schema.sql 이 BEGIN...COMMIT 으로 감싸여 있어서 합칠 수 없습니다 —
+      #   CREATE EXTENSION timescaledb 는 트랜잭션 안에서 실행되지 않습니다.
+      #   순수 PostgreSQL 로 간다면 이 줄을 지우세요.
+      - ./timescale.sql:/docker-entrypoint-initdb.d/02-timescale.sql:ro
+      # 테스트용 시드 데이터가 필요하면 주석을 푸세요.
+      # - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  # 선택 — DB 를 GUI 로 보고 싶을 때. 필요 없으면 지우세요.
+  # 접속: http://localhost:8081  (user@example.com / admin)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: trading-pgadmin
+    ports:
+      - "8081:80"
+    environment:
+      PGADMIN_DEFAULT_EMAIL: user@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["tools"] # docker compose --profile tools up -d 로만 기동
+
+volumes:
+  pgdata:
