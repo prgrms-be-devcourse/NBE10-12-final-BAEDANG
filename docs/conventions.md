@@ -3,6 +3,16 @@
 Development pipeline and collaboration conventions for AI agents and contributors.
 Follow these formats exactly when creating branches, commits, issues, and pull requests.
 
+## GitHub Template Locations
+
+The actual GitHub templates are maintained in these paths:
+
+- Feature issue template → [`.github/ISSUE_TEMPLATE/기능-개발-템플릿.md`](.github/ISSUE_TEMPLATE/기능-개발-템플릿.md)
+- Fix issue template → [`.github/ISSUE_TEMPLATE/버그-수정-템플릿.md`](.github/ISSUE_TEMPLATE/버그-수정-템플릿.md)
+- Pull Request template → [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)
+
+This document defines the conventions that those templates use. Keep the templates and this document synchronized when either one changes.
+
 ## Development Pipeline
 
 Feature planning → feature design (incl. edge-case analysis) → implementation → tests (integration: user-case based / unit: edge-case based / acceptance: E2E) → merge.
@@ -42,11 +52,11 @@ fix/stock_scheduling         + commits: hotfix / refactor
 ```markdown
 ## 기능 설명
 
-<!-- Overall description of the feature -->
+<!-- Describe what the feature is and why it is needed. -->
 
 ## 작업 상세 내용
 
-<!-- Detailed logic / implementation items -->
+<!-- List the detailed implementation and logic items. -->
 ```
 
 ### Fix issue
@@ -54,33 +64,54 @@ fix/stock_scheduling         + commits: hotfix / refactor
 ```markdown
 ## 버그 설명
 
-<!-- What the bug is + the situation where it occurs -->
+<!-- Describe what is wrong and the situation in which it occurs. -->
 
 ## 수정 사항
 
-<!-- What will be changed -->
+<!-- Describe what will be changed to fix the bug. -->
 ```
 
 ## GitHub Pull Request Template
 
-Auto-close the linked issue with `Closes #N`. Replace `N` with the number of the issue the PR resolves.
+Replace the `#` in `- Closes #` with the actual issue number that the PR resolves. If multiple issues are being closed, use the closing keyword for each issue.
 
 ```markdown
 ## 개요 (Overview)
 
-<!-- What this PR is about -->
+<!-- Describe what this PR does in two or three lines.
+     Help reviewers understand what to expect before reading the code. -->
+
+---
 
 ## 주요 변경 사항 (Key Changes)
 
-### 1. ...
+<!-- Group changes by what was changed and why, rather than listing files.
+     GitHub already shows the diff, so include the reasoning that the diff does not show. -->
 
-<!-- What was done in this PR -->
+### 1.
+
+### 2.
+
+---
 
 ## 검증 결과 (Verification)
 
-<!-- Test results, run results (screenshots) — optional -->
+<!-- Optional. Include screenshots for UI work or requests and responses for APIs. -->
+
+```bash
+
+```
+
+---
 
 ## 관련 이슈 (Related Issues)
 
-Closes #N
+<!-- Use Closes / Fixes / Resolves followed by the issue number.
+     The issue is closed automatically when the PR is merged.
+
+     For multiple issues, add a closing keyword to each issue.
+       O  Closes #12, closes #13
+       X  Closes #12, #13     ← #13 will not be closed -->
+
+- Closes #
 ```
