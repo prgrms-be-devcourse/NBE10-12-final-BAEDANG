@@ -30,7 +30,7 @@ The existing Java package is `com.baedang`. Do not rename it.
 
 ## Rules — violations break the project or risk real orders
 
-- **`QuoteClient` must whitelist allowed call paths. NEVER call order APIs (e.g. `POST /orders`) — real-money order risk.**
+- `QuoteClient` **must whitelist allowed call paths. NEVER call order APIs (e.g.** `POST /orders`**) — real-money order risk.**
 - Amounts/quantities: use `NUMERIC`/`BigDecimal`. API responses return amounts as **strings**. Timestamps: `TIMESTAMPTZ` (store UTC, convert only for display).
 - `ledger_entry` is append-only — no UPDATE/DELETE; offset mistakes with an opposite-sign entry.
 - Trading/balance transactions start by locking the `account` row with `FOR UPDATE` (prevents double-deduction on concurrent orders).
@@ -40,10 +40,11 @@ The existing Java package is `com.baedang`. Do not rename it.
 - Top-100 minute candles are collected every minute in sequential 20-stock groups under the separate `MARKET_DATA_CHART` 5 TPS group. Other/off-hours charts use on-demand caching.
 - Portfolio reset is NOT a delete — close the account with `CLOSED` and open a new one with `round_no + 1`.
 - Never hardcode US regular-session hours — derive from the `/market-calendar` cache (DST shifts 1 hour).
-- Errors use a single `BusinessException` + error-code table; return both the code and a user-facing message.
+- Errors use a single `ServiceException` + error-code table; return both the code and a user-facing message.
 
 ## Reference — open `docs/` when implementing
 
 - Endpoints & response shapes → `docs/api-spec.md`
 - Tables, columns, batch schedule → `docs/erd.md`
 - Screens & polling intervals → `docs/wireframe.md`
+- Branch/commit/issue/PR conventions → `docs/conventions.md` (MUST follow when creating branches, commits, issues, or PRs)
