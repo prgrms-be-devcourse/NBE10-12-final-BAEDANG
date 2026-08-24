@@ -20,9 +20,13 @@ docker compose up -d              # local PostgreSQL/TimescaleDB + Redis
 ## Project Structure
 
 ```text
-backend/src/main/java/com/baedangminjok/{common,auth,market,stock,quote,trade,account}
-frontend/app/{page,rankings,stocks/[symbol],guide,my} + components + lib
+back/                                  # Spring Boot backend
+front/                                 # Next.js frontend (planned)
+infra/                                 # Local database infrastructure
+docs/                                  # Design documents
 ```
+
+The existing Java package is `com.baedang`. Do not rename it.
 
 ## Rules — violations break the project or risk real orders
 

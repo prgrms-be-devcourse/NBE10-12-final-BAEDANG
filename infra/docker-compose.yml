@@ -24,7 +24,7 @@ services:
     #   timescale/timescaledb 이미지에는 PostgreSQL 이 함께 들어 있습니다.
     #   태그의 pg17 은 내장된 PostgreSQL 버전이며, TimescaleDB 가 지원하는
     #   최신 PG 버전을 쓰세요 (PG18 태그가 나왔는지 Docker Hub 에서 확인).
-    image: timescale/timescaledb:latest-pg17
+    image: timescale/timescaledb:latest-pg18
     #
     # ── TimescaleDB 없이 순수 PostgreSQL 로 갈 경우 ──
     #   위 image 를 지우고 아래를 쓰면서, volumes 의 02-timescale.sql 줄도 지우세요.

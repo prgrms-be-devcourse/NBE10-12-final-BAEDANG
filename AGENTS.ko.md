@@ -13,12 +13,16 @@ cd frontend && npm run dev        # Next.js 16.3
 docker compose up -d              # 로컬 PG + Redis
 ```
 
-## Project Structure
+## 프로젝트 구조
 
 ```text
-backend/src/main/java/com/baedangminjok/{common,auth,market,stock,quote,trade,account}
-frontend/app/{page,rankings,stocks/[symbol],guide,my} + components + lib
+back/                                  # Spring Boot 백엔드
+front/                                 # Next.js 프론트엔드 (예정)
+infra/                                 # 로컬 DB 인프라
+docs/                                  # 설계 문서
 ```
+
+기존 Java 패키지는 `com.baedang`을 사용한다. 명시적인 요청 없이 변경하지 않는다.
 
 ## Rules — 위반 시 프로젝트가 망가지거나 실주문 위험
 
