@@ -41,7 +41,7 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     volumes:
       # 데이터 영속화 (컨테이너를 지워도 테이블이 남음)
-      - pgdata:/var/lib/postgresql/data
+      - pgdata:/var/lib/postgresql
 
       # ── 최초 기동 시 자동 실행 (이름순) ────────────────────────────────
       #   Flyway 를 안 쓰므로 여기가 스키마 관리 지점입니다.
