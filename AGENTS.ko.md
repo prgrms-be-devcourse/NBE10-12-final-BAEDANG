@@ -33,7 +33,7 @@ docs/                                  # 설계 문서
 - **주문가능금액 = `cash_balance − locked_cash`** / **매도가능수량 = `quantity − locked_quantity`**. 동결액은 `gross_amount`가 아니라 **수수료·세금 포함 `net_amount`** 로 잠근다.
 - 포트폴리오 초기화는 삭제가 아님 — `CLOSED` + `round_no+1` 새 계좌 개설.
 - 미국 정규장 시각 하드코딩 금지 — `/market-calendar` 캐시로 판정 (서머타임 1시간 이동).
-- 에러는 `ServiceException` 1개 + 에러 코드 표 방식, 프론트에 코드·사용자용 메시지 함께 내려줌.
+- 에러는 `BusinessException` 1개 + 에러 코드 표 방식, 프론트에 코드·사용자용 메시지 함께 내려줌.
 
 ## Reference — 구현 시 `docs/`를 열어 확인
 
