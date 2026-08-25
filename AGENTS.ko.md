@@ -8,9 +8,9 @@
 ## Build / Test
 
 ```bash
-cd backend && ./gradlew test      # Java 21 · Spring Boot · PostgreSQL 18
-cd frontend && npm run dev        # Next.js 16.3
-docker compose up -d              # 로컬 PG + Redis
+cd back && ./gradlew test      # Java 21 · Spring Boot · PostgreSQL 18
+cd front && npm run dev        # Next.js 16.3
+cd infra && docker compose up -d              # 로컬 PG + Redis
 ```
 
 ## 프로젝트 구조

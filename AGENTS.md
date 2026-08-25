@@ -12,9 +12,9 @@ A tool to help users **understand** trading, not just execute it.
 - Preserve the existing project name and repository/package names when applying design-document updates.
 
 ```bash
-cd backend && ./gradlew test      # Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB + Testcontainers
-cd frontend && npm run dev        # Next.js 16.3
-docker compose up -d              # local PostgreSQL/TimescaleDB + Redis
+cd back && ./gradlew test      # Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB + Testcontainers
+cd front && npm run dev        # Next.js 16.3
+cd infra && docker compose up -d              # local PostgreSQL/TimescaleDB + Redis
 ```
 
 ## Project Structure
