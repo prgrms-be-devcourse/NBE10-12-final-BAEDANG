@@ -31,6 +31,11 @@ dependencies {
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // ── 외부 API(Toss) 어댑터 테스트용 — 실제 Toss 를 호출하지 않고 응답을 스텁한다.
+    //    org.wiremock:wiremock 은 Jetty 서버 구현체를 포함하지 않는 모듈형 아티팩트라
+    //    별도로 추가해야 한다 — standalone 버전이 다 번들돼 있어 더 간단하다.
+    testImplementation 'org.wiremock:wiremock-standalone:3.13.2'
 }
 
 tasks.named('test') {
