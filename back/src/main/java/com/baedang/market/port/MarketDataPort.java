@@ -8,4 +8,5 @@ import java.util.List;
  */
 public interface MarketDataPort {
     List<PriceQuote> fetchPrices(List<String> symbols);
+    List<Candle> fetchCandles(String symbols, CandleInterval interval, int count);
 }
