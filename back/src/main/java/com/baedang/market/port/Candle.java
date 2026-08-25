@@ -15,11 +15,11 @@ import java.time.OffsetDateTime;
  */
 public record Candle(
         OffsetDateTime candleAt,
-        String openPrice,
-        String highPrice,
-        String lowPrice,
-        String closePrice,
-        String volume,
+        BigDecimal openPrice,
+        BigDecimal highPrice,
+        BigDecimal lowPrice,
+        BigDecimal closePrice,
+        BigDecimal volume,
         String currency
 ) {
 }

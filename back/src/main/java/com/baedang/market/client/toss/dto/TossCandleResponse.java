@@ -1,6 +1,5 @@
 package com.baedang.market.client.toss.dto;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -14,7 +13,7 @@ public record TossCandleResponse(
     }
 
     public record TossCandleItem(
-            OffsetDateTime candleAt,
+            OffsetDateTime timestamp,
             String openPrice,
             String highPrice,
             String lowPrice,
