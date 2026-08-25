@@ -1,6 +1,6 @@
 "use client";
 
-import { useAuth } from "./AuthProvider";
+import { useRouter, usePathname } from "next/navigation";
 
 type Props = {
   open: boolean;
@@ -9,13 +9,16 @@ type Props = {
 
 /**
  * 비로그인 상태에서 거래를 시도했을 때 뜨는 회원가입 유도 모달.
- * wireframe-clean(3).html 의 모달 그대로 — 회원가입 버튼을 누르면
- * (아직 실제 가입 API가 없으므로) AuthProvider 의 mock 로그인으로 전환합니다.
+ * 버튼을 누르면 실제 `/signup`, `/login` 페이지로 이동합니다 — 로그인/가입 성공 후
+ * `next` 쿼리로 원래 있던 화면(예: 종목 상세)으로 돌아옵니다.
  */
 export function SignupModal({ open, onClose }: Props) {
-  const { login } = useAuth();
+  const router = useRouter();
+  const pathname = usePathname();
 
   if (!open) return null;
+
+  const next = encodeURIComponent(pathname);
 
   return (
     <div
@@ -36,19 +39,13 @@ export function SignupModal({ open, onClose }: Props) {
         </p>
         <button
           className="mb-2 w-full rounded-md bg-gray-900 px-4 py-2.5 text-[13px] font-medium text-white hover:bg-black"
-          onClick={() => {
-            login();
-            onClose();
-          }}
+          onClick={() => router.push(`/signup?next=${next}`)}
         >
           회원가입하고 5,000만원 받기
         </button>
         <button
           className="mb-3.5 w-full rounded-md border border-gray-300 bg-white px-4 py-2.5 text-[13px] font-medium text-gray-900 hover:bg-gray-50"
-          onClick={() => {
-            login();
-            onClose();
-          }}
+          onClick={() => router.push(`/login?next=${next}`)}
         >
           이미 계정이 있어요 · 로그인
         </button>
