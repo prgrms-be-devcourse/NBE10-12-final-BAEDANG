@@ -1,13 +1,17 @@
 package com.baedang.trading.controller;
 
 import com.baedang.trading.dto.OrderQuoteResponse;
+import com.baedang.trading.dto.OrderResponse;
+import com.baedang.trading.dto.PlaceOrderRequest;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.service.MarketOrderService;
 import com.baedang.trading.service.OrderQuoteService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -15,24 +19,27 @@ import java.time.OffsetDateTime;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @ExtendWith(MockitoExtension.class)
-class OrderQuoteControllerTest {
+class OrderControllerTest {
 
     @Mock OrderQuoteService orderQuoteService;
+    @Mock MarketOrderService marketOrderService;
 
     private MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
-        OrderQuoteController controller = new OrderQuoteController(orderQuoteService);
-        mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(new OrderController(orderQuoteService, marketOrderService))
+                .build();
     }
 
     @Test
-    void 금액과_수량을_JSON_문자열로_응답한다() throws Exception {
+    void 주문_견적의_금액과_수량을_JSON_문자열로_응답한다() throws Exception {
         when(orderQuoteService.getQuote(1L, "005930", "BUY", "10"))
                 .thenReturn(new OrderQuoteResponse(
                         "005930",
@@ -63,5 +70,36 @@ class OrderQuoteControllerTest {
                 .andExpect(jsonPath("$.netAmount").value("2415242"))
                 .andExpect(jsonPath("$.executable").value(true))
                 .andExpect(jsonPath("$.reason").doesNotExist());
+    }
+
+    @Test
+    void 시장가_주문을_즉시_체결하고_금액을_문자열로_응답한다() throws Exception {
+        PlaceOrderRequest request = new PlaceOrderRequest(
+                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "BUY", "10");
+        when(marketOrderService.place(1L, request)).thenReturn(new OrderResponse(
+                1024L, "FILLED", "005930", "BUY", "10", "241500", "1",
+                "2415000", "242", "0", "2415242",
+                OffsetDateTime.parse("2026-08-11T12:36:59+09:00"),
+                OffsetDateTime.parse("2026-08-11T12:37:02+09:00"),
+                new OrderResponse.AccountSummary("45824758", "50412300")
+        ));
+
+        mockMvc.perform(post("/api/orders")
+                        .header("X-User-Id", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
+                                  "symbol": "005930",
+                                  "side": "BUY",
+                                  "quantity": "10"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.status").value("FILLED"))
+                .andExpect(jsonPath("$.quantity").value("10"))
+                .andExpect(jsonPath("$.grossAmount").value("2415000"))
+                .andExpect(jsonPath("$.netAmount").value("2415242"))
+                .andExpect(jsonPath("$.account.cashBalance").value("45824758"));
     }
 }

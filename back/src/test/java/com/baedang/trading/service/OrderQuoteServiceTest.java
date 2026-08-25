@@ -65,8 +65,8 @@ class OrderQuoteServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 calculator,
-                Clock.fixed(NOW, ZoneOffset.UTC),
-                15
+                new MarketOrderPolicy(15),
+                Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 
