@@ -16,6 +16,8 @@ import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
+import java.util.Map;
+
 @Component
 public class TossSecuritiesClient {
 
@@ -35,6 +37,12 @@ public class TossSecuritiesClient {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.clientId = clientId;
         this.clientSecret = clientSecret;
+    }
+
+    public <T> T get(String path, Map<String, String> queryParams, Class<T> responseType) {
+        MultiValueMap<String, String> multiValueMap = new LinkedMultiValueMap<>();
+        multiValueMap.setAll(queryParams);
+        return get(path, multiValueMap, responseType);
     }
 
     public <T> T get(String path, MultiValueMap<String, String> queryParams, Class<T> responseType) {

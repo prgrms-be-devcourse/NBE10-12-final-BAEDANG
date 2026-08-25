@@ -1,5 +1,6 @@
 package com.baedang.global.client.toss;
 
+import com.baedang.global.clients.tossSecurities.TossSecuritiesClient;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -44,9 +45,12 @@ class TossSecuritiesClientTest {
         stubFor(post(urlEqualTo("/oauth2/token"))
                 .willReturn(okJson(TOKEN_RESPONSE)));
 
-        TossApiProperties properties = new TossApiProperties(
-                "http://localhost:" + wireMockServer.port(), "test-id", "test-secret", true);
-        client = new TossSecuritiesClient(RestClient.builder(), properties);
+        client = new TossSecuritiesClient(
+                RestClient.builder(),
+                "http://localhost:" + wireMockServer.port(),
+                "test-id",
+                "test-secret"
+        );
     }
 
     @AfterEach
@@ -61,7 +65,7 @@ class TossSecuritiesClientTest {
                         { "baseCurrency": "USD", "quoteCurrency": "KRW" }
                         """)));
 
-        TestBody body = client.get(TossPathWhitelist.EXCHANGE_RATE,
+        TestBody body = client.get("/api/v1/exchange-rate",
                 Map.of("baseCurrency", "USD", "quoteCurrency", "KRW"), TestBody.class);
 
         assertThat(body.baseCurrency()).isEqualTo("USD");
@@ -75,9 +79,9 @@ class TossSecuritiesClientTest {
                         { "baseCurrency": "USD", "quoteCurrency": "KRW" }
                         """)));
 
-        client.get(TossPathWhitelist.EXCHANGE_RATE, Map.of(), TestBody.class);
-        client.get(TossPathWhitelist.EXCHANGE_RATE, Map.of(), TestBody.class);
-        client.get(TossPathWhitelist.EXCHANGE_RATE, Map.of(), TestBody.class);
+        client.get("/api/v1/exchange-rate", Map.of(), TestBody.class);
+        client.get("/api/v1/exchange-rate", Map.of(), TestBody.class);
+        client.get("/api/v1/exchange-rate", Map.of(), TestBody.class);
 
         // /oauth2/token 은 세 번 중 처음 한 번만 호출돼야 한다 — 매 요청마다 발급받으면
         // rate limit 에 걸린다는 docs/erd.md 규칙을 지키는지 확인.
@@ -90,7 +94,7 @@ class TossSecuritiesClientTest {
         stubFor(get(urlPathEqualTo("/api/v1/exchange-rate"))
                 .willReturn(aResponse().withStatus(500)));
 
-        assertThatThrownBy(() -> client.get(TossPathWhitelist.EXCHANGE_RATE, Map.of(), TestBody.class))
+        assertThatThrownBy(() -> client.get("/api/v1/exchange-rate", Map.of(), TestBody.class))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.TOSS_API_ERROR);
@@ -101,7 +105,7 @@ class TossSecuritiesClientTest {
         stubFor(get(urlPathEqualTo("/api/v1/exchange-rate"))
                 .willReturn(aResponse().withStatus(429)));
 
-        assertThatThrownBy(() -> client.get(TossPathWhitelist.EXCHANGE_RATE, Map.of(), TestBody.class))
+        assertThatThrownBy(() -> client.get("/api/v1/exchange-rate", Map.of(), TestBody.class))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.TOSS_RATE_LIMITED);
@@ -112,7 +116,7 @@ class TossSecuritiesClientTest {
         wireMockServer.resetAll();
         stubFor(post(urlEqualTo("/oauth2/token")).willReturn(aResponse().withStatus(401)));
 
-        assertThatThrownBy(() -> client.get(TossPathWhitelist.EXCHANGE_RATE, Map.of(), TestBody.class))
+        assertThatThrownBy(() -> client.get("/api/v1/exchange-rate", Map.of(), TestBody.class))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.TOSS_API_ERROR);

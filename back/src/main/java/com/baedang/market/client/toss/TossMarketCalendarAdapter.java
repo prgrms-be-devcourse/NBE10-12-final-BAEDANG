@@ -1,7 +1,6 @@
 package com.baedang.market.client.toss;
 
-import com.baedang.global.client.toss.TossPathWhitelist;
-import com.baedang.global.client.toss.TossSecuritiesClient;
+import com.baedang.global.clients.tossSecurities.TossSecuritiesClient;
 import com.baedang.market.client.toss.dto.TossExchangeRateResponse;
 import com.baedang.market.client.toss.dto.TossMarketCalendarResponse;
 import com.baedang.market.port.ExchangeRateQuote;
@@ -38,7 +37,7 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
     @Override
     public ExchangeRateQuote fetchExchangeRate() {
         TossExchangeRateResponse response = tossSecuritiesClient.get(
-                TossPathWhitelist.EXCHANGE_RATE,
+                "/api/v1/exchange-rate",
                 Map.of("baseCurrency", BASE_CURRENCY, "quoteCurrency", QUOTE_CURRENCY),
                 TossExchangeRateResponse.class
         );
@@ -55,15 +54,15 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
 
     @Override
     public MarketCalendarDay fetchKrMarketCalendar(LocalDate date) {
-        return fetchCalendar(MarketCountry.KR, TossPathWhitelist.MARKET_CALENDAR_KR, date);
+        return fetchCalendar(MarketCountry.KR, "/api/v1/market-calendar/KR", date);
     }
 
     @Override
     public MarketCalendarDay fetchUsMarketCalendar(LocalDate date) {
-        return fetchCalendar(MarketCountry.US, TossPathWhitelist.MARKET_CALENDAR_US, date);
+        return fetchCalendar(MarketCountry.US, "/api/v1/market-calendar/US", date);
     }
 
-    private MarketCalendarDay fetchCalendar(MarketCountry marketCountry, TossPathWhitelist path, LocalDate date) {
+    private MarketCalendarDay fetchCalendar(MarketCountry marketCountry, String path, LocalDate date) {
         TossMarketCalendarResponse response = tossSecuritiesClient.get(
                 path,
                 Map.of("date", date.toString()),
