@@ -78,9 +78,10 @@ toss:
 #     매도(국내)   net = gross - fee - k_tax
 #     매도(미국)   net = gross - fee - a_tax
 #
-#       fee   = gross x fee-rate
-#       k_tax = gross x k-tax-rate
-#       a_tax = max(gross x a-tax-rate, a-tax-min-usd x 환율)
+#       fee        = gross_krw x fee-rate
+#       k_tax      = gross_krw x k-tax-rate
+#       sec_fee_usd = max(price_usd x quantity x a-tax-rate, a-tax-min-usd)
+#       a_tax      = sec_fee_usd x 환율
 trading:
   initial-cash: ${INITIAL_CASH:50000000}
 
@@ -118,4 +119,3 @@ logging:
     org.hibernate.SQL: DEBUG
     # 바인딩 파라미터까지 보고 싶을 때만 켜세요. 로그가 매우 길어집니다.
     # org.hibernate.orm.jdbc.bind: TRACE
-

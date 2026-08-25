@@ -474,10 +474,13 @@ Fee & tax preview
 ```
 buy   netAmount = grossAmount + fee           (deducted from deposit)
 sell  netAmount = grossAmount − fee − tax     (credited to deposit)
-grossAmount = executedPrice × quantity × exchangeRate
-fee         = grossAmount × 0.0001   trading fee 0.01% (buy & sell)
-  tax         = KR grossAmount × 0.002                 (KR sell only)
-             = max(USD grossAmount × 0.0000206, $0.01) (US SEC fee, sell only)
+KR grossAmount = round(executedPriceKrw × quantity, 0)
+US priceUsd    = round(executedPriceUsd, 2)
+US grossAmount = round(priceUsd × quantity × exchangeRate, 0)
+fee            = round(grossAmount × 0.0001, 0)  trading fee 0.01% (buy & sell)
+KR tax         = round(grossAmount × 0.002, 0)   (KR sell only)
+US secFeeUsd   = round(max(priceUsd × quantity × 0.0000206, $0.01), 2)
+US tax         = round(secFeeUsd × exchangeRate, 0) (US sell only)
 ```
 **Example — 삼성전자 10주 @ 241,500**
 ```
@@ -485,7 +488,7 @@ buy   gross 2,415,000 + fee   242              = 2,415,242 deducted
 sell  gross 2,415,000 − fee   242 − tax 4,830  = 2,409,928 credited
 ```
 - **Market-specific rates are config (`.env`). Never hardcode.** KR sell tax is 0.2%; US sell tax is replaced by the SEC fee rate `0.0000206` with a USD `0.01` minimum. The trading fee remains 0.01% for both markets.
-- **Round twice.** For US orders, calculate in USD, round to cents (including the `$0.01` minimum), then convert the final amount to KRW and round to whole won with **HALF_UP**. For KR orders, round the KRW gross amount first, calculate fee/tax from that value, then round again. Keep final ledger amounts as integers so the invariant holds exactly.
+- **Round at the currency boundary with `HALF_UP`.** For US orders, first round the per-share USD price to cents. Calculate KRW gross from that `priceUsd × quantity × exchangeRate` and round to whole won. Calculate `secFeeUsd` separately from `priceUsd × quantity`, apply the `$0.01` minimum, round it to cents, then convert it to KRW and round to whole won. For KR orders, round the KRW gross amount first, calculate fee/tax from that value, then round again. Keep final ledger amounts as integers so the invariant holds exactly.
 - **Price can move between quote and fill.** The quote is a reference; the server recomputes at fill time.
 
 ### `POST /orders` 🔒
