@@ -89,6 +89,27 @@ public class Account {
         return cashBalance.subtract(lockedCash);
     }
 
+    /** 시장가 매수 금액을 즉시 차감합니다. 지정가 주문의 동결액은 침범하지 않습니다. */
+    public void debitMarketBuy(BigDecimal amount) {
+        requirePositive(amount);
+        if (availableCash().compareTo(amount) < 0) {
+            throw new IllegalStateException("주문가능금액보다 큰 금액을 차감할 수 없습니다");
+        }
+        this.cashBalance = this.cashBalance.subtract(amount);
+    }
+
+    /** 시장가 매도 체결 금액을 예수금에 즉시 반영합니다. */
+    public void creditMarketSell(BigDecimal amount) {
+        requirePositive(amount);
+        this.cashBalance = this.cashBalance.add(amount);
+    }
+
+    private void requirePositive(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException("금액은 0보다 커야 합니다");
+        }
+    }
+
     public void close() {
         this.status = AccountStatus.CLOSED;
         this.closedAt = OffsetDateTime.now();

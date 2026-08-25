@@ -9,8 +9,9 @@ import java.util.UUID;
 /**
  * 주문 + 체결. {@code order} 는 SQL 예약어라 테이블명이 {@code trade_order} 입니다.
  *
- * <p><b>1주차 시장가는 PENDING 을 거치지 않습니다.</b> 접수와 체결이 한 트랜잭션
- * 안에서 연속 실행되므로 FILLED 또는 REJECTED 로 직행합니다.
+ * <p><b>시장가는 PENDING 을 거치지 않습니다.</b> 하나의 트랜잭션에서 즉시
+ * 체결되므로 FILLED 또는 REJECTED 로 INSERT 합니다. PENDING 은 지정가 주문의
+ * 접수·동결 트랜잭션부터 사용합니다.
  *
  * <p><b>요율은 저장하지 않습니다.</b> {@code fee}·{@code tax} 에는 계산된 <b>금액</b>이
  * 들어갑니다. 요율은 전역 정책이라 {@code application.yml} 의 {@code trading.*} 이
@@ -97,40 +98,46 @@ public class TradeOrder {
     }
 
     private TradeOrder(Long accountId, Long stockId, UUID clientOrderId,
-                       OrderSide side, BigDecimal quantity) {
+                       OrderSide side, BigDecimal quantity, OrderStatus status,
+                       OffsetDateTime orderedAt) {
         this.accountId = accountId;
         this.stockId = stockId;
         this.clientOrderId = clientOrderId;
         this.side = side;
         this.quantity = quantity;
         this.orderType = OrderType.MARKET;
-        this.status = OrderStatus.PENDING;
-        this.orderedAt = OffsetDateTime.now();
+        this.status = status;
+        this.orderedAt = orderedAt;
     }
 
-    /** 시장가 주문 접수. 1주차에는 이 상태가 커밋되지 않고 곧바로 체결로 넘어갑니다. */
-    public static TradeOrder placeMarketOrder(Long accountId, Long stockId, UUID clientOrderId,
-                                              OrderSide side, BigDecimal quantity) {
-        return new TradeOrder(accountId, stockId, clientOrderId, side, quantity);
+    /** 시장가 체결 결과를 처음부터 FILLED 상태로 생성합니다. */
+    public static TradeOrder filledMarketOrder(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, BigDecimal executedPrice, OffsetDateTime quoteAt,
+            BigDecimal exchangeRate, BigDecimal grossAmount, BigDecimal fee,
+            BigDecimal tax, BigDecimal netAmount, OffsetDateTime orderedAt
+    ) {
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.FILLED, orderedAt);
+        order.executedPrice = executedPrice;
+        order.quoteAt = quoteAt;
+        order.exchangeRate = exchangeRate;
+        order.grossAmount = grossAmount;
+        order.fee = fee;
+        order.tax = tax;
+        order.netAmount = netAmount;
+        return order;
     }
 
-    /** 체결 확정. 시장가는 접수 직후 곧바로 이 메서드로 넘어옵니다. */
-    public void fill(BigDecimal executedPrice, OffsetDateTime quoteAt, BigDecimal exchangeRate,
-                     BigDecimal grossAmount, BigDecimal fee, BigDecimal tax, BigDecimal netAmount) {
-        this.executedPrice = executedPrice;
-        this.quoteAt = quoteAt;
-        this.exchangeRate = exchangeRate;
-        this.grossAmount = grossAmount;
-        this.fee = fee;
-        this.tax = tax;
-        this.netAmount = netAmount;
-        this.status = OrderStatus.FILLED;
-    }
-
-    /** 검증 단계 거절. 자금을 동결하지 않았으므로 되돌릴 것이 없습니다. */
-    public void reject(String reasonCode) {
-        this.status = OrderStatus.REJECTED;
-        this.rejectReason = reasonCode;
+    /** 유효한 시장가 요청이 업무 규칙으로 거절된 기록을 생성합니다. */
+    public static TradeOrder rejectedMarketOrder(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, String reasonCode, OffsetDateTime orderedAt
+    ) {
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, orderedAt);
+        order.rejectReason = reasonCode;
+        return order;
     }
 
     public Long getOrderId() { return orderId; }

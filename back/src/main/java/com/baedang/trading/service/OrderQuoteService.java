@@ -6,7 +6,6 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketSessionProvider;
-import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -14,19 +13,17 @@ import com.baedang.trading.dto.OrderQuoteResponse;
 import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.Locale;
 
 @Service
 @Transactional(readOnly = true)
@@ -42,8 +39,8 @@ public class OrderQuoteService {
     private final MarketSessionProvider marketSessionProvider;
     private final ExecutionExchangeRateProvider exchangeRateProvider;
     private final OrderAmountCalculator amountCalculator;
+    private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
-    private final Duration quoteMaxStaleness;
 
     public OrderQuoteService(
             AccountRepository accountRepository,
@@ -53,8 +50,8 @@ public class OrderQuoteService {
             MarketSessionProvider marketSessionProvider,
             ExecutionExchangeRateProvider exchangeRateProvider,
             OrderAmountCalculator amountCalculator,
-            Clock clock,
-            @Value("${trading.quote-max-staleness-seconds}") long quoteMaxStalenessSeconds
+            MarketOrderPolicy marketOrderPolicy,
+            Clock clock
     ) {
         this.accountRepository = accountRepository;
         this.stockRepository = stockRepository;
@@ -63,20 +60,18 @@ public class OrderQuoteService {
         this.marketSessionProvider = marketSessionProvider;
         this.exchangeRateProvider = exchangeRateProvider;
         this.amountCalculator = amountCalculator;
+        this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
-        this.quoteMaxStaleness = Duration.ofSeconds(quoteMaxStalenessSeconds);
     }
 
     /** 견적은 자금이나 수량을 예약하지 않는 비구속성 읽기 모델입니다. */
     public OrderQuoteResponse getQuote(Long userId, String symbolValue, String sideValue, String quantityValue) {
-        OrderSide side = parseSide(sideValue);
-        BigDecimal quantity = parseQuantity(quantityValue);
-        String symbol = normalizeSymbol(symbolValue);
+        OrderTerms terms = marketOrderPolicy.parseTerms(symbolValue, sideValue, quantityValue);
 
         Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
-        Stock stock = stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc(symbol)
-                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + symbol));
+        Stock stock = stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc(terms.symbol())
+                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.QUOTE_NOT_FOUND, "stockId=" + stock.getStockId()));
 
@@ -85,54 +80,36 @@ public class OrderQuoteService {
                 : exchangeRateProvider.currentUsdKrwRate();
         OrderAmount amount = amountCalculator.calculate(
                 stock.getMarketCountry(),
-                side,
+                terms.side(),
                 quote.getLastPrice(),
-                quantity,
+                terms.quantity(),
                 exchangeRate
         );
 
         Instant now = clock.instant();
-        ErrorCode reason = determineReason(account, stock, quote, side, quantity, amount, now);
+        BigDecimal availableQuantity = terms.side() == OrderSide.SELL
+                ? availableQuantity(account, stock)
+                : BigDecimal.ZERO;
+        ErrorCode reason = marketOrderPolicy.determineRejection(
+                account,
+                stock,
+                quote,
+                terms.side(),
+                terms.quantity(),
+                amount,
+                availableQuantity,
+                () -> marketSessionProvider.isOpen(stock.getMarketCountry(), now),
+                now
+        );
         return OrderQuoteResponse.of(
                 stock.getSymbol(),
-                side,
-                quantity,
+                terms.side(),
+                terms.quantity(),
                 amount,
                 account.availableCash(),
                 quote.getQuoteAt(),
                 reason
         );
-    }
-
-    private ErrorCode determineReason(
-            Account account,
-            Stock stock,
-            QuoteSnapshot quote,
-            OrderSide side,
-            BigDecimal quantity,
-            OrderAmount amount,
-            Instant now
-    ) {
-        if (!Boolean.TRUE.equals(stock.getIsRanked()) || stock.getListingStatus() != ListingStatus.ACTIVE) {
-            return ErrorCode.NOT_IN_UNIVERSE;
-        }
-        if (Boolean.TRUE.equals(stock.getIsSuspended())) return ErrorCode.STOCK_SUSPENDED;
-        if (Boolean.TRUE.equals(stock.getIsLiquidation())) return ErrorCode.STOCK_LIQUIDATION;
-        if (!marketSessionProvider.isOpen(stock.getMarketCountry(), now)) return ErrorCode.MARKET_CLOSED;
-        if (isStale(quote, now)) return ErrorCode.STALE_QUOTE;
-
-        if (side == OrderSide.BUY && account.availableCash().compareTo(amount.netAmount()) < 0) {
-            return ErrorCode.INSUFFICIENT_CASH;
-        }
-        if (side == OrderSide.SELL && availableQuantity(account, stock).compareTo(quantity) < 0) {
-            return ErrorCode.INSUFFICIENT_QUANTITY;
-        }
-        return null;
-    }
-
-    private boolean isStale(QuoteSnapshot quote, Instant now) {
-        Duration age = Duration.between(quote.getQuoteAt().toInstant(), now);
-        return !age.isNegative() && age.compareTo(quoteMaxStaleness) > 0;
     }
 
     private BigDecimal availableQuantity(Account account, Stock stock) {
@@ -141,30 +118,4 @@ public class OrderQuoteService {
                 .orElse(BigDecimal.ZERO);
     }
 
-    private OrderSide parseSide(String side) {
-        if (side == null || side.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
-        try {
-            return OrderSide.valueOf(side.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "side=" + side);
-        }
-    }
-
-    private BigDecimal parseQuantity(String quantity) {
-        if (quantity == null || quantity.isBlank()) throw new BusinessException(ErrorCode.INVALID_QUANTITY);
-        try {
-            BigDecimal parsed = new BigDecimal(quantity.trim());
-            if (parsed.compareTo(BigDecimal.ONE) < 0 || parsed.stripTrailingZeros().scale() > 0) {
-                throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + quantity);
-            }
-            return parsed;
-        } catch (NumberFormatException e) {
-            throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + quantity);
-        }
-    }
-
-    private String normalizeSymbol(String symbol) {
-        if (symbol == null || symbol.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
-        return symbol.trim().toUpperCase(Locale.ROOT);
-    }
 }

@@ -54,20 +54,28 @@ public class Holding {
     }
 
     private Holding(Long accountId, Long stockId, BigDecimal quantity,
-                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
+                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate,
+                    OffsetDateTime updatedAt) {
         this.accountId = accountId;
         this.stockId = stockId;
         this.quantity = quantity;
         this.lockedQuantity = BigDecimal.ZERO;
         this.avgBuyPrice = avgBuyPrice;
         this.avgExchangeRate = avgExchangeRate != null ? avgExchangeRate : BigDecimal.ONE;
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt = updatedAt;
     }
 
     /** 처음 매수하는 종목일 때. 두 번째부터는 {@link #addBuy} 를 씁니다. */
     public static Holding firstBuy(Long accountId, Long stockId, BigDecimal quantity,
                                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
-        return new Holding(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate);
+        return firstBuy(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate,
+                OffsetDateTime.now());
+    }
+
+    public static Holding firstBuy(Long accountId, Long stockId, BigDecimal quantity,
+                                   BigDecimal avgBuyPrice, BigDecimal avgExchangeRate,
+                                   OffsetDateTime updatedAt) {
+        return new Holding(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate, updatedAt);
     }
 
     /** 매도 가능 수량. 저장하지 않고 계산합니다. */
@@ -82,6 +90,10 @@ public class Holding {
      * 계좌 총 손익에는 이미 반영돼 있습니다 (예수금에서 빠졌으므로).
      */
     public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate) {
+        addBuy(addQty, price, rate, OffsetDateTime.now());
+    }
+
+    public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate, OffsetDateTime updatedAt) {
         BigDecimal totalQty = quantity.add(addQty);
         this.avgBuyPrice = quantity.multiply(avgBuyPrice)
                 .add(addQty.multiply(price))
@@ -90,13 +102,23 @@ public class Holding {
                 .add(addQty.multiply(rate))
                 .divide(totalQty, 6, RoundingMode.HALF_UP);
         this.quantity = totalQty;
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt = updatedAt;
     }
 
     /** 매도 체결 반영. <b>평단가는 그대로 둡니다</b> — 평가손익의 기준이기 때문입니다. */
     public void subtractSell(BigDecimal sellQty) {
+        subtractSell(sellQty, OffsetDateTime.now());
+    }
+
+    public void subtractSell(BigDecimal sellQty, OffsetDateTime updatedAt) {
+        if (sellQty == null || sellQty.signum() <= 0) {
+            throw new IllegalArgumentException("매도 수량은 0보다 커야 합니다");
+        }
+        if (availableQuantity().compareTo(sellQty) < 0) {
+            throw new IllegalStateException("매도 가능 수량보다 많이 차감할 수 없습니다");
+        }
         this.quantity = this.quantity.subtract(sellQty);
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt = updatedAt;
     }
 
     public Long getHoldingId() { return holdingId; }
