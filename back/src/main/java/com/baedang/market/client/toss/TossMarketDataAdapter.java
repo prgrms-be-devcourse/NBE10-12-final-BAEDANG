@@ -10,6 +10,8 @@ import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceQuote;
 import org.springframework.stereotype.Component;
+// pr#11 반영
+// import com.baedang.global.clients.tossSecurities.TossSecuritiesClient;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -37,6 +39,8 @@ public class TossMarketDataAdapter implements MarketDataPort {
         validateSymbols(symbols);
         TossPriceResponse response = tossSecuritiesClient.get(
                 PRICES,
+                // pr#11 반영
+                // "/api/v1/prices",
                 Map.of("symbols", String.join(",", symbols)),
                 TossPriceResponse.class
         );
@@ -72,6 +76,8 @@ public class TossMarketDataAdapter implements MarketDataPort {
 
             TossCandleResponse response = tossSecuritiesClient.get(
                     CANDLES,
+                    // pr#11 반영
+                    // "/api/v1/candles",
                     Map.copyOf(queryParams),
                     TossCandleResponse.class
             );

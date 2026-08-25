@@ -3,6 +3,8 @@ package com.baedang.market.client.toss;
 import com.baedang.global.client.toss.TossSecuritiesClient;
 import com.baedang.market.client.toss.dto.TossCandleResponse;
 import com.baedang.market.client.toss.dto.TossPriceResponse;
+// pr#11 반영
+// import com.baedang.global.clients.tossSecurities.TossSecuritiesClient;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.PriceQuote;
@@ -47,6 +49,8 @@ public class TossMarketDataAdapterTest {
 
         when(tossSecuritiesClient.get(
                 eq(PRICES),
+                // pr#11 반영
+                // eq("/api/v1/prices"),
                 eq(Map.of("symbols","005930")),
                 eq(TossPriceResponse.class)
         )).thenReturn(response);
@@ -75,6 +79,8 @@ public class TossMarketDataAdapterTest {
 
         when(tossSecuritiesClient.get(
                 eq(PRICES),
+                // pr#11 반영
+                // eq("/api/v1/prices"),
                 eq(Map.of("symbols","AAPL")),
                 eq(TossPriceResponse.class)
         )).thenReturn(response);
@@ -113,6 +119,8 @@ public class TossMarketDataAdapterTest {
 
         when(tossSecuritiesClient.get(
                 eq(CANDLES),
+                // pr#11 반영
+                // eq("/api/v1/candles"),
                 eq(Map.of(
                         "symbol", "005930",
                         "interval", "1d",
@@ -177,6 +185,8 @@ public class TossMarketDataAdapterTest {
 
         when(tossSecuritiesClient.get(
                 eq(CANDLES),
+                // pr#11 반영
+                // eq("/api/v1/candles"),
                 eq(Map.of(
                         "symbol", "005930",
                         "interval", "1m",
@@ -188,6 +198,8 @@ public class TossMarketDataAdapterTest {
 
         when(tossSecuritiesClient.get(
                 eq(CANDLES),
+                // pr#11 반영
+                // eq("/api/v1/candles"),
                 eq(Map.of(
                         "symbol", "005930",
                         "interval", "1m",
