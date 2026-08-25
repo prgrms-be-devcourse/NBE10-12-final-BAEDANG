@@ -222,7 +222,7 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | `side` | VARCHAR(4) | `BUY` / `SELL`. |
 | `order_type` | VARCHAR(10) | MVP는 `MARKET` 고정. 컬럼 미리 두어 `LIMIT` 추가 시 스키마 변경 불필요. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
-| `status` | VARCHAR(12) | **주문의 생애주기.** 1주차 시장가는 **`PENDING` 을 거치지 않습니다** — 접수와 체결이 한 트랜잭션 안에서 연속 실행되므로 `FILLED` 또는 `REJECTED` 로 **직행**. `PENDING` 이 실제로 저장되는 건 지정가를 붙이는 2주차부터.
+| `status` | VARCHAR(12) | **주문의 생애주기.** 시장가는 **`PENDING` 을 거치지 않습니다** — 하나의 트랜잭션에서 처음부터 `FILLED` 또는 `REJECTED` 로 INSERT 합니다. `PENDING` 은 주문 접수·동결과 체결이 별도 트랜잭션인 지정가 주문에서만 사용합니다.
   `PENDING` 접수 완료·자금/수량 동결 · `FILLED` 체결 완료·동결 해제+출금 확정 · `REJECTED` 검증 단계 거절(동결 안 함) · `CANCELED` 사용자 취소 · `EXPIRED` 타임아웃 자동 해제.
   상태 전이는 **조건부 UPDATE** 로 — `WHERE order_id=? AND status='PENDING'` 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것. |
 | `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `SUSPENDED` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE`. 화면 문구 근거. |
@@ -403,12 +403,17 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 
 ---
 
-## 매수 처리 — 2단계 모델
+## 주문 처리 — 시장가는 즉시, 지정가는 2단계
 
-> **MVP(시장가 즉시 체결)는 두 단계를 한 트랜잭션 안에서 연속 실행**합니다. 지정가를 도입하면 Phase 1 을 커밋하고 체결 엔진이 나중에 Phase 2 를 돌립니다. 스키마를 미리 이렇게 잡아두면 그때 **로직만 쪼개면** 됩니다.
+### 시장가 주문 — 한 트랜잭션에서 즉시 체결
 
-> ⚠️ **1주차에는 `PENDING` 이 DB 에 남지 않습니다.** 한 트랜잭션이라 Phase 1 의 `locked_cash += net_amount` 와 Phase 2 의 `locked_cash −= net_amount` 가 커밋 전에 상쇄되고, `status` 는 `FILLED` 로 커밋됩니다.
-> **그래도 두 단계를 그대로 코드에 남겨두세요.** 지금 지우면 2주차에 다시 쓰게 되고, 무엇보다 **동결 로직을 처음부터 검증하게 됩니다** — `locked_cash` 계산이 틀려 있으면 지정가를 붙이는 날 한꺼번에 터집니다.
+시장가 주문에는 커밋되는 중간 상태가 없습니다. 계좌 행을 먼저 잠근 뒤 `cash_balance − locked_cash` 또는 `quantity − locked_quantity` 기준으로 검증하고, 계좌·보유 수량 변경, `FILLED` 주문 INSERT, 원장 INSERT를 하나의 트랜잭션에서 처리합니다. 다른 트랜잭션이 볼 수 없는 동결액을 증가시켰다가 바로 감소시키지 않습니다.
+
+형식이 유효한 요청이 업무 규칙으로 거절되면 예수금·수량·원장을 변경하지 않고 `reject_reason`과 함께 `REJECTED` 주문을 커밋합니다. FK나 숫자 형식조차 만족할 수 없는 잘못된 요청은 주문 행으로 저장하지 않고 요청 오류로 반환합니다.
+
+### 지정가 주문 — 서로 다른 두 트랜잭션
+
+지정가 주문은 아래 두 단계를 사용합니다. Phase 1이 동결과 `PENDING`을 커밋하고 체결 Worker가 나중에 Phase 2를 수행합니다. 이 흐름을 도입할 때 취소·만료·장애 복구도 반드시 함께 구현합니다.
 
 ### Phase 1 — 주문 접수 [동결]
 | 단계 | 동작 | 설명 |
@@ -426,11 +431,11 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | ③ | `UPDATE … WHERE status='PENDING'` | **조건부 UPDATE 로 경합 방지.** 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것이므로 롤백. |
 | ④ | `INSERT ledger_entry` | 원장 기록. append only — **`BUY` 한 줄에 수수료까지 포함해 넣고 `exchange_rate` 를 함께 남깁니다.** |
 
-> 💡 **매도는 대칭입니다.** Phase 1 에서 `holding.locked_quantity` 를 늘리고, Phase 2 에서 `quantity` 와 `locked_quantity` 를 함께 줄이며 예수금을 입금합니다. **`avg_buy_price` 는 건드리지 않습니다** — 평가손익의 기준이기 때문입니다.
+> 💡 **지정가 매도는 대칭입니다.** Phase 1 에서 `holding.locked_quantity` 를 늘리고, Phase 2 에서 `quantity` 와 `locked_quantity` 를 함께 줄이며 예수금을 입금합니다. **`avg_buy_price` 는 건드리지 않습니다** — 이동평균법에서는 매도 시 수량과 취득원가가 같은 비율로 줄어 남은 주당 평균단가가 변하지 않기 때문입니다.
 
 > ⛔ **지정가를 도입하면 반드시 필요한 것** — Phase 1 커밋 직후 장애가 나면 **동결액이 영원히 안 풀립니다.** 사용자는 "돈이 있는데 왜 주문이 안 되지?"가 됩니다. 타임아웃 기반 자동 해제 배치를 만드세요:
 > `UPDATE trade_order SET status='EXPIRED' WHERE status='PENDING' AND ordered_at < now() − INTERVAL '5 min'` → 해당 금액만큼 `locked_cash` 를 되돌림.
-> **MVP 는 한 트랜잭션이라 롤백으로 끝나므로 이 배치가 필요 없습니다.**
+> **시장가 주문은 즉시 체결 트랜잭션 전체가 롤백되므로 이 배치가 필요 없습니다.**
 
 > ✅ **검증식이 하나 늘어납니다.** `locked_cash = SUM(trade_order.net_amount WHERE status='PENDING')` — 미체결 주문 합계와 동결액이 항상 같아야 합니다. 고아 PENDING 이 생기면 이 식이 깨지므로 즉시 잡아낼 수 있습니다.
 

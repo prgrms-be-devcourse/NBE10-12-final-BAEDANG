@@ -501,7 +501,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "quantity": "10"
 }
 ```
-`clientOrderId` 는 프론트가 **UUID v4 로 생성**합니다. 주문 화면 진입 시 한 번 만들고, 성공하면 새로 발급합니다. **같은 값으로 재요청하면 중복 체결 대신 기존 주문 결과를 반환**합니다 — 버튼 두 번 클릭과 네트워크 재시도를 모두 막습니다.
+`clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 기존 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
 
 **Response · 201**
 ```json
@@ -530,12 +530,15 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 **서버 처리 순서 · 한 트랜잭션**
 ```
 ① SELECT ... FROM account WHERE account_id = ? FOR UPDATE
-② 검증 — 장 시간 · is_ranked · 거래정지 · 시세 유효시간 · 예수금/보유수량
-③ INSERT trade_order       (clientOrderId 유니크 위반 → 중복 요청)
-④ UPDATE account.cash_balance
-⑤ INSERT ledger_entry       (append only)
-⑥ UPSERT holding            (이동평균 단가 재계산)
+② clientOrderId 멱등성 확인 — 동일 요청 재시도면 기존 결과 반환
+③ 검증 — 장 시간 · is_ranked · 거래정지 · 시세 유효시간 · 예수금/보유수량
+④ INSERT trade_order FILLED (유효한 업무 거절은 REJECTED)
+⑤ UPDATE account.cash_balance
+⑥ UPSERT holding            (이동평균 단가 재계산, 매도 시 평균값 유지)
+⑦ INSERT ledger_entry       (append only, FILLED만 기록)
 ```
+
+시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않으며, 주문 행을 구성할 수 없는 잘못된 요청 형식은 `REJECTED`를 저장하지 않고 요청 오류로 반환합니다.
 
 **에러**
 | 코드 | HTTP | 화면 문구 |

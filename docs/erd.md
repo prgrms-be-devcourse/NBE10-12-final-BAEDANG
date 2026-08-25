@@ -225,7 +225,7 @@ MVP is immediate market fills, so order and fill are one row. **Rejected orders 
 | `side` | VARCHAR(4) | `BUY` / `SELL`. |
 | `order_type` | VARCHAR(10) | `MARKET` in MVP. Reserving the column means no schema change when `LIMIT` arrives. |
 | `quantity` | NUMERIC(19,6) | order quantity. KR is whole shares but US allows fractional — NUMERIC leaves room. |
-| `status` | VARCHAR(12) | **The order lifecycle.** Week-1 market orders **do not pass through `PENDING`** — acceptance and fill run consecutively in one transaction, so it commits as `FILLED` or `REJECTED`. `PENDING` is actually persisted only from week 2 (limit orders).
+| `status` | VARCHAR(12) | **The order lifecycle.** Market orders **do not pass through `PENDING`** — one transaction inserts them directly as `FILLED` or `REJECTED`. `PENDING` is used only by limit orders, whose acceptance/reservation and fill run in separate transactions.
   `PENDING` accepted, funds/qty locked · `FILLED` filled, unlocked + withdrawal confirmed · `REJECTED` rejected at validation (nothing locked) · `CANCELED` user cancel · `EXPIRED` timeout auto-release.
   Handle transitions with **conditional UPDATE** — if `WHERE order_id=? AND status='PENDING'` affects 0 rows, it was already canceled or taken by another worker. |
 | `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `SUSPENDED` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE`. Basis for the screen message. |
@@ -407,12 +407,17 @@ Dividend is an **attribute, not a type**. KB금융 is both dividend-paying and a
 
 ---
 
-## Buy Processing — 2-Phase Model
+## Order Processing — Market Now, Limit Later
 
-> **MVP (market immediate fill) runs the two phases consecutively inside ONE transaction.** When limit orders arrive, Phase 1 commits and a fill engine runs Phase 2 later. With the schema pre-built this way, you only **split the logic** then.
+### Market order — immediate fill in one transaction
 
-> ⚠️ **In week 1, `PENDING` never lands in the DB.** In one transaction, Phase 1's `locked_cash += net_amount` and Phase 2's `locked_cash −= net_amount` cancel before commit, and `status` commits as `FILLED`.
-> **Keep both phases in the code anyway.** Deleting them now means rewriting in week 2 — and more importantly, you **validate the lock logic from day one**; a wrong `locked_cash` calc would blow up all at once the day limit orders arrive.
+Market orders have no committed intermediate state. Start by locking the account row, validate against `cash_balance − locked_cash` or `quantity − locked_quantity`, then update the account/holding, insert a `FILLED` order, and append one ledger entry in the same transaction. Do not increase and decrease locks that no other transaction can observe.
+
+If a structurally valid request fails a business rule, insert a `REJECTED` order with `reject_reason` and commit it without changing cash, quantity, or the ledger. Malformed requests that cannot satisfy the order FKs or quantity type are returned as request errors and are not order rows.
+
+### Limit order — two separate transactions
+
+Limit orders use the following two phases. Phase 1 commits `PENDING` with a reservation; a fill worker runs Phase 2 later. Cancellation, expiration, and recovery are mandatory when this flow is introduced.
 
 ### Phase 1 — Order acceptance [lock]
 | Step | Action | Description |
@@ -431,11 +436,11 @@ Dividend is an **attribute, not a type**. KB금융 is both dividend-paying and a
 | ③ | `UPDATE … WHERE status='PENDING'` | **Conditional UPDATE prevents races.** If 0 rows affected, it was already canceled or taken by another worker — roll back. |
 | ④ | `INSERT ledger_entry` | ledger record. append only — **one `BUY` line with the fee included, plus `exchange_rate`**. |
 
-> 💡 **Sell is symmetric.** Phase 1 increases `holding.locked_quantity`; Phase 2 decreases `quantity` and `locked_quantity` together and credits the deposit. **Don't touch `avg_buy_price`** — it's the basis of unrealized P&L.
+> 💡 **Limit sells are symmetric.** Phase 1 increases `holding.locked_quantity`; Phase 2 decreases `quantity` and `locked_quantity` together and credits the deposit. **Don't touch `avg_buy_price`** — under moving-average accounting, selling reduces quantity and cost basis proportionally, so the remaining per-share average does not change.
 
 > ⛔ **Required once limit orders arrive** — if a crash hits right after Phase 1 commits, the **locked funds never unlock**. Users see "I have money but can't order." Build a timeout auto-release batch:
 > `UPDATE trade_order SET status='EXPIRED' WHERE status='PENDING' AND ordered_at < now() − INTERVAL '5 min'` → refund `locked_cash` by that amount.
-> **MVP needs no such batch** — a single transaction ends in rollback.
+> **Market orders need no such batch** — their immediate-fill transaction ends in a full rollback on technical failure.
 
 > ✅ **One more invariant.** `locked_cash = SUM(trade_order.net_amount WHERE status='PENDING')` must always hold. An orphan PENDING breaks this equation and is caught instantly.
 
