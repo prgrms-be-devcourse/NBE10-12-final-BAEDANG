@@ -70,7 +70,7 @@ public class TossRankingAdapter implements RankingPort {
                 "rankings.size()=", rankings.size(),
                 "rankedAt=", rankedAt
         );
-        throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+        throw new BusinessException(ErrorCode.TOSS_API_ERROR);
     }
 
     private List<RankingEntry> rankingsToEntriesOrThrow(List<TossRankingResponse.Ranking> rankings, String marketName) {
@@ -89,7 +89,7 @@ public class TossRankingAdapter implements RankingPort {
                     marketName,
                     "ranking.rank"
             );
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR);
         }
 
         String symbol = requireNonNullOrThrow(ranking.symbol(), "ranking.symbol", marketName);
@@ -121,7 +121,7 @@ public class TossRankingAdapter implements RankingPort {
                     marketName,
                     valueName
             );
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR);
         }
         return value;
     }
@@ -135,7 +135,7 @@ public class TossRankingAdapter implements RankingPort {
                     marketName,
                     stringName
             );
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR);
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR);
         }
     }
 }
