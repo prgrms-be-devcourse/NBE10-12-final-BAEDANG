@@ -150,7 +150,9 @@ public class TossRankingAdapterTest {
         stub("KR", response(null, samsung()));
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     @Test
@@ -158,7 +160,9 @@ public class TossRankingAdapterTest {
         stub("KR", new TossRankingResponse(new TossRankingResponse.Result(List.of(), RANKED_AT)));
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     // ── 매핑 실패 ───────────────────────────────────────────────────────────
@@ -168,7 +172,9 @@ public class TossRankingAdapterTest {
         stub("KR", null);
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     @Test
@@ -176,7 +182,9 @@ public class TossRankingAdapterTest {
         stub("KR", new TossRankingResponse(null));
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     @Test
@@ -184,7 +192,9 @@ public class TossRankingAdapterTest {
         stub("KR", new TossRankingResponse(new TossRankingResponse.Result(null, RANKED_AT)));
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     @ParameterizedTest
@@ -195,7 +205,9 @@ public class TossRankingAdapterTest {
         stub("KR", new TossRankingResponse(new TossRankingResponse.Result(rankings, RANKED_AT)));
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     static Stream<Arguments> rankingsWithNullField() {
@@ -225,7 +237,9 @@ public class TossRankingAdapterTest {
         stub("KR", response(RANKED_AT, ranking(0, "005930")));
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     @Test
@@ -242,7 +256,9 @@ public class TossRankingAdapterTest {
 
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(MarketCountry.KR))
                 .isInstanceOf(BusinessException.class)
-                .isNotInstanceOf(NumberFormatException.class);
+                .isNotInstanceOf(NumberFormatException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 
     // ── 인자 검증 ───────────────────────────────────────────────────────────
@@ -250,7 +266,9 @@ public class TossRankingAdapterTest {
     @Test
     void market이_null이면_토스를_호출하지_않고_예외를_던진다() {
         assertThatThrownBy(() -> tossRankingAdapter.fetchRanking(null))
-                .isInstanceOf(BusinessException.class);
+                .isInstanceOf(BusinessException.class)
+                .extracting(thrown -> ((BusinessException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.INTERNAL_ERROR);
 
         verifyNoInteractions(tossSecuritiesClient);
     }
