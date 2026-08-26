@@ -11,7 +11,7 @@ public record RankingEntry(
 
         BigDecimal lastPrice,
         BigDecimal basePrice,
-        @Nullable BigDecimal changeRate,
+        @Nullable BigDecimal changeRate,   // basePrice 가 0 이면 null (등락률 계산 불가)
 
         BigDecimal tradingVolume,
         BigDecimal tradingAmount
