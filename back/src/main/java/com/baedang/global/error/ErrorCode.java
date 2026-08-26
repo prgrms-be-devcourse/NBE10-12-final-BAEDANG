@@ -62,6 +62,8 @@ public enum ErrorCode {
      * 오래된 가격으로 체결되면 원장의 신뢰가 무너지므로 차라리 거절합니다.
      */
     STALE_QUOTE(HttpStatus.UNPROCESSABLE_ENTITY, "시세 정보가 오래되었어요. 다시 시도해주세요"),
+    FUTURE_QUOTE(HttpStatus.UNPROCESSABLE_ENTITY, "시세 기준 시각이 올바르지 않아요. 다시 시도해주세요"),
+    INVALID_SETTLEMENT_AMOUNT(HttpStatus.UNPROCESSABLE_ENTITY, "정산 금액이 올바르지 않아요"),
 
     /**
      * 같은 {@code clientOrderId} 로 이미 처리된 주문. 중복 클릭이거나 네트워크 재시도입니다.

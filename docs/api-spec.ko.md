@@ -501,7 +501,9 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "quantity": "10"
 }
 ```
-`clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 기존 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
+`clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 계좌 안에서 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 시장 API 호출 없이 저장된 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
+
+`REJECTED` 응답을 받은 주문 시도는 최종 결과로 확정됩니다. 장 재개, 시세 갱신, 예수금 충전 등 조건이 바뀐 뒤 주문을 다시 시도하려면 **새 `clientOrderId`를 발급해야 합니다.** 거절된 시도의 ID를 재사용하면 시장 조건을 다시 평가하지 않고 저장된 거절 결과를 그대로 반환합니다.
 
 **Response · 201**
 ```json
@@ -520,25 +522,27 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "quoteAt": "2026-08-11T12:36:59+09:00",
   "orderedAt": "2026-08-11T12:37:02+09:00",
   "account": {
-    "cashBalance": "45824758",
-    "totalAsset": "50412300"
+    "cashBalance": "45824758"
   }
 }
 ```
-**응답에 갱신된 계좌 요약을 포함**하면 프론트가 재조회하지 않아도 됩니다.
+주문 응답에는 거래 트랜잭션이 확정한 예수금만 포함합니다. 포트폴리오 평가는 체결과 분리하며, 최신 `totalAsset`이 필요하면 `GET /accounts/me`를 조회합니다.
 
-**서버 처리 순서 · 한 트랜잭션**
+**서버 처리 순서**
 ```
-① SELECT ... FROM account WHERE account_id = ? FOR UPDATE
-② clientOrderId 멱등성 확인 — 동일 요청 재시도면 기존 결과 반환
-③ 검증 — 장 시간 · is_ranked · 거래정지 · 시세 유효시간 · 예수금/보유수량
-④ INSERT trade_order FILLED (유효한 업무 거절은 REJECTED)
-⑤ UPDATE account.cash_balance
-⑥ UPSERT holding            (이동평균 단가 재계산, 매도 시 평균값 유지)
-⑦ INSERT ledger_entry       (append only, FILLED만 기록)
+① clientOrderId 조회 — 동일 요청 재시도면 저장된 결과 즉시 반환
+② 신규 주문만 장 운영 여부와 미국 주문 실행 환율 조회(국내 주문은 환율 조회 없이 1 사용)
+③ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
+④ 동시 요청 경쟁을 막기 위해 clientOrderId 재확인
+⑤ 검증 — 장 운영 · 거래 대상 · 거래정지 · 시세 시각 · 예수금/보유수량
+⑥ INSERT trade_order FILLED (유효한 업무 거절은 REJECTED)
+⑦ UPDATE account.cash_balance 및 UPSERT holding
+⑧ INSERT ledger_entry       (append only, FILLED만 기록)
 ```
 
 시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않으며, 주문 행을 구성할 수 없는 잘못된 요청 형식은 `REJECTED`를 저장하지 않고 요청 오류로 반환합니다.
+
+시장가 주문 유스케이스는 최상위 트랜잭션 경계로만 실행합니다. 애플리케이션 진입점은 `Propagation.NEVER`로 외부 트랜잭션 안에서의 호출을 금지하고, 실제 DB 변경 서비스가 자체 `REQUIRED` 트랜잭션을 시작합니다. 따라서 커밋된 `REJECTED` 기록이 관련 없는 외부 업무의 롤백에 함께 사라지지 않습니다.
 
 **거래 대상 범위** — 현재 MVP는 정기 수집되는 시장별 거래대금 상위 100종목만 거래하며 `is_ranked` 검증을 유지합니다. 추후 온디맨드 시세 환경이 도입되면 상위 100 밖 종목은 사용자가 견적 또는 주문을 요청할 때 Toss API에서 현재가와 거래 가능 정보를 받아 캐시에 저장한 뒤 거래합니다. 그 시점에 `is_ranked`를 거래 허용 조건에서 “정기 수집 대상 여부”로 역할을 축소하고 주문 정책을 함께 변경합니다. 온디맨드 조회가 없는 현재 단계에서는 상위 100 밖 주문을 열지 않습니다.
 
@@ -550,12 +554,16 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 | `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
 | `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
 | `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
+| `STOCK_LIQUIDATION` | 422 | 정리매매 종목이에요 |
 | `INSUFFICIENT_CASH` | 422 | 주문가능금액이 부족해요 |
 | `INSUFFICIENT_QUANTITY` | 422 | 보유 수량이 부족해요 |
 | `STALE_QUOTE` | 422 | 시세 정보가 오래되었어요. 다시 시도해주세요 |
+| `FUTURE_QUOTE` | 422 | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
+| `INVALID_SETTLEMENT_AMOUNT` | 422 | 정산 금액이 올바르지 않아요 |
 | `INVALID_QUANTITY` | 400 | 수량은 1주 이상의 정수로 입력해주세요 |
+| `DUPLICATE_ORDER` | 409 | 이미 처리된 주문이에요 |
 
-**`STALE_QUOTE`** — `quote_at` 이 현재보다 **15초 이상** 오래되면 거절합니다. 오래된 가격으로 체결되면 원장의 신뢰가 무너집니다.
+**`STALE_QUOTE`** 는 `quote_at` 이 현재보다 **15초 이상** 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 어느 쪽이든 그대로 체결하면 원장의 신뢰가 무너집니다.
 
 ---
 

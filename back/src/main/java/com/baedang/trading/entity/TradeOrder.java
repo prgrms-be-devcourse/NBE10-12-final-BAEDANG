@@ -18,7 +18,13 @@ import java.util.UUID;
  * 유일한 정의 지점입니다. 금액이 남아 있으면 요율이 바뀌어도 과거 거래가 안 흔들립니다.
  */
 @Entity
-@Table(name = "trade_order")
+@Table(
+        name = "trade_order",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_account_client_order",
+                columnNames = {"account_id", "client_order_id"}
+        )
+)
 public class TradeOrder {
 
     @Id
@@ -34,9 +40,9 @@ public class TradeOrder {
 
     /**
      * 멱등성 키. 프론트가 주문 화면 진입 시 생성해 함께 보냅니다.
-     * 버튼을 두 번 눌러도 UNIQUE 제약에 걸려 중복 체결이 막힙니다.
+     * 버튼을 두 번 눌러도 계좌+멱등 키 UNIQUE 제약에 걸려 중복 체결이 막힙니다.
      */
-    @Column(name = "client_order_id", nullable = false, unique = true)
+    @Column(name = "client_order_id", nullable = false)
     private UUID clientOrderId;
 
     @Enumerated(EnumType.STRING)

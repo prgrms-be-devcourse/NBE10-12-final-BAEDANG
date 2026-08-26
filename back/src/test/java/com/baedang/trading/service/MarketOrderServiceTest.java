@@ -31,6 +31,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,11 +54,11 @@ class MarketOrderServiceTest {
         when(marketOrderPolicy.parseCommand(
                 request.clientOrderId(), request.symbol(), request.side(), request.quantity()))
                 .thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", "KRW", "STOCK");
         when(stockRepository.findBySymbolIgnoreCase("005930"))
                 .thenReturn(Optional.of(stock));
         when(marketSessionProvider.isOpen(eq(MarketCountry.KR), any())).thenReturn(true);
-        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(new BigDecimal("1383.60"));
         when(transactionService.execute(eq(1L), eq(command), any(MarketOrderExecutionContext.class)))
                 .thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
 
@@ -66,6 +68,7 @@ class MarketOrderServiceTest {
                 stockRepository,
                 marketSessionProvider,
                 exchangeRateProvider,
+                new OrderResponseAssembler(),
                 Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -79,7 +82,39 @@ class MarketOrderServiceTest {
         assertThat(contextCaptor.getValue()).isEqualTo(new MarketOrderExecutionContext(
                 MarketCountry.KR,
                 true,
-                new BigDecimal("1383.60"),
+                BigDecimal.ONE,
                 Instant.parse("2026-08-26T01:00:00Z")));
+        verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 멱등_재요청은_외부_시장정보를_조회하지_않는다() {
+        PlaceOrderRequest request = new PlaceOrderRequest(
+                UUID.randomUUID().toString(), "005930", "BUY", "10");
+        MarketOrderCommand command = new MarketOrderCommand(
+                UUID.fromString(request.clientOrderId()),
+                new OrderTerms("005930", OrderSide.BUY, new BigDecimal("10")));
+        when(marketOrderPolicy.parseCommand(
+                request.clientOrderId(), request.symbol(), request.side(), request.quantity()))
+                .thenReturn(command);
+        when(transactionService.findExisting(1L, command))
+                .thenReturn(Optional.of(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH)));
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy,
+                transactionService,
+                stockRepository,
+                marketSessionProvider,
+                exchangeRateProvider,
+                new OrderResponseAssembler(),
+                Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> service.place(1L, request))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INSUFFICIENT_CASH);
+
+        verifyNoInteractions(stockRepository, marketSessionProvider, exchangeRateProvider);
+        verify(transactionService, never()).execute(any(), any(), any());
     }
 }

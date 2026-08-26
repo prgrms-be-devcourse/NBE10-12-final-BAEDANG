@@ -13,7 +13,7 @@ import java.time.Instant;
 public record MarketOrderExecutionContext(
         MarketCountry marketCountry,
         boolean marketOpen,
-        BigDecimal usdKrwRate,
+        BigDecimal executionRate,
         Instant checkedAt
 ) {
 }

@@ -67,7 +67,9 @@ public class MarketOrderPolicy {
         if (Boolean.TRUE.equals(stock.getIsSuspended())) return ErrorCode.STOCK_SUSPENDED;
         if (Boolean.TRUE.equals(stock.getIsLiquidation())) return ErrorCode.STOCK_LIQUIDATION;
         if (!marketOpen.getAsBoolean()) return ErrorCode.MARKET_CLOSED;
-        if (isStale(quote, now)) return ErrorCode.STALE_QUOTE;
+        ErrorCode quoteTimeRejection = validateQuoteTime(quote, now);
+        if (quoteTimeRejection != null) return quoteTimeRejection;
+        if (amount.netAmount().signum() <= 0) return ErrorCode.INVALID_SETTLEMENT_AMOUNT;
         if (side == OrderSide.BUY && account.availableCash().compareTo(amount.netAmount()) < 0) {
             return ErrorCode.INSUFFICIENT_CASH;
         }
@@ -77,9 +79,11 @@ public class MarketOrderPolicy {
         return null;
     }
 
-    private boolean isStale(QuoteSnapshot quote, Instant now) {
+    private ErrorCode validateQuoteTime(QuoteSnapshot quote, Instant now) {
         Duration age = Duration.between(quote.getQuoteAt().toInstant(), now);
-        return !age.isNegative() && age.compareTo(quoteMaxStaleness) > 0;
+        if (age.isNegative()) return ErrorCode.FUTURE_QUOTE;
+        if (age.compareTo(quoteMaxStaleness) > 0) return ErrorCode.STALE_QUOTE;
+        return null;
     }
 
     private UUID parseClientOrderId(String value) {

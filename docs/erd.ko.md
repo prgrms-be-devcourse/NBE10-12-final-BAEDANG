@@ -218,14 +218,14 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | `order_id` | BIGINT PK | 주문 번호. 체결 내역 화면 정렬 키. |
 | `account_id` | BIGINT FK | 어느 회차 계좌인지. 초기화 후에는 새 계좌 것만 조회. |
 | `stock_id` | BIGINT FK | 거래 대상 종목. 심볼이 아니라 내부 ID(심볼은 바뀔 수 있고 시장마다 중복). |
-| `client_order_id` | UUID UK | **멱등성 키.** 프론트가 주문 화면 진입 시 생성해 함께 보냄. 유니크 제약으로 중복 체결 차단(버튼 두 번, 네트워크 재시도). 토스 API 도 같은 방식. |
+| `client_order_id` | UUID | **계좌 범위 멱등성 키.** 프론트가 주문 화면 진입 시 생성해 함께 보냄. `UNIQUE(account_id, client_order_id)`로 같은 계좌의 중복 체결을 차단하면서 서로 다른 사용자의 우연한 UUID 중복은 허용합니다. |
 | `side` | VARCHAR(4) | `BUY` / `SELL`. |
 | `order_type` | VARCHAR(10) | MVP는 `MARKET` 고정. 컬럼 미리 두어 `LIMIT` 추가 시 스키마 변경 불필요. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
 | `status` | VARCHAR(12) | **주문의 생애주기.** 시장가는 **`PENDING` 을 거치지 않습니다** — 하나의 트랜잭션에서 처음부터 `FILLED` 또는 `REJECTED` 로 INSERT 합니다. `PENDING` 은 주문 접수·동결과 체결이 별도 트랜잭션인 지정가 주문에서만 사용합니다.
   `PENDING` 접수 완료·자금/수량 동결 · `FILLED` 체결 완료·동결 해제+출금 확정 · `REJECTED` 검증 단계 거절(동결 안 함) · `CANCELED` 사용자 취소 · `EXPIRED` 타임아웃 자동 해제.
   상태 전이는 **조건부 UPDATE** 로 — `WHERE order_id=? AND status='PENDING'` 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `SUSPENDED` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE`. 화면 문구 근거. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `NOT_IN_UNIVERSE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
 | `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
 | `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
@@ -422,7 +422,7 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | ① | `SELECT … FOR UPDATE` | 계좌 행 잠금. **검증보다 먼저 잠가야** 그 사이에 값이 안 바뀝니다. |
 | ② | 검증 | 장 시간 · `is_ranked` · 거래정지 · 시세 유효시간(15초) · **주문가능금액 = `cash_balance − locked_cash` ≥ `net_amount`** |
 | ③ | `locked_cash += net_amount` | **자금 동결.** 수수료·세금을 포함한 `net_amount` 를 묶습니다 — `gross_amount` 만 묶으면 체결 시점에 수수료만큼 부족해집니다. |
-| ④ | `INSERT trade_order (PENDING)` | `client_order_id` 유니크 위반이면 중복 클릭이므로 기존 주문 결과를 반환. |
+| ④ | `INSERT trade_order (PENDING)` | `(account_id, client_order_id)` 유니크 위반이면 중복 클릭이므로 기존 주문 결과를 반환. |
 
 ### Phase 2 — 주문 체결 [확정]
 | 단계 | 동작 | 설명 |

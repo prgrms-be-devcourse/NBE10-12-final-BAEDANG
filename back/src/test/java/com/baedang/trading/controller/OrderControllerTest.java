@@ -85,7 +85,7 @@ class OrderControllerTest {
                 "2415000", "242", "0", "2415242",
                 OffsetDateTime.parse("2026-08-11T12:36:59+09:00"),
                 OffsetDateTime.parse("2026-08-11T12:37:02+09:00"),
-                new OrderResponse.AccountSummary("45824758", "50412300")
+                new OrderResponse.AccountSummary("45824758")
         ));
 
         mockMvc.perform(post("/api/orders")
@@ -104,7 +104,8 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.quantity").value("10"))
                 .andExpect(jsonPath("$.grossAmount").value("2415000"))
                 .andExpect(jsonPath("$.netAmount").value("2415242"))
-                .andExpect(jsonPath("$.account.cashBalance").value("45824758"));
+                .andExpect(jsonPath("$.account.cashBalance").value("45824758"))
+                .andExpect(jsonPath("$.account.totalAsset").doesNotExist());
     }
 
     @Test

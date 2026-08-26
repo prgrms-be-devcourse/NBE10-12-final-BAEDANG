@@ -72,12 +72,6 @@ public class LedgerEntry {
     }
 
     private LedgerEntry(Long accountId, Long orderId, EntryType entryType, BigDecimal amount,
-                        BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
-        this(accountId, orderId, entryType, amount, balanceAfter, exchangeRate, memo,
-                OffsetDateTime.now());
-    }
-
-    private LedgerEntry(Long accountId, Long orderId, EntryType entryType, BigDecimal amount,
                         BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
                         OffsetDateTime occurredAt) {
         this.accountId = accountId;
@@ -91,9 +85,14 @@ public class LedgerEntry {
     }
 
     /** 모의투자금 지급. 회원가입과 포트폴리오 초기화 두 곳에서 씁니다. */
-    public static LedgerEntry initialDeposit(Long accountId, BigDecimal amount, String memo) {
+    public static LedgerEntry initialDeposit(
+            Long accountId,
+            BigDecimal amount,
+            String memo,
+            OffsetDateTime occurredAt
+    ) {
         return new LedgerEntry(accountId, null, EntryType.INITIAL_DEPOSIT,
-                amount, amount, BigDecimal.ONE, memo);
+                amount, amount, BigDecimal.ONE, memo, occurredAt);
     }
 
     /**

@@ -7,7 +7,6 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.OrderResponse;
 import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.OrderSide;
@@ -16,6 +15,7 @@ import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.OrderAmount;
 import com.baedang.trading.model.OrderTerms;
@@ -25,6 +25,8 @@ import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,10 +35,16 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Optional;
+
+import static com.baedang.trading.model.AmountFormatter.plain;
 
 /** 시장가 주문의 DB 변경을 하나의 트랜잭션으로 즉시 확정합니다. */
 @Service
 public class MarketOrderTransactionService {
+
+    private static final Logger log = LoggerFactory.getLogger(MarketOrderTransactionService.class);
+    private static final int MAX_MEMO_LENGTH = 200;
 
     private final AccountRepository accountRepository;
     private final StockRepository stockRepository;
@@ -70,6 +78,25 @@ public class MarketOrderTransactionService {
         this.clock = clock;
     }
 
+    /** 처리 완료된 주문은 외부 시장 데이터 조회 없이 저장된 감사 값으로 재생합니다. */
+    @Transactional(readOnly = true)
+    public Optional<MarketOrderResult> findExisting(Long userId, MarketOrderCommand command) {
+        Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
+        TradeOrder existing = tradeOrderRepository
+                .findByAccountIdAndClientOrderId(account.getAccountId(), command.clientOrderId())
+                .orElse(null);
+        if (existing == null) return Optional.empty();
+
+        Stock stock = stockRepository.findById(existing.getStockId())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.STOCK_NOT_FOUND, "stockId=" + existing.getStockId()));
+        verifySameRequest(existing, account, stock, command.terms());
+        log.info("시장가 주문 멱등 응답: orderId={}, accountId={}, status={}",
+                existing.getOrderId(), account.getAccountId(), existing.getStatus());
+        return Optional.of(existingResult(existing, stock));
+    }
+
     @Transactional
     public MarketOrderResult execute(
             Long userId,
@@ -87,10 +114,14 @@ public class MarketOrderTransactionService {
             throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
         }
 
-        TradeOrder existing = tradeOrderRepository.findByClientOrderId(command.clientOrderId()).orElse(null);
+        TradeOrder existing = tradeOrderRepository
+                .findByAccountIdAndClientOrderId(account.getAccountId(), command.clientOrderId())
+                .orElse(null);
         if (existing != null) {
             verifySameRequest(existing, account, stock, terms);
-            return existingResult(existing, account, stock, executionContext.usdKrwRate());
+            log.info("시장가 주문 동시 멱등 응답: orderId={}, accountId={}, status={}",
+                    existing.getOrderId(), account.getAccountId(), existing.getStatus());
+            return existingResult(existing, stock);
         }
 
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
@@ -98,7 +129,7 @@ public class MarketOrderTransactionService {
 
         BigDecimal executionRate = stock.getMarketCountry() == MarketCountry.KR
                 ? BigDecimal.ONE
-                : executionContext.usdKrwRate();
+                : executionContext.executionRate();
         OrderAmount amount = amountCalculator.calculate(
                 stock.getMarketCountry(), terms.side(), quote.getLastPrice(), terms.quantity(), executionRate);
 
@@ -122,10 +153,12 @@ public class MarketOrderTransactionService {
                 now
         );
         if (rejection != null) {
-            tradeOrderRepository.save(TradeOrder.rejectedMarketOrder(
+            TradeOrder rejectedOrder = tradeOrderRepository.save(TradeOrder.rejectedMarketOrder(
                     account.getAccountId(), stock.getStockId(), command.clientOrderId(), terms.side(),
-                    terms.quantity(), amount.executedPrice(), quote.getQuoteAt(), amount.exchangeRate(),
+                    terms.quantity(), quote.getLastPrice(), quote.getQuoteAt(), amount.exchangeRate(),
                     rejection.name(), orderedAt));
+            log.info("시장가 주문 거절: orderId={}, accountId={}, stockId={}, reason={}",
+                    rejectedOrder.getOrderId(), account.getAccountId(), stock.getStockId(), rejection);
             return MarketOrderResult.rejected(rejection);
         }
 
@@ -160,46 +193,35 @@ public class MarketOrderTransactionService {
                     account.getCashBalance(), amount.exchangeRate(), memo, orderedAt);
         ledgerEntryRepository.save(ledgerEntry);
 
-        return MarketOrderResult.filled(toResponse(
-                order, account, stock, executionContext.usdKrwRate()));
+        log.info("시장가 주문 체결: orderId={}, accountId={}, stockId={}, side={}, quantity={}",
+                order.getOrderId(), account.getAccountId(), stock.getStockId(), terms.side(), terms.quantity());
+
+        return MarketOrderResult.filled(MarketOrderReceipt.from(
+                order, stock, account.getCashBalance()));
     }
 
-    private MarketOrderResult existingResult(
-            TradeOrder order,
-            Account account,
-            Stock stock,
-            BigDecimal usdKrwRate
-    ) {
+    private MarketOrderResult existingResult(TradeOrder order, Stock stock) {
         if (order.getStatus() == OrderStatus.REJECTED) {
             try {
                 return MarketOrderResult.rejected(ErrorCode.valueOf(order.getRejectReason()));
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException | NullPointerException e) {
                 throw new BusinessException(ErrorCode.DUPLICATE_ORDER, "orderId=" + order.getOrderId());
             }
         }
         if (order.getStatus() != OrderStatus.FILLED) {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER, "orderId=" + order.getOrderId());
         }
-        return MarketOrderResult.filled(toResponse(order, account, stock, usdKrwRate));
-    }
-
-    private OrderResponse toResponse(
-            TradeOrder order,
-            Account account,
-            Stock stock,
-            BigDecimal usdKrwRate
-    ) {
-        BigDecimal valuationRate = holdingRepository.existsUsHolding(account.getAccountId())
-                ? usdKrwRate
-                : BigDecimal.ONE;
-        BigDecimal stockValue = holdingRepository.calculateStockValue(account.getAccountId(), valuationRate);
-        return OrderResponse.filled(order, stock, account.getCashBalance(),
-                account.getCashBalance().add(stockValue));
+        LedgerEntry ledgerEntry = ledgerEntryRepository.findByOrderId(order.getOrderId())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INTERNAL_ERROR, "filled order ledger missing: orderId=" + order.getOrderId()));
+        return MarketOrderResult.filled(MarketOrderReceipt.from(
+                order, stock, ledgerEntry.getBalanceAfter()));
     }
 
     private void verifySameRequest(TradeOrder order, Account account, Stock stock, OrderTerms terms) {
         boolean same = order.getAccountId().equals(account.getAccountId())
                 && order.getStockId().equals(stock.getStockId())
+                && stock.getSymbol().equalsIgnoreCase(terms.symbol())
                 && order.getOrderType() == OrderType.MARKET
                 && order.getSide() == terms.side()
                 && order.getQuantity().compareTo(terms.quantity()) == 0;
@@ -210,12 +232,8 @@ public class MarketOrderTransactionService {
     }
 
     private String createMemo(Stock stock, TradeOrder order) {
-        return stock.getName() + " " + plain(order.getQuantity()) + "주 @ "
+        String memo = stock.getName() + " " + plain(order.getQuantity()) + "주 @ "
                 + plain(order.getExecutedPrice()) + " (수수료·세금 포함)";
-    }
-
-    private String plain(BigDecimal value) {
-        if (value.signum() == 0) return "0";
-        return value.stripTrailingZeros().toPlainString();
+        return memo.length() <= MAX_MEMO_LENGTH ? memo : memo.substring(0, MAX_MEMO_LENGTH);
     }
 }

@@ -7,6 +7,8 @@ import com.baedang.trading.model.OrderAmount;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
+import static com.baedang.trading.model.AmountFormatter.plain;
+
 public record OrderQuoteResponse(
         String symbol,
         OrderSide side,
@@ -49,8 +51,4 @@ public record OrderQuoteResponse(
         );
     }
 
-    private static String plain(BigDecimal value) {
-        if (value.signum() == 0) return "0";
-        return value.stripTrailingZeros().toPlainString();
-    }
 }

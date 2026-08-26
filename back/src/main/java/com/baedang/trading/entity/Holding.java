@@ -67,12 +67,6 @@ public class Holding {
 
     /** 처음 매수하는 종목일 때. 두 번째부터는 {@link #addBuy} 를 씁니다. */
     public static Holding firstBuy(Long accountId, Long stockId, BigDecimal quantity,
-                                   BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
-        return firstBuy(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate,
-                OffsetDateTime.now());
-    }
-
-    public static Holding firstBuy(Long accountId, Long stockId, BigDecimal quantity,
                                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate,
                                    OffsetDateTime updatedAt) {
         return new Holding(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate, updatedAt);
@@ -92,10 +86,6 @@ public class Holding {
      * <p>수수료는 평단가에 넣지 않습니다. 종목별 평가손익에는 안 들어가지만
      * 계좌 총 손익에는 이미 반영돼 있습니다 (예수금에서 빠졌으므로).
      */
-    public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate) {
-        addBuy(addQty, price, rate, OffsetDateTime.now());
-    }
-
     public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate, OffsetDateTime updatedAt) {
         BigDecimal totalQty = quantity.add(addQty);
         BigDecimal previousPurchaseAmount = quantity.multiply(avgBuyPrice);
@@ -111,10 +101,6 @@ public class Holding {
     }
 
     /** 매도 체결 반영. <b>평단가는 그대로 둡니다</b> — 평가손익의 기준이기 때문입니다. */
-    public void subtractSell(BigDecimal sellQty) {
-        subtractSell(sellQty, OffsetDateTime.now());
-    }
-
     public void subtractSell(BigDecimal sellQty, OffsetDateTime updatedAt) {
         if (sellQty == null || sellQty.signum() <= 0) {
             throw new IllegalArgumentException("매도 수량은 0보다 커야 합니다");

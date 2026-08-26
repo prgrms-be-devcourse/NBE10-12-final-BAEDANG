@@ -18,6 +18,8 @@ import com.baedang.user.repository.AccountRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -58,10 +60,11 @@ class OrderQuoteServiceTest {
                 new BigDecimal("0.01")
         );
         service = new OrderQuoteService(
-                accountRepository,
-                stockRepository,
-                quoteSnapshotRepository,
-                holdingRepository,
+                new OrderQuoteQueryService(
+                        accountRepository,
+                        stockRepository,
+                        quoteSnapshotRepository,
+                        holdingRepository),
                 marketSessionProvider,
                 exchangeRateProvider,
                 calculator,
@@ -85,6 +88,41 @@ class OrderQuoteServiceTest {
         assertThat(result.netAmount()).isEqualTo("2415242");
         assertThat(result.executable()).isTrue();
         assertThat(result.reason()).isNull();
+    }
+
+    @Test
+    void 국내_종목_견적은_환율을_조회하지_않는다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "BUY", "1");
+
+        assertThat(result.exchangeRate()).isEqualTo("1");
+        verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 미국_종목_견적의_환율이_null이면_명시적으로_거절한다() {
+        givenUsStock(new BigDecimal("100"));
+        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(null);
+
+        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        verifyNoInteractions(marketSessionProvider);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "-1"})
+    void 미국_종목_견적의_환율이_0이하면_명시적으로_거절한다(String rate) {
+        givenUsStock(new BigDecimal("100"));
+        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(new BigDecimal(rate));
+
+        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        verifyNoInteractions(marketSessionProvider);
     }
 
     @Test
@@ -189,5 +227,16 @@ class OrderQuoteServiceTest {
         QuoteSnapshot quote = new QuoteSnapshot(101L, price, "KRW", quoteAt);
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
         when(marketSessionProvider.isOpen(MarketCountry.KR, NOW)).thenReturn(true);
+    }
+
+    private void givenUsStock(BigDecimal price) {
+        when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
+                .thenReturn(Optional.of(account));
+        when(stockRepository.findBySymbolIgnoreCase("INTC")).thenReturn(Optional.of(stock));
+        when(stock.getStockId()).thenReturn(101L);
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
+        QuoteSnapshot quote = new QuoteSnapshot(
+                101L, price, "USD", NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
+        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
     }
 }

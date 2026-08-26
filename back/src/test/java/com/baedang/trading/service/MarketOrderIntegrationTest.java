@@ -9,10 +9,14 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.trading.dto.OrderQuoteResponse;
 import com.baedang.trading.dto.OrderResponse;
 import com.baedang.trading.dto.PlaceOrderRequest;
+import com.baedang.trading.entity.EntryType;
 import com.baedang.trading.entity.Holding;
+import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.OrderStatus;
+import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
@@ -28,8 +32,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.IllegalTransactionStateException;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -48,6 +56,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.clearInvocations;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -70,6 +80,7 @@ class MarketOrderIntegrationTest {
     @MockitoBean ExecutionExchangeRateProvider exchangeRateProvider;
 
     @Autowired MarketOrderService marketOrderService;
+    @Autowired OrderQuoteService orderQuoteService;
     @Autowired UserRepository userRepository;
     @Autowired AccountRepository accountRepository;
     @Autowired StockRepository stockRepository;
@@ -78,6 +89,7 @@ class MarketOrderIntegrationTest {
     @Autowired TradeOrderRepository tradeOrderRepository;
     @Autowired LedgerEntryRepository ledgerEntryRepository;
     @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired PlatformTransactionManager transactionManager;
 
     @BeforeEach
     void setUpProviders() {
@@ -101,7 +113,7 @@ class MarketOrderIntegrationTest {
         assertThat(account.getCashBalance()).isEqualByComparingTo("29998");
         assertThat(account.getLockedCash()).isEqualByComparingTo("0");
         assertThat(holding.getQuantity()).isEqualByComparingTo("2");
-        assertThat(response.account().totalAsset()).isEqualTo("49998");
+        assertThat(response.account().cashBalance()).isEqualTo("29998");
         assertThat(ledgerEntryRepository.findByOrderId(order.getOrderId()).orElseThrow().getAmount())
                 .isEqualByComparingTo("-20002");
     }
@@ -124,7 +136,12 @@ class MarketOrderIntegrationTest {
         assertThat(holding.getQuantity()).isEqualByComparingTo("3");
         assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo("8000");
         assertThat(response.netAmount()).isEqualTo("19958");
-        assertThat(response.account().totalAsset()).isEqualTo("59958");
+        assertThat(response.account().cashBalance()).isEqualTo("29958");
+        LedgerEntry ledger = ledgerEntryRepository.findByOrderId(response.orderId()).orElseThrow();
+        assertThat(ledger.getEntryType()).isEqualTo(EntryType.SELL);
+        assertThat(ledger.getAmount()).isEqualByComparingTo("19958");
+        assertThat(ledger.getBalanceAfter()).isEqualByComparingTo(updated.getCashBalance());
+        assertThat(ledger.getExchangeRate()).isEqualByComparingTo("1");
     }
 
     @Test
@@ -139,7 +156,8 @@ class MarketOrderIntegrationTest {
 
         Account account = activeAccount(fixture.userId());
         TradeOrder rejected = tradeOrderRepository
-                .findByClientOrderId(UUID.fromString(request.clientOrderId())).orElseThrow();
+                .findByAccountIdAndClientOrderId(account.getAccountId(), UUID.fromString(request.clientOrderId()))
+                .orElseThrow();
         assertThat(rejected.getStatus()).isEqualTo(OrderStatus.REJECTED);
         assertThat(rejected.getRejectReason()).isEqualTo("INSUFFICIENT_CASH");
         assertThat(account.getCashBalance()).isEqualByComparingTo("10000");
@@ -192,6 +210,7 @@ class MarketOrderIntegrationTest {
         PlaceOrderRequest request = request(fixture.symbol(), "BUY", "1");
 
         OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        clearInvocations(marketSessionProvider, exchangeRateProvider);
         OrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         Account account = activeAccount(fixture.userId());
@@ -199,6 +218,182 @@ class MarketOrderIntegrationTest {
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(account.getCashBalance()).isEqualByComparingTo("39999");
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+    }
+
+    @Test
+    void 멱등_재시도는_후속_주문과_무관하게_최초_체결_직후_잔액을_반환한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest firstRequest = request(fixture.symbol(), "BUY", "1");
+
+        OrderResponse first = marketOrderService.place(fixture.userId(), firstRequest);
+        marketOrderService.place(fixture.userId(),
+                new PlaceOrderRequest(UUID.randomUUID().toString(), fixture.symbol(), "BUY", "1"));
+        OrderResponse retried = marketOrderService.place(fixture.userId(), firstRequest);
+
+        assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("29998");
+        assertThat(retried.orderId()).isEqualTo(first.orderId());
+        assertThat(retried.account().cashBalance()).isEqualTo(first.account().cashBalance());
+        assertThat(retried.account().cashBalance()).isEqualTo("39999");
+    }
+
+    @Test
+    void 체결_주문에_원장이_없으면_멱등_응답을_만들지_않고_내부오류로_처리한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        UUID clientOrderId = UUID.randomUUID();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        tradeOrderRepository.save(TradeOrder.filledMarketOrder(
+                fixture.accountId(), fixture.stockId(), clientOrderId, OrderSide.BUY,
+                BigDecimal.ONE, new BigDecimal("10000"), now, BigDecimal.ONE,
+                new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ZERO,
+                new BigDecimal("10001"), now));
+
+        PlaceOrderRequest request = new PlaceOrderRequest(
+                clientOrderId.toString(), fixture.symbol(), "BUY", "1");
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INTERNAL_ERROR));
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+    }
+
+    @Test
+    void 국내_주문은_환율을_조회하지_않는다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+
+        marketOrderService.place(fixture.userId(), request(fixture.symbol(), "BUY", "1"));
+
+        verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 견적의_외부_시장정보는_읽기_트랜잭션_종료_후_조회한다() {
+        Fixture fixture = createUsFixture(new BigDecimal("500000"), new BigDecimal("100"));
+        when(exchangeRateProvider.currentUsdKrwRate()).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return new BigDecimal("1383.60");
+        });
+        when(marketSessionProvider.isOpen(any(), any())).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return true;
+        });
+
+        OrderQuoteResponse response = orderQuoteService.getQuote(
+                fixture.userId(), fixture.symbol(), "BUY", "1");
+
+        assertThat(response.executable()).isTrue();
+        assertThat(response.exchangeRate()).isEqualTo("1383.6");
+    }
+
+    @Test
+    void 주문_유스케이스는_외부_트랜잭션_안에서_실행할_수_없다() {
+        TransactionTemplate outerTransaction = new TransactionTemplate(transactionManager);
+        PlaceOrderRequest request = request("005930", "BUY", "1");
+
+        assertThatThrownBy(() -> outerTransaction.executeWithoutResult(
+                status -> marketOrderService.place(1L, request)))
+                .isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void 미래_시각의_시세는_REJECTED로_기록한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
+        quote.updatePrice(new BigDecimal("10000"), OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(1));
+        quoteSnapshotRepository.save(quote);
+
+        assertRejected(fixture, request(fixture.symbol(), "BUY", "1"), ErrorCode.FUTURE_QUOTE);
+    }
+
+    @Test
+    void 장종료_거래정지_정리매매_유니버스제외는_각각_REJECTED로_기록한다() {
+        Fixture marketClosed = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        when(marketSessionProvider.isOpen(any(), any())).thenReturn(false);
+        assertRejected(marketClosed, request(marketClosed.symbol(), "BUY", "1"), ErrorCode.MARKET_CLOSED);
+
+        when(marketSessionProvider.isOpen(any(), any())).thenReturn(true);
+        Fixture suspended = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Stock suspendedStock = stockRepository.findById(suspended.stockId()).orElseThrow();
+        suspendedStock.updateFlags(true, false, false);
+        stockRepository.save(suspendedStock);
+        assertRejected(suspended, request(suspended.symbol(), "BUY", "1"), ErrorCode.STOCK_SUSPENDED);
+
+        Fixture liquidation = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Stock liquidationStock = stockRepository.findById(liquidation.stockId()).orElseThrow();
+        liquidationStock.updateFlags(false, true, false);
+        stockRepository.save(liquidationStock);
+        assertRejected(liquidation, request(liquidation.symbol(), "BUY", "1"), ErrorCode.STOCK_LIQUIDATION);
+
+        Fixture outsideUniverse = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Stock outsideStock = stockRepository.findById(outsideUniverse.stockId()).orElseThrow();
+        outsideStock.clearRanking();
+        stockRepository.save(outsideStock);
+        assertRejected(outsideUniverse, request(outsideUniverse.symbol(), "BUY", "1"), ErrorCode.NOT_IN_UNIVERSE);
+    }
+
+    @Test
+    void 오래된_시세와_보유수량_부족은_REJECTED로_기록한다() {
+        Fixture stale = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        QuoteSnapshot staleQuote = quoteSnapshotRepository.findById(stale.stockId()).orElseThrow();
+        staleQuote.updatePrice(new BigDecimal("10000"), OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+        quoteSnapshotRepository.save(staleQuote);
+        assertRejected(stale, request(stale.symbol(), "BUY", "1"), ErrorCode.STALE_QUOTE);
+
+        Fixture insufficient = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Account account = activeAccount(insufficient.userId());
+        holdingRepository.save(Holding.firstBuy(
+                account.getAccountId(), insufficient.stockId(), BigDecimal.ONE,
+                new BigDecimal("10000"), BigDecimal.ONE, OffsetDateTime.now(ZoneOffset.UTC)));
+        assertRejected(insufficient, request(insufficient.symbol(), "SELL", "2"),
+                ErrorCode.INSUFFICIENT_QUANTITY);
+    }
+
+    @Test
+    void 미국_매도_정산액이_0이하면_REJECTED로_기록한다() {
+        Fixture fixture = createUsFixture(new BigDecimal("50000"), new BigDecimal("0.001"));
+        Account account = activeAccount(fixture.userId());
+        holdingRepository.save(Holding.firstBuy(
+                account.getAccountId(), fixture.stockId(), BigDecimal.ONE,
+                new BigDecimal("0.01"), new BigDecimal("1383.60"), OffsetDateTime.now(ZoneOffset.UTC)));
+
+        assertRejected(fixture, request(fixture.symbol(), "SELL", "1"),
+                ErrorCode.INVALID_SETTLEMENT_AMOUNT);
+    }
+
+    @Test
+    void clientOrderId는_계좌마다_독립적이다() {
+        Fixture first = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Fixture second = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        String clientOrderId = UUID.randomUUID().toString();
+
+        marketOrderService.place(first.userId(),
+                new PlaceOrderRequest(clientOrderId, first.symbol(), "BUY", "1"));
+        marketOrderService.place(second.userId(),
+                new PlaceOrderRequest(clientOrderId, second.symbol(), "BUY", "1"));
+
+        assertThat(tradeOrderRepository.count()).isGreaterThanOrEqualTo(2);
+    }
+
+    @Test
+    void 원장_누적액은_예수금과_일치하고_주문_정산액과_부호만_다르다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        ledgerEntryRepository.save(LedgerEntry.initialDeposit(
+                fixture.accountId(), new BigDecimal("50000"), "모의투자금 지급",
+                OffsetDateTime.now(ZoneOffset.UTC)));
+
+        OrderResponse response = marketOrderService.place(
+                fixture.userId(), request(fixture.symbol(), "BUY", "2"));
+
+        Account account = activeAccount(fixture.userId());
+        TradeOrder order = tradeOrderRepository.findById(response.orderId()).orElseThrow();
+        LedgerEntry orderLedger = ledgerEntryRepository.findByOrderId(order.getOrderId()).orElseThrow();
+        BigDecimal ledgerSum = jdbcTemplate.queryForObject(
+                "SELECT SUM(amount) FROM ledger_entry WHERE account_id = ?",
+                BigDecimal.class, fixture.accountId());
+        assertThat(ledgerSum).isEqualByComparingTo(account.getCashBalance());
+        assertThat(orderLedger.getAmount().abs()).isEqualByComparingTo(order.getNetAmount());
+        assertThat(orderLedger.getBalanceAfter()).isEqualByComparingTo(account.getCashBalance());
     }
 
     @Test
@@ -219,6 +414,26 @@ class MarketOrderIntegrationTest {
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(account.getCashBalance()).isEqualByComparingTo("39999");
+    }
+
+    @Test
+    void 같은_clientOrderId에_다른_심볼을_보내면_외부조회없이_충돌로_거절한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest first = request(fixture.symbol(), "BUY", "1");
+        PlaceOrderRequest changed = new PlaceOrderRequest(
+                first.clientOrderId(), "OTHER", "BUY", "1");
+        marketOrderService.place(fixture.userId(), first);
+        clearInvocations(marketSessionProvider, exchangeRateProvider);
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), changed))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.DUPLICATE_ORDER);
+
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+        Account account = activeAccount(fixture.userId());
+        assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
+        assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
     }
 
     @Test
@@ -293,6 +508,21 @@ class MarketOrderIntegrationTest {
 
     private Account activeAccount(Long userId) {
         return accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE).orElseThrow();
+    }
+
+    private TradeOrder assertRejected(Fixture fixture, PlaceOrderRequest request, ErrorCode expected) {
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(expected);
+        TradeOrder rejected = tradeOrderRepository
+                .findByAccountIdAndClientOrderId(
+                        fixture.accountId(), UUID.fromString(request.clientOrderId()))
+                .orElseThrow();
+        assertThat(rejected.getStatus()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(rejected.getRejectReason()).isEqualTo(expected.name());
+        assertThat(ledgerEntryRepository.findByOrderId(rejected.getOrderId())).isEmpty();
+        return rejected;
     }
 
     private PlaceOrderRequest request(String symbol, String side, String quantity) {

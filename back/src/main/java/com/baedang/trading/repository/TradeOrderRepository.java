@@ -8,7 +8,7 @@ import java.util.UUID;
 
 public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
 
-    Optional<TradeOrder> findByClientOrderId(UUID clientOrderId);
+    Optional<TradeOrder> findByAccountIdAndClientOrderId(Long accountId, UUID clientOrderId);
 
     long countByAccountId(Long accountId);
 }

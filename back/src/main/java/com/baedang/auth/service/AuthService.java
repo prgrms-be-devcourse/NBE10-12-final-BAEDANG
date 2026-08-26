@@ -87,7 +87,7 @@ public class AuthService {
         accountRepository.save(Account.open(user.getUserId(), 1, initialCash));
 
         // TODO(거래 도메인): 초기 지급을 ledger_entry 에 INITIAL_DEPOSIT 으로 기록
-        //   LedgerEntry.initialDeposit(accountId, initialCash, "모의투자금 지급")
+        //   LedgerEntry.initialDeposit(accountId, initialCash, "모의투자금 지급", openedAt)
         //   원장 검증식 SUM(amount) = cash_balance 가 이 줄이 있어야 성립합니다.
 
         log.info("회원가입 완료 userId={} email={}", user.getUserId(), email);

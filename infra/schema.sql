@@ -691,8 +691,9 @@ CREATE TABLE trade_order (
     -- CANCELED: 사용자가 취소. 동결 해제.  EXPIRED: 타임아웃 자동 해제.
     status          VARCHAR(12)   NOT NULL
                     CHECK (status IN ('PENDING','FILLED','REJECTED','CANCELED','EXPIRED')),
-    reject_reason   VARCHAR(40),              -- MARKET_CLOSED / SUSPENDED /
-                                              -- INSUFFICIENT_CASH / STALE_QUOTE ...
+    reject_reason   VARCHAR(40),              -- MARKET_CLOSED / STOCK_SUSPENDED /
+                                              -- INSUFFICIENT_CASH / STALE_QUOTE /
+                                              -- FUTURE_QUOTE ...
     reference_price NUMERIC(19,4),            -- REJECTED 판정에 사용한 기준 가격
     quote_at        TIMESTAMPTZ,              -- 체결 또는 거절 판정에 사용한 시세 시각
     exchange_rate   NUMERIC(19,6),            -- 체결 또는 거절 판정에 사용한 환율
@@ -708,7 +709,7 @@ CREATE TABLE trade_order (
     net_amount      NUMERIC(19,4),            -- 실제 예수금 증감액
 
     ordered_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
-    CONSTRAINT uq_client_order UNIQUE (client_order_id)
+    CONSTRAINT uq_account_client_order UNIQUE (account_id, client_order_id)
 );
 CREATE INDEX ix_order_history ON trade_order (account_id, ordered_at DESC);
 
@@ -842,7 +843,7 @@ COMMIT;
 --   -- 3) 자금 동결  (매수 net_amount = gross + fee. gross 만 묶으면 안 된다)
 --   UPDATE account SET locked_cash = locked_cash + ? WHERE account_id = ?;
 --
---   -- 4) 주문 접수 기록 (client_order_id 유니크 위반 → 중복 클릭이므로 무시)
+--   -- 4) 주문 접수 기록 (account_id + client_order_id 유니크 위반 → 중복 클릭이므로 무시)
 --   INSERT INTO trade_order (..., status) VALUES (..., 'PENDING');
 -- COMMIT;
 --
