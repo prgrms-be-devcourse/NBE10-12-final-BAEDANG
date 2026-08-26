@@ -102,8 +102,8 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
         TossUsMarketCalendarResponse.Today today = result.today();
 
         // US는 KR과 달리 integrated로 감싸지 않고 today 바로 아래 regularMarket이 온다.
-        // 휴장일에 regularMarket이 정확히 어떻게 오는지는 아직 실제로 확인되지 않아,
-        // "필드가 없으면 휴장"으로 방어적으로 처리한다 (TossUsMarketCalendarResponse 참고).
+        // 휴장일엔 필드가 사라지는 게 아니라 "regularMarket": null 로 명시적으로 온다
+        // (실제 캡처로 확인됨 — TossUsMarketCalendarResponse 참고). null 체크 하나로 충분하다.
         boolean isOpen = today.regularMarket() != null;
 
         return new MarketCalendarDay(

@@ -184,29 +184,48 @@ class TossMarketCalendarAdapterTest {
     }
 
     @Test
-    void US_regularMarket이_없으면_휴장일로_판단하고_다음_개장_시각을_준다() {
-        // ⚠️ 실제 US 휴장일 응답을 아직 캡처하지 못해, KR과 같은 "필드 없으면 휴장" 가정으로
-        // 작성한 방어적 테스트다. 실제 응답을 확인하면 이 픽스처도 다시 검증해야 한다.
+    void US_휴장일에는_regularMarket이_명시적으로_null로_오며_다음_개장_시각을_준다() {
+        // 2026-08-27 실제 호출 캡처(호영님 공유, 일요일 8/23 조회) 기준. 필드가 사라지는 게
+        // 아니라 "regularMarket": null 처럼 명시적으로 null이 온다 — Jackson 입장에서는
+        // "필드 없음"과 결과가 같아서 기존 null 체크 로직이 그대로 맞다.
+        // nextBusinessDay.date(8/24)의 regularMarket.startTime은 8/24를 직접 조회했을 때의
+        // regularMarket.startTime과 동일해서(22:30 KST, DST) 교차검증까지 된 값이다.
         stubFor(get(urlPathEqualTo("/api/v1/market-calendar/US"))
                 .willReturn(okJson("""
                         {
                           "result": {
-                            "today": { "date": "2026-08-15" },
+                            "today": {
+                              "date": "2026-08-23",
+                              "dayMarket": null,
+                              "preMarket": null,
+                              "regularMarket": null,
+                              "afterMarket": null
+                            },
+                            "previousBusinessDay": {
+                              "date": "2026-08-21",
+                              "dayMarket": { "startTime": "2026-08-21T09:00:00+09:00", "endTime": "2026-08-21T17:00:00+09:00" },
+                              "preMarket": { "startTime": "2026-08-21T17:00:00+09:00", "endTime": "2026-08-21T22:30:00+09:00" },
+                              "regularMarket": { "startTime": "2026-08-21T22:30:00+09:00", "endTime": "2026-08-22T05:00:00+09:00" },
+                              "afterMarket": { "startTime": "2026-08-22T05:00:00+09:00", "endTime": "2026-08-22T08:50:00+09:00" }
+                            },
                             "nextBusinessDay": {
-                              "date": "2026-08-17",
-                              "regularMarket": {
-                                "startTime": "2026-08-17T22:30:00+09:00",
-                                "endTime": "2026-08-18T05:00:00+09:00"
-                              }
+                              "date": "2026-08-24",
+                              "dayMarket": { "startTime": "2026-08-24T09:00:00+09:00", "endTime": "2026-08-24T17:00:00+09:00" },
+                              "preMarket": { "startTime": "2026-08-24T17:00:00+09:00", "endTime": "2026-08-24T22:30:00+09:00" },
+                              "regularMarket": { "startTime": "2026-08-24T22:30:00+09:00", "endTime": "2026-08-25T05:00:00+09:00" },
+                              "afterMarket": { "startTime": "2026-08-25T05:00:00+09:00", "endTime": "2026-08-25T08:50:00+09:00" }
                             }
                           }
                         }
                         """)));
 
-        MarketCalendarDay day = adapter.fetchUsMarketCalendar(LocalDate.of(2026, 8, 15));
+        MarketCalendarDay day = adapter.fetchUsMarketCalendar(LocalDate.of(2026, 8, 23));
 
         assertThat(day.isOpen()).isFalse();
         assertThat(day.regularOpenAt()).isNull();
-        assertThat(day.nextOpensAt()).isEqualTo(OffsetDateTime.parse("2026-08-17T22:30:00+09:00"));
+        assertThat(day.regularCloseAt()).isNull();
+        // previousBusinessDay는 우리 도메인에 필요 없어 매핑 안 하지만, 응답에 있어도
+        // @JsonIgnoreProperties(ignoreUnknown = true) 덕분에 역직렬화가 깨지지 않는다.
+        assertThat(day.nextOpensAt()).isEqualTo(OffsetDateTime.parse("2026-08-24T22:30:00+09:00"));
     }
 }
