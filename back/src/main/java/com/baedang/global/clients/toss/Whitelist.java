@@ -3,7 +3,7 @@ package com.baedang.global.clients.toss;
 import org.springframework.util.AntPathMatcher;
 
 // 주문(order) 계열은 절대 추가하지 않습니다.
-public enum WhiteList {
+public enum Whitelist {
 
     // ── Market Info ─────────────────────────────────────────────────────────
     EXCHANGE_RATE("/api/v1/exchange-rate"),
@@ -25,12 +25,12 @@ public enum WhiteList {
 
     private final String pattern;
 
-    WhiteList(String pattern) {
+    Whitelist(String pattern) {
         this.pattern = pattern;
     }
 
     public static boolean match(String path) {
-        for (WhiteList value : values()) {
+        for (Whitelist value : values()) {
             if (pathMatcher.match(value.pattern, path)) return true;
         }
         return false;

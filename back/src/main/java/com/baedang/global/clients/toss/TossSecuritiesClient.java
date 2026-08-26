@@ -59,7 +59,7 @@ public class TossSecuritiesClient {
     }
 
     private void validatePathOrThrow(String path) {
-        if (!WhiteList.match(path)) {
+        if (!Whitelist.match(path)) {
             logger.error("`{}` does not match white list.", path);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
