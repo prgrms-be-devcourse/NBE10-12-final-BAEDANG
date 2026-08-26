@@ -103,10 +103,39 @@ class TossMarketCalendarAdapterTest {
         assertThat(day.isOpen()).isTrue();
         assertThat(day.regularOpenAt()).isEqualTo(OffsetDateTime.parse("2026-08-25T09:00:00+09:00"));
         assertThat(day.regularCloseAt()).isEqualTo(OffsetDateTime.parse("2026-08-25T15:30:00+09:00"));
+        // 이미 열려 있으면 "다음 개장 시각"은 필요 없다 — docs/api-spec.md의 open:true → nextOpensAt:null 규칙.
+        assertThat(day.nextOpensAt()).isNull();
     }
 
     @Test
-    void 휴장일은_integrated가_null이고_isOpen_false를_반환한다() {
+    void 휴장일은_integrated가_null이고_isOpen_false를_반환하며_다음_개장_시각을_함께_준다() {
+        stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
+                .willReturn(okJson("""
+                        {
+                          "today": { "date": "2026-08-15", "integrated": null },
+                          "nextBusinessDay": {
+                            "date": "2026-08-17",
+                            "integrated": {
+                              "regularMarket": {
+                                "startTime": "2026-08-17T09:00:00+09:00",
+                                "endTime": "2026-08-17T15:30:00+09:00"
+                              }
+                            }
+                          }
+                        }
+                        """)));
+
+        MarketCalendarDay day = adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 15));
+
+        assertThat(day.isOpen()).isFalse();
+        assertThat(day.regularOpenAt()).isNull();
+        assertThat(day.regularCloseAt()).isNull();
+        // nextOpensAt은 nextBusinessDay.integrated.regularMarket.startTime을 그대로 옮긴 값이다.
+        assertThat(day.nextOpensAt()).isEqualTo(OffsetDateTime.parse("2026-08-17T09:00:00+09:00"));
+    }
+
+    @Test
+    void 휴장일이고_nextBusinessDay마저_없으면_다음_개장_시각도_null이다() {
         stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
                 .willReturn(okJson("""
                         { "today": { "date": "2026-08-15", "integrated": null } }
@@ -115,8 +144,7 @@ class TossMarketCalendarAdapterTest {
         MarketCalendarDay day = adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 15));
 
         assertThat(day.isOpen()).isFalse();
-        assertThat(day.regularOpenAt()).isNull();
-        assertThat(day.regularCloseAt()).isNull();
+        assertThat(day.nextOpensAt()).isNull();
     }
 
     @Test
@@ -141,6 +169,7 @@ class TossMarketCalendarAdapterTest {
         // 8월은 DST 기간이라 22:30~05:00 이 나와야 한다 — 이 계산은 전부 Toss 응답을 그대로 신뢰한다.
         assertThat(day.regularOpenAt()).isEqualTo(OffsetDateTime.parse("2026-08-25T22:30:00+09:00"));
         assertThat(day.regularCloseAt()).isEqualTo(OffsetDateTime.parse("2026-08-26T05:00:00+09:00"));
+        assertThat(day.nextOpensAt()).isNull();
         verify(getRequestedFor(urlPathEqualTo("/api/v1/market-calendar/US")));
     }
 }

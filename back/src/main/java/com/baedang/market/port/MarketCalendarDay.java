@@ -22,12 +22,18 @@ import java.time.OffsetDateTime;
  *                       {@code null} 이면(휴장일) {@code false}.
  * @param regularOpenAt  정규장 시작 시각. {@code isOpen=false} 면 {@code null}.
  * @param regularCloseAt 정규장 종료 시각. {@code isOpen=false} 면 {@code null}.
+ * @param nextOpensAt    다음 정규장 개장 시각. {@code isOpen=true} 면 {@code null}
+ *                       (이미 열려 있어서 "다음"이 필요 없음) — {@code docs/api-spec.md}의
+ *                       {@code GET /market/status} 응답과 동일한 규칙. {@code isOpen=false}일
+ *                       때는 Toss 응답의 {@code nextBusinessDay}에서 그대로 옮긴 값이며,
+ *                       그 영업일도 정규장 정보가 없으면(연휴 등) {@code null}일 수 있다.
  */
 public record MarketCalendarDay(
         MarketCountry marketCountry,
         LocalDate tradeDate,
         boolean isOpen,
         OffsetDateTime regularOpenAt,
-        OffsetDateTime regularCloseAt
+        OffsetDateTime regularCloseAt,
+        OffsetDateTime nextOpensAt
 ) {
 }

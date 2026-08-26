@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.Map;
 
 /**
@@ -80,7 +81,20 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
                 today.date(),
                 isOpen,
                 isOpen ? integrated.regularMarket().startTime() : null,
-                isOpen ? integrated.regularMarket().endTime() : null
+                isOpen ? integrated.regularMarket().endTime() : null,
+                isOpen ? null : nextOpensAt(response.nextBusinessDay())
         );
+    }
+
+    /**
+     * 휴장일일 때만 쓰는 값 — 다음 영업일의 정규장 시작 시각. Toss가 {@code nextBusinessDay}로
+     * 이미 계산해서 주는 값을 그대로 옮길 뿐, 여기서 날짜 계산을 하지 않는다.
+     */
+    private static OffsetDateTime nextOpensAt(TossMarketCalendarResponse.Today nextBusinessDay) {
+        if (nextBusinessDay == null || nextBusinessDay.integrated() == null
+                || nextBusinessDay.integrated().regularMarket() == null) {
+            return null;
+        }
+        return nextBusinessDay.integrated().regularMarket().startTime();
     }
 }
