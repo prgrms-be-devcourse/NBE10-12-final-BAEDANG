@@ -30,7 +30,7 @@ The existing Java package is `com.baedang`. Do not rename it.
 
 ## Rules — violations break the project or risk real orders
 
-- `QuoteClient` **must whitelist allowed call paths. NEVER call order APIs (e.g.** `POST /orders`**) — real-money order risk.**
+- External market-data clients (currently `TossSecuritiesClient`) **must whitelist allowed call paths. NEVER call order APIs (e.g.** `POST /orders`**) — real-money order risk.**
 - Amounts/quantities: use `NUMERIC`/`BigDecimal`. API responses return amounts as **strings**. Timestamps: `TIMESTAMPTZ` (store UTC, convert only for display).
 - `ledger_entry` is append-only — no UPDATE/DELETE; offset mistakes with an opposite-sign entry.
 - Trading/balance transactions start by locking the `account` row with `FOR UPDATE` (prevents double-deduction on concurrent orders).

@@ -129,7 +129,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS | history: **every hour on the hour** / current: 1-min TTL cache | **Two separate paths.** Chart history is stored to `exchange_rate` hourly (24 calls/day); the current rate used for execution comes from a **1-min TTL memory cache**. Store the response `validFrom` as `rate_at` with `ON CONFLICT DO NOTHING` — **weekend duplicates filtered automatically**. |
 | `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS | app startup + once daily | **Memory cache is enough** (`schema.sql` lists `market_calendar` as optional if history is wanted). Used in three places — **① order-time validation**, **② quote scheduler on/off**, **③ screen "realtime/close" label**. **Never hardcode** because of DST·exam days·ad-hoc holidays. |
 | `wss://openapi-ws/ws/v1` | 100 subs / 2 connections | **week-2 improvement** | **Realtime fill & order-book WebSocket.** 100 subs per connection, 2 connections per account → **KR 100 + US 100 = exactly 200 stocks**. Adopting it removes polling for true realtime. Requires reconnect/resubscribe, 60s PING, full-replace subscription management, and frames are **LOSSY** so loss must be tolerated. **Week 1 uses polling.** |
-| `POST /api/v1/orders` etc. | — | not used | **Never call order APIs** — they'd place real orders on a real account. Pin `QuoteClient`'s callable paths to a whitelist. |
+| `POST /api/v1/orders` etc. | — | not used | **Never call order APIs** — they'd place real orders on a real account. Pin the external market-data client's callable paths to a whitelist (currently `TossSecuritiesClient`). |
 
 ### Per-Table Data Source
 
