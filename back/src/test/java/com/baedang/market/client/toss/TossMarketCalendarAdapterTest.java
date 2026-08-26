@@ -19,9 +19,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * {@link TossMarketCalendarAdapter} 단위 테스트.
  *
- * <p>WireMock 응답 픽스처는 실제 Toss OpenAPI 스펙
- * ({@code https://openapi.tossinvest.com/openapi-docs/latest/openapi.json}) 기준으로
- * 확인한 필드명·구조를 그대로 사용한다.
+ * <p>WireMock 응답 픽스처는 2026-08-26 실제 Toss 호출 캡처(호영님 공유) 기준으로
+ * 작성했습니다. 최상위 {@code result} 래핑, KR의 {@code integrated} 구조, US의
+ * {@code integrated} 없는 구조를 전부 실제 응답 그대로 반영합니다.
  */
 class TossMarketCalendarAdapterTest {
 
@@ -53,14 +53,16 @@ class TossMarketCalendarAdapterTest {
         stubFor(get(urlPathEqualTo("/api/v1/exchange-rate"))
                 .willReturn(okJson("""
                         {
-                          "baseCurrency": "USD",
-                          "quoteCurrency": "KRW",
-                          "rate": "1398.50",
-                          "midRate": "1385.20",
-                          "basisPoint": 16,
-                          "rateChangeType": "UP",
-                          "validFrom": "2026-08-25T15:00:00+09:00",
-                          "validUntil": "2026-08-25T16:00:00+09:00"
+                          "result": {
+                            "baseCurrency": "USD",
+                            "quoteCurrency": "KRW",
+                            "rate": "1398.50",
+                            "midRate": "1385.20",
+                            "basisPoint": 16,
+                            "rateChangeType": "UP",
+                            "validFrom": "2026-08-25T15:00:00+09:00",
+                            "validUntil": "2026-08-25T16:00:00+09:00"
+                          }
                         }
                         """)));
 
@@ -79,46 +81,50 @@ class TossMarketCalendarAdapterTest {
     }
 
     @Test
-    void 정규장이_열리는_날은_isOpen_true와_시작종료시각을_반환한다() {
+    void KR_정규장이_열리는_날은_isOpen_true와_시작종료시각을_반환한다() {
         stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
                 .willReturn(okJson("""
                         {
-                          "today": {
-                            "date": "2026-08-25",
-                            "integrated": {
-                              "preMarket": { "startTime": "2026-08-25T08:30:00+09:00", "endTime": "2026-08-25T09:00:00+09:00" },
-                              "regularMarket": {
-                                "startTime": "2026-08-25T09:00:00+09:00",
-                                "singlePriceAuctionStartTime": "2026-08-25T15:20:00+09:00",
-                                "endTime": "2026-08-25T15:30:00+09:00"
-                              },
-                              "afterMarket": { "startTime": "2026-08-25T15:40:00+09:00", "endTime": "2026-08-25T18:00:00+09:00" }
+                          "result": {
+                            "today": {
+                              "date": "2026-08-26",
+                              "integrated": {
+                                "preMarket": { "startTime": "2026-08-26T08:00:00+09:00", "singlePriceAuctionStartTime": "2026-08-26T08:50:00+09:00", "endTime": "2026-08-26T09:00:00+09:00" },
+                                "regularMarket": {
+                                  "startTime": "2026-08-26T09:00:00+09:00",
+                                  "singlePriceAuctionStartTime": "2026-08-26T15:20:00+09:00",
+                                  "endTime": "2026-08-26T15:30:00+09:00"
+                                },
+                                "afterMarket": { "startTime": "2026-08-26T15:30:00+09:00", "singlePriceAuctionEndTime": "2026-08-26T15:40:00+09:00", "endTime": "2026-08-26T20:00:00+09:00" }
+                              }
                             }
                           }
                         }
                         """)));
 
-        MarketCalendarDay day = adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 25));
+        MarketCalendarDay day = adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 26));
 
         assertThat(day.isOpen()).isTrue();
-        assertThat(day.regularOpenAt()).isEqualTo(OffsetDateTime.parse("2026-08-25T09:00:00+09:00"));
-        assertThat(day.regularCloseAt()).isEqualTo(OffsetDateTime.parse("2026-08-25T15:30:00+09:00"));
+        assertThat(day.regularOpenAt()).isEqualTo(OffsetDateTime.parse("2026-08-26T09:00:00+09:00"));
+        assertThat(day.regularCloseAt()).isEqualTo(OffsetDateTime.parse("2026-08-26T15:30:00+09:00"));
         // 이미 열려 있으면 "다음 개장 시각"은 필요 없다 — docs/api-spec.md의 open:true → nextOpensAt:null 규칙.
         assertThat(day.nextOpensAt()).isNull();
     }
 
     @Test
-    void 휴장일은_integrated가_null이고_isOpen_false를_반환하며_다음_개장_시각을_함께_준다() {
+    void KR_휴장일은_integrated가_null이고_isOpen_false를_반환하며_다음_개장_시각을_함께_준다() {
         stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
                 .willReturn(okJson("""
                         {
-                          "today": { "date": "2026-08-15", "integrated": null },
-                          "nextBusinessDay": {
-                            "date": "2026-08-17",
-                            "integrated": {
-                              "regularMarket": {
-                                "startTime": "2026-08-17T09:00:00+09:00",
-                                "endTime": "2026-08-17T15:30:00+09:00"
+                          "result": {
+                            "today": { "date": "2026-08-15", "integrated": null },
+                            "nextBusinessDay": {
+                              "date": "2026-08-17",
+                              "integrated": {
+                                "regularMarket": {
+                                  "startTime": "2026-08-17T09:00:00+09:00",
+                                  "endTime": "2026-08-17T15:30:00+09:00"
+                                }
                               }
                             }
                           }
@@ -135,10 +141,10 @@ class TossMarketCalendarAdapterTest {
     }
 
     @Test
-    void 휴장일이고_nextBusinessDay마저_없으면_다음_개장_시각도_null이다() {
+    void KR_휴장일이고_nextBusinessDay마저_없으면_다음_개장_시각도_null이다() {
         stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
                 .willReturn(okJson("""
-                        { "today": { "date": "2026-08-15", "integrated": null } }
+                        { "result": { "today": { "date": "2026-08-15", "integrated": null } } }
                         """)));
 
         MarketCalendarDay day = adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 15));
@@ -148,28 +154,59 @@ class TossMarketCalendarAdapterTest {
     }
 
     @Test
-    void US_장운영정보는_market_calendar_US_경로를_호출한다() {
+    void US_응답은_integrated로_감싸지_않고_today_바로_아래_regularMarket을_준다() {
         stubFor(get(urlPathEqualTo("/api/v1/market-calendar/US"))
                 .willReturn(okJson("""
                         {
-                          "today": {
-                            "date": "2026-08-25",
-                            "integrated": {
+                          "result": {
+                            "today": {
+                              "date": "2026-08-26",
+                              "dayMarket": { "startTime": "2026-08-26T09:00:00+09:00", "endTime": "2026-08-26T17:00:00+09:00" },
+                              "preMarket": { "startTime": "2026-08-26T17:00:00+09:00", "endTime": "2026-08-26T22:30:00+09:00" },
                               "regularMarket": {
-                                "startTime": "2026-08-25T22:30:00+09:00",
-                                "endTime": "2026-08-26T05:00:00+09:00"
+                                "startTime": "2026-08-26T22:30:00+09:00",
+                                "endTime": "2026-08-27T05:00:00+09:00"
+                              },
+                              "afterMarket": { "startTime": "2026-08-27T05:00:00+09:00", "endTime": "2026-08-27T08:50:00+09:00" }
+                            }
+                          }
+                        }
+                        """)));
+
+        MarketCalendarDay day = adapter.fetchUsMarketCalendar(LocalDate.of(2026, 8, 26));
+
+        assertThat(day.isOpen()).isTrue();
+        // 8월은 DST 기간이라 22:30~05:00 이 나와야 한다 — 이 계산은 전부 Toss 응답을 그대로 신뢰한다.
+        assertThat(day.regularOpenAt()).isEqualTo(OffsetDateTime.parse("2026-08-26T22:30:00+09:00"));
+        assertThat(day.regularCloseAt()).isEqualTo(OffsetDateTime.parse("2026-08-27T05:00:00+09:00"));
+        assertThat(day.nextOpensAt()).isNull();
+        verify(getRequestedFor(urlPathEqualTo("/api/v1/market-calendar/US")));
+    }
+
+    @Test
+    void US_regularMarket이_없으면_휴장일로_판단하고_다음_개장_시각을_준다() {
+        // ⚠️ 실제 US 휴장일 응답을 아직 캡처하지 못해, KR과 같은 "필드 없으면 휴장" 가정으로
+        // 작성한 방어적 테스트다. 실제 응답을 확인하면 이 픽스처도 다시 검증해야 한다.
+        stubFor(get(urlPathEqualTo("/api/v1/market-calendar/US"))
+                .willReturn(okJson("""
+                        {
+                          "result": {
+                            "today": { "date": "2026-08-15" },
+                            "nextBusinessDay": {
+                              "date": "2026-08-17",
+                              "regularMarket": {
+                                "startTime": "2026-08-17T22:30:00+09:00",
+                                "endTime": "2026-08-18T05:00:00+09:00"
                               }
                             }
                           }
                         }
                         """)));
 
-        MarketCalendarDay day = adapter.fetchUsMarketCalendar(LocalDate.of(2026, 8, 25));
+        MarketCalendarDay day = adapter.fetchUsMarketCalendar(LocalDate.of(2026, 8, 15));
 
-        // 8월은 DST 기간이라 22:30~05:00 이 나와야 한다 — 이 계산은 전부 Toss 응답을 그대로 신뢰한다.
-        assertThat(day.regularOpenAt()).isEqualTo(OffsetDateTime.parse("2026-08-25T22:30:00+09:00"));
-        assertThat(day.regularCloseAt()).isEqualTo(OffsetDateTime.parse("2026-08-26T05:00:00+09:00"));
-        assertThat(day.nextOpensAt()).isNull();
-        verify(getRequestedFor(urlPathEqualTo("/api/v1/market-calendar/US")));
+        assertThat(day.isOpen()).isFalse();
+        assertThat(day.regularOpenAt()).isNull();
+        assertThat(day.nextOpensAt()).isEqualTo(OffsetDateTime.parse("2026-08-17T22:30:00+09:00"));
     }
 }
