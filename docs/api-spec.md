@@ -542,6 +542,10 @@ Including the updated account summary means the frontend doesn't re-fetch.
 
 Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Malformed requests that cannot form a valid order row are returned as request errors without persisting `REJECTED`.
 
+**Tradable universe** — the MVP trades only the top 100 stocks per market whose quotes are collected on schedule, so the `is_ranked` guard remains active. When on-demand quotes are introduced, a quote or order for a stock outside the top 100 will first fetch current price and tradability data from Toss and cache it. At that point `is_ranked` becomes only the scheduled-collection flag and the order policy must change with it. Until that infrastructure exists, orders outside the top 100 stay blocked.
+
+One order may contain at most **1,000,000 shares**, configured by `trading.max-order-quantity`; scientific notation is not accepted.
+
 **Errors**
 | Code | HTTP | Screen text |
 |---|---|---|

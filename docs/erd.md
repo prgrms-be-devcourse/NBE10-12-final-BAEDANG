@@ -229,9 +229,10 @@ MVP is immediate market fills, so order and fill are one row. **Rejected orders 
   `PENDING` accepted, funds/qty locked · `FILLED` filled, unlocked + withdrawal confirmed · `REJECTED` rejected at validation (nothing locked) · `CANCELED` user cancel · `EXPIRED` timeout auto-release.
   Handle transitions with **conditional UPDATE** — if `WHERE order_id=? AND status='PENDING'` affects 0 rows, it was already canceled or taken by another worker. |
 | `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `SUSPENDED` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE`. Basis for the screen message. |
+| `reference_price` | NUMERIC(19,4) | Price in the stock currency used to evaluate a `REJECTED` order. Kept separate from `executed_price` because no fill occurred. |
 | `executed_price` | NUMERIC(19,4) | fill price. **In the stock's currency** (USD for US stocks). KRW conversion stored separately in `gross_amount`. |
-| `quote_at` | TIMESTAMPTZ | **the quote timestamp used for the fill.** The only evidence of "why this price", and the most important audit field in finance. Copied verbatim from `quote_snapshot.quote_at`. |
-| `exchange_rate` | NUMERIC(19,6) | **FX at fill time.** 1 for KRW stocks. Without it, separating price vs FX gains is **permanently impossible**. |
+| `quote_at` | TIMESTAMPTZ | Quote timestamp used for either fill or rejection evaluation. Copied from `quote_snapshot.quote_at`. |
+| `exchange_rate` | NUMERIC(19,6) | FX used for either fill or rejection evaluation. 1 for KRW stocks. |
 | `gross_amount` | NUMERIC(19,4) | fill amount (in KRW). `executed_price × quantity × exchange_rate`. |
 | `fee` | NUMERIC(19,4) | trading fee — **`gross_amount × 0.0001` (0.01%, buy & sell)**. **Store the applied amount, not the rate** — history must survive future fee-rate changes. |
 | `tax` | NUMERIC(19,4) | market-specific sell charge. KR: **`gross_amount × 0.002` (0.2%)**. US: SEC Fee **`max(USD gross × 0.0000206, $0.01)`**, rounded to cents before KRW conversion. 0 on buy. Store the applied amount, not the rate; configure rates and minimums in `.env`. |

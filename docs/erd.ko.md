@@ -226,9 +226,10 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
   `PENDING` 접수 완료·자금/수량 동결 · `FILLED` 체결 완료·동결 해제+출금 확정 · `REJECTED` 검증 단계 거절(동결 안 함) · `CANCELED` 사용자 취소 · `EXPIRED` 타임아웃 자동 해제.
   상태 전이는 **조건부 UPDATE** 로 — `WHERE order_id=? AND status='PENDING'` 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것. |
 | `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `SUSPENDED` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE`. 화면 문구 근거. |
+| `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
-| `quote_at` | TIMESTAMPTZ | **체결에 사용한 시세의 기준 시각.** "왜 이 가격에 체결됐는가"의 유일한 근거. 금융 도메인 최중요 감사 항목. `quote_snapshot.quote_at` 을 그대로 복사. |
-| `exchange_rate` | NUMERIC(19,6) | **체결 시점 환율.** 원화 종목은 1. 지금 안 남기면 환차손익(주가 손익 vs 환율 손익) **영원히 분리 불가**. |
+| `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
+| `exchange_rate` | NUMERIC(19,6) | 체결 또는 거절 판정 시점 환율. 원화 종목은 1. |
 | `gross_amount` | NUMERIC(19,4) | 체결 금액(원화 환산). `executed_price × quantity × exchange_rate`. |
 | `fee` | NUMERIC(19,4) | 거래 수수료 — **`gross_amount × 0.0001` (0.01%, 매수·매도 공통)**. **율이 아니라 적용된 금액 저장** — 정책이 바뀌어도 과거 기록 보존. |
 | `tax` | NUMERIC(19,4) | 시장별 매도 비용. 국내: **`gross_amount × 0.002` (0.2%)**. 미국: SEC Fee **`max(USD gross × 0.0000206, $0.01)`**, 원화 환산 전 센트 반올림. 매수는 0. 요율과 최소 금액은 `.env` 로 관리하고 적용된 금액을 저장합니다. |
