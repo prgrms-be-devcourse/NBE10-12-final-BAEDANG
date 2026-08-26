@@ -3,8 +3,6 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.port.ExecutionExchangeRateProvider;
-import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -17,6 +15,7 @@ import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.MarketOrderCommand;
+import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.OrderAmount;
 import com.baedang.trading.model.OrderTerms;
@@ -45,8 +44,6 @@ public class MarketOrderTransactionService {
     private final HoldingRepository holdingRepository;
     private final TradeOrderRepository tradeOrderRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
-    private final MarketSessionProvider marketSessionProvider;
-    private final ExecutionExchangeRateProvider exchangeRateProvider;
     private final OrderAmountCalculator amountCalculator;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
@@ -58,8 +55,6 @@ public class MarketOrderTransactionService {
             HoldingRepository holdingRepository,
             TradeOrderRepository tradeOrderRepository,
             LedgerEntryRepository ledgerEntryRepository,
-            MarketSessionProvider marketSessionProvider,
-            ExecutionExchangeRateProvider exchangeRateProvider,
             OrderAmountCalculator amountCalculator,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
@@ -70,15 +65,17 @@ public class MarketOrderTransactionService {
         this.holdingRepository = holdingRepository;
         this.tradeOrderRepository = tradeOrderRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
-        this.marketSessionProvider = marketSessionProvider;
-        this.exchangeRateProvider = exchangeRateProvider;
         this.amountCalculator = amountCalculator;
         this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
     }
 
     @Transactional
-    public MarketOrderResult execute(Long userId, MarketOrderCommand command) {
+    public MarketOrderResult execute(
+            Long userId,
+            MarketOrderCommand command,
+            MarketOrderExecutionContext executionContext
+    ) {
         // 거래 트랜잭션의 첫 DB 접근은 계좌 행 잠금입니다.
         Account account = accountRepository.findByUserIdAndStatusForUpdate(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
@@ -86,11 +83,14 @@ public class MarketOrderTransactionService {
         OrderTerms terms = command.terms();
         Stock stock = stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc(terms.symbol())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
+        if (stock.getMarketCountry() != executionContext.marketCountry()) {
+            throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
+        }
 
         TradeOrder existing = tradeOrderRepository.findByClientOrderId(command.clientOrderId()).orElse(null);
         if (existing != null) {
             verifySameRequest(existing, account, stock, terms);
-            return existingResult(existing, account, stock);
+            return existingResult(existing, account, stock, executionContext.usdKrwRate());
         }
 
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
@@ -98,7 +98,7 @@ public class MarketOrderTransactionService {
 
         BigDecimal executionRate = stock.getMarketCountry() == MarketCountry.KR
                 ? BigDecimal.ONE
-                : exchangeRateProvider.currentUsdKrwRate();
+                : executionContext.usdKrwRate();
         OrderAmount amount = amountCalculator.calculate(
                 stock.getMarketCountry(), terms.side(), quote.getLastPrice(), terms.quantity(), executionRate);
 
@@ -118,7 +118,7 @@ public class MarketOrderTransactionService {
                 terms.quantity(),
                 amount,
                 availableQuantity,
-                () -> marketSessionProvider.isOpen(stock.getMarketCountry(), now),
+                executionContext::marketOpen,
                 now
         );
         if (rejection != null) {
@@ -159,10 +159,16 @@ public class MarketOrderTransactionService {
                     account.getCashBalance(), amount.exchangeRate(), memo, orderedAt);
         ledgerEntryRepository.save(ledgerEntry);
 
-        return MarketOrderResult.filled(toResponse(order, account, stock, executionRate));
+        return MarketOrderResult.filled(toResponse(
+                order, account, stock, executionContext.usdKrwRate()));
     }
 
-    private MarketOrderResult existingResult(TradeOrder order, Account account, Stock stock) {
+    private MarketOrderResult existingResult(
+            TradeOrder order,
+            Account account,
+            Stock stock,
+            BigDecimal usdKrwRate
+    ) {
         if (order.getStatus() == OrderStatus.REJECTED) {
             try {
                 return MarketOrderResult.rejected(ErrorCode.valueOf(order.getRejectReason()));
@@ -173,22 +179,19 @@ public class MarketOrderTransactionService {
         if (order.getStatus() != OrderStatus.FILLED) {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER, "orderId=" + order.getOrderId());
         }
-        return MarketOrderResult.filled(toResponse(order, account, stock, null));
+        return MarketOrderResult.filled(toResponse(order, account, stock, usdKrwRate));
     }
 
     private OrderResponse toResponse(
             TradeOrder order,
             Account account,
             Stock stock,
-            BigDecimal executionRate
+            BigDecimal usdKrwRate
     ) {
-        BigDecimal usdKrwRate = BigDecimal.ONE;
-        if (holdingRepository.existsUsHolding(account.getAccountId())) {
-            usdKrwRate = executionRate != null && stock.getMarketCountry() == MarketCountry.US
-                    ? executionRate
-                    : exchangeRateProvider.currentUsdKrwRate();
-        }
-        BigDecimal stockValue = holdingRepository.calculateStockValue(account.getAccountId(), usdKrwRate);
+        BigDecimal valuationRate = holdingRepository.existsUsHolding(account.getAccountId())
+                ? usdKrwRate
+                : BigDecimal.ONE;
+        BigDecimal stockValue = holdingRepository.calculateStockValue(account.getAccountId(), valuationRate);
         return OrderResponse.filled(order, stock, account.getCashBalance(),
                 account.getCashBalance().add(stockValue));
     }
