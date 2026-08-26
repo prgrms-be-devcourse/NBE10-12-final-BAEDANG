@@ -3,9 +3,11 @@ package com.baedang.stock.client.toss;
 import com.baedang.global.clients.toss.TossSecuritiesClient;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.stock.client.toss.dto.TossListedStockResponse;
 import com.baedang.stock.client.toss.dto.TossStockInfoResponse;
 import com.baedang.stock.client.toss.dto.TossStockWarningResponse;
 import com.baedang.stock.port.StockInfo;
+import com.baedang.stock.port.StockUniverseEntry;
 import com.baedang.stock.port.StockWarnings;
 import com.baedang.stock.port.SymbolInfoPort;
 import org.springframework.stereotype.Component;
@@ -13,11 +15,14 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Component
 public class TossSymbolInfoAdapter implements SymbolInfoPort {
 
     private static final int MAX_SYMBOLS_PER_REQUEST = 200;
+
+    private static final Set<String> TOSS_MARKETS = Set.of("KOSPI", "KOSDAQ", "NYSE", "NASDAQ", "AMEX", "KR_ETC", "US_ETC");
 
     private final TossSecuritiesClient tossSecuritiesClient;
 
@@ -50,7 +55,7 @@ public class TossSymbolInfoAdapter implements SymbolInfoPort {
         validateSymbol(symbol);
 
         TossStockWarningResponse response = tossSecuritiesClient.get(
-                "/api/v1/stocks/"+symbol+"/warnings",
+                "/api/v1/stocks/" + symbol + "/warnings",
                 Map.of(),
                 TossStockWarningResponse.class
         );
@@ -69,6 +74,32 @@ public class TossSymbolInfoAdapter implements SymbolInfoPort {
                                 item.endDate()
                         )).toList()
         );
+    }
+
+    @Override
+    public List<StockUniverseEntry> fetchAllStocks(String market) {
+        if (market == null || TOSS_MARKETS.contains(market)) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "지원하지 않는 마켓: " + market);
+        }
+
+        TossListedStockResponse response = tossSecuritiesClient.get(
+                "/api/v1/stocks/all",
+                Map.of("market", market),
+                TossListedStockResponse.class
+        );
+
+        if (response == null || response.result() == null) {
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR,"종목 유니버스 응답이 비어 있음");
+        }
+
+        return response.result().stream()
+                .map(item->new StockUniverseEntry(
+                        item.symbol(),
+                        item.name(),
+                        item.securityType(),
+                        item.isCommonShare(),
+                        item.isinCode()
+                )).toList();
     }
 
     private StockInfo toStockInfo(TossStockInfoResponse.TossStockInfo item) {
@@ -117,9 +148,9 @@ public class TossSymbolInfoAdapter implements SymbolInfoPort {
         }
     }
 
-    private void  validateSymbol(String symbol) {
+    private void validateSymbol(String symbol) {
         if (symbol == null || symbol.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,"종목 심볼이 비어 있음");
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "종목 심볼이 비어 있음");
         }
     }
 }
