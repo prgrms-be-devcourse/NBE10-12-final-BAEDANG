@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.math.BigDecimal;
+import java.util.List;
 import java.util.Optional;
 
 public interface HoldingRepository extends JpaRepository<Holding, Long> {
@@ -20,4 +22,6 @@ public interface HoldingRepository extends JpaRepository<Holding, Long> {
             @Param("stockId") Long stockId
     );
 
+    /** 계좌의 보유 종목 중 수량이 남은 것만. 마이페이지 평가에 씁니다. */
+    List<Holding> findByAccountIdAndQuantityGreaterThan(Long accountId, BigDecimal quantity);
 }

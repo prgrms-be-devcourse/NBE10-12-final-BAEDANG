@@ -4,13 +4,8 @@ import { useMemo, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { useAuth } from "./AuthProvider";
-import {
-  getHolding,
-  getMockChartPoints,
-  AVAILABLE_CASH,
-  USD_KRW_RATE,
-  type StockDetail,
-} from "@/lib/mock-data";
+import { useExchangeRate } from "./ExchangeRateProvider";
+import { getHolding, getMockChartPoints, AVAILABLE_CASH, type StockDetail } from "@/lib/mock-data";
 import { calculateOrderAmount } from "@/lib/order-amount";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
@@ -31,6 +26,7 @@ const CATEGORY_GUIDE: Record<string, string> = {
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn } = useAuth();
+  const { rate: usdKrwRate } = useExchangeRate();
   const [candleUnit, setCandleUnit] = useState<"일봉" | "1분봉">("일봉");
   const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
   const [side, setSide] = useState<"매수" | "매도">("매수");
@@ -56,7 +52,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     quantity,
     price: detail.lastPrice,
     currency: detail.currency,
-    usdKrwRate: USD_KRW_RATE,
+    usdKrwRate,
   });
 
   const priceLabel = detail.currency === "USD" ? formatUsd(detail.lastPrice) : formatNumber(detail.lastPrice);
