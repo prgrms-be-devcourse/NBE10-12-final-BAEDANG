@@ -78,7 +78,7 @@ public class TossSymbolInfoAdapter implements SymbolInfoPort {
 
     @Override
     public List<StockUniverseEntry> fetchAllStocks(String market) {
-        if (market == null || TOSS_MARKETS.contains(market)) {
+        if (market == null || !TOSS_MARKETS.contains(market)) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "지원하지 않는 마켓: " + market);
         }
 
