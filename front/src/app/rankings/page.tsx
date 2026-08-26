@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { D } from "@/lib/decimal";
 import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry } from "@/lib/mock-data";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
@@ -147,9 +148,12 @@ export default function RankingsPage() {
             const isUp = item.changeAmount >= 0;
             const isUsd = item.currency === "USD";
             // 정책상 원화만 거래에 쓰이므로, 미국 종목은 원화 환산액을 우선 표시하고
-            // 원래 달러 값은 보조 텍스트로 같이 보여준다.
-            const krwPrice = isUsd ? item.lastPrice * rate : item.lastPrice;
-            const krwChange = isUsd ? item.changeAmount * rate : item.changeAmount;
+            // 원래 달러 값은 보조 텍스트로 같이 보여준다. 부동소수점 오차를 피하려고
+            // decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17).
+            const krwPrice = (isUsd ? new D(item.lastPrice).times(rate) : new D(item.lastPrice)).round().toNumber();
+            const krwChange = (isUsd ? new D(item.changeAmount).times(rate) : new D(item.changeAmount))
+              .round()
+              .toNumber();
             return (
               <tr key={item.symbol}>
                 <td className="border-b border-gray-100 py-2.5 text-gray-500">{item.rank}</td>

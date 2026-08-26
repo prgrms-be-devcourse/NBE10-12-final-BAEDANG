@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { D } from "@/lib/decimal";
 import {
   AVAILABLE_CASH,
   INITIAL_CASH,
@@ -14,8 +15,11 @@ import {
 } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
-function toKrw(value: number, currency: "KRW" | "USD", usdKrwRate: number) {
-  return currency === "USD" ? value * usdKrwRate : value;
+/** 보유 수량 × 단가를 원화로 환산한다. 평가금액·평가손익처럼 정확해야 하는
+ * 계산이라 순수 number 대신 decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17). */
+function holdingAmountKrw(quantity: number, unitPrice: number, currency: "KRW" | "USD", usdKrwRate: number) {
+  const amount = new D(quantity).times(unitPrice);
+  return currency === "USD" ? amount.times(usdKrwRate) : amount;
 }
 
 export default function MyPage() {
@@ -26,16 +30,16 @@ export default function MyPage() {
   const [cash, setCash] = useState(AVAILABLE_CASH);
 
   const stockValue = useMemo(
-    () => holdings.reduce((sum, h) => sum + toKrw(h.quantity * h.lastPrice, h.currency, rate), 0),
+    () => holdings.reduce((sum, h) => sum.plus(holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate)), new D(0)),
     [holdings, rate]
   );
   const costBasis = useMemo(
-    () => holdings.reduce((sum, h) => sum + toKrw(h.quantity * h.avgBuyPrice, h.currency, rate), 0),
+    () => holdings.reduce((sum, h) => sum.plus(holdingAmountKrw(h.quantity, h.avgBuyPrice, h.currency, rate)), new D(0)),
     [holdings, rate]
   );
-  const pnl = stockValue - costBasis;
-  const pnlRate = costBasis > 0 ? pnl / costBasis : 0;
-  const totalAssets = cash + stockValue;
+  const pnl = stockValue.minus(costBasis);
+  const pnlRate = costBasis.greaterThan(0) ? pnl.dividedBy(costBasis).toNumber() : 0;
+  const totalAssets = new D(cash).plus(stockValue);
 
   function handleReset() {
     const ok = window.confirm(
@@ -63,18 +67,18 @@ export default function MyPage() {
       </div>
 
       <div className="mb-5 flex gap-4">
-        <SummaryCard label="총 자산" value={formatNumber(totalAssets)} />
+        <SummaryCard label="총 자산" value={formatNumber(totalAssets.round().toNumber())} />
         <SummaryCard label="예수금" value={formatNumber(cash)} />
-        <SummaryCard label="주식 평가금액" value={formatNumber(stockValue)} />
+        <SummaryCard label="주식 평가금액" value={formatNumber(stockValue.round().toNumber())} />
         <SummaryCard
           label="평가손익"
           value={
             <>
-              {formatSigned(Math.round(pnl))}{" "}
+              {formatSigned(pnl.round().toNumber())}{" "}
               <span className="text-[14px]">({formatPercent(pnlRate)})</span>
             </>
           }
-          emphasize={pnl >= 0}
+          emphasize={pnl.greaterThanOrEqualTo(0)}
         />
       </div>
 
@@ -112,18 +116,21 @@ export default function MyPage() {
               <tbody>
                 {holdings.map((h) => {
                   const isUsd = h.currency === "USD";
-                  const value = toKrw(h.quantity * h.lastPrice, h.currency, rate);
-                  const cost = toKrw(h.quantity * h.avgBuyPrice, h.currency, rate);
-                  const hPnl = value - cost;
-                  const hRate = cost > 0 ? hPnl / cost : 0;
+                  const value = holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate);
+                  const cost = holdingAmountKrw(h.quantity, h.avgBuyPrice, h.currency, rate);
+                  const hPnl = value.minus(cost);
+                  const hRate = cost.greaterThan(0) ? hPnl.dividedBy(cost).toNumber() : 0;
                   // 정책상 원화만 거래에 쓰이므로, 미국 종목은 단가도 원화 환산액을
                   // 우선 표시하고 원래 달러 값은 보조 텍스트로 같이 보여준다.
-                  const priceCell = (usdValue: number) => (
-                    <>
-                      {formatNumber(toKrw(usdValue, h.currency, rate))}
-                      {isUsd && <div className="text-[10.5px] text-gray-400">{formatUsd(usdValue)}</div>}
-                    </>
-                  );
+                  const priceCell = (usdValue: number) => {
+                    const krw = isUsd ? new D(usdValue).times(rate) : new D(usdValue);
+                    return (
+                      <>
+                        {formatNumber(krw.round().toNumber())}
+                        {isUsd && <div className="text-[10.5px] text-gray-400">{formatUsd(usdValue)}</div>}
+                      </>
+                    );
+                  };
                   return (
                     <tr key={h.symbol}>
                       <td className="border-b border-gray-100 py-2.5">
@@ -132,13 +139,13 @@ export default function MyPage() {
                       <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{h.quantity}</td>
                       <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{priceCell(h.avgBuyPrice)}</td>
                       <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{priceCell(h.lastPrice)}</td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{formatNumber(value)}</td>
+                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{formatNumber(value.round().toNumber())}</td>
                       <td
                         className={`border-b border-gray-100 py-2.5 text-right tabular-nums ${
-                          hPnl >= 0 ? "font-semibold text-gray-900" : "text-gray-400"
+                          hPnl.greaterThanOrEqualTo(0) ? "font-semibold text-gray-900" : "text-gray-400"
                         }`}
                       >
-                        {formatSigned(Math.round(hPnl))} <span className="text-[11.5px]">({formatPercent(hRate)})</span>
+                        {formatSigned(hPnl.round().toNumber())} <span className="text-[11.5px]">({formatPercent(hRate)})</span>
                       </td>
                       <td className="border-b border-gray-100 py-2.5">
                         <Link
