@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/*
+  무채색(흰색/검정/회색) 임시 팔레트입니다. 2주차에 실제 디자인 시스템으로
+  교체할 때는 이 변수들만 바꾸면 되도록 컴포넌트에서는 가능한 한 이 값들을
+  참조하는 Tailwind 회색조 유틸(gray-*, black, white)만 썼습니다.
+*/
+:root {
+  --background: #f3f4f6; /* gray-100 — 페이지 바탕 */
+  --foreground: #111827; /* gray-900 — 기본 텍스트 */
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic",
+    "Apple SD Gothic Neo", sans-serif;
+}
