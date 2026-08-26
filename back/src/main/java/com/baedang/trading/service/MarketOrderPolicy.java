@@ -19,12 +19,14 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
+import java.util.regex.Pattern;
 
 /** 견적 조회와 실제 주문이 동일한 입력·거래 가능 규칙을 사용하도록 모은 정책입니다. */
 @Component
 public class MarketOrderPolicy {
 
     private static final int MAX_QUANTITY_INPUT_LENGTH = 32;
+    private static final Pattern QUANTITY_PATTERN = Pattern.compile("\\d+(\\.0+)?");
 
     private final Duration quoteMaxStaleness;
     private final BigDecimal maxOrderQuantity;
@@ -108,7 +110,7 @@ public class MarketOrderPolicy {
         if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_QUANTITY);
         String normalized = value.trim();
         if (normalized.length() > MAX_QUANTITY_INPUT_LENGTH
-                || !normalized.matches("\\d+(\\.0+)?")) {
+                || !QUANTITY_PATTERN.matcher(normalized).matches()) {
             throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value);
         }
         try {

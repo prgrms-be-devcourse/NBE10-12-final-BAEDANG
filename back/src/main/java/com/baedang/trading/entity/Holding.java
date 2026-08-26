@@ -87,6 +87,9 @@ public class Holding {
      * 계좌 총 손익에는 이미 반영돼 있습니다 (예수금에서 빠졌으므로).
      */
     public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate, OffsetDateTime updatedAt) {
+        requirePositive(price, "매수 가격");
+        requirePositive(rate, "매수 환율");
+
         BigDecimal totalQty = quantity.add(addQty);
         BigDecimal previousPurchaseAmount = quantity.multiply(avgBuyPrice);
         BigDecimal addedPurchaseAmount = addQty.multiply(price);
@@ -98,6 +101,12 @@ public class Holding {
                 .divide(totalPurchaseAmount, 6, RoundingMode.HALF_UP);
         this.quantity = totalQty;
         this.updatedAt = updatedAt;
+    }
+
+    private void requirePositive(BigDecimal value, String fieldName) {
+        if (value == null || value.signum() <= 0) {
+            throw new IllegalArgumentException(fieldName + "은 0보다 커야 합니다");
+        }
     }
 
     /** 매도 체결 반영. <b>평단가는 그대로 둡니다</b> — 평가손익의 기준이기 때문입니다. */
