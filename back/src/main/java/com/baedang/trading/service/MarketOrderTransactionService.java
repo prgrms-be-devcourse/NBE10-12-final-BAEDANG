@@ -81,7 +81,7 @@ public class MarketOrderTransactionService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
 
         OrderTerms terms = command.terms();
-        Stock stock = stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc(terms.symbol())
+        Stock stock = stockRepository.findBySymbolIgnoreCase(terms.symbol())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
         if (stock.getMarketCountry() != executionContext.marketCountry()) {
             throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
@@ -124,7 +124,8 @@ public class MarketOrderTransactionService {
         if (rejection != null) {
             tradeOrderRepository.save(TradeOrder.rejectedMarketOrder(
                     account.getAccountId(), stock.getStockId(), command.clientOrderId(), terms.side(),
-                    terms.quantity(), rejection.name(), orderedAt));
+                    terms.quantity(), amount.executedPrice(), quote.getQuoteAt(), amount.exchangeRate(),
+                    rejection.name(), orderedAt));
             return MarketOrderResult.rejected(rejection);
         }
 

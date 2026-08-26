@@ -70,7 +70,7 @@ public class OrderQuoteService {
 
         Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
-        Stock stock = stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc(terms.symbol())
+        Stock stock = stockRepository.findBySymbolIgnoreCase(terms.symbol())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.QUOTE_NOT_FOUND, "stockId=" + stock.getStockId()));

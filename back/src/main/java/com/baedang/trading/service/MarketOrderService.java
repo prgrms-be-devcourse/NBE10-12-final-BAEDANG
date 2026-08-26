@@ -59,7 +59,7 @@ public class MarketOrderService {
 
     private MarketOrderExecutionContext prepareExecutionContext(MarketOrderCommand command) {
         Stock stock = stockRepository
-                .findFirstBySymbolIgnoreCaseOrderByStockIdAsc(command.terms().symbol())
+                .findBySymbolIgnoreCase(command.terms().symbol())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.STOCK_NOT_FOUND, "symbol=" + command.terms().symbol()));
         Instant checkedAt = clock.instant();

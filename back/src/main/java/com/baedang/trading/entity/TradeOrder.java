@@ -59,19 +59,22 @@ public class TradeOrder {
     @Column(name = "reject_reason", length = 40)
     private String rejectReason;
 
+    /** REJECTED 판정에 사용한 기준 가격. FILLED 주문은 {@code null}입니다. */
+    @Column(name = "reference_price", precision = 19, scale = 4)
+    private BigDecimal referencePrice;
+
     /** 체결 단가. <b>종목 통화 기준</b>입니다 (미국이면 달러). */
     @Column(name = "executed_price", precision = 19, scale = 4)
     private BigDecimal executedPrice;
 
     /**
-     * 체결에 쓴 시세의 기준 시각.
-     * "왜 이 가격에 체결됐는가"를 설명하는 유일한 근거이고,
-     * 금융 도메인에서 가장 중요한 감사 항목입니다.
+     * 체결 또는 거절 판정에 쓴 시세의 기준 시각.
+     * REJECTED 주문은 {@link #referencePrice}와 함께 감사 근거로 보존합니다.
      */
     @Column(name = "quote_at")
     private OffsetDateTime quoteAt;
 
-    /** 체결 시점 환율. 원화 종목은 1. 안 남기면 환차손익을 영원히 분리할 수 없습니다. */
+    /** 체결 또는 거절 판정 시점 환율. 원화 종목은 1입니다. */
     @Column(name = "exchange_rate", precision = 19, scale = 6)
     private BigDecimal exchangeRate;
 
@@ -132,11 +135,15 @@ public class TradeOrder {
     /** 유효한 시장가 요청이 업무 규칙으로 거절된 기록을 생성합니다. */
     public static TradeOrder rejectedMarketOrder(
             Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
-            BigDecimal quantity, String reasonCode, OffsetDateTime orderedAt
+            BigDecimal quantity, BigDecimal referencePrice, OffsetDateTime quoteAt,
+            BigDecimal exchangeRate, String reasonCode, OffsetDateTime orderedAt
     ) {
         TradeOrder order = new TradeOrder(
                 accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, orderedAt);
         order.rejectReason = reasonCode;
+        order.referencePrice = referencePrice;
+        order.quoteAt = quoteAt;
+        order.exchangeRate = exchangeRate;
         return order;
     }
 
@@ -149,6 +156,7 @@ public class TradeOrder {
     public BigDecimal getQuantity() { return quantity; }
     public OrderStatus getStatus() { return status; }
     public String getRejectReason() { return rejectReason; }
+    public BigDecimal getReferencePrice() { return referencePrice; }
     public BigDecimal getExecutedPrice() { return executedPrice; }
     public OffsetDateTime getQuoteAt() { return quoteAt; }
     public BigDecimal getExchangeRate() { return exchangeRate; }

@@ -24,12 +24,17 @@ import java.util.function.BooleanSupplier;
 @Component
 public class MarketOrderPolicy {
 
+    private static final int MAX_QUANTITY_INPUT_LENGTH = 32;
+
     private final Duration quoteMaxStaleness;
+    private final BigDecimal maxOrderQuantity;
 
     public MarketOrderPolicy(
-            @Value("${trading.quote-max-staleness-seconds}") long quoteMaxStalenessSeconds
+            @Value("${trading.quote-max-staleness-seconds}") long quoteMaxStalenessSeconds,
+            @Value("${trading.max-order-quantity}") BigDecimal maxOrderQuantity
     ) {
         this.quoteMaxStaleness = Duration.ofSeconds(quoteMaxStalenessSeconds);
+        this.maxOrderQuantity = maxOrderQuantity;
     }
 
     public MarketOrderCommand parseCommand(
@@ -97,9 +102,16 @@ public class MarketOrderPolicy {
 
     private BigDecimal parseQuantity(String value) {
         if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_QUANTITY);
+        String normalized = value.trim();
+        if (normalized.length() > MAX_QUANTITY_INPUT_LENGTH
+                || !normalized.matches("\\d+(\\.0+)?")) {
+            throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value);
+        }
         try {
-            BigDecimal parsed = new BigDecimal(value.trim());
-            if (parsed.compareTo(BigDecimal.ONE) < 0 || parsed.stripTrailingZeros().scale() > 0) {
+            BigDecimal parsed = new BigDecimal(normalized);
+            if (parsed.compareTo(BigDecimal.ONE) < 0
+                    || parsed.compareTo(maxOrderQuantity) > 0
+                    || parsed.stripTrailingZeros().scale() > 0) {
                 throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value);
             }
             return parsed;

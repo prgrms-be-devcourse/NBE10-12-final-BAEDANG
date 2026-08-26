@@ -693,11 +693,12 @@ CREATE TABLE trade_order (
                     CHECK (status IN ('PENDING','FILLED','REJECTED','CANCELED','EXPIRED')),
     reject_reason   VARCHAR(40),              -- MARKET_CLOSED / SUSPENDED /
                                               -- INSUFFICIENT_CASH / STALE_QUOTE ...
+    reference_price NUMERIC(19,4),            -- REJECTED 판정에 사용한 기준 가격
+    quote_at        TIMESTAMPTZ,              -- 체결 또는 거절 판정에 사용한 시세 시각
+    exchange_rate   NUMERIC(19,6),            -- 체결 또는 거절 판정에 사용한 환율
 
     -- 체결 결과 (status = FILLED 일 때만 채워짐)
     executed_price  NUMERIC(19,4),            -- 체결 단가 (종목 통화 기준)
-    quote_at        TIMESTAMPTZ,              -- 체결에 사용한 시세의 기준 시각 (감사 추적)
-    exchange_rate   NUMERIC(19,6),            -- 체결 시점 환율 (KRW 종목은 1)
     gross_amount    NUMERIC(19,4),            -- 체결 금액 (원화 환산)
     fee             NUMERIC(19,4) DEFAULT 0,  -- 수수료
     -- 매도 시에만 발생. 국내(k_tax)와 미국(a_tax)의 계산식이 다르지만,
@@ -711,7 +712,8 @@ CREATE TABLE trade_order (
 );
 CREATE INDEX ix_order_history ON trade_order (account_id, ordered_at DESC);
 
-COMMENT ON COLUMN trade_order.quote_at IS '"왜 이 가격에 체결됐는가"를 설명하기 위한 감사 근거';
+COMMENT ON COLUMN trade_order.quote_at IS '체결 또는 거절 판정에 사용한 시세의 기준 시각';
+COMMENT ON COLUMN trade_order.reference_price IS 'REJECTED 판정 당시 사용한 종목 통화 기준 가격';
 COMMENT ON COLUMN trade_order.exchange_rate IS '나중에 환차손익을 분리하려면 반드시 필요';
 COMMENT ON COLUMN trade_order.tax IS '적용된 세금 "금액". 요율은 DB 가 아니라 .env 에 있다 (K_TAX_RATE / A_TAX_RATE)';
 COMMENT ON COLUMN trade_order.fee IS '적용된 수수료 "금액". 요율은 .env 의 FEE_RATE';

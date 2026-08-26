@@ -7,5 +7,5 @@ import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, Long> {
 
-    Optional<Stock> findFirstBySymbolIgnoreCaseOrderByStockIdAsc(String symbol);
+    Optional<Stock> findBySymbolIgnoreCase(String symbol);
 }
