@@ -29,4 +29,14 @@ public interface SymbolInfoPort {
      */
     StockWarnings fetchStockWarnings(String symbol);
 
+    /**
+     * 한 마켓(KOSPI, NASDAQ 등)의 전체 상장 종목을 조회한다.
+     *
+     * 상장(ACTIVE) 종목만 반환되며 페이징이 없다 — 마켓당 한 번의 호출.
+     * 호출 한도가 가장 낮은 엔드포인트(1 TPS)이므로 주간 배치 전용으로 쓴다.
+     *
+     * @param market KOSPI · KOSDAQ · NYSE · NASDAQ · AMEX · KR_ETC · US_ETC 중 하나
+     */
+    List<StockUniverseEntry> fetchAllStocks(String market);
+
 }
