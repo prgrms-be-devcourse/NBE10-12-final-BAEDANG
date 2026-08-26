@@ -19,7 +19,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
@@ -38,6 +41,8 @@ class AccountServiceTest {
     @Mock ExchangeRateRepository exchangeRateRepository;
     @Mock Account account;
 
+    private static final Instant NOW = Instant.parse("2026-08-26T03:00:00Z");
+
     private AccountService service;
 
     @BeforeEach
@@ -47,7 +52,8 @@ class AccountServiceTest {
                 holdingRepository,
                 quoteSnapshotRepository,
                 exchangeRateRepository,
-                new HoldingValuator()
+                new HoldingValuator(),
+                Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
 
@@ -80,6 +86,7 @@ class AccountServiceTest {
         assertThat(response.unrealizedPnl()).isEqualTo("0");
         assertThat(response.unrealizedPnlRate()).isNull();
         assertThat(response.exchangeRate()).isNull();
+        assertThat(response.asOf()).isEqualTo(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
     }
 
     @Test

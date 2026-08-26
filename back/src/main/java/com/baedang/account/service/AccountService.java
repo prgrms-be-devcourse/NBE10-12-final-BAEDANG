@@ -18,7 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -42,17 +44,20 @@ public class AccountService {
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final ExchangeRateRepository exchangeRateRepository;
     private final HoldingValuator holdingValuator;
+    private final Clock clock;
 
     public AccountService(AccountRepository accountRepository,
                           HoldingRepository holdingRepository,
                           QuoteSnapshotRepository quoteSnapshotRepository,
                           ExchangeRateRepository exchangeRateRepository,
-                          HoldingValuator holdingValuator) {
+                          HoldingValuator holdingValuator,
+                          Clock clock) {
         this.accountRepository = accountRepository;
         this.holdingRepository = holdingRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.exchangeRateRepository = exchangeRateRepository;
         this.holdingValuator = holdingValuator;
+        this.clock = clock;
     }
 
     public AccountSummaryResponse getSummary(Long userId) {
@@ -74,8 +79,9 @@ public class AccountService {
                 ? unrealizedPnl.divide(costBasis, 4, RoundingMode.HALF_UP)
                 : null;
 
+        OffsetDateTime asOf = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         return AccountSummaryResponse.of(
-                account, stockValue, totalAsset, unrealizedPnl, pnlRate, usdKrwRate, OffsetDateTime.now());
+                account, stockValue, totalAsset, unrealizedPnl, pnlRate, usdKrwRate, asOf);
     }
 
     private Map<Long, QuoteSnapshot> quotesByStockId(List<Holding> holdings) {
