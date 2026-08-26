@@ -1,6 +1,6 @@
 package com.baedang.market.client.toss;
 
-import com.baedang.global.clients.tossSecurities.TossSecuritiesClient;
+import com.baedang.global.clients.toss.TossSecuritiesClient;
 import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.port.MarketCalendarDay;
 import com.github.tomakehurst.wiremock.WireMockServer;

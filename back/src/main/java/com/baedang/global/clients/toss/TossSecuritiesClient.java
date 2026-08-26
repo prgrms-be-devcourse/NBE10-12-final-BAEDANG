@@ -1,4 +1,4 @@
-package com.baedang.global.clients.tossSecurities;
+package com.baedang.global.clients.toss;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;

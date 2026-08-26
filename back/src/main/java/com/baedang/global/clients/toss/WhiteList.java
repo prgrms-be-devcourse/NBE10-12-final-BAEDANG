@@ -1,4 +1,4 @@
-package com.baedang.global.clients.tossSecurities;
+package com.baedang.global.clients.toss;
 
 import org.springframework.util.AntPathMatcher;
 
