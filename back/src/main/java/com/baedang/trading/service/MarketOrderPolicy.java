@@ -4,9 +4,11 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.stock.entity.ListingStatus;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.MarketOrderCommand;
+import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.OrderAmount;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.user.entity.Account;
@@ -42,14 +44,21 @@ public class MarketOrderPolicy {
     public MarketOrderCommand parseCommand(
             String clientOrderId,
             String symbol,
+            String marketCountry,
             String side,
             String quantity
     ) {
-        return new MarketOrderCommand(parseClientOrderId(clientOrderId), parseTerms(symbol, side, quantity));
+        return new MarketOrderCommand(
+                parseClientOrderId(clientOrderId),
+                parseTerms(symbol, marketCountry, side, quantity));
     }
 
-    public OrderTerms parseTerms(String symbol, String side, String quantity) {
-        return new OrderTerms(normalizeSymbol(symbol), parseSide(side), parseQuantity(quantity));
+    public OrderTerms parseTerms(String symbol, String marketCountry, String side, String quantity) {
+        return new OrderTerms(
+                normalizeSymbol(symbol),
+                parseMarketCountry(marketCountry),
+                parseSide(side),
+                parseQuantity(quantity));
     }
 
     public ErrorCode determineRejection(
@@ -63,11 +72,8 @@ public class MarketOrderPolicy {
             BooleanSupplier marketOpen,
             Instant now
     ) {
-        if (!Boolean.TRUE.equals(stock.getIsRanked()) || stock.getListingStatus() != ListingStatus.ACTIVE) {
-            return ErrorCode.NOT_IN_UNIVERSE;
-        }
-        if (Boolean.TRUE.equals(stock.getIsSuspended())) return ErrorCode.STOCK_SUSPENDED;
-        if (Boolean.TRUE.equals(stock.getIsLiquidation())) return ErrorCode.STOCK_LIQUIDATION;
+        ErrorCode staticRejection = determineStaticRejection(stock);
+        if (staticRejection != null) return staticRejection;
         if (!marketOpen.getAsBoolean()) return ErrorCode.MARKET_CLOSED;
         ErrorCode quoteTimeRejection = validateQuoteTime(quote, now);
         if (quoteTimeRejection != null) return quoteTimeRejection;
@@ -79,6 +85,22 @@ public class MarketOrderPolicy {
             return ErrorCode.INSUFFICIENT_QUANTITY;
         }
         return null;
+    }
+
+    public ErrorCode determineStaticRejection(Stock stock) {
+        if (!Boolean.TRUE.equals(stock.getIsRanked()) || stock.getListingStatus() != ListingStatus.ACTIVE) {
+            return ErrorCode.NOT_IN_UNIVERSE;
+        }
+        if (Boolean.TRUE.equals(stock.getIsSuspended())) return ErrorCode.STOCK_SUSPENDED;
+        if (Boolean.TRUE.equals(stock.getIsLiquidation())) return ErrorCode.STOCK_LIQUIDATION;
+        return null;
+    }
+
+    public void validateExecutionContextFresh(MarketOrderExecutionContext context, Instant now) {
+        Duration age = Duration.between(context.checkedAt(), now);
+        if (age.isNegative() || age.compareTo(quoteMaxStaleness) > 0) {
+            throw new BusinessException(ErrorCode.MARKET_CONTEXT_EXPIRED);
+        }
     }
 
     private ErrorCode validateQuoteTime(QuoteSnapshot quote, Instant now) {
@@ -103,6 +125,15 @@ public class MarketOrderPolicy {
             return OrderSide.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "side=" + value);
+        }
+    }
+
+    private MarketCountry parseMarketCountry(String value) {
+        if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
+        try {
+            return MarketCountry.valueOf(value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value);
         }
     }
 

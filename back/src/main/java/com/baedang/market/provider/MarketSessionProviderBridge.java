@@ -3,6 +3,7 @@ package com.baedang.market.provider;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Component;
 
@@ -15,7 +16,7 @@ import java.time.ZoneId;
  *
  * <p><b>⚠️ 이건 다훈님 PR(#7)이 정의한 인터페이스와, 제가 만든 {@link MarketCalendarPort}
  * 사이의 임시 다리(bridge)입니다.</b> 둘이 장 운영 여부를 서로 다른 모양으로 표현하고 있어서
- * ({@code MarketSessionProvider.isOpen(country, Instant)} vs
+ * ({@code MarketSessionProvider.currentSession(country, Instant)} vs
  * {@code MarketCalendarPort.fetchKrMarketCalendar(LocalDate)}), 팀에서 어느 쪽으로
  * 통일할지 정해질 때까지 백엔드가 최소한 기동은 되도록 얇은 변환만 합니다.
  * <b>Port 설계가 정리되면 이 클래스는 지우거나 교체하세요.</b>
@@ -36,27 +37,31 @@ public class MarketSessionProviderBridge implements MarketSessionProvider {
     }
 
     @Override
-    public boolean isOpen(MarketCountry marketCountry, Instant now) {
+    public MarketSessionStatus currentSession(MarketCountry marketCountry, Instant now) {
         LocalDate today = now.atZone(KST).toLocalDate();
 
         if (marketCountry == MarketCountry.KR) {
-            return isWithinSession(marketCalendarPort.fetchKrMarketCalendar(today), now);
+            return statusOf(marketCalendarPort.fetchKrMarketCalendar(today), now);
         }
 
         // 미국 정규장은 KST 기준 자정을 넘기므로(예: 22:30~익일 05:00),
         // 오늘 날짜 조회만으로는 자정 이후 시간대를 놓칠 수 있어 전날 조회분도 함께 확인한다.
-        if (isWithinSession(marketCalendarPort.fetchUsMarketCalendar(today), now)) {
-            return true;
+        MarketSessionStatus todayStatus = statusOf(
+                marketCalendarPort.fetchUsMarketCalendar(today), now);
+        if (todayStatus.open()) {
+            return todayStatus;
         }
-        return isWithinSession(marketCalendarPort.fetchUsMarketCalendar(today.minusDays(1)), now);
+        return statusOf(marketCalendarPort.fetchUsMarketCalendar(today.minusDays(1)), now);
     }
 
-    private boolean isWithinSession(MarketCalendarDay day, Instant now) {
+    private MarketSessionStatus statusOf(MarketCalendarDay day, Instant now) {
         if (!day.isOpen() || day.regularOpenAt() == null || day.regularCloseAt() == null) {
-            return false;
+            return MarketSessionStatus.closed();
         }
         Instant openAt = day.regularOpenAt().toInstant();
         Instant closeAt = day.regularCloseAt().toInstant();
-        return !now.isBefore(openAt) && now.isBefore(closeAt);
+        return !now.isBefore(openAt) && now.isBefore(closeAt)
+                ? new MarketSessionStatus(true, closeAt)
+                : MarketSessionStatus.closed();
     }
 }

@@ -448,8 +448,10 @@ The ranked-universe collector runs once per minute, sequentially in 20-stock gro
 Fee & tax preview
 
 ```
-?symbol=005930&side=BUY&quantity=10
+?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
+
+`marketCountry` is required and must be `KR` or `US`. Symbols may overlap across markets, so the server identifies a stock by `(symbol, marketCountry)`.
 
 **Response**
 ```json
@@ -499,6 +501,7 @@ Buy / sell (market immediate fill)
 {
   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10"
 }
@@ -533,16 +536,18 @@ The order response contains only the cash balance authoritatively finalized by t
 **Server processing order**
 ```
 ① Read clientOrderId; return the stored result immediately on an exact retry
-② Only for a new order, read market session and US execution FX (KR orders use rate 1 without FX lookup)
-③ Begin transaction with SELECT ... FROM account ... FOR UPDATE
-④ Recheck clientOrderId to close the concurrent-request race
-⑤ Validate — session · universe · suspension · quote time · deposit/quantity
-⑥ INSERT trade_order FILLED (or REJECTED on a valid business-rule failure)
-⑦ UPDATE account.cash_balance and UPSERT holding
-⑧ INSERT ledger_entry       (append only; FILLED only)
+② Read the stock and preflight static rules — universe → suspension → liquidation
+③ Only after preflight passes, read market session and US execution FX (KR uses rate 1)
+④ Begin the transaction with SELECT ... FROM account ... FOR UPDATE
+⑤ Reject an expired market context, then recheck clientOrderId
+⑥ Read the quote and lock holding for a sell (lock order: account → holding)
+⑦ Validate — universe → suspension → liquidation → session → quote time → settlement → cash/quantity
+⑧ INSERT trade_order FILLED (or REJECTED for a business rejection confirmed in the transaction)
+⑨ UPDATE account.cash_balance and lock/upsert holding
+⑩ INSERT ledger_entry (append only; FILLED only)
 ```
 
-Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Malformed requests that cannot form a valid order row are returned as request errors without persisting `REJECTED`.
+Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Malformed input, external-market-data failures, static preflight failures, and a market context that expires while waiting for the account lock do not create an order row, so the same `clientOrderId` can be retried after recovery. Only a `REJECTED` result confirmed inside the transaction is final.
 
 The market-order use case is a top-level transaction boundary. It must not be invoked inside another transaction; the application entry point enforces this with `Propagation.NEVER`, while the DB mutation service starts its own `REQUIRED` transaction. This keeps a committed `REJECTED` record from being rolled back by an unrelated outer workflow.
 
@@ -554,6 +559,7 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 | Code | HTTP | Screen text |
 |---|---|---|
 | `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_CONTEXT_EXPIRED` | 422 | 시장 정보를 다시 확인한 뒤 주문해주세요 |
 | `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
 | `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
 | `STOCK_LIQUIDATION` | 422 | 정리매매 종목이에요 |

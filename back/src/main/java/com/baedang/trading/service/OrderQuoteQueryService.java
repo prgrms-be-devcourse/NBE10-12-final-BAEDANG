@@ -44,7 +44,8 @@ public class OrderQuoteQueryService {
     public OrderQuoteQueryContext load(Long userId, OrderTerms terms) {
         Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
-        Stock stock = stockRepository.findBySymbolIgnoreCase(terms.symbol())
+        Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(
+                        terms.symbol(), terms.marketCountry())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())

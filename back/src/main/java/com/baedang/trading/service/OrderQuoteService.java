@@ -51,8 +51,15 @@ public class OrderQuoteService {
     }
 
     /** 견적은 자금이나 수량을 예약하지 않는 비구속성 읽기 모델입니다. */
-    public OrderQuoteResponse getQuote(Long userId, String symbolValue, String sideValue, String quantityValue) {
-        OrderTerms terms = marketOrderPolicy.parseTerms(symbolValue, sideValue, quantityValue);
+    public OrderQuoteResponse getQuote(
+            Long userId,
+            String symbolValue,
+            String marketCountryValue,
+            String sideValue,
+            String quantityValue
+    ) {
+        OrderTerms terms = marketOrderPolicy.parseTerms(
+                symbolValue, marketCountryValue, sideValue, quantityValue);
 
         OrderQuoteQueryContext queryContext = queryService.load(userId, terms);
         Account account = queryContext.account();

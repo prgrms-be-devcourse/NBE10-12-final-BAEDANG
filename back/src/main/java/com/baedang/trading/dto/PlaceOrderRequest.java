@@ -4,6 +4,7 @@ package com.baedang.trading.dto;
 public record PlaceOrderRequest(
         String clientOrderId,
         String symbol,
+        String marketCountry,
         String side,
         String quantity
 ) {

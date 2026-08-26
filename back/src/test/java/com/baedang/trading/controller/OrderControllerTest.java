@@ -44,7 +44,7 @@ class OrderControllerTest {
 
     @Test
     void 주문_견적의_금액과_수량을_JSON_문자열로_응답한다() throws Exception {
-        when(orderQuoteService.getQuote(1L, "005930", "BUY", "10"))
+        when(orderQuoteService.getQuote(1L, "005930", "KR", "BUY", "10"))
                 .thenReturn(new OrderQuoteResponse(
                         "005930",
                         OrderSide.BUY,
@@ -64,6 +64,7 @@ class OrderControllerTest {
         mockMvc.perform(get("/api/orders/quote")
                         .header("X-User-Id", "1")
                         .param("symbol", "005930")
+                        .param("marketCountry", "KR")
                         .param("side", "BUY")
                         .param("quantity", "10"))
                 .andExpect(status().isOk())
@@ -79,7 +80,7 @@ class OrderControllerTest {
     @Test
     void 시장가_주문을_즉시_체결하고_금액을_문자열로_응답한다() throws Exception {
         PlaceOrderRequest request = new PlaceOrderRequest(
-                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "BUY", "10");
+                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request)).thenReturn(new OrderResponse(
                 1024L, "FILLED", "005930", "BUY", "10", "241500", "1",
                 "2415000", "242", "0", "2415242",
@@ -95,6 +96,7 @@ class OrderControllerTest {
                                 {
                                   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
                                   "symbol": "005930",
+                                  "marketCountry": "KR",
                                   "side": "BUY",
                                   "quantity": "10"
                                 }
@@ -111,7 +113,7 @@ class OrderControllerTest {
     @Test
     void 시장가_주문_업무거절을_표준_에러응답으로_변환한다() throws Exception {
         PlaceOrderRequest request = new PlaceOrderRequest(
-                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "BUY", "10");
+                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request))
                 .thenThrow(new BusinessException(ErrorCode.INSUFFICIENT_CASH));
 
@@ -122,6 +124,7 @@ class OrderControllerTest {
                                 {
                                   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
                                   "symbol": "005930",
+                                  "marketCountry": "KR",
                                   "side": "BUY",
                                   "quantity": "10"
                                 }
@@ -129,5 +132,26 @@ class OrderControllerTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_CASH"))
                 .andExpect(jsonPath("$.message").value("주문가능금액이 부족해요"));
+    }
+
+    @Test
+    void 사용자_헤더가_없으면_400_표준에러를_응답한다() throws Exception {
+        mockMvc.perform(get("/api/orders/quote")
+                        .param("symbol", "005930")
+                        .param("marketCountry", "KR")
+                        .param("side", "BUY")
+                        .param("quantity", "1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    void 주문_JSON을_읽을_수_없으면_400_표준에러를_응답한다() throws Exception {
+        mockMvc.perform(post("/api/orders")
+                        .header("X-User-Id", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientOrderId\":"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }
 }

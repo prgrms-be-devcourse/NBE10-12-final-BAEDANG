@@ -209,9 +209,11 @@ CREATE TABLE stock (
     trading_amount     NUMERIC(24,0),
 
     created_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    CONSTRAINT uq_stock_symbol UNIQUE (symbol, market_country)
+    updated_at         TIMESTAMPTZ  NOT NULL DEFAULT now()
 );
+
+-- 종목 심볼은 대문자로 저장하되, 직접 적재되는 데이터도 대소문자 중복을 만들 수 없게 한다.
+CREATE UNIQUE INDEX uq_stock_symbol ON stock (UPPER(symbol), market_country);
 
 -- 랭킹 화면: 국내/해외 탭 + 거래대금 내림차순 + 커서 페이지네이션
 --   커서가 (trading_amount, stock_id) 튜플이므로 인덱스도 같은 순서·같은 방향이어야
@@ -762,6 +764,7 @@ CREATE TABLE ledger_entry (
     CONSTRAINT ck_ledger_rate_positive CHECK (exchange_rate > 0)
 );
 CREATE INDEX ix_ledger_account ON ledger_entry (account_id, occurred_at);
+CREATE INDEX ix_ledger_order ON ledger_entry (order_id, entry_id) WHERE order_id IS NOT NULL;
 
 COMMENT ON TABLE ledger_entry IS 'UPDATE/DELETE 금지. 잘못 기록했으면 반대 부호 항목을 새로 넣어 상쇄한다';
 COMMENT ON COLUMN ledger_entry.amount IS '수수료·세금 포함. trade_order.net_amount 와 절대값이 같다';

@@ -34,10 +34,12 @@ public class OrderController {
     public ResponseEntity<OrderQuoteResponse> quote(
             @RequestHeader("X-User-Id") Long userId,
             @RequestParam(required = false) String symbol,
+            @RequestParam(required = false) String marketCountry,
             @RequestParam(required = false) String side,
             @RequestParam(required = false) String quantity
     ) {
-        return ResponseEntity.ok(orderQuoteService.getQuote(userId, symbol, side, quantity));
+        return ResponseEntity.ok(orderQuoteService.getQuote(
+                userId, symbol, marketCountry, side, quantity));
     }
 
     @PostMapping

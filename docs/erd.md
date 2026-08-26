@@ -241,12 +241,12 @@ MVP is immediate market fills, so order and fill are one row. **Rejected orders 
 
 #### `ledger_entry` — ledger
 **Records every event that moves the deposit. Not UPDATE-ing and not DELETE-ing is this table's reason to exist.** If recorded wrong, don't edit — add an opposite-sign entry to offset.
-**Entries are only three — `INITIAL_DEPOSIT` · `BUY` · `SELL`.** Fees and taxes are **not split into separate rows — included in the buy/sell amounts**. One ledger line corresponds to exactly one `trade_order.net_amount`, so the list is half as long and cursor handling is simpler. The trade-off: "how much spent on fees so far" can't be read from the ledger alone — but `SUM(trade_order.fee)` retrieves it anytime, which is why splitting isn't necessary.
+**Entries are only three — `INITIAL_DEPOSIT` · `BUY` · `SELL`.** Fees and taxes are **not split into separate rows — included in the buy/sell amounts**. A normal fill creates one line for its `trade_order.net_amount`, while append-only corrections and future partial fills may add later rows with the same `order_id`. Idempotent replay reads the earliest row through the `(order_id, entry_id)` index.
 | Column | Type | Description |
 |---|---|---|
 | `entry_id` | BIGINT PK | ledger number. Increases in time order. |
 | `account_id` | BIGINT FK | which account. |
-| `order_id` | BIGINT FK, NULL | causing order. **NULL for initial funding and reset.** |
+| `order_id` | BIGINT FK, NULL | causing order. **NULL for initial funding and reset.** Indexed by `(order_id, entry_id)` for ordered lookup. |
 | `entry_type` | VARCHAR(20) | **Only three.**
   `INITIAL_DEPOSIT` — mock funding 50M credited (+)
   `BUY` — gross + fee deducted (−)

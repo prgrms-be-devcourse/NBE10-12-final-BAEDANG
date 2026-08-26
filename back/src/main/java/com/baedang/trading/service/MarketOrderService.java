@@ -4,6 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -56,7 +57,8 @@ public class MarketOrderService {
     public OrderResponse place(Long userId, PlaceOrderRequest request) {
         if (request == null) throw new BusinessException(ErrorCode.INVALID_INPUT);
         MarketOrderCommand command = marketOrderPolicy.parseCommand(
-                request.clientOrderId(), request.symbol(), request.side(), request.quantity());
+                request.clientOrderId(), request.symbol(), request.marketCountry(),
+                request.side(), request.quantity());
 
         Optional<MarketOrderResult> existing = transactionService.findExisting(userId, command);
         if (existing.isPresent()) {
@@ -78,11 +80,18 @@ public class MarketOrderService {
 
     private MarketOrderExecutionContext prepareExecutionContext(MarketOrderCommand command) {
         Stock stock = stockRepository
-                .findBySymbolIgnoreCase(command.terms().symbol())
+                .findBySymbolIgnoreCaseAndMarketCountry(
+                        command.terms().symbol(), command.terms().marketCountry())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.STOCK_NOT_FOUND, "symbol=" + command.terms().symbol()));
+        ErrorCode staticRejection = marketOrderPolicy.determineStaticRejection(stock);
+        if (staticRejection != null) {
+            // 외부 조회와 주문 저장 전이므로 조건이 바뀐 뒤 같은 clientOrderId로 재시도할 수 있습니다.
+            throw new BusinessException(staticRejection);
+        }
         Instant checkedAt = clock.instant();
-        boolean marketOpen = marketSessionProvider.isOpen(stock.getMarketCountry(), checkedAt);
+        MarketSessionStatus session = marketSessionProvider.currentSession(
+                stock.getMarketCountry(), checkedAt);
         BigDecimal executionRate = BigDecimal.ONE;
         if (stock.getMarketCountry() == MarketCountry.US) {
             executionRate = exchangeRateProvider.currentUsdKrwRate();
@@ -91,6 +100,6 @@ public class MarketOrderService {
             }
         }
         return new MarketOrderExecutionContext(
-                stock.getMarketCountry(), marketOpen, executionRate, checkedAt);
+                stock.getMarketCountry(), session.open(), session.validUntil(), executionRate, checkedAt);
     }
 }

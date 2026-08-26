@@ -13,7 +13,14 @@ import java.time.Instant;
 public record MarketOrderExecutionContext(
         MarketCountry marketCountry,
         boolean marketOpen,
+        Instant marketOpenUntil,
         BigDecimal executionRate,
         Instant checkedAt
 ) {
+
+    public boolean isMarketOpenAt(Instant now) {
+        return marketOpen
+                && marketOpenUntil != null
+                && now.isBefore(marketOpenUntil);
+    }
 }

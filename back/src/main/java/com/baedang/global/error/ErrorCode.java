@@ -50,6 +50,7 @@ public enum ErrorCode {
 
     // ── 주문 · 체결 ─────────────────────────────────────────────────────────
     MARKET_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "지금은 거래할 수 없는 시간이에요"),
+    MARKET_CONTEXT_EXPIRED(HttpStatus.UNPROCESSABLE_ENTITY, "시장 정보를 다시 확인한 뒤 주문해주세요"),
     NOT_IN_UNIVERSE(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 아직 거래를 지원하지 않아요"),
     STOCK_SUSPENDED(HttpStatus.UNPROCESSABLE_ENTITY, "거래정지 종목이에요"),
     STOCK_LIQUIDATION(HttpStatus.UNPROCESSABLE_ENTITY, "정리매매 종목이에요"),

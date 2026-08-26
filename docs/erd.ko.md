@@ -238,12 +238,12 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 
 #### `ledger_entry` — 거래 원장
 **예수금이 움직인 모든 사건을 기록합니다. UPDATE 와 DELETE 를 하지 않는 것이 이 테이블의 존재 이유입니다.** 잘못 기록했으면 수정하지 말고 반대 부호 항목을 넣어 상쇄합니다.
-**항목은 세 가지뿐입니다 — `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료와 세금을 **별도 줄로 쪼개지 않고 매수·매도 금액에 포함**합니다. 원장 한 줄이 곧 `trade_order.net_amount` 하나에 대응하므로 목록이 절반으로 짧아지고 커서 처리도 단순해집니다. 대신 "지금까지 수수료로 얼마 썼나"는 원장만으로 뽑을 수 없습니다 — 그건 `SUM(trade_order.fee)` 로 언제든 구할 수 있으니 정보가 사라지지 않습니다.
+**항목은 세 가지뿐입니다 — `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료와 세금을 **별도 줄로 쪼개지 않고 매수·매도 금액에 포함**합니다. 정상 체결은 원장 한 줄이 `trade_order.net_amount` 하나에 대응하지만, append-only 정정이나 향후 부분 체결에서는 같은 `order_id`에 후속 행이 추가될 수 있습니다. 멱등 응답의 최초 체결 잔액은 `(order_id, entry_id)` 인덱스로 가장 이른 행을 조회합니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `entry_id` | BIGINT PK | 원장 번호. 시간순으로 증가. |
 | `account_id` | BIGINT FK | 어느 계좌의 원장인지. |
-| `order_id` | BIGINT FK, NULL | 원인이 된 주문. **최초 지급·초기화는 NULL.** |
+| `order_id` | BIGINT FK, NULL | 원인이 된 주문. **최초 지급·초기화는 NULL.** `(order_id, entry_id)` 인덱스로 주문별 원장을 시간순 조회. |
 | `entry_type` | VARCHAR(20) | **세 가지뿐.**
   `INITIAL_DEPOSIT` — 모의투자금 5천만원 지급 (+)
   `BUY` — gross + fee 차감 (−)

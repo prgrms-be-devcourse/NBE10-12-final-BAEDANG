@@ -10,7 +10,7 @@ public interface LedgerEntryRepository extends Repository<LedgerEntry, Long> {
 
     LedgerEntry save(LedgerEntry ledgerEntry);
 
-    Optional<LedgerEntry> findByOrderId(Long orderId);
+    Optional<LedgerEntry> findFirstByOrderIdOrderByEntryIdAsc(Long orderId);
 
     long countByAccountId(Long accountId);
 }

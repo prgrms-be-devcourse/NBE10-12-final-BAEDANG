@@ -77,7 +77,7 @@ class OrderQuoteServiceTest {
     void 시장가_매수_견적을_조회하고_데이터를_변경하지_않는다() {
         givenTradableKrStock(new BigDecimal("241500"), 5);
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "buy", "10");
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "buy", "10");
 
         assertThat(result.symbol()).isEqualTo("005930");
         assertThat(result.side().name()).isEqualTo("BUY");
@@ -94,10 +94,20 @@ class OrderQuoteServiceTest {
     void 국내_종목_견적은_환율을_조회하지_않는다() {
         givenTradableKrStock(new BigDecimal("241500"), 5);
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "BUY", "1");
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
 
         assertThat(result.exchangeRate()).isEqualTo("1");
         verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 시장구분이_없으면_종목을_조회하기_전에_거절한다() {
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", null, "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.INVALID_INPUT));
+
+        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
     }
 
     @Test
@@ -105,7 +115,7 @@ class OrderQuoteServiceTest {
         givenUsStock(new BigDecimal("100"));
         when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(null);
 
-        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "BUY", "1"))
+        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
@@ -118,7 +128,7 @@ class OrderQuoteServiceTest {
         givenUsStock(new BigDecimal("100"));
         when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(new BigDecimal(rate));
 
-        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "BUY", "1"))
+        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
@@ -130,7 +140,7 @@ class OrderQuoteServiceTest {
         givenTradableKrStock(new BigDecimal("241500"), 5);
         when(account.availableCash()).thenReturn(new BigDecimal("1000000"));
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "BUY", "10");
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "10");
 
         assertThat(result.executable()).isFalse();
         assertThat(result.reason()).isEqualTo(ErrorCode.INSUFFICIENT_CASH.name());
@@ -143,7 +153,7 @@ class OrderQuoteServiceTest {
         when(account.getAccountId()).thenReturn(11L);
         when(holdingRepository.findByAccountIdAndStockId(11L, 101L)).thenReturn(Optional.empty());
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "SELL", "1");
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "SELL", "1");
 
         assertThat(result.executable()).isFalse();
         assertThat(result.reason()).isEqualTo(ErrorCode.INSUFFICIENT_QUANTITY.name());
@@ -153,7 +163,7 @@ class OrderQuoteServiceTest {
     void 시세가_15초를_초과하면_오래된_시세로_판정한다() {
         givenTradableKrStock(new BigDecimal("241500"), 16);
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "BUY", "1");
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
 
         assertThat(result.executable()).isFalse();
         assertThat(result.reason()).isEqualTo(ErrorCode.STALE_QUOTE.name());
@@ -164,7 +174,7 @@ class OrderQuoteServiceTest {
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
                 .thenReturn(Optional.of(account));
         when(account.availableCash()).thenReturn(new BigDecimal("50000000"));
-        when(stockRepository.findBySymbolIgnoreCase("005930"))
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getSymbol()).thenReturn("005930");
@@ -178,7 +188,7 @@ class OrderQuoteServiceTest {
         );
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "BUY", "1");
+        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
 
         assertThat(result.reason()).isEqualTo(ErrorCode.NOT_IN_UNIVERSE.name());
         verifyNoInteractions(marketSessionProvider);
@@ -186,7 +196,7 @@ class OrderQuoteServiceTest {
 
     @Test
     void 소수점_수량은_조회전에_거절한다() {
-        assertThatThrownBy(() -> service.getQuote(1L, "005930", "BUY", "0.5"))
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "0.5"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
         verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
@@ -194,7 +204,7 @@ class OrderQuoteServiceTest {
 
     @Test
     void 백만주를_초과한_수량은_조회전에_거절한다() {
-        assertThatThrownBy(() -> service.getQuote(1L, "005930", "BUY", "1000001"))
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1000001"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
         verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
@@ -202,7 +212,7 @@ class OrderQuoteServiceTest {
 
     @Test
     void 지수표기_수량은_조회전에_거절한다() {
-        assertThatThrownBy(() -> service.getQuote(1L, "005930", "BUY", "1e5000000"))
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1e5000000"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
         verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
@@ -213,7 +223,7 @@ class OrderQuoteServiceTest {
                 .thenReturn(Optional.of(account));
         when(account.availableCash()).thenReturn(new BigDecimal("50000000"));
 
-        when(stockRepository.findBySymbolIgnoreCase("005930"))
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getSymbol()).thenReturn("005930");
@@ -232,7 +242,8 @@ class OrderQuoteServiceTest {
     private void givenUsStock(BigDecimal price) {
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
                 .thenReturn(Optional.of(account));
-        when(stockRepository.findBySymbolIgnoreCase("INTC")).thenReturn(Optional.of(stock));
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("INTC", MarketCountry.US))
+                .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
         QuoteSnapshot quote = new QuoteSnapshot(

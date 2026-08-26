@@ -4,6 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -47,18 +48,21 @@ class MarketOrderServiceTest {
     @Test
     void REJECTED가_커밋된_뒤_업무_예외로_변환한다() {
         PlaceOrderRequest request = new PlaceOrderRequest(
-                UUID.randomUUID().toString(), "005930", "BUY", "10");
+                UUID.randomUUID().toString(), "005930", "KR", "BUY", "10");
         MarketOrderCommand command = new MarketOrderCommand(
                 UUID.fromString(request.clientOrderId()),
-                new OrderTerms("005930", OrderSide.BUY, new BigDecimal("10")));
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, new BigDecimal("10")));
         when(marketOrderPolicy.parseCommand(
-                request.clientOrderId(), request.symbol(), request.side(), request.quantity()))
+                request.clientOrderId(), request.symbol(), request.marketCountry(),
+                request.side(), request.quantity()))
                 .thenReturn(command);
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", "KRW", "STOCK");
-        when(stockRepository.findBySymbolIgnoreCase("005930"))
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
                 .thenReturn(Optional.of(stock));
-        when(marketSessionProvider.isOpen(eq(MarketCountry.KR), any())).thenReturn(true);
+        when(marketSessionProvider.currentSession(eq(MarketCountry.KR), any()))
+                .thenReturn(new MarketSessionStatus(
+                        true, Instant.parse("2026-08-26T02:00:00Z")));
         when(transactionService.execute(eq(1L), eq(command), any(MarketOrderExecutionContext.class)))
                 .thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
 
@@ -82,6 +86,7 @@ class MarketOrderServiceTest {
         assertThat(contextCaptor.getValue()).isEqualTo(new MarketOrderExecutionContext(
                 MarketCountry.KR,
                 true,
+                Instant.parse("2026-08-26T02:00:00Z"),
                 BigDecimal.ONE,
                 Instant.parse("2026-08-26T01:00:00Z")));
         verifyNoInteractions(exchangeRateProvider);
@@ -90,12 +95,13 @@ class MarketOrderServiceTest {
     @Test
     void 멱등_재요청은_외부_시장정보를_조회하지_않는다() {
         PlaceOrderRequest request = new PlaceOrderRequest(
-                UUID.randomUUID().toString(), "005930", "BUY", "10");
+                UUID.randomUUID().toString(), "005930", "KR", "BUY", "10");
         MarketOrderCommand command = new MarketOrderCommand(
                 UUID.fromString(request.clientOrderId()),
-                new OrderTerms("005930", OrderSide.BUY, new BigDecimal("10")));
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, new BigDecimal("10")));
         when(marketOrderPolicy.parseCommand(
-                request.clientOrderId(), request.symbol(), request.side(), request.quantity()))
+                request.clientOrderId(), request.symbol(), request.marketCountry(),
+                request.side(), request.quantity()))
                 .thenReturn(command);
         when(transactionService.findExisting(1L, command))
                 .thenReturn(Optional.of(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH)));

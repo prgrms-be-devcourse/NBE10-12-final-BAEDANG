@@ -449,8 +449,10 @@ minute_candle 에 60초 이내 데이터가 있나?
 수수료 · 세금 미리보기
 
 ```
-?symbol=005930&side=BUY&quantity=10
+?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
+
+`marketCountry`는 `KR` 또는 `US`이며 필수입니다. 심볼은 시장마다 중복될 수 있으므로 서버는 `(symbol, marketCountry)`로 종목을 식별합니다.
 
 **Response**
 ```json
@@ -475,10 +477,13 @@ minute_candle 에 60초 이내 데이터가 있나?
 ```
 매수   netAmount = grossAmount + fee           (예수금에서 차감)
 매도   netAmount = grossAmount − fee − tax     (예수금으로 입금)
-grossAmount = executedPrice × quantity × exchangeRate
-fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공통)
-  tax         = KR grossAmount × 0.002                  (국내 매도만)
-             = max(USD grossAmount × 0.0000206, $0.01)  (미국 SEC Fee, 매도만)
+KR grossAmount = round(executedPriceKrw × quantity, 0)
+US priceUsd    = round(executedPriceUsd, 2)
+US grossAmount = round(priceUsd × quantity × exchangeRate, 0)
+fee            = round(grossAmount × 0.0001, 0)  거래 수수료 0.01% (매수·매도 공통)
+KR tax         = round(grossAmount × 0.002, 0)   (국내 매도만)
+US secFeeUsd   = round(max(priceUsd × quantity × 0.0000206, $0.01), 2)
+US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ```
 **예시 — 삼성전자 10주 @ 241,500**
 ```
@@ -486,7 +491,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 매도  gross 2,415,000 − fee   242 − tax 4,830  = 2,409,928 입금
 ```
 - **시장별 요율을 `.env` 설정값으로 두고 하드코딩하지 마세요.** 국내 매도 세금은 0.2%, 미국 매도는 증권거래세 대신 SEC Fee `0.0000206`과 최소 `$0.01`을 적용합니다. 거래 수수료 0.01%는 두 시장 모두 적용합니다.
-- **두 단계로 반올림합니다.** 미국 주문은 달러로 계산해 센트 단위로 먼저 반올림하고(`$0.01` 최소 포함), 최종 금액을 원화로 환산해 원 단위 **HALF_UP**으로 반올림합니다. 국내 주문은 원화 gross 를 먼저 반올림한 뒤 fee·tax 를 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
+- 통화 경계마다 **HALF_UP**으로 반올림합니다. 미국 주문은 주당 달러 가격을 센트로 먼저 반올림합니다. 그 가격으로 `grossKrw`를 계산하고, 거래 수수료와 `secFeeUsd → secFeeKrw`도 각각 원 단위로 반올림합니다. 국내 주문은 원화 gross를 먼저 반올림한 뒤 fee·tax를 각각 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
 - **견적과 실제 체결 사이에 가격이 바뀔 수 있습니다.** 견적은 참고값이고, 체결 시점에 서버가 다시 계산합니다.
 
 ### `POST /orders` 🔒
@@ -497,6 +502,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 {
   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10"
 }
@@ -531,16 +537,18 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 **서버 처리 순서**
 ```
 ① clientOrderId 조회 — 동일 요청 재시도면 저장된 결과 즉시 반환
-② 신규 주문만 장 운영 여부와 미국 주문 실행 환율 조회(국내 주문은 환율 조회 없이 1 사용)
-③ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
-④ 동시 요청 경쟁을 막기 위해 clientOrderId 재확인
-⑤ 검증 — 장 운영 · 거래 대상 · 거래정지 · 시세 시각 · 예수금/보유수량
-⑥ INSERT trade_order FILLED (유효한 업무 거절은 REJECTED)
-⑦ UPDATE account.cash_balance 및 UPSERT holding
-⑧ INSERT ledger_entry       (append only, FILLED만 기록)
+② 종목 조회 후 정적 검증 — 거래 대상 → 거래정지 → 정리매매
+③ 정적 검증 통과 시에만 장 운영 정보와 미국 주문 실행 환율 조회(국내는 환율 1)
+④ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
+⑤ 시장 컨텍스트 만료 검사 후 clientOrderId 재확인
+⑥ 시세 조회 및 매도 시 holding FOR UPDATE (락 순서: account → holding)
+⑦ 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
+⑧ INSERT trade_order FILLED (트랜잭션 내부의 유효한 업무 거절은 REJECTED)
+⑨ UPDATE account.cash_balance 및 holding 잠금·UPSERT
+⑩ INSERT ledger_entry (append only, FILLED만 기록)
 ```
 
-시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않으며, 주문 행을 구성할 수 없는 잘못된 요청 형식은 `REJECTED`를 저장하지 않고 요청 오류로 반환합니다.
+시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않습니다. 잘못된 요청 형식, 외부 시장 데이터 실패, 정적 사전 검증 실패, 락 대기 중 시장 컨텍스트 만료는 주문 행을 만들지 않으므로 조건이 회복된 뒤 같은 `clientOrderId`로 재시도할 수 있습니다. 트랜잭션에 진입한 뒤 확정된 `REJECTED`만 최종 결과로 보존합니다.
 
 시장가 주문 유스케이스는 최상위 트랜잭션 경계로만 실행합니다. 애플리케이션 진입점은 `Propagation.NEVER`로 외부 트랜잭션 안에서의 호출을 금지하고, 실제 DB 변경 서비스가 자체 `REQUIRED` 트랜잭션을 시작합니다. 따라서 커밋된 `REJECTED` 기록이 관련 없는 외부 업무의 롤백에 함께 사라지지 않습니다.
 
@@ -552,6 +560,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 | 코드 | HTTP | 화면 문구 |
 |---|---|---|
 | `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_CONTEXT_EXPIRED` | 422 | 시장 정보를 다시 확인한 뒤 주문해주세요 |
 | `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
 | `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
 | `STOCK_LIQUIDATION` | 422 | 정리매매 종목이에요 |

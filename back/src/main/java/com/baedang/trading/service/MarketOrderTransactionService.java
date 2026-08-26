@@ -106,9 +106,13 @@ public class MarketOrderTransactionService {
         // 거래 트랜잭션의 첫 DB 접근은 계좌 행 잠금입니다.
         Account account = accountRepository.findByUserIdAndStatusForUpdate(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
+        Instant now = clock.instant();
+        // 락 대기 중 만료된 컨텍스트는 주문 행 없이 롤백하여 같은 clientOrderId 재시도를 허용합니다.
+        marketOrderPolicy.validateExecutionContextFresh(executionContext, now);
 
         OrderTerms terms = command.terms();
-        Stock stock = stockRepository.findBySymbolIgnoreCase(terms.symbol())
+        Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(
+                        terms.symbol(), terms.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
         if (stock.getMarketCountry() != executionContext.marketCountry()) {
             throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
@@ -138,7 +142,6 @@ public class MarketOrderTransactionService {
                     .orElse(null)
                 : null;
         BigDecimal availableQuantity = holding == null ? BigDecimal.ZERO : holding.availableQuantity();
-        Instant now = clock.instant();
         OffsetDateTime orderedAt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
 
         ErrorCode rejection = marketOrderPolicy.determineRejection(
@@ -149,7 +152,7 @@ public class MarketOrderTransactionService {
                 terms.quantity(),
                 amount,
                 availableQuantity,
-                executionContext::marketOpen,
+                () -> executionContext.isMarketOpenAt(now),
                 now
         );
         if (rejection != null) {
@@ -211,7 +214,8 @@ public class MarketOrderTransactionService {
         if (order.getStatus() != OrderStatus.FILLED) {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER, "orderId=" + order.getOrderId());
         }
-        LedgerEntry ledgerEntry = ledgerEntryRepository.findByOrderId(order.getOrderId())
+        LedgerEntry ledgerEntry = ledgerEntryRepository
+                .findFirstByOrderIdOrderByEntryIdAsc(order.getOrderId())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.INTERNAL_ERROR, "filled order ledger missing: orderId=" + order.getOrderId()));
         return MarketOrderResult.filled(MarketOrderReceipt.from(
@@ -222,6 +226,7 @@ public class MarketOrderTransactionService {
         boolean same = order.getAccountId().equals(account.getAccountId())
                 && order.getStockId().equals(stock.getStockId())
                 && stock.getSymbol().equalsIgnoreCase(terms.symbol())
+                && stock.getMarketCountry() == terms.marketCountry()
                 && order.getOrderType() == OrderType.MARKET
                 && order.getSide() == terms.side()
                 && order.getQuantity().compareTo(terms.quantity()) == 0;
