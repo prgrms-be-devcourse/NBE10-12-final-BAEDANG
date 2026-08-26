@@ -1,6 +1,6 @@
 package com.baedang.market.client.toss;
 
-import com.baedang.global.client.toss.TossSecuritiesClient;
+import com.baedang.global.clients.toss.TossSecuritiesClient;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.client.toss.dto.TossCandleResponse;
@@ -10,17 +10,12 @@ import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceQuote;
 import org.springframework.stereotype.Component;
-// pr#11 반영
-// import com.baedang.global.clients.tossSecurities.TossSecuritiesClient;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-
-import static com.baedang.global.client.toss.TossPathWhitelist.CANDLES;
-import static com.baedang.global.client.toss.TossPathWhitelist.PRICES;
 
 @Component
 public class TossMarketDataAdapter implements MarketDataPort {
@@ -38,9 +33,7 @@ public class TossMarketDataAdapter implements MarketDataPort {
     public List<PriceQuote> fetchPrices(List<String> symbols) {
         validateSymbols(symbols);
         TossPriceResponse response = tossSecuritiesClient.get(
-                PRICES,
-                // pr#11 반영
-                // "/api/v1/prices",
+                "/api/v1/prices",
                 Map.of("symbols", String.join(",", symbols)),
                 TossPriceResponse.class
         );
@@ -75,9 +68,7 @@ public class TossMarketDataAdapter implements MarketDataPort {
             if (before != null) queryParams.put("before", before.toString());
 
             TossCandleResponse response = tossSecuritiesClient.get(
-                    CANDLES,
-                    // pr#11 반영
-                    // "/api/v1/candles",
+                    "/api/v1/candles",
                     Map.copyOf(queryParams),
                     TossCandleResponse.class
             );
@@ -146,18 +137,18 @@ public class TossMarketDataAdapter implements MarketDataPort {
                 || symbols.isEmpty()
                 || symbols.size() > MAX_PRICE_SYMBOLS_PER_REQUEST
                 || symbols.stream().anyMatch(
-                        symbol -> symbol == null || symbol.isBlank())) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,"현재가 심볼은 1~200개여아 함");
+                symbol -> symbol == null || symbol.isBlank())) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "현재가 심볼은 1~200개여아 함");
         }
     }
 
     private void validateCandleRequest(String symbol, CandleInterval interval, int count) {
         if (symbol == null || symbol.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,"캔들 종목 심볼이 비어 있음");
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "캔들 종목 심볼이 비어 있음");
         }
 
         if (interval == null || count <= 0) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT,"캔들 interval 또는 count가 올바르지 않음");
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "캔들 interval 또는 count가 올바르지 않음");
         }
     }
 
