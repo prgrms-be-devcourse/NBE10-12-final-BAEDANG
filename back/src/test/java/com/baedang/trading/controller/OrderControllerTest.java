@@ -1,5 +1,8 @@
 package com.baedang.trading.controller;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.global.error.GlobalExceptionHandler;
 import com.baedang.trading.dto.OrderQuoteResponse;
 import com.baedang.trading.dto.OrderResponse;
 import com.baedang.trading.dto.PlaceOrderRequest;
@@ -35,6 +38,7 @@ class OrderControllerTest {
     void setUp() {
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new OrderController(orderQuoteService, marketOrderService))
+                .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
     }
 
@@ -101,5 +105,28 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.grossAmount").value("2415000"))
                 .andExpect(jsonPath("$.netAmount").value("2415242"))
                 .andExpect(jsonPath("$.account.cashBalance").value("45824758"));
+    }
+
+    @Test
+    void 시장가_주문_업무거절을_표준_에러응답으로_변환한다() throws Exception {
+        PlaceOrderRequest request = new PlaceOrderRequest(
+                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "BUY", "10");
+        when(marketOrderService.place(1L, request))
+                .thenThrow(new BusinessException(ErrorCode.INSUFFICIENT_CASH));
+
+        mockMvc.perform(post("/api/orders")
+                        .header("X-User-Id", "1")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
+                                  "symbol": "005930",
+                                  "side": "BUY",
+                                  "quantity": "10"
+                                }
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("INSUFFICIENT_CASH"))
+                .andExpect(jsonPath("$.message").value("주문가능금액이 부족해요"));
     }
 }

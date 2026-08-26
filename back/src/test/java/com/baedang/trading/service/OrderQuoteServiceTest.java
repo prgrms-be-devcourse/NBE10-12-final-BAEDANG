@@ -65,7 +65,7 @@ class OrderQuoteServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 calculator,
-                new MarketOrderPolicy(15),
+                new MarketOrderPolicy(15, new BigDecimal("1000000")),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
@@ -126,7 +126,7 @@ class OrderQuoteServiceTest {
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
                 .thenReturn(Optional.of(account));
         when(account.availableCash()).thenReturn(new BigDecimal("50000000"));
-        when(stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc("005930"))
+        when(stockRepository.findBySymbolIgnoreCase("005930"))
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getSymbol()).thenReturn("005930");
@@ -154,12 +154,28 @@ class OrderQuoteServiceTest {
         verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
     }
 
+    @Test
+    void 백만주를_초과한_수량은_조회전에_거절한다() {
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "BUY", "1000001"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
+    }
+
+    @Test
+    void 지수표기_수량은_조회전에_거절한다() {
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "BUY", "1e5000000"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
+    }
+
     private void givenTradableKrStock(BigDecimal price, long quoteAgeSeconds) {
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
                 .thenReturn(Optional.of(account));
         when(account.availableCash()).thenReturn(new BigDecimal("50000000"));
 
-        when(stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc("005930"))
+        when(stockRepository.findBySymbolIgnoreCase("005930"))
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getSymbol()).thenReturn("005930");

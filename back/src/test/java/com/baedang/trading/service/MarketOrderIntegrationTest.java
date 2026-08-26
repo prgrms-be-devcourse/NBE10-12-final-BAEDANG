@@ -27,13 +27,16 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.annotation.DirtiesContext;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.MountableFile;
 
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -49,7 +52,7 @@ import static org.mockito.Mockito.when;
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(properties = {
-        "spring.jpa.hibernate.ddl-auto=create-drop",
+        "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
         "logging.level.org.hibernate.SQL=OFF"
 })
@@ -57,7 +60,11 @@ class MarketOrderIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
+            .withCopyFileToContainer(
+                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
+                            .toAbsolutePath().normalize()),
+                    "/docker-entrypoint-initdb.d/01-schema.sql");
 
     @MockitoBean MarketSessionProvider marketSessionProvider;
     @MockitoBean ExecutionExchangeRateProvider exchangeRateProvider;
@@ -70,6 +77,7 @@ class MarketOrderIntegrationTest {
     @Autowired HoldingRepository holdingRepository;
     @Autowired TradeOrderRepository tradeOrderRepository;
     @Autowired LedgerEntryRepository ledgerEntryRepository;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     @BeforeEach
     void setUpProviders() {
@@ -136,6 +144,46 @@ class MarketOrderIntegrationTest {
         assertThat(rejected.getRejectReason()).isEqualTo("INSUFFICIENT_CASH");
         assertThat(account.getCashBalance()).isEqualByComparingTo("10000");
         assertThat(ledgerEntryRepository.findByOrderId(rejected.getOrderId())).isEmpty();
+        assertThat(rejected.getReferencePrice()).isEqualByComparingTo("10000");
+        assertThat(rejected.getQuoteAt()).isNotNull();
+        assertThat(rejected.getExchangeRate()).isEqualByComparingTo("1");
+    }
+
+    @Test
+    void 같은_미국종목을_두번_매수하면_평균환율을_달러취득원가로_가중한다() {
+        Fixture fixture = createUsFixture(new BigDecimal("10000000"), new BigDecimal("100"));
+        when(exchangeRateProvider.currentUsdKrwRate())
+                .thenReturn(new BigDecimal("1300"), new BigDecimal("1400"));
+
+        marketOrderService.place(fixture.userId(), request(fixture.symbol(), "BUY", "10"));
+        QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
+        quote.updatePrice(new BigDecimal("200"), OffsetDateTime.now(ZoneOffset.UTC));
+        quoteSnapshotRepository.save(quote);
+
+        marketOrderService.place(fixture.userId(), request(fixture.symbol(), "BUY", "10"));
+
+        Account account = activeAccount(fixture.userId());
+        Holding holding = holdingRepository
+                .findByAccountIdAndStockId(account.getAccountId(), fixture.stockId()).orElseThrow();
+        assertThat(holding.getQuantity()).isEqualByComparingTo("20");
+        assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo("150.0000");
+        assertThat(holding.getAvgExchangeRate()).isEqualByComparingTo("1366.666667");
+        assertThat(account.getCashBalance()).isEqualByComparingTo("5899590");
+        assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(2);
+        assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(2);
+    }
+
+    @Test
+    void 운영_스키마의_보유수량_제약조건이_실제_DB에_적용된다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO holding (
+                    account_id, stock_id, quantity, locked_quantity,
+                    avg_buy_price, avg_exchange_rate
+                ) VALUES (?, ?, 1, 2, 10000, 1)
+                """, fixture.accountId(), fixture.stockId()))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
 
     @Test
@@ -216,12 +264,26 @@ class MarketOrderIntegrationTest {
     }
 
     private Fixture createKrFixture(BigDecimal initialCash, BigDecimal price) {
+        return createFixture(initialCash, price, MarketCountry.KR, "KOSPI", "KRW");
+    }
+
+    private Fixture createUsFixture(BigDecimal initialCash, BigDecimal price) {
+        return createFixture(initialCash, price, MarketCountry.US, "NASDAQ", "USD");
+    }
+
+    private Fixture createFixture(
+            BigDecimal initialCash,
+            BigDecimal price,
+            MarketCountry marketCountry,
+            String market,
+            String currency
+    ) {
         String suffix = UUID.randomUUID().toString();
         User user = userRepository.save(User.create(
                 suffix + "@example.com", "password-hash", "user-" + suffix.substring(0, 8)));
         Account account = accountRepository.save(Account.open(user.getUserId(), 1, initialCash));
         String symbol = suffix.substring(0, 6).toUpperCase();
-        Stock stock = Stock.create(symbol, MarketCountry.KR, "KOSPI", "테스트 종목", "KRW", "STOCK");
+        Stock stock = Stock.create(symbol, marketCountry, market, "테스트 종목", currency, "STOCK");
         stock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(stock);
         quoteSnapshotRepository.save(new QuoteSnapshot(

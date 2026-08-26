@@ -53,7 +53,7 @@ class MarketOrderServiceTest {
                 request.clientOrderId(), request.symbol(), request.side(), request.quantity()))
                 .thenReturn(command);
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", "KRW", "STOCK");
-        when(stockRepository.findFirstBySymbolIgnoreCaseOrderByStockIdAsc("005930"))
+        when(stockRepository.findBySymbolIgnoreCase("005930"))
                 .thenReturn(Optional.of(stock));
         when(marketSessionProvider.isOpen(eq(MarketCountry.KR), any())).thenReturn(true);
         when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(new BigDecimal("1383.60"));
