@@ -16,6 +16,7 @@ public enum Whitelist {
 
     // ── Stock Info ──────────────────────────────────────────────────────────
     STOCKS("/api/v1/stocks"),
+    STOCKS_ALL("/api/v1/stocks/all"),
     STOCK_WARNINGS("/api/v1/stocks/{symbol}/warnings"),
 
     // ── Ranking ─────────────────────────────────────────────────────────────
