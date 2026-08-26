@@ -3,18 +3,14 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Tag } from "@/components/Tag";
-import {
-  KR_RANKINGS,
-  US_RANKINGS,
-  SEARCHABLE_STOCKS,
-  USD_KRW_RATE,
-  type MarketCountry,
-} from "@/lib/mock-data";
+import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry } from "@/lib/mock-data";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
 const PAGE_SIZE = 20;
 
 export default function RankingsPage() {
+  const { rate, updatedAt, isLoading: rateLoading } = useExchangeRate();
   const [market, setMarket] = useState<MarketCountry>("KR");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
@@ -54,14 +50,15 @@ export default function RankingsPage() {
         거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
       </p>
 
-      {/* 환율 배너 */}
+      {/* 환율 배너 — 정책상 거래는 원화로만 제공되어, 미국 종목 표시는 이 환율로 환산합니다 */}
       <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2 text-[12.5px]">
         <span className="font-bold text-gray-900">USD / KRW</span>
         <span className="text-[14px] font-bold tabular-nums text-gray-900">
-          {formatNumber(USD_KRW_RATE)}
+          {rateLoading ? "불러오는 중…" : formatNumber(rate)}
         </span>
-        <span className="font-semibold text-gray-700">▲ 2.30 (+0.16%)</span>
-        <span className="text-gray-400">15:00 기준</span>
+        <span className="text-gray-400">
+          {updatedAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 기준 · 1시간마다 갱신
+        </span>
         <span
           className="ml-auto cursor-default text-gray-300"
           title="환율 추이 그래프는 2주차 MVP 예정입니다"
@@ -148,8 +145,11 @@ export default function RankingsPage() {
         <tbody>
           {shown.map((item) => {
             const isUp = item.changeAmount >= 0;
-            const price = item.currency === "USD" ? formatUsd(item.lastPrice) : formatNumber(item.lastPrice);
-            const change = item.currency === "USD" ? formatUsd(item.changeAmount) : formatSigned(item.changeAmount);
+            const isUsd = item.currency === "USD";
+            // 정책상 원화만 거래에 쓰이므로, 미국 종목은 원화 환산액을 우선 표시하고
+            // 원래 달러 값은 보조 텍스트로 같이 보여준다.
+            const krwPrice = isUsd ? item.lastPrice * rate : item.lastPrice;
+            const krwChange = isUsd ? item.changeAmount * rate : item.changeAmount;
             return (
               <tr key={item.symbol}>
                 <td className="border-b border-gray-100 py-2.5 text-gray-500">{item.rank}</td>
@@ -160,13 +160,21 @@ export default function RankingsPage() {
                 <td className="border-b border-gray-100 py-2.5">
                   <Tag variant="dark">{item.category}</Tag>
                 </td>
-                <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{price}</td>
+                <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">
+                  {formatNumber(krwPrice)}
+                  {isUsd && <div className="text-[10.5px] text-gray-400">{formatUsd(item.lastPrice)}</div>}
+                </td>
                 <td
                   className={`border-b border-gray-100 py-2.5 text-right tabular-nums ${
                     isUp ? "font-semibold text-gray-900" : "text-gray-400"
                   }`}
                 >
-                  {isUp ? "▲" : "▼"} {change} ({formatPercent(item.changeRate)})
+                  {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
+                  {isUsd && (
+                    <div className="font-normal text-[10.5px] text-gray-400">
+                      {isUp ? "▲" : "▼"} {formatUsd(item.changeAmount)}
+                    </div>
+                  )}
                 </td>
                 <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">
                   {formatKoreanAmount(item.tradingAmount)}

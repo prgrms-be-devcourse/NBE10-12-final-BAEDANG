@@ -3,34 +3,35 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Tag } from "@/components/Tag";
+import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import {
   AVAILABLE_CASH,
   INITIAL_CASH,
   MOCK_HOLDINGS,
   MOCK_LEDGER,
-  USD_KRW_RATE,
   type Holding,
   type LedgerEntry,
 } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
-function toKrw(value: number, currency: "KRW" | "USD") {
-  return currency === "USD" ? value * USD_KRW_RATE : value;
+function toKrw(value: number, currency: "KRW" | "USD", usdKrwRate: number) {
+  return currency === "USD" ? value * usdKrwRate : value;
 }
 
 export default function MyPage() {
+  const { rate } = useExchangeRate();
   const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
   const [holdings, setHoldings] = useState<Holding[]>(MOCK_HOLDINGS);
   const [ledger, setLedger] = useState<LedgerEntry[]>(MOCK_LEDGER);
   const [cash, setCash] = useState(AVAILABLE_CASH);
 
   const stockValue = useMemo(
-    () => holdings.reduce((sum, h) => sum + toKrw(h.quantity * h.lastPrice, h.currency), 0),
-    [holdings]
+    () => holdings.reduce((sum, h) => sum + toKrw(h.quantity * h.lastPrice, h.currency, rate), 0),
+    [holdings, rate]
   );
   const costBasis = useMemo(
-    () => holdings.reduce((sum, h) => sum + toKrw(h.quantity * h.avgBuyPrice, h.currency), 0),
-    [holdings]
+    () => holdings.reduce((sum, h) => sum + toKrw(h.quantity * h.avgBuyPrice, h.currency, rate), 0),
+    [holdings, rate]
   );
   const pnl = stockValue - costBasis;
   const pnlRate = costBasis > 0 ? pnl / costBasis : 0;
@@ -110,19 +111,27 @@ export default function MyPage() {
               </thead>
               <tbody>
                 {holdings.map((h) => {
-                  const value = toKrw(h.quantity * h.lastPrice, h.currency);
-                  const cost = toKrw(h.quantity * h.avgBuyPrice, h.currency);
+                  const isUsd = h.currency === "USD";
+                  const value = toKrw(h.quantity * h.lastPrice, h.currency, rate);
+                  const cost = toKrw(h.quantity * h.avgBuyPrice, h.currency, rate);
                   const hPnl = value - cost;
                   const hRate = cost > 0 ? hPnl / cost : 0;
-                  const fmt = (v: number) => (h.currency === "USD" ? formatUsd(v) : formatNumber(v));
+                  // 정책상 원화만 거래에 쓰이므로, 미국 종목은 단가도 원화 환산액을
+                  // 우선 표시하고 원래 달러 값은 보조 텍스트로 같이 보여준다.
+                  const priceCell = (usdValue: number) => (
+                    <>
+                      {formatNumber(toKrw(usdValue, h.currency, rate))}
+                      {isUsd && <div className="text-[10.5px] text-gray-400">{formatUsd(usdValue)}</div>}
+                    </>
+                  );
                   return (
                     <tr key={h.symbol}>
                       <td className="border-b border-gray-100 py-2.5">
                         {h.name} <Tag>{h.symbol}</Tag>
                       </td>
                       <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{h.quantity}</td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{fmt(h.avgBuyPrice)}</td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{fmt(h.lastPrice)}</td>
+                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{priceCell(h.avgBuyPrice)}</td>
+                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{priceCell(h.lastPrice)}</td>
                       <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{formatNumber(value)}</td>
                       <td
                         className={`border-b border-gray-100 py-2.5 text-right tabular-nums ${
@@ -145,7 +154,7 @@ export default function MyPage() {
               </tbody>
             </table>
             <div className="mt-2.5 text-[11.5px] text-gray-400">
-              해외 종목 평가금액은 적용 환율({formatNumber(USD_KRW_RATE)} KRW/USD)로 환산
+              해외 종목 금액은 적용 환율({formatNumber(rate)} KRW/USD)로 환산 · 매시 정각 갱신
             </div>
           </>
         )

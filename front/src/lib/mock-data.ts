@@ -240,8 +240,6 @@ export const MOCK_HOLDINGS: Holding[] = [
   { symbol: "NVDA", name: "엔비디아", market: "US", currency: "USD", quantity: 3, avgBuyPrice: 168.2, lastPrice: 182.4 },
 ];
 
-export const USD_KRW_RATE = 1398.5;
-
 export type LedgerEntry = {
   type: "매수" | "매도" | "초기지급";
   memo: string;
