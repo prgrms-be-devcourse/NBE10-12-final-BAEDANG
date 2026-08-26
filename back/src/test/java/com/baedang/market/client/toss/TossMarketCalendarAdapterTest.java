@@ -1,7 +1,6 @@
 package com.baedang.market.client.toss;
 
-import com.baedang.global.client.toss.TossApiProperties;
-import com.baedang.global.client.toss.TossSecuritiesClient;
+import com.baedang.global.clients.toss.TossSecuritiesClient;
 import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.port.MarketCalendarDay;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -40,9 +39,7 @@ class TossMarketCalendarAdapterTest {
         configureFor("localhost", wireMockServer.port());
         stubFor(post(urlEqualTo("/oauth2/token")).willReturn(okJson(TOKEN_RESPONSE)));
 
-        TossApiProperties properties = new TossApiProperties(
-                "http://localhost:" + wireMockServer.port(), "test-id", "test-secret", true);
-        TossSecuritiesClient client = new TossSecuritiesClient(RestClient.builder(), properties);
+        TossSecuritiesClient client = new TossSecuritiesClient(RestClient.builder(), "http://localhost:" + wireMockServer.port(), "test-id", "test-secret");
         adapter = new TossMarketCalendarAdapter(client);
     }
 
