@@ -82,14 +82,14 @@ export default function MainPage() {
             <div className="mt-5 flex gap-2.5">
               <Link
                 href="/rankings"
-                className="rounded-md px-6 py-3 text-[14px] font-bold"
+                className="rounded-lg px-6 py-3 text-[14px] font-bold"
                 style={{ background: "var(--ctaBtn)", color: "var(--ctaBtnText)" }}
               >
                 모의 투자금 받고 시작하기
               </Link>
               <Link
                 href="/guide"
-                className="rounded-md px-5 py-3 text-[14px] font-semibold"
+                className="rounded-lg px-5 py-3 text-[14px] font-semibold"
                 style={{ background: "#ffffff", color: "#000000" }}
               >
                 이용가이드 보기
