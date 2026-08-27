@@ -1,28 +1,40 @@
-/** 화면 표시용 포맷 유틸. 백엔드가 붙기 전까지는 프론트에서만 쓰는 임시 함수들입니다. */
+import { D } from "./decimal";
+import type Decimal from "decimal.js";
 
-export function formatNumber(value: number): string {
-  return new Intl.NumberFormat("ko-KR").format(Math.round(value));
+/** 포맷 함수가 받을 수 있는 숫자 타입 (문자열, 숫자, Decimal 인스턴스) */
+export type NumericValue = number | string | Decimal;
+
+export function formatNumber(value: NumericValue): string {
+  const d = new D(value).toDecimalPlaces(0);
+  const parts = d.toString().split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return parts.join(".");
 }
 
-/** 1,240,000,000,000 → "1.24조" 같은 한국식 축약 표기. 거래대금 표시용. */
-export function formatKoreanAmount(value: number): string {
-  const eok = 100_000_000;
-  const jo = 1_000_000_000_000;
-  if (value >= jo) return `${(value / jo).toFixed(2)}조`;
-  if (value >= eok) return `${Math.round(value / eok)}억`;
-  return formatNumber(value);
+/** 1,240,000,000,000 → "1.24조", 10,000,000,000 → "100억" 같은 한국식 축약 표기. 거래대금 표시용. */
+export function formatKoreanAmount(value: NumericValue): string {
+  const d = new D(value);
+  const eok = new D(100_000_000);
+  const jo = new D(1_000_000_000_000);
+
+  if (d.gte(jo)) return `${d.dividedBy(jo).toFixed(2)}조`;
+  if (d.gte(eok)) return `${formatNumber(d.dividedBy(eok).toDecimalPlaces(0))}억`;
+  return formatNumber(d);
 }
 
-export function formatSigned(value: number): string {
-  const sign = value > 0 ? "+" : value < 0 ? "" : "±";
-  return `${sign}${formatNumber(value)}`;
+export function formatSigned(value: NumericValue): string {
+  const d = new D(value);
+  const sign = d.gt(0) ? "+" : d.lt(0) ? "" : "±";
+  return `${sign}${formatNumber(d)}`;
 }
 
-export function formatPercent(rate: number): string {
-  const sign = rate > 0 ? "+" : "";
-  return `${sign}${(rate * 100).toFixed(2)}%`;
+export function formatPercent(rate: NumericValue): string {
+  const d = new D(rate);
+  const sign = d.gt(0) ? "+" : "";
+  return `${sign}${d.times(100).toFixed(2)}%`;
 }
 
-export function formatUsd(value: number): string {
-  return `$${value.toFixed(2)}`;
+export function formatUsd(value: NumericValue): string {
+  const d = new D(value);
+  return `$${d.toFixed(2)}`;
 }
