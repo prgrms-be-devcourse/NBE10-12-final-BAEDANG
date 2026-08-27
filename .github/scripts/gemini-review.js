@@ -21,7 +21,7 @@ const QUOTA_NOTICE = `
 
 > ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 const MAX_DIFF_LEN = 80_000;
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 120_000;
 const DIFF_PATHS = [
   '.',
   ':(exclude)**/package-lock.json',
