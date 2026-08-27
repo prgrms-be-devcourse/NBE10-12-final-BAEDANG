@@ -195,12 +195,13 @@ const requestData = JSON.stringify({
   generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
 });
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent';
+const MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
 
-function sendGeminiRequest() {
+function sendGeminiRequest(model) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   return new Promise((resolve, reject) => {
     const req = https.request(
-      GEMINI_URL,
+      url,
       {
         method: 'POST',
         headers: {
@@ -239,65 +240,76 @@ function sleep(ms) {
 async function run() {
   let lastError = null;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      console.log(`Calling Gemini API (Attempt ${attempt}/${MAX_RETRIES})...`);
-      const { statusCode, body } = await sendGeminiRequest();
+  for (const model of MODELS) {
+    console.log(`\n[INFO] Attempting code review with model: ${model}`);
 
-      // 1. Success (2xx)
-      if (statusCode >= 200 && statusCode < 300) {
-        const json = JSON.parse(body);
-        const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!reviewText || !reviewText.trim()) {
-          handleGracefulNotice('Empty review text returned', NOTICE_EMPTY);
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`Calling ${model} (Attempt ${attempt}/${MAX_RETRIES})...`);
+        const { statusCode, body } = await sendGeminiRequest(model);
+
+        // 1. Success (2xx)
+        if (statusCode >= 200 && statusCode < 300) {
+          const json = JSON.parse(body);
+          const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (!reviewText || !reviewText.trim()) {
+            handleGracefulNotice('Empty review text returned', NOTICE_EMPTY);
+            return;
+          }
+
+          const modelDisplayName = model === 'gemini-3.6-flash' ? 'Gemini 3.6 Flash' : 'Gemini 3.5 Flash';
+          const commentBody =
+            `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n` +
+            `*이 리뷰는 GitHub Actions와 ${modelDisplayName}에 의해 자동으로 생성·갱신되었습니다.*`;
+
+          upsertComment(commentBody);
           return;
         }
 
-        const commentBody =
-          `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n` +
-          '*이 리뷰는 GitHub Actions와 Gemini 3.7 Flash에 의해 자동으로 생성·갱신되었습니다.*';
+        // 2. Quota exceeded (429) -> Graceful skip with quota notice
+        if (statusCode === 429) {
+          handleGracefulNotice('Gemini API quota exceeded (429)', NOTICE_QUOTA);
+          return;
+        }
 
-        upsertComment(commentBody);
-        return;
-      }
+        // 3. Transient server error (500, 502, 503, 504) -> Retry or fallback to next model
+        if (statusCode >= 500) {
+          console.warn(`[WARN] ${model} returned server error ${statusCode}: ${body}`);
+          if (attempt < MAX_RETRIES) {
+            const waitMs = attempt * 3000;
+            console.log(`Waiting ${waitMs / 1000}s before retry on ${model}...`);
+            await sleep(waitMs);
+            continue;
+          } else {
+            console.warn(`[WARN] Retries exhausted for ${model}. Falling back to next model.`);
+            break; // Try next model in MODELS
+          }
+        }
 
-      // 2. Quota exceeded (429) -> Graceful skip with quota notice
-      if (statusCode === 429) {
-        handleGracefulNotice('Gemini API quota exceeded (429)', NOTICE_QUOTA);
-        return;
-      }
+        // 4. Model not found (404) -> Fallback to next model
+        if (statusCode === 404) {
+          console.warn(`[WARN] Model ${model} returned 404 Not Found. Falling back to next model.`);
+          break; // Try next model in MODELS
+        }
 
-      // 3. Transient server error (500, 502, 503, 504) -> Retry with backoff
-      if (statusCode >= 500) {
-        console.warn(`[WARN] Gemini API returned server error ${statusCode}: ${body}`);
+        // 5. Other client errors (400, 401, 403) -> Fail CI to surface misconfiguration
+        console.error(`[ERROR] Gemini API returned status ${statusCode}: ${body}`);
+        process.exit(1);
+
+      } catch (err) {
+        console.warn(`[WARN] Network error on ${model} (Attempt ${attempt}): ${err.message}`);
+        lastError = err;
         if (attempt < MAX_RETRIES) {
-          const waitMs = attempt * 5000;
-          console.log(`Waiting ${waitMs / 1000}s before retry...`);
+          const waitMs = attempt * 3000;
+          console.log(`Waiting ${waitMs / 1000}s before retry on ${model}...`);
           await sleep(waitMs);
-          continue;
-        } else {
-          handleGracefulNotice(`Gemini server error (${statusCode}) after ${MAX_RETRIES} attempts`, NOTICE_SERVER_OVERLOAD);
-          return;
         }
-      }
-
-      // 4. Fatal client errors (400, 401, 403, 404) -> Fail CI to surface misconfiguration
-      console.error(`[ERROR] Gemini API returned status ${statusCode}: ${body}`);
-      process.exit(1);
-
-    } catch (err) {
-      console.warn(`[WARN] Network error on attempt ${attempt}: ${err.message}`);
-      lastError = err;
-      if (attempt < MAX_RETRIES) {
-        const waitMs = attempt * 5000;
-        console.log(`Waiting ${waitMs / 1000}s before retry...`);
-        await sleep(waitMs);
       }
     }
   }
 
-  // If retries exhausted on network/timeout errors -> Graceful skip with server overload notice
-  handleGracefulNotice(`Network/timeout error (${lastError?.message}) after ${MAX_RETRIES} attempts`, NOTICE_SERVER_OVERLOAD);
+  // If all models and retries exhausted -> Graceful skip with server overload notice
+  handleGracefulNotice(`All models exhausted (${lastError?.message || 'Server Overload'})`, NOTICE_SERVER_OVERLOAD);
 }
 
 run();
