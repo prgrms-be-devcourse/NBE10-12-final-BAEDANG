@@ -117,12 +117,19 @@ let _cachedComment = undefined;
 function getExistingComment() {
   if (_cachedComment !== undefined) return _cachedComment;
   try {
-    const raw = execSync(
-      `gh api repos/${repo}/issues/${prNumber}/comments --paginate`,
+    const raw = execFileSync(
+      'gh',
+      [
+        'api',
+        `repos/${repo}/issues/${prNumber}/comments`,
+        '--paginate',
+        '--jq',
+        `[.[] | select(.body | contains("${TAG}"))] | first`,
+      ],
       { env: { ...process.env, GITHUB_TOKEN: ghToken }, encoding: 'utf8' }
-    );
-    const comments = JSON.parse(raw);
-    _cachedComment = comments.find(c => c.body && c.body.includes(TAG)) || null;
+    ).trim();
+
+    _cachedComment = raw && raw !== 'null' ? JSON.parse(raw) : null;
   } catch (err) {
     console.error('Failed to query existing PR comments:', err.message);
     _cachedComment = null;
@@ -136,14 +143,16 @@ function upsertComment(body) {
   const existing = getExistingComment();
 
   if (existing) {
-    execSync(
-      `gh api -X PATCH repos/${repo}/issues/comments/${existing.id} --input -`,
+    execFileSync(
+      'gh',
+      ['api', '-X', 'PATCH', `repos/${repo}/issues/comments/${existing.id}`, '--input', '-'],
       { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload, encoding: 'utf8' }
     );
     console.log(`Successfully updated existing Gemini code review comment (ID: ${existing.id}) on PR #${prNumber}`);
   } else {
-    execSync(
-      `gh api -X POST repos/${repo}/issues/${prNumber}/comments --input -`,
+    execFileSync(
+      'gh',
+      ['api', '-X', 'POST', `repos/${repo}/issues/${prNumber}/comments`, '--input', '-'],
       { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload, encoding: 'utf8' }
     );
     console.log(`Successfully posted new Gemini code review comment on PR #${prNumber}`);

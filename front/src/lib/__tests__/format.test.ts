@@ -68,6 +68,11 @@ describe('formatKoreanAmount', () => {
   it('조 경계 바로 아래 (999,999,999,999) → 억 단위에 콤마 정상 적용 ("10,000억")', () => {
     expect(formatKoreanAmount(999_999_999_999)).toBe('10,000억');
   });
+
+  it('음수 금액 지원 (-520,000,000 → "-5억", -1,240,000,000,000 → "-1.24조")', () => {
+    expect(formatKoreanAmount(-520_000_000)).toBe('-5억');
+    expect(formatKoreanAmount(-1_240_000_000_000)).toBe('-1.24조');
+  });
 });
 
 describe('formatSigned', () => {
@@ -133,6 +138,37 @@ describe('formatUsd', () => {
 
   it('0 → "$0.00"', () => {
     expect(formatUsd(0)).toBe('$0.00');
+  });
+});
+
+describe('비정상 입력(null / undefined / "" / NaN) 방어 (React 렌더 크래시 방지)', () => {
+  it('formatNumber: null, undefined, "", NaN 입력 시 기본 fallback ("-") 반환 (예외 안 던짐)', () => {
+    expect(formatNumber(null)).toBe('-');
+    expect(formatNumber(undefined)).toBe('-');
+    expect(formatNumber('')).toBe('-');
+    expect(formatNumber(NaN)).toBe('-');
+    expect(formatNumber(null, '0')).toBe('0');
+  });
+
+  it('formatUsd: null, undefined 입력 시 fallback ("-") 반환', () => {
+    expect(formatUsd(null)).toBe('-');
+    expect(formatUsd(undefined)).toBe('-');
+    expect(formatUsd('', '$0.00')).toBe('$0.00');
+  });
+
+  it('formatKoreanAmount: null, undefined 입력 시 fallback ("-") 반환', () => {
+    expect(formatKoreanAmount(null)).toBe('-');
+    expect(formatKoreanAmount(undefined)).toBe('-');
+  });
+
+  it('formatSigned: null, undefined 입력 시 fallback ("-") 반환', () => {
+    expect(formatSigned(null)).toBe('-');
+    expect(formatSigned(undefined)).toBe('-');
+  });
+
+  it('formatPercent: null, undefined 입력 시 fallback ("-") 반환', () => {
+    expect(formatPercent(null)).toBe('-');
+    expect(formatPercent(undefined)).toBe('-');
   });
 });
 
