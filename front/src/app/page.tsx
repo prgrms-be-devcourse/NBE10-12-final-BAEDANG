@@ -95,7 +95,7 @@ export default function MainPage() {
                 이용가이드 보기
               </Link>
             </div>
-            <div className="mt-3.5 text-[12px]" style={{ color: "var(--heroSub)" }}>
+            <div className="mt-3.5 text-[14px]" style={{ color: "var(--heroSub)" }}>
               실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요
             </div>
           </div>
