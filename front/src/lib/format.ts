@@ -24,8 +24,9 @@ export function formatKoreanAmount(value: NumericValue): string {
 
 export function formatSigned(value: NumericValue): string {
   const d = new D(value);
-  const sign = d.gt(0) ? "+" : d.lt(0) ? "" : "±";
-  return `${sign}${formatNumber(d)}`;
+  const rounded = d.toDecimalPlaces(0);
+  const sign = rounded.gt(0) ? "+" : rounded.lt(0) ? "" : "±";
+  return `${sign}${formatNumber(rounded)}`;
 }
 
 export function formatPercent(rate: NumericValue): string {

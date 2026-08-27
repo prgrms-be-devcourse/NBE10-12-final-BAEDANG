@@ -26,6 +26,17 @@ const DIFF_PATHS = [
   ':(exclude)**/package-lock.json',
   ':(exclude)**/yarn.lock',
   ':(exclude)**/pnpm-lock.yaml',
+  ':(exclude)**/*.png',
+  ':(exclude)**/*.jpg',
+  ':(exclude)**/*.jpeg',
+  ':(exclude)**/*.gif',
+  ':(exclude)**/*.svg',
+  ':(exclude)**/*.ico',
+  ':(exclude)**/*.webp',
+  ':(exclude)**/*.woff',
+  ':(exclude)**/*.woff2',
+  ':(exclude)**/*.ttf',
+  ':(exclude)**/*.eot',
 ];
 
 // ---------------------------------------------------------------------------
@@ -146,7 +157,7 @@ const prompt = [
 
 const requestData = JSON.stringify({
   contents: [{ parts: [{ text: prompt }] }],
-  generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+  generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
 });
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';

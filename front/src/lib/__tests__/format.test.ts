@@ -79,8 +79,18 @@ describe('formatSigned', () => {
     expect(formatSigned(-1234)).toBe('-1,234');
   });
 
-  it('0 → "±0"', () => {
+  it('정수 0 → "±0"', () => {
     expect(formatSigned(0)).toBe('±0');
+  });
+
+  it('반올림 시 0이 되는 소수값(+0.4, -0.4) → "+0"이나 "-0" 대신 "±0"으로 일관 표기', () => {
+    expect(formatSigned(0.4)).toBe('±0');
+    expect(formatSigned(-0.4)).toBe('±0');
+    expect(formatSigned('0.49')).toBe('±0');
+  });
+
+  it('반올림 시 1이 되는 소수값(+0.5) → "+1"', () => {
+    expect(formatSigned(0.5)).toBe('+1');
   });
 });
 
