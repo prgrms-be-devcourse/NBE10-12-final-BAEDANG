@@ -7,6 +7,7 @@ import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
 import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry, type RankingItem } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
@@ -21,6 +22,7 @@ const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우�
 
 export default function RankingsPage() {
   const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
@@ -148,7 +150,7 @@ export default function RankingsPage() {
           </svg>
           <input
             className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[15px] outline-none"
-            style={{ background: "#ffffff", color: "var(--ink)" }}
+            style={{ background: theme === "dark" ? "var(--card)" : "#ffffff", color: "var(--ink)" }}
             placeholder="티커 또는 종목명으로 검색 (2자 이상)"
             value={query}
             onFocus={() => setSearchOpen(true)}
