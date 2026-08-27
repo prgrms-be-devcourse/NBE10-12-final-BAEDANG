@@ -16,12 +16,14 @@ const baseRef   = process.env.BASE_REF || process.env.GITHUB_BASE_REF || 'develo
 const repo      = process.env.REPO;
 const ghToken   = process.env.GITHUB_TOKEN;
 
-const TAG          = '<!-- GEMINI_AI_REVIEW -->';
-const QUOTA_NOTICE = `
+const TAG                   = '<!-- GEMINI_AI_REVIEW -->';
+const NOTICE_QUOTA          = `\n\n> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
+const NOTICE_SERVER_OVERLOAD = `\n\n> ※ 안내: Google AI 서버의 일시적인 과부하(503/Timeout)로 인해 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
+const NOTICE_EMPTY          = `\n\n> ※ 안내: Gemini API로부터 유효한 응답을 받지 못하여 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 
-> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 const MAX_DIFF_LEN = 80_000;
-const REQUEST_TIMEOUT_MS = 120_000;
+const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_RETRIES = 3;
 const DIFF_PATHS = [
   '.',
   ':(exclude)**/package-lock.json',
@@ -101,8 +103,8 @@ function getExistingComment() {
   try {
     const raw = execSync(
       `gh api repos/${repo}/issues/${prNumber}/comments --paginate`,
-      { env: { ...process.env, GITHUB_TOKEN: ghToken } }
-    ).toString();
+      { env: { ...process.env, GITHUB_TOKEN: ghToken }, encoding: 'utf8' }
+    );
     const comments = JSON.parse(raw);
     _cachedComment = comments.find(c => c.body && c.body.includes(TAG)) || null;
   } catch (err) {
@@ -120,34 +122,34 @@ function upsertComment(body) {
   if (existing) {
     execSync(
       `gh api -X PATCH repos/${repo}/issues/comments/${existing.id} --input -`,
-      { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload }
+      { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload, encoding: 'utf8' }
     );
     console.log(`Successfully updated existing Gemini code review comment (ID: ${existing.id}) on PR #${prNumber}`);
   } else {
     execSync(
       `gh api -X POST repos/${repo}/issues/${prNumber}/comments --input -`,
-      { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload }
+      { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload, encoding: 'utf8' }
     );
     console.log(`Successfully posted new Gemini code review comment on PR #${prNumber}`);
   }
 }
 
-/** Appends a quota-exceeded notice to the existing review comment (if any). */
-function handleQuotaExceededNotice(reason) {
-  console.warn(`[WARN] ${reason}. Preserving existing review with quota notice.`);
+/** Gracefully handles non-fatal API issues (quota, temporary overload) by preserving existing review. */
+function handleGracefulNotice(reason, noticeText) {
+  console.warn(`[WARN] ${reason}. Preserving existing review with notice.`);
   const existing = getExistingComment();
-  if (existing && !existing.body.includes('할당량(Quota) 초과로 건너뛰어졌습니다')) {
+  if (existing && !existing.body.includes('건너뛰어졌습니다')) {
     try {
-      upsertComment(existing.body + QUOTA_NOTICE);
+      upsertComment(existing.body + noticeText);
     } catch (e) {
-      console.error('Failed to append quota notice:', e.message);
+      console.error('Failed to append notice to comment:', e.message);
     }
   }
   process.exit(0);
 }
 
 // ---------------------------------------------------------------------------
-// Build prompt and call Gemini API
+// Build prompt and call Gemini API with retry
 // ---------------------------------------------------------------------------
 const prompt = [
   guidelines,
@@ -170,38 +172,59 @@ const requestData = JSON.stringify({
 
 const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent';
 
-const req = https.request(
-  GEMINI_URL,
-  {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(requestData),
-      'x-goog-api-key': apiKey,   // API key via header — safer than URL query param
-    },
-  },
-  (res) => {
-    res.setEncoding('utf8');
-    let body = '';
-    res.on('data', (chunk) => { body += chunk; });
-    res.on('end', () => {
-      // 429 → quota exhausted: preserve existing review gracefully
-      if (res.statusCode === 429) {
-        handleQuotaExceededNotice(`Gemini API rate-limited (429)`);
-        return;
+function sendGeminiRequest() {
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      GEMINI_URL,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(requestData),
+          'x-goog-api-key': apiKey,
+        },
+      },
+      (res) => {
+        res.setEncoding('utf8');
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          resolve({ statusCode: res.statusCode, body });
+        });
       }
+    );
 
-      // Other 4xx / 5xx → real error, fail the CI step so it is visible on the PR
-      if (res.statusCode >= 400) {
-        console.error(`[ERROR] Gemini API returned status ${res.statusCode}: ${body}`);
-        process.exit(1);
-      }
+    req.on('error', (e) => {
+      reject(e);
+    });
 
-      try {
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Gemini API request timed out after ${REQUEST_TIMEOUT_MS}ms`));
+    });
+
+    req.write(requestData);
+    req.end();
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function run() {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`Calling Gemini API (Attempt ${attempt}/${MAX_RETRIES})...`);
+      const { statusCode, body } = await sendGeminiRequest();
+
+      // 1. Success (2xx)
+      if (statusCode >= 200 && statusCode < 300) {
         const json = JSON.parse(body);
         const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!reviewText || !reviewText.trim()) {
-          handleQuotaExceededNotice('Empty review content returned from Gemini');
+          handleGracefulNotice('Empty review text returned', NOTICE_EMPTY);
           return;
         }
 
@@ -210,24 +233,46 @@ const req = https.request(
           '*이 리뷰는 GitHub Actions와 Gemini 3.7 Flash에 의해 자동으로 생성·갱신되었습니다.*';
 
         upsertComment(commentBody);
-      } catch (e) {
-        console.error('Failed to parse Gemini response or post PR comment:', e.message);
-        process.exit(1);
+        return;
       }
-    });
+
+      // 2. Quota exceeded (429) -> Graceful skip with quota notice
+      if (statusCode === 429) {
+        handleGracefulNotice('Gemini API quota exceeded (429)', NOTICE_QUOTA);
+        return;
+      }
+
+      // 3. Transient server error (500, 502, 503, 504) -> Retry with backoff
+      if (statusCode >= 500) {
+        console.warn(`[WARN] Gemini API returned server error ${statusCode}: ${body}`);
+        if (attempt < MAX_RETRIES) {
+          const waitMs = attempt * 3000;
+          console.log(`Waiting ${waitMs / 1000}s before retry...`);
+          await sleep(waitMs);
+          continue;
+        } else {
+          handleGracefulNotice(`Gemini server error (${statusCode}) after ${MAX_RETRIES} attempts`, NOTICE_SERVER_OVERLOAD);
+          return;
+        }
+      }
+
+      // 4. Fatal client errors (400, 401, 403, 404) -> Fail CI to surface misconfiguration
+      console.error(`[ERROR] Gemini API returned status ${statusCode}: ${body}`);
+      process.exit(1);
+
+    } catch (err) {
+      console.warn(`[WARN] Network error on attempt ${attempt}: ${err.message}`);
+      lastError = err;
+      if (attempt < MAX_RETRIES) {
+        const waitMs = attempt * 3000;
+        console.log(`Waiting ${waitMs / 1000}s before retry...`);
+        await sleep(waitMs);
+      }
+    }
   }
-);
 
-req.on('error', (e) => {
-  // Network-level errors (DNS failure, timeout, etc.) are not quota issues.
-  // Fail the CI step explicitly so the problem is visible on the PR.
-  console.error(`[ERROR] Gemini API network error: ${e.message}`);
-  process.exit(1);
-});
+  // If retries exhausted on network/timeout errors -> Graceful skip with server overload notice
+  handleGracefulNotice(`Network/timeout error (${lastError?.message}) after ${MAX_RETRIES} attempts`, NOTICE_SERVER_OVERLOAD);
+}
 
-req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-  req.destroy(new Error(`Gemini API request timed out after ${REQUEST_TIMEOUT_MS}ms`));
-});
-
-req.write(requestData);
-req.end();
+run();
