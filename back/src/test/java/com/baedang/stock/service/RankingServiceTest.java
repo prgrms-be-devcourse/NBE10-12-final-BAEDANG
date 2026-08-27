@@ -13,6 +13,9 @@ import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -25,6 +28,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.Base64;
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -104,10 +108,10 @@ public class RankingServiceTest {
     @Test
     @DisplayName("size보다 한 건 더 있으면 다음 cursor 반환")
     void t2() {
-        Stock first = rankedStock(1L, 1, "005930",new BigDecimal("300"));
-        Stock second = rankedStock(2L,2,"000660",new BigDecimal("200"));
+        Stock first = rankedStock(1L, 1, "005930", new BigDecimal("300"));
+        Stock second = rankedStock(2L, 2, "000660", new BigDecimal("200"));
         Stock extra = mock(Stock.class);
-        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L,2L))).thenReturn(List.of());
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L, 2L))).thenReturn(List.of());
         when(stockRepository.findRankedByMarketCountry(
                 MarketCountry.KR,
                 PageRequest.of(0, 3)
@@ -135,7 +139,7 @@ public class RankingServiceTest {
                 PageRequest.of(0, 21)
         )).thenReturn(List.of());
 
-        RankingResponse response = rankingService.getRankings("KR",20,cursor);
+        RankingResponse response = rankingService.getRankings("KR", 20, cursor);
 
         assertThat(response.items()).isEmpty();
         assertThat(response.hasNext()).isFalse();
@@ -156,7 +160,7 @@ public class RankingServiceTest {
     void t4() {
         assertThatThrownBy(() -> rankingService.getRankings("JP", 20, null))
                 .isInstanceOf(BusinessException.class)
-                .extracting(e->((BusinessException) e).getErrorCode())
+                .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
     }
 
@@ -165,17 +169,38 @@ public class RankingServiceTest {
     void t5() {
         assertThatThrownBy(() -> rankingService.getRankings("KR", 101, null))
                 .isInstanceOf(BusinessException.class)
-                .extracting(e->((BusinessException) e).getErrorCode())
+                .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
     }
 
-    @Test
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("invalidCursors")
     @DisplayName("잘못된 cursor면 예외 발생")
-    void t6() {
-        assertThatThrownBy(() -> rankingService.getRankings("KR", 20, "invalid-cursor"))
+    void t6(String caseName, String cursor) {
+        assertThatThrownBy(() -> rankingService.getRankings("KR", 20, cursor))
                 .isInstanceOf(BusinessException.class)
-                .extracting(e->((BusinessException) e).getErrorCode())
+                .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_CURSOR);
+    }
+
+    private static Stream<Arguments> invalidCursors() {
+        return Stream.of(
+                Arguments.of("Base64 형식 오류", "%"),
+                Arguments.of("구분자 없음", encodeCursorValue("200")),
+                Arguments.of("구분자가 여러 개", encodeCursorValue("200:2:3")),
+                Arguments.of("거래대금이 비어 있음", encodeCursorValue(":2")),
+                Arguments.of("stockId가 비어 있음", encodeCursorValue("200:")),
+                Arguments.of("거래대금이 숫자가 아님", encodeCursorValue("amount:2")),
+                Arguments.of("stockId가 숫자가 아님", encodeCursorValue("200:stock")),
+                Arguments.of("거래대금이 음수", encodeCursorValue("-1:2")),
+                Arguments.of("stockId가 0", encodeCursorValue("200:0")),
+                Arguments.of("stockId가 long 범위 초과", encodeCursorValue("200:9223372036854775808"))
+
+        );
+    }
+
+    private static String encodeCursorValue(String value) {
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
     }
 
     private Stock rankedStock(
