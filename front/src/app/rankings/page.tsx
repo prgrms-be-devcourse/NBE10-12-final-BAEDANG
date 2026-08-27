@@ -240,9 +240,9 @@ export default function RankingsPage() {
         ]}
         value={market}
         onChange={switchMarket}
-        trackClassName="mb-3 w-[340px] gap-0.5 rounded-full p-[3px]"
+        trackClassName="mb-3 w-[240px] gap-0.5 rounded-full p-[3px]"
         trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
-        buttonClassName="rounded-full py-2.5 text-[13.5px] font-bold"
+        buttonClassName="rounded-full py-1.5 text-[12px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}
       />
 
@@ -258,7 +258,7 @@ export default function RankingsPage() {
 
       <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
         <div
-          className="grid items-center px-5 py-2.5 text-[12px] font-medium"
+          className="grid items-center px-5 py-2.5 text-[12px] font-bold"
           style={{
             gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr",
             borderBottom: "1px solid var(--line2)",
@@ -291,7 +291,7 @@ export default function RankingsPage() {
             <Link
               key={item.symbol}
               href={`/stocks/${item.symbol}`}
-              className="grid items-center px-5 py-3 text-[13.5px] transition-[background] duration-150"
+              className="grid items-center px-5 py-3 text-[15px] transition-[background] duration-150"
               style={{ gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr", borderBottom: "1px solid var(--line2)" }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
