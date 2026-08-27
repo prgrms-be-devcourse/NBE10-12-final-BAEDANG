@@ -186,7 +186,7 @@ function SignupForm() {
 function Field({ label, input, error }: { label: string; input: React.ReactNode; error?: string }) {
   return (
     <div>
-      <label className="mb-1 block text-[12px]" style={{ color: "var(--mut)" }}>{label}</label>
+      <label className="mb-1 block text-[12px] font-bold" style={{ color: "var(--mut)" }}>{label}</label>
       {input}
       {error && <div className="mt-1 text-[11.5px]" style={{ color: "var(--warnText)" }}>{error}</div>}
     </div>
