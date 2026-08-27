@@ -1,11 +1,16 @@
 package com.baedang.market.client.toss;
 
 import com.baedang.global.clients.toss.TossSecuritiesClient;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.market.client.toss.dto.TossCandleResponse;
 import com.baedang.market.client.toss.dto.TossPriceResponse;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.PriceQuote;
+import com.baedang.stock.client.toss.TossSymbolInfoAdapter;
+import com.baedang.stock.client.toss.dto.TossListedStockResponse;
+import com.baedang.stock.port.StockUniverseEntry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.eq;
@@ -27,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class TossMarketDataAdapterTest {
     private final TossSecuritiesClient tossSecuritiesClient = mock(TossSecuritiesClient.class);
     private final TossMarketDataAdapter tossMarketDataAdapter = new TossMarketDataAdapter(tossSecuritiesClient);
+    private final TossSymbolInfoAdapter tossSymbolInfoAdapter = new  TossSymbolInfoAdapter(tossSecuritiesClient);
 
     @Test
     @DisplayName("현재가 응답을 PriceQuote로 변환")
@@ -207,6 +214,52 @@ public class TossMarketDataAdapterTest {
         assertThat(result)
                 .extracting(Candle::candleAt)
                 .doesNotHaveDuplicates();
+    }
+
+    @Test
+    @DisplayName("마켓별 전체 종목 유니버스 조회")
+    void fetchStockUniverse(){
+        TossListedStockResponse response = new TossListedStockResponse(
+                List.of(
+                        new TossListedStockResponse.TossListedStockItem(
+                                "005930", "삼성전자", "STOCK", true, "KR7005930003"
+                        ),
+                        new TossListedStockResponse.TossListedStockItem(
+                                "069500", "KODEX 200", "ETF", true, "KR7069500007"
+                        )
+                )
+        );
+
+        when(tossSecuritiesClient.get(
+                eq("/api/v1/stocks/all"),
+                eq(Map.of("market","KOSPI")),
+                eq(TossListedStockResponse.class)
+        )).thenReturn(response);
+
+        List<StockUniverseEntry> result = tossSymbolInfoAdapter.fetchAllStocks("KOSPI");
+
+        assertThat(result).hasSize(2);
+        assertThat(result.get(0).symbol()).isEqualTo("005930");
+        assertThat(result.get(0).isCommonShare()).isTrue();
+        assertThat(result.get(1).securityType()).isEqualTo("ETF");
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 마켓이면 예외가 발생")
+    void rejectUnsupportedMarket(){
+        assertThatThrownBy(()->tossSymbolInfoAdapter.fetchAllStocks("TOKYO"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e->((BusinessException)e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_INPUT);
+    }
+
+    @Test
+    @DisplayName("null 마켓이면 예외 발생")
+    void rejectNullMarket(){
+        assertThatThrownBy(()->tossSymbolInfoAdapter.fetchAllStocks(null))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e->((BusinessException)e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_INPUT);
     }
 
     private TossCandleResponse.TossCandleItem candleItem(
