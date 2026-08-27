@@ -218,8 +218,13 @@ CREATE UNIQUE INDEX uq_stock_symbol ON stock (UPPER(symbol), market_country);
 -- 랭킹 화면: 국내/해외 탭 + 거래대금 내림차순 + 커서 페이지네이션
 --   커서가 (trading_amount, stock_id) 튜플이므로 인덱스도 같은 순서·같은 방향이어야
 --   추가 정렬 없이 인덱스만 훑는다.
+--   is_ranked는 상위 100종목뿐 아니라 보유로 인해 시세 수집 대상인 종목도
+--   포함할 수 있고, 이 경우 trading_amount가 NULL일 수 있다.
+--   랭킹 쿼리의 trading_amount IS NOT NULL 조건과 맞춰 NULL 행은 인덱스에서도 제외한다.
 CREATE INDEX ix_stock_rank
-    ON stock (market_country, trading_amount DESC, stock_id DESC) WHERE is_ranked;
+    ON stock (market_country, trading_amount DESC, stock_id DESC)
+    WHERE is_ranked
+      AND trading_amount IS NOT NULL;
 
 -- 검색: 종목명 부분일치 (pg_trgm 확장 필요)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
