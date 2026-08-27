@@ -14,7 +14,7 @@ on:
 
 jobs:
   lint-and-build:
-    name: Frontend Lint, Type Check & Build
+    name: Frontend Lint, Test & Build
     runs-on: ubuntu-latest
 
     steps:
