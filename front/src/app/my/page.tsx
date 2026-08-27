@@ -6,6 +6,7 @@ import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
 import {
   AVAILABLE_CASH,
@@ -26,6 +27,7 @@ function holdingAmountKrw(quantity: number, unitPrice: number, currency: "KRW" |
 
 export default function MyPage() {
   const { rate } = useExchangeRate();
+  const { theme } = useTheme();
   const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
   const [holdings, setHoldings] = useState<Holding[]>(MOCK_HOLDINGS);
   const [ledger, setLedger] = useState<LedgerEntry[]>(MOCK_LEDGER);
@@ -93,7 +95,10 @@ export default function MyPage() {
           value={tab}
           onChange={(v) => setTab(v as "holdings" | "ledger")}
           trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
-          trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
+          trackStyle={{
+            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
+            border: theme === "dark" ? "0.1px solid rgba(255,255,255,.06)" : "0.1px solid rgba(15,56,104,.12)",
+          }}
           buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
           inactiveTextStyle={{ color: "var(--mut)" }}
         />

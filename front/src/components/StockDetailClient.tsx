@@ -173,7 +173,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             value={candleUnit}
             onChange={(v) => setCandleUnit(v as "일봉" | "1분봉")}
             trackClassName="w-fit rounded-full p-[3px]"
-            trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
+            trackStyle={{
+              background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
+              border: theme === "dark" ? "0.1px solid rgba(255,255,255,.06)" : "0.1px solid rgba(15,56,104,.12)",
+            }}
             buttonClassName="rounded-full px-4 py-1.5 text-[12.5px] font-bold"
             inactiveTextStyle={{ color: "var(--mut)" }}
             gapPx={0}
@@ -188,7 +191,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               value={period}
               onChange={(v) => setPeriod(v as "1개월" | "6개월" | "1년")}
               trackClassName="w-fit rounded-full p-[3px]"
-              trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
+              trackStyle={{
+                background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
+                border: theme === "dark" ? "0.1px solid rgba(255,255,255,.06)" : "0.1px solid rgba(15,56,104,.12)",
+              }}
               buttonClassName="rounded-full px-3.5 py-1.5 text-[12px] font-bold"
               inactiveTextStyle={{ color: "var(--mut)" }}
               gapPx={0}

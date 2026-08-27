@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { useTheme } from "@/components/ThemeProvider";
 
 const SECTIONS = [
   {
@@ -69,6 +70,7 @@ const SECTIONS = [
 
 export default function GuidePage() {
   const [tab, setTab] = useState<"guide" | "wiki">("guide");
+  const { theme } = useTheme();
 
   return (
     <div>
@@ -81,7 +83,10 @@ export default function GuidePage() {
           value={tab}
           onChange={(v) => setTab(v as "guide" | "wiki")}
           trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
-          trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
+          trackStyle={{
+            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
+            border: theme === "dark" ? "0.1px solid rgba(255,255,255,.06)" : "0.1px solid rgba(15,56,104,.12)",
+          }}
           buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
           inactiveTextStyle={{ color: "var(--mut)" }}
         />
