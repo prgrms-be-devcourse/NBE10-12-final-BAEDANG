@@ -79,9 +79,9 @@ export default function GuidePage() {
         ]}
         value={tab}
         onChange={(v) => setTab(v as "guide" | "wiki")}
-        trackClassName="mb-4.5 w-[280px] gap-0.5 rounded-full p-[3px]"
+        trackClassName="mb-4.5 w-[240px] gap-0.5 rounded-full p-[3px]"
         trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
-        buttonClassName="rounded-full px-0 py-2.5 text-[13.5px] font-bold"
+        buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}
       />
 
@@ -117,37 +117,32 @@ export default function GuidePage() {
       ) : (
         <>
           <Reveal delay={0.02}>
-            <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
+            <h2 className="text-[26px] font-extrabold" style={{ color: "var(--ink)" }}>
               이용가이드
             </h2>
           </Reveal>
           <Reveal delay={0.08} className="mb-6">
-            <p className="text-[13.5px]" style={{ color: "var(--mut)" }}>
+            <p className="text-[15px]" style={{ color: "var(--mut)" }}>
               이 서비스에서 거래가 어떻게 이루어지는지 안내해 드려요
             </p>
           </Reveal>
 
-          <div className="flex gap-4 max-md:flex-col">
-            <div className="flex-1 space-y-3.5">
-              {SECTIONS.slice(0, 3).map((s, i) => (
-                <Reveal key={s.title} delay={0.14 + i * 0.12}>
-                  <div style={{ background: "var(--card)", borderRadius: 20, padding: "22px 24px" }}>
-                    <h4 className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>{s.title}</h4>
-                    <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>{s.body}</p>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
-            <div className="flex-1 space-y-3.5">
-              {SECTIONS.slice(3).map((s, i) => (
-                <Reveal key={s.title} delay={0.2 + i * 0.12}>
-                  <div style={{ background: "var(--card)", borderRadius: 20, padding: "22px 24px" }}>
-                    <h4 className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>{s.title}</h4>
-                    <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>{s.body}</p>
-                  </div>
-                </Reveal>
-              ))}
-            </div>
+          {/* 왼쪽 열(1·2·3)과 오른쪽 열(4·5·6)이 같은 줄끼리 카드 높이를 맞춰야 해서
+              (예: "3. 매수하기"와 "6. 거래할 수 없는 경우"), 두 개의 독립된 flex 컬럼
+              대신 하나의 grid로 1,4 / 2,5 / 3,6 순서로 배치한다 — grid는 같은 행의
+              칸들이 자동으로 높이를 맞춰준다(flex 컬럼 두 개로는 그게 안 된다). */}
+          <div className="grid grid-cols-2 gap-4 gap-y-3.5 max-md:grid-cols-1">
+            {[SECTIONS[0], SECTIONS[3], SECTIONS[1], SECTIONS[4], SECTIONS[2], SECTIONS[5]].map((s, i) => (
+              <Reveal key={s.title} delay={0.14 + i * 0.06}>
+                <div
+                  className="h-full"
+                  style={{ background: "var(--card)", borderRadius: 20, padding: "22px 24px" }}
+                >
+                  <h4 className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>{s.title}</h4>
+                  <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>{s.body}</p>
+                </div>
+              </Reveal>
+            ))}
           </div>
 
           <Reveal delay={0.5} className="mt-4.5">
