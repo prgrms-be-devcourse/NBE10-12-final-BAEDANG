@@ -1,6 +1,7 @@
 package com.baedang.account.controller;
 
 import com.baedang.account.dto.AccountSummaryResponse;
+import com.baedang.account.dto.HoldingsResponse;
 import com.baedang.account.service.AccountService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -33,7 +34,17 @@ public class AccountController {
     public ResponseEntity<AccountSummaryResponse> getSummary(
             @RequestHeader(value = "X-User-Id", required = false) Long userId
     ) {
-        Long resolvedUserId = userId != null ? userId : fallbackUserId;
-        return ResponseEntity.ok(accountService.getSummary(resolvedUserId));
+        return ResponseEntity.ok(accountService.getSummary(resolveUserId(userId)));
+    }
+
+    @GetMapping("/me/holdings")
+    public ResponseEntity<HoldingsResponse> getHoldings(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId
+    ) {
+        return ResponseEntity.ok(accountService.getHoldings(resolveUserId(userId)));
+    }
+
+    private Long resolveUserId(Long userId) {
+        return userId != null ? userId : fallbackUserId;
     }
 }
