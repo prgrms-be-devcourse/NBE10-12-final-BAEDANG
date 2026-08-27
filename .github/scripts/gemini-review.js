@@ -21,7 +21,7 @@ const NOTICE_QUOTA          = `\n\n> ※ 안내: 최신 커밋에 대한 Gemini 
 const NOTICE_SERVER_OVERLOAD = `\n\n> ※ 안내: Google AI 서버의 일시적인 과부하(503/Timeout)로 인해 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 const NOTICE_EMPTY          = `\n\n> ※ 안내: Gemini API로부터 유효한 응답을 받지 못하여 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 
-const MAX_DIFF_LEN = 35_000;
+const MAX_DIFF_LEN = 60_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_RETRIES = 3;
 const DIFF_PATHS = [
