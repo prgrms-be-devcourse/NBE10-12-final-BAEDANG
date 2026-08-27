@@ -198,7 +198,7 @@ export default function MainPage() {
           </p>
           <Link
             href="/rankings"
-            className="mt-2 inline-block rounded-[12px] px-8 py-3 text-[14px] font-bold transition-[background] duration-[180ms]"
+            className="mt-2 inline-block rounded-[12px] px-8 py-3 text-[14px] font-extrabold transition-[background] duration-[180ms]"
             style={{ background: "#fff", color: "var(--ctaBannerBtnText)" }}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--ctaBannerBtnHover)")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
