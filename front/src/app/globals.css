@@ -69,7 +69,7 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: oklch(15% 0.01 258);
+  --bg: #000000;
   --card: #1a1a1a;
   --fill: #222222;
   --line: #333333;
@@ -119,7 +119,7 @@
   --invert: #f2f2f2;
   --onInvert: #1c1c1c;
   --modalOverlay: rgba(0, 0, 0, 0.75);
-  --headerBg: oklch(15% 0.01 258);
+  --headerBg: #000000;
   --headerLogo: #ffffff;
   --headerLoginText: rgba(255, 255, 255, 0.75);
   --headerNavInactive: rgba(255, 255, 255, 0.75);
@@ -128,7 +128,7 @@
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: oklch(15% 0.01 258);
+    --bg: #000000;
     --card: #1a1a1a;
     --fill: #222222;
     --line: #333333;
@@ -178,7 +178,7 @@
     --invert: #f2f2f2;
     --onInvert: #1c1c1c;
     --modalOverlay: rgba(0, 0, 0, 0.75);
-    --headerBg: oklch(15% 0.01 258);
+    --headerBg: #000000;
     --headerLogo: #ffffff;
     --headerLoginText: rgba(255, 255, 255, 0.75);
     --headerNavInactive: rgba(255, 255, 255, 0.75);
