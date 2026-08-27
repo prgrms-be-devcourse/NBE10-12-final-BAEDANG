@@ -160,7 +160,7 @@ const requestData = JSON.stringify({
   generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
 });
 
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent';
 
 const req = https.request(
   GEMINI_URL,
@@ -198,7 +198,7 @@ const req = https.request(
 
         const commentBody =
           `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n` +
-          '*이 리뷰는 GitHub Actions와 Gemini 2.0 Flash에 의해 자동으로 생성·갱신되었습니다.*';
+          '*이 리뷰는 GitHub Actions와 Gemini 3.7 Flash에 의해 자동으로 생성·갱신되었습니다.*';
 
         upsertComment(commentBody);
       } catch (e) {
