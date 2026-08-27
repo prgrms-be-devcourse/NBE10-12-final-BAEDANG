@@ -89,22 +89,22 @@ export function Nav() {
             </button>
           </>
         ) : (
-          <>
-            <Link
-              href={`/login?next=${encodeURIComponent(pathname)}`}
-              className="whitespace-nowrap px-3.5 py-[7px] text-[13px] font-semibold"
-              style={{ color: "var(--headerLoginText)" }}
-            >
-              로그인
-            </Link>
-            <Link
-              href={`/signup?next=${encodeURIComponent(pathname)}`}
-              className="whitespace-nowrap rounded-lg px-4 py-[7px] text-[13px] font-bold"
-              style={{ background: "var(--accent)", color: "#ffffff" }}
-            >
-              회원가입
-            </Link>
-          </>
+          // 상단 네비(메인/랭킹/가이드/마이페이지)와 같은 슬라이딩 필박스 탭으로 통일했다.
+          // 로그인 화면이 아니면 기본으로 회원가입 쪽에 필박스를 둔다 — 평소엔 회원가입이
+          // 강조돼 있다가, 로그인 화면으로 이동하면 필박스가 로그인 쪽으로 슬라이딩한다.
+          <PillTabs
+            options={[
+              { value: "login", label: "로그인" },
+              { value: "signup", label: "회원가입" },
+            ]}
+            value={pathname === "/login" ? "login" : "signup"}
+            onChange={(v) => router.push(`/${v}?next=${encodeURIComponent(pathname)}`)}
+            trackClassName="w-[176px] gap-0.5 rounded-lg p-[3px]"
+            pillRadius="8px"
+            buttonClassName="rounded-lg px-1 py-[7px] text-[13px] font-bold"
+            activeTextClassName="text-white"
+            inactiveTextStyle={{ color: "var(--headerNavInactive)" }}
+          />
         )}
       </div>
     </header>
