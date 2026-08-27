@@ -180,7 +180,12 @@ export default function MyPage() {
         <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
           <div
             className="grid px-5 py-2.5 text-[12px] font-bold"
-            style={{ gridTemplateColumns: "80px 2fr 1fr 1fr 1.2fr", borderBottom: "1px solid var(--line2)", color: "var(--mut2)" }}
+            style={{
+              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              columnGap: "20px",
+              borderBottom: "1px solid var(--line2)",
+              color: "var(--mut2)",
+            }}
           >
             <span>구분</span>
             <span>설명</span>
@@ -192,12 +197,16 @@ export default function MyPage() {
             <div
               key={i}
               className="grid items-center px-5 py-3 text-[15px]"
-              style={{ gridTemplateColumns: "80px 2fr 1fr 1fr 1.2fr", borderBottom: "1px solid var(--line2)" }}
+              style={{
+                gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                columnGap: "20px",
+                borderBottom: "1px solid var(--line2)",
+              }}
             >
               <span>
                 <LedgerBadge type={entry.type} />
               </span>
-              <span style={{ color: "var(--body)" }}>{entry.memo}</span>
+              <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
               <span
                 className="text-right tabular-nums font-semibold"
                 style={{ color: entry.amount >= 0 ? "var(--up)" : "var(--down)" }}
@@ -205,7 +214,7 @@ export default function MyPage() {
                 {formatSigned(entry.amount)}
               </span>
               <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-              <span className="text-[11.5px]" style={{ color: "var(--mut2)" }}>{entry.occurredAt}</span>
+              <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{entry.occurredAt}</span>
             </div>
           ))}
         </div>
