@@ -8,6 +8,8 @@ import { useExchangeRate } from "./ExchangeRateProvider";
 import { getHolding, getMockChartPoints, AVAILABLE_CASH, type StockDetail } from "@/lib/mock-data";
 import { calculateOrderAmount } from "@/lib/order-amount";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
+import { ApiError, placeOrder } from "@/lib/api";
+import { nextClientOrderId } from "@/lib/order-retry-policy";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
   MARKET_CLOSED: "장 마감 · 거래 시간이 아니에요",
@@ -25,7 +27,7 @@ const CATEGORY_GUIDE: Record<string, string> = {
 };
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, user } = useAuth();
   const { rate: usdKrwRate } = useExchangeRate();
   const [candleUnit, setCandleUnit] = useState<"일봉" | "1분봉">("일봉");
   const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
@@ -33,6 +35,12 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
   const [orderResult, setOrderResult] = useState<string | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  // 실패한 주문을 재시도할 때 이 clientOrderId를 재사용할지, 새로 발급할지는
+  // 백엔드가 응답에 실어주는 retryPolicy로 결정한다 (lib/order-retry-policy.ts 참고).
+  // null이면 "지금 이 주문 시도는 끝났다" — 다음 제출 때 완전히 새로 발급한다.
+  const [clientOrderId, setClientOrderId] = useState<string | null>(null);
 
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
   const isUp = detail.changeAmount >= 0;
@@ -68,15 +76,44 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     blockReason = "주문가능금액이 부족해요";
   }
 
-  function handleSubmit() {
-    if (blockReason) return;
-    if (!isLoggedIn) {
+  async function handleSubmit() {
+    if (blockReason || submitting) return;
+    if (!isLoggedIn || !user) {
       setModalOpen(true);
       return;
     }
-    setOrderResult(
-      `${detail.name} ${quantity}주를 시장가로 ${side}했어요 (모의 체결 · 총 ${side === "매수" ? "차감" : "입금"}액 ${formatNumber(amount.netAmount)}원)`
-    );
+
+    // 이전 시도의 clientOrderId가 남아있으면(SAME_CLIENT_ORDER_ID 재시도) 그대로 쓰고,
+    // 없으면(첫 시도이거나 직전에 NOT_RETRYABLE로 리셋됨) 새로 발급한다.
+    const idToUse = clientOrderId ?? crypto.randomUUID();
+
+    setSubmitting(true);
+    setOrderError(null);
+    try {
+      const response = await placeOrder(user.userId, {
+        clientOrderId: idToUse,
+        symbol: detail.symbol,
+        marketCountry: detail.marketCountry,
+        side: side === "매수" ? "BUY" : "SELL",
+        quantity: quantityInput,
+      });
+      setOrderResult(
+        `${detail.name} ${response.quantity}주 시장가 ${side} 체결 (체결가 ${response.executedPrice}` +
+          `${detail.currency === "USD" ? "$" : "원"} · 총 ${side === "매수" ? "차감" : "입금"}액 ` +
+          `${formatNumber(Number(response.netAmount))}원)`
+      );
+      setClientOrderId(null); // 성공했으니 다음 주문은 완전히 새로 시작한다.
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setOrderError(err.message);
+        setClientOrderId(nextClientOrderId(err.retryPolicy, idToUse));
+      } else {
+        setOrderError("주문 처리 중 오류가 발생했어요.");
+        setClientOrderId(idToUse); // 정책 정보가 없는 예상 밖 오류는 안전하게 같은 ID로 재시도 허용.
+      }
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -202,7 +239,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               {(["매수", "매도"] as const).map((s) => (
                 <button
                   key={s}
-                  onClick={() => setSide(s)}
+                  onClick={() => {
+                    setSide(s);
+                    // 주문 내용이 바뀌면 이전 clientOrderId를 그대로 재사용하면 안 된다 —
+                    // "같은 ID인데 다른 내용"은 NOT_RETRYABLE(DUPLICATE_ORDER)로 거절된다.
+                    setClientOrderId(null);
+                    setOrderError(null);
+                  }}
                   className={`flex-1 border-b-2 py-1.5 text-center text-[13px] ${
                     side === s
                       ? "border-gray-900 font-semibold text-gray-900"
@@ -220,7 +263,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 className="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 text-[13px] outline-none focus:border-gray-500"
                 inputMode="numeric"
                 value={quantityInput}
-                onChange={(e) => setQuantityInput(e.target.value.replace(/[^0-9]/g, ""))}
+                onChange={(e) => {
+                  setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+                  setClientOrderId(null);
+                  setOrderError(null);
+                }}
               />
               <span className="flex-none text-[11.5px] text-gray-400">주</span>
             </div>
@@ -273,14 +320,30 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             ) : (
               <button
                 onClick={handleSubmit}
-                className="w-full rounded-md bg-gray-900 py-2.5 text-[13px] font-medium text-white hover:bg-black"
+                disabled={submitting}
+                className="w-full rounded-md bg-gray-900 py-2.5 text-[13px] font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {side === "매수" ? "매수하기" : "매도하기"}
+                {submitting ? "처리 중…" : side === "매수" ? "매수하기" : "매도하기"}
               </button>
             )}
             {!isLoggedIn && (
               <div className="mt-1.5 text-center text-[11.5px] text-gray-400">
                 비로그인 상태에서 누르면 회원가입으로 안내됩니다
+              </div>
+            )}
+            {orderError && (
+              <div className="mt-3 rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-[12px] text-gray-700">
+                {orderError}
+                {clientOrderId && (
+                  <div className="mt-1 text-[11px] text-gray-400">
+                    같은 주문으로 다시 시도하시려면 버튼을 다시 눌러주세요.
+                  </div>
+                )}
+                {!clientOrderId && (
+                  <div className="mt-1 text-[11px] text-gray-400">
+                    주문 내용을 확인한 뒤 다시 시도해주세요.
+                  </div>
+                )}
               </div>
             )}
             {orderResult && (
