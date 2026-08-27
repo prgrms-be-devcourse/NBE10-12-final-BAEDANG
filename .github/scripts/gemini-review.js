@@ -93,7 +93,8 @@ if (!diff.trim()) {
 
 let truncated = false;
 if (diff.length > MAX_DIFF_LEN) {
-  diff = diff.substring(0, MAX_DIFF_LEN);
+  const lastNewline = diff.lastIndexOf('\n', MAX_DIFF_LEN);
+  diff = diff.substring(0, lastNewline > 0 ? lastNewline : MAX_DIFF_LEN);
   truncated = true;
 }
 
