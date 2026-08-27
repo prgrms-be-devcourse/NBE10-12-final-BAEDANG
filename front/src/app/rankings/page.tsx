@@ -92,7 +92,7 @@ export default function RankingsPage() {
       <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
         주식 종목 랭킹
       </h2>
-      <p className="mb-4.5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+      <p className="mt-2 mb-4.5 text-[13.5px]" style={{ color: "var(--mut)" }}>
         거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
       </p>
 
