@@ -256,7 +256,7 @@ export default function RankingsPage() {
         trackClassName="mb-3 w-[200px] gap-0.5 rounded-full p-[3px]"
         trackStyle={{
           background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-          border: theme === "dark" ? "0.1px solid rgba(255,255,255,.06)" : "0.1px solid rgba(15,56,104,.12)",
+          border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
         }}
         buttonClassName="rounded-full py-2 text-[12px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}

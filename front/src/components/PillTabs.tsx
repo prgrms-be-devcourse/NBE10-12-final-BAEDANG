@@ -88,7 +88,7 @@ export function PillTabs({
   const widthExpr = `calc(${buttonWidthExpr})`;
 
   return (
-    <div className={`relative flex ${trackClassName}`} style={trackStyle}>
+    <div className={`relative flex overflow-hidden ${trackClassName}`} style={trackStyle}>
       <div
         className="absolute top-[3px] bottom-[3px]"
         style={{
