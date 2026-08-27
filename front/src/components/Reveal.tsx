@@ -9,6 +9,8 @@ type Props = {
   /** riseIn 애니메이션 재생 시간(초). */
   duration?: number;
   className?: string;
+  /** 등장 애니메이션 인라인 스타일과 병합할 추가 스타일(배경·테두리 등). */
+  style?: React.CSSProperties;
   as?: "div" | "section";
 };
 
@@ -18,7 +20,7 @@ type Props = {
  * 반드시 표시되어야 하므로, 화면 하단 8%보다 위에 걸쳐 있기만 해도 즉시 보인다.
  * 컴포넌트가 다시 마운트될 때(페이지 재진입)마다 초기 상태로 돌아가 재생된다.
  */
-export function Reveal({ children, delay = 0, duration = 0.6, className = "", as = "div" }: Props) {
+export function Reveal({ children, delay = 0, duration = 0.6, className = "", style, as = "div" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -59,8 +61,8 @@ export function Reveal({ children, delay = 0, duration = 0.6, className = "", as
       className={className}
       style={
         visible
-          ? { opacity: 0, animation: `riseIn ${duration}s cubic-bezier(.22,1,.36,1) ${delay}s forwards` }
-          : { opacity: 0, transform: "translateY(18px)" }
+          ? { ...style, opacity: 0, animation: `riseIn ${duration}s cubic-bezier(.22,1,.36,1) ${delay}s forwards` }
+          : { ...style, opacity: 0, transform: "translateY(18px)" }
       }
     >
       {children}

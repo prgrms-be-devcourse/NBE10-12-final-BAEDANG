@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
+import { Reveal } from "@/components/Reveal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { D } from "@/lib/decimal";
 import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry } from "@/lib/mock-data";
@@ -89,15 +90,18 @@ export default function RankingsPage() {
 
   return (
     <div>
-      <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
-        주식 종목 랭킹
-      </h2>
-      <p className="mt-2 mb-4.5 text-[15px]" style={{ color: "var(--mut)" }}>
-        거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
-      </p>
+      <Reveal delay={0}>
+        <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
+          주식 종목 랭킹
+        </h2>
+        <p className="mt-2 mb-4.5 text-[15px]" style={{ color: "var(--mut)" }}>
+          거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
+        </p>
+      </Reveal>
 
       {/* 환율 배너 — 정책상 거래는 원화로만 제공되어, 미국 종목 표시는 이 환율로 환산합니다 */}
-      <div
+      <Reveal
+        delay={0.12}
         className="mb-4 flex items-center gap-2.5 rounded-[14px] px-4.5 py-2.5 text-[14px]"
         style={{ border: "1px solid var(--line2)", background: "var(--card)" }}
       >
@@ -122,9 +126,10 @@ export default function RankingsPage() {
         >
           환율 추이 그래프 →
         </span>
-      </div>
+      </Reveal>
 
       {/* 검색 */}
+      <Reveal delay={0.24}>
       <div ref={searchBoxRef} className="relative z-30 mb-5 max-w-[480px]">
         <div className="relative">
           <svg
@@ -231,8 +236,10 @@ export default function RankingsPage() {
           </div>
         )}
       </div>
+      </Reveal>
 
       {/* 탭 */}
+      <Reveal delay={0.36}>
       <PillTabs
         options={[
           { value: "KR", label: "국내 주식" },
@@ -255,7 +262,9 @@ export default function RankingsPage() {
           12:36:59 기준 · 5초마다 갱신
         </span>
       </div>
+      </Reveal>
 
+      <Reveal delay={0.48}>
       <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
         <div
           className="grid items-center px-5 py-2.5 text-[12px] font-bold"
@@ -357,6 +366,7 @@ export default function RankingsPage() {
           </span>
         )}
       </div>
+      </Reveal>
     </div>
   );
 }
