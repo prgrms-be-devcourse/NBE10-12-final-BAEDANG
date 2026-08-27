@@ -361,10 +361,6 @@ export default function RankingsPage() {
         })}
       </div>
 
-      {hover && (
-        <StockHoverPreview item={hover.item} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
-      )}
-
       <div className="mt-5 text-center">
         {hasNext ? (
           <button
@@ -382,6 +378,14 @@ export default function RankingsPage() {
         )}
       </div>
       </Reveal>
+
+      {/* Reveal은 등장 애니메이션에 transform을 쓰는데, transform이 걸린 조상 안에서는
+          position:fixed가 뷰포트가 아니라 그 조상 기준으로 계산돼버린다(CSS 스펙상
+          transform이 새 containing block을 만든다). 그래서 호버 카드는 반드시
+          모든 Reveal 바깥, 최상위에 렌더링해야 실제 커서 좌표에 제대로 뜬다. */}
+      {hover && (
+        <StockHoverPreview item={hover.item} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
+      )}
     </div>
   );
 }
