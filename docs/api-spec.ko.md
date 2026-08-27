@@ -512,6 +512,19 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 실패 응답의 `data.retryPolicy`가 재시도 시 `clientOrderId` 처리 방법을 알려줍니다. `SAME_CLIENT_ORDER_ID`는 주문 행이 만들어지지 않은 실패이므로 같은 ID로 안전하게 재시도하고, `NEW_CLIENT_ORDER_ID`는 `REJECTED` 행이 최종 결과로 저장된 실패이므로 조건이 바뀐 뒤 새 ID를 발급합니다. `NOT_RETRYABLE`은 같은 ID의 요청 내용 충돌처럼 그대로 재전송해도 성공할 수 없는 요청입니다.
 
+```json
+{
+  "code": "MARKET_CONTEXT_EXPIRED",
+  "message": "시장 정보를 다시 확인한 뒤 주문해주세요",
+  "timestamp": "2026-08-27T10:30:00+09:00",
+  "data": {
+    "retryPolicy": "SAME_CLIENT_ORDER_ID"
+  }
+}
+```
+
+클라이언트는 HTTP 상태나 오류 코드만으로 ID 재사용 여부를 추론하지 않고, 응답에 포함된 `data.retryPolicy`를 우선합니다. `retryPolicy`가 없는 잘못된 JSON 등의 요청은 기존 요청을 그대로 자동 재전송하지 않습니다.
+
 **Response · 201**
 ```json
 {

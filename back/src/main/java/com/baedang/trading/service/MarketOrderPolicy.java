@@ -120,10 +120,15 @@ public class MarketOrderPolicy {
         }
     }
 
-    public boolean hasMatchingQuoteCurrency(Stock stock, QuoteSnapshot quote) {
-        return stock.getCurrency() != null
-                && quote.getCurrency() != null
-                && stock.getCurrency().trim().equalsIgnoreCase(quote.getCurrency().trim());
+    public boolean hasValidCurrencyForMarket(Stock stock, QuoteSnapshot quote) {
+        if (stock.getCurrency() == null || quote.getCurrency() == null) return false;
+
+        String expectedCurrency = switch (stock.getMarketCountry()) {
+            case KR -> "KRW";
+            case US -> "USD";
+        };
+        return expectedCurrency.equalsIgnoreCase(stock.getCurrency().trim())
+                && expectedCurrency.equalsIgnoreCase(quote.getCurrency().trim());
     }
 
     private ErrorCode validateQuoteTime(QuoteSnapshot quote, Instant now) {

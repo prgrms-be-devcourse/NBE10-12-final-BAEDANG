@@ -132,6 +132,7 @@ class OrderQuoteServiceTest {
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
         when(stock.getCurrency()).thenReturn("USD");
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(new QuoteSnapshot(
                 101L, new BigDecimal("241500"), "KRW", NOW.atOffset(ZoneOffset.UTC))));

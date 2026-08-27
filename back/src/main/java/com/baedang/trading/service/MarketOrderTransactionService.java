@@ -135,7 +135,7 @@ public class MarketOrderTransactionService {
                         ErrorCode.QUOTE_NOT_FOUND,
                         "stockId=" + stock.getStockId(),
                         ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
-        if (!marketOrderPolicy.hasMatchingQuoteCurrency(stock, quote)) {
+        if (!marketOrderPolicy.hasValidCurrencyForMarket(stock, quote)) {
             throw new BusinessException(
                     ErrorCode.QUOTE_CURRENCY_MISMATCH,
                     "stockCurrency=" + stock.getCurrency() + ", quoteCurrency=" + quote.getCurrency(),

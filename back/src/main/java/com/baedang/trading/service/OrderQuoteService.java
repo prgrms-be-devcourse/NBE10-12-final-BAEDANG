@@ -64,7 +64,7 @@ public class OrderQuoteService {
         OrderQuoteQueryContext queryContext = queryService.load(userId, terms);
         Account account = queryContext.account();
         Stock stock = queryContext.stock();
-        if (!marketOrderPolicy.hasMatchingQuoteCurrency(stock, queryContext.quote())) {
+        if (!marketOrderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
             throw new BusinessException(
                     ErrorCode.QUOTE_CURRENCY_MISMATCH,
                     "stockCurrency=" + stock.getCurrency()

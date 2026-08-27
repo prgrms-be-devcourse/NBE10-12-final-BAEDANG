@@ -511,6 +511,19 @@ Buy / sell (market immediate fill)
 
 The failure response's `data.retryPolicy` defines how to handle `clientOrderId`. `SAME_CLIENT_ORDER_ID` means no order row was created and the same ID can be retried safely. `NEW_CLIENT_ORDER_ID` means a `REJECTED` row was stored as the final result, so a new attempt after conditions change needs a new ID. `NOT_RETRYABLE` means resending the request unchanged cannot succeed, such as reusing an ID with a different payload.
 
+```json
+{
+  "code": "MARKET_CONTEXT_EXPIRED",
+  "message": "시장 정보를 다시 확인한 뒤 주문해주세요",
+  "timestamp": "2026-08-27T10:30:00+09:00",
+  "data": {
+    "retryPolicy": "SAME_CLIENT_ORDER_ID"
+  }
+}
+```
+
+Clients must follow `data.retryPolicy` instead of inferring ID reuse from the HTTP status or error code alone. If malformed JSON or another failure has no `retryPolicy`, do not automatically resend the unchanged request.
+
 **Response · 201**
 ```json
 {

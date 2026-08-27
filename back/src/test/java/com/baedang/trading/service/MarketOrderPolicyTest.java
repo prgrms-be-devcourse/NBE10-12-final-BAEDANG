@@ -2,12 +2,17 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +24,29 @@ class MarketOrderPolicyTest {
 
     private final MarketOrderPolicy policy =
             new MarketOrderPolicy(15, 15, new BigDecimal("1000000"));
+
+    @ParameterizedTest
+    @CsvSource({"KR, KRW", "US, USD"})
+    void 시장에_맞는_종목과_시세_통화면_유효하다(MarketCountry marketCountry, String currency) {
+        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", currency, "STOCK");
+        QuoteSnapshot quote = new QuoteSnapshot(
+                1L, BigDecimal.ONE, currency, OffsetDateTime.now());
+
+        assertThat(policy.hasValidCurrencyForMarket(stock, quote)).isTrue();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"KR, USD", "US, KRW"})
+    void 종목과_시세_통화가_같아도_시장과_다르면_유효하지_않다(
+            MarketCountry marketCountry,
+            String currency
+    ) {
+        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", currency, "STOCK");
+        QuoteSnapshot quote = new QuoteSnapshot(
+                1L, BigDecimal.ONE, currency, OffsetDateTime.now());
+
+        assertThat(policy.hasValidCurrencyForMarket(stock, quote)).isFalse();
+    }
 
     @Test
     void 세션_종료_시각부터는_조회당시_운영중이어도_체결할_수_없다() {
