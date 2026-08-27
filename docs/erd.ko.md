@@ -129,7 +129,7 @@ quote_snapshot.prev_close
 | `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS | 이력 적재: **매시 정각** / 현재 환율: 1분 TTL 캐시 | **두 경로가 다릅니다.** 그래프용 이력은 매시 정각 `exchange_rate` 로 적재(하루 24콜), 체결용 현재 환율은 **1분 TTL 메모리 캐시**. 응답의 `validFrom` 을 `rate_at` 으로, `ON CONFLICT DO NOTHING` 으로 **주말 중복 자동 차단**. |
 | `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS | 앱 기동 시 + 매일 1회 | **메모리 캐시로 충분**(이력을 남기고 싶으면 `schema.sql` 의 `market_calendar` 테이블 선택). 세 곳에 쓰임 — **① 주문 가능 시간 판정, ② 시세 수집 스케줄러 on/off, ③ 화면 "실시간/종가" 분기**. 서머타임·수능일·임시휴장 때문에 **절대 하드코딩 금지**. |
 | `wss://openapi-ws/ws/v1` | 구독 100건 / 연결 2개 | **2주차 개선 과제** | **실시간 체결·호가 웹소켓.** 연결당 구독 100건, 계정당 연결 2개라 **국내 100 + 미국 100 = 정확히 200종목**. 도입하면 폴링이 사라지고 진짜 실시간. 재연결·재구독, 60초 PING, full-replace 구독 관리 필요, 시세는 **LOSSY 보장**이라 프레임 유실 감안. **1주차에는 폴링**. |
-| `POST /api/v1/orders` 등 | — | 사용 안 함 | **주문 API 는 절대 호출하지 않습니다** — 실제 계좌에 실주문이 나갑니다. `QuoteClient` 에서 호출 가능 경로를 화이트리스트로 고정하세요. |
+| `POST /api/v1/orders` 등 | — | 사용 안 함 | **주문 API 는 절대 호출하지 않습니다** — 실제 계좌에 실주문이 나갑니다. `TossSecuritiesClient` 등 외부 API 클라이언트에서 호출 가능 경로를 화이트리스트로 고정하세요. |
 
 ### 테이블별 데이터 출처
 
