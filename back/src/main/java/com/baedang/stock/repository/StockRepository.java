@@ -16,7 +16,9 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
 
     Optional<Stock> findBySymbolIgnoreCaseAndMarketCountry(String symbol, MarketCountry marketCountry);
 
-    /** 보유 종목들의 심볼·이름·통화를 한 번에 조회합니다 (마이페이지 보유 목록). */
+    /**
+     * 보유 종목들의 심볼·이름·통화를 한 번에 조회합니다 (마이페이지 보유 목록).
+     */
     List<Stock> findByStockIdIn(Collection<Long> stockIds);
 
 
@@ -35,6 +37,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             from Stock s
             where s.marketCountry = :marketCountry
               and s.isRanked = true
+              and s.tradingAmount is not null
             order by s.tradingAmount desc, s.stockId desc
             """)
     List<Stock> findRankedByMarketCountry(
@@ -48,6 +51,7 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             from Stock s
             where s.marketCountry = :marketCountry
               and s.isRanked = true
+              and s.tradingAmount is not null
               and (
                     s.tradingAmount < :tradingAmount
                     or (
