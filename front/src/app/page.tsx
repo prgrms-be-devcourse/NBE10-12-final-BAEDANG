@@ -54,7 +54,7 @@ export default function MainPage() {
   return (
     <div>
       {/* 히어로 */}
-      <Reveal delay={0}>
+      <Reveal delay={0} duration={1}>
         <div
           className="my-4 flex items-center gap-10 rounded-[28px] px-12 py-14 max-md:flex-col"
           style={{ background: "var(--heroBg)" }}
@@ -106,7 +106,7 @@ export default function MainPage() {
       </Reveal>
 
       {/* 3단계 */}
-      <Reveal delay={0.08} className="mt-12 mb-10">
+      <Reveal delay={0.16} duration={1} className="mt-12 mb-10">
         <h2 className="text-center text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
           이렇게 사용해요
         </h2>
@@ -139,7 +139,7 @@ export default function MainPage() {
       </Reveal>
 
       {/* 비교표 */}
-      <Reveal delay={0.16} className="mb-10">
+      <Reveal delay={0.32} duration={1} className="mb-10">
         <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
           증권사 앱과 무엇이 다른가요?
         </h2>
@@ -152,7 +152,7 @@ export default function MainPage() {
             className="grid text-[13.5px] opacity-0"
             style={{
               gridTemplateColumns: "1fr 1.2fr 1.2fr",
-              animation: "riseIn .6s cubic-bezier(.22,1,.36,1) .34s forwards",
+              animation: "riseIn .9s cubic-bezier(.22,1,.36,1) .5s forwards",
             }}
           >
             <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)" }} />
@@ -172,7 +172,7 @@ export default function MainPage() {
               className="grid text-[13.5px] opacity-0"
               style={{
                 gridTemplateColumns: "1fr 1.2fr 1.2fr",
-                animation: `riseIn .6s cubic-bezier(.22,1,.36,1) ${0.34 + (i + 1) * 0.11}s forwards`,
+                animation: `riseIn .9s cubic-bezier(.22,1,.36,1) ${0.5 + (i + 1) * 0.17}s forwards`,
               }}
             >
               <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)", color: "var(--mut)" }}>
@@ -190,7 +190,7 @@ export default function MainPage() {
       </Reveal>
 
       {/* CTA 배너 */}
-      <Reveal delay={0.24} className="mb-10">
+      <Reveal delay={0.48} duration={1} className="mb-10">
         <div className="rounded-[24px] px-11 py-11 text-center" style={{ background: "var(--ctaBanner)" }}>
           <h2 className="text-[24px] font-extrabold text-white">첫 거래는 오늘, 첫 손실은 0원</h2>
           <p className="mx-auto my-2.5 max-w-[420px] text-[14px] text-white/80">
@@ -209,7 +209,7 @@ export default function MainPage() {
       </Reveal>
 
       {/* 푸터 고지 */}
-      <Reveal delay={0.32}>
+      <Reveal delay={0.64} duration={1}>
         <p className="text-center text-[12.5px] leading-[1.8]" style={{ color: "var(--mut2)" }}>
           본 서비스는 투자 교육을 목적으로 하는 모의 투자 서비스예요. 실제 매매가 이루어지지 않으며, 특정
           종목에 대한 투자 조언이나 매매 권유를 제공하지 않아요.

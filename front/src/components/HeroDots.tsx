@@ -39,7 +39,7 @@ export function HeroDots() {
     const next = points.map((p): Dot => {
       const angle = Math.random() * Math.PI * 2;
       const dist = 240 + Math.random() * 260;
-      const delay = +(Math.random() * 0.5).toFixed(2);
+      const delay = +(Math.random() * 0.7).toFixed(2);
       const dx = Math.cos(angle) * dist;
       const dy = Math.sin(angle) * dist;
       const maxOpacity = +(0.45 + p.density * 0.55).toFixed(2);
@@ -57,7 +57,7 @@ export function HeroDots() {
           ["--dx" as string]: `${dx.toFixed(1)}px`,
           ["--dy" as string]: `${dy.toFixed(1)}px`,
           ["--maxop" as string]: maxOpacity,
-          animation: `dotGather 1.3s cubic-bezier(.16,1,.3,1) ${delay}s 1 both`,
+          animation: `dotGather 1.9s cubic-bezier(.16,1,.3,1) ${delay}s 1 both`,
         } as React.CSSProperties,
       };
     });

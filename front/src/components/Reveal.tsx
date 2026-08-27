@@ -6,6 +6,8 @@ type Props = {
   children: ReactNode;
   /** riseIn 애니메이션 시작 지연(초). 섹션마다 스태거를 주는 값. */
   delay?: number;
+  /** riseIn 애니메이션 재생 시간(초). */
+  duration?: number;
   className?: string;
   as?: "div" | "section";
 };
@@ -16,7 +18,7 @@ type Props = {
  * 반드시 표시되어야 하므로, 화면 하단 8%보다 위에 걸쳐 있기만 해도 즉시 보인다.
  * 컴포넌트가 다시 마운트될 때(페이지 재진입)마다 초기 상태로 돌아가 재생된다.
  */
-export function Reveal({ children, delay = 0, className = "", as = "div" }: Props) {
+export function Reveal({ children, delay = 0, duration = 0.6, className = "", as = "div" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -57,7 +59,7 @@ export function Reveal({ children, delay = 0, className = "", as = "div" }: Prop
       className={className}
       style={
         visible
-          ? { opacity: 0, animation: `riseIn .6s cubic-bezier(.22,1,.36,1) ${delay}s forwards` }
+          ? { opacity: 0, animation: `riseIn ${duration}s cubic-bezier(.22,1,.36,1) ${delay}s forwards` }
           : { opacity: 0, transform: "translateY(18px)" }
       }
     >
