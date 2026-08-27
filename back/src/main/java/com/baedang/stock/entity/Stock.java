@@ -110,15 +110,25 @@ public class Stock extends BaseEntity {
     protected Stock() {
     }
 
-    private Stock(String symbol, MarketCountry marketCountry, String market, String name,
-                  String currency, String securityType) {
+    private Stock(
+            String symbol,
+            MarketCountry marketCountry,
+            String market,
+            String name,
+            String isinCode,
+            String currency,
+            String securityType,
+            Boolean isCommonShare
+    ) {
         this.symbol = symbol.trim().toUpperCase(Locale.ROOT);
         this.marketCountry = marketCountry;
         this.market = market;
         this.name = name;
+        this.isinCode = isinCode;
         this.currency = currency;
         this.securityType = securityType;
         this.stockCategory = StockCategory.INDIVIDUAL;
+        this.isCommonShare = isCommonShare;
         this.isDividend = false;
         this.isSuspended = false;
         this.isLiquidation = false;
@@ -130,10 +140,30 @@ public class Stock extends BaseEntity {
     /**
      * 마스터 배치가 신규 종목을 넣을 때 씁니다.
      * 필수값만 받고, 나머지는 {@link #updateMasterInfo} 로 채웁니다.
+     *
+     * <p><b>{@code stockCategory} 는 여기서 판정합니다.</b> 기본값 {@code INDIVIDUAL} 로 넣었다가
+     * 나중에 고치면, 그사이 검색·랭킹 화면에 우선주와 ETF 가 개별주로 노출됩니다.
      */
-    public static Stock create(String symbol, MarketCountry marketCountry, String market,
-                               String name, String currency, String securityType) {
-        return new Stock(symbol, marketCountry, market, name, currency, securityType);
+    public static Stock create(
+            String symbol,
+            MarketCountry marketCountry,
+            String market,
+            String name,
+            String isinCode,
+            String currency,
+            String securityType,
+            Boolean isCommonShare
+    ) {
+        return new Stock(
+                symbol,
+                marketCountry,
+                market,
+                name,
+                isinCode,
+                currency,
+                securityType,
+                isCommonShare
+        );
     }
 
     /** 매주 월요일 07:00 마스터 갱신. 선택 정보는 여기서 덮어씁니다. */

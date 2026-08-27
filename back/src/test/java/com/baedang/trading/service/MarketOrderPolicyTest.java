@@ -28,7 +28,7 @@ class MarketOrderPolicyTest {
     @ParameterizedTest
     @CsvSource({"KR, KRW", "US, USD"})
     void 시장에_맞는_종목과_시세_통화면_유효하다(MarketCountry marketCountry, String currency) {
-        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", currency, "STOCK");
+        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
         QuoteSnapshot quote = new QuoteSnapshot(
                 1L, BigDecimal.ONE, currency, OffsetDateTime.now());
 
@@ -41,7 +41,7 @@ class MarketOrderPolicyTest {
             MarketCountry marketCountry,
             String currency
     ) {
-        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", currency, "STOCK");
+        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
         QuoteSnapshot quote = new QuoteSnapshot(
                 1L, BigDecimal.ONE, currency, OffsetDateTime.now());
 
