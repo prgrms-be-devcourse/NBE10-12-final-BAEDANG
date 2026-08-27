@@ -6,16 +6,16 @@ import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { D } from "@/lib/decimal";
-import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry, type StockCategory } from "@/lib/mock-data";
+import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry } from "@/lib/mock-data";
+import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
 const PAGE_SIZE = 20;
 
-const CATEGORY_BADGE: Record<StockCategory, { bg: string; text: string }> = {
-  개별주: { bg: "var(--purpleBg)", text: "var(--purpleText)" },
-  ETF: { bg: "var(--accentSoft)", text: "var(--accentText)" },
-  배당주: { bg: "var(--greenBg)", text: "var(--greenText)" },
-};
+// 검색창 클릭 시(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
+// 하드코딩된 예시 그대로다. 산업은 연결할 실제 화면이 없어 장식용으로만 둔다.
+const POPULAR_SYMBOLS = ["005930", "NVDA", "000660", "TSLA", "069500"];
+const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우주항공", "로봇"];
 
 export default function RankingsPage() {
   const { rate, updatedAt, isLoading: rateLoading } = useExchangeRate();
@@ -23,7 +23,11 @@ export default function RankingsPage() {
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
+  // 검색 팝업은 열기/닫기 애니메이션이 서로 달라(searchPanelOpen .22s / searchPanelClose .18s)
+  // "지금 열려 있어야 하는가"(searchOpen)와 "지금 DOM에 있어야 하는가"(searchMounted)를
+  // 분리해서 관리한다 — 닫힐 때도 닫힘 애니메이션이 끝날 때까지는 DOM에 남아 있어야 한다.
   const [searchOpen, setSearchOpen] = useState(false);
+  const [searchMounted, setSearchMounted] = useState(false);
   const [wishlist, setWishlist] = useState<Record<string, boolean>>({});
   const searchBoxRef = useRef<HTMLDivElement>(null);
 
@@ -48,6 +52,21 @@ export default function RankingsPage() {
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, []);
+
+  // 열고 닫힘에 따라 DOM 마운트 여부를 지연시켜 닫힘 애니메이션(searchPanelClose)이
+  // 끝까지 재생되게 한다. AuthProvider와 마찬가지로 외부 트리거(searchOpen)에 반응해
+  // 타이머를 거는 것이라 effect 안 setState가 맞는 자리다.
+  useEffect(() => {
+    if (searchOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearchMounted(true);
+      return;
+    }
+    if (!searchMounted) return;
+    const t = setTimeout(() => setSearchMounted(false), 180); // searchPanelClose 재생 시간
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen]);
 
   function switchMarket(next: string) {
     setMarket(next as MarketCountry);
@@ -98,27 +117,87 @@ export default function RankingsPage() {
 
       {/* 검색 */}
       <div ref={searchBoxRef} className="relative z-30 mb-5 max-w-[480px]">
-        <input
-          className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-          style={{ background: "var(--fill)", color: "var(--ink)" }}
-          placeholder="티커 또는 종목명으로 검색 (2자 이상)"
-          value={query}
-          onFocus={() => setSearchOpen(true)}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setSearchOpen(true);
-          }}
-        />
-        {searchOpen && (
+        <div className="relative">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2"
+          >
+            <circle cx="11" cy="11" r="7" stroke="var(--mut2)" strokeWidth="2" />
+            <path d="M21 21l-4.3-4.3" stroke="var(--mut2)" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <input
+            className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[13.5px] outline-none"
+            style={{ background: "var(--fill)", color: "var(--ink)" }}
+            placeholder="티커 또는 종목명으로 검색 (2자 이상)"
+            value={query}
+            onFocus={() => setSearchOpen(true)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSearchOpen(true);
+            }}
+          />
+        </div>
+        {searchMounted && (
           <div
             className="absolute top-full z-[31] mt-1.5 w-full origin-top overflow-hidden rounded-[14px] text-[13px]"
             style={{
               background: "var(--card)",
               boxShadow: "0 8px 24px rgba(8,14,26,.12)",
-              animation: "searchPanelOpen .22s cubic-bezier(.2,.9,.3,1) both",
+              animation: searchOpen
+                ? "searchPanelOpen .22s cubic-bezier(.2,.9,.3,1) both"
+                : "searchPanelClose .18s cubic-bezier(.2,.9,.3,1) both",
             }}
           >
-            {searchResults.length > 0 ? (
+            {query.trim().length === 0 ? (
+              <>
+                <div className="px-4.5 pt-4 pb-2.5 text-[12.5px] font-bold" style={{ color: "var(--mut2)" }}>
+                  지금 인기 있는 종목
+                </div>
+                <div className="flex flex-col px-1.5 pb-2.5">
+                  {POPULAR_SYMBOLS.map((symbol, i) => {
+                    const s = SEARCHABLE_STOCKS.find((item) => item.symbol === symbol);
+                    if (!s) return null;
+                    return (
+                      <Link
+                        key={symbol}
+                        href={`/stocks/${symbol}`}
+                        className="flex items-center gap-2.5 rounded-[10px] px-3 py-2"
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <span className="w-4 text-[13px] font-extrabold" style={{ color: "var(--accentText)" }}>
+                          {i + 1}
+                        </span>
+                        <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+                          {s.name}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+                <div
+                  className="px-4.5 pt-3.5 pb-2.5 text-[12.5px] font-bold"
+                  style={{ color: "var(--mut2)", borderTop: "1px solid var(--line2)" }}
+                >
+                  요즘 뜨는 산업
+                </div>
+                <div className="flex flex-col px-1.5 pb-2.5">
+                  {TRENDING_INDUSTRIES.map((name, i) => (
+                    <div key={name} className="flex items-center gap-2.5 rounded-[10px] px-3 py-2">
+                      <span className="w-4 text-[13px] font-extrabold" style={{ color: "var(--accentText)" }}>
+                        {i + 1}
+                      </span>
+                      <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+                        {name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : searchResults.length > 0 ? (
               searchResults.map((s) => (
                 <Link
                   key={`${s.market}-${s.symbol}`}
@@ -126,12 +205,18 @@ export default function RankingsPage() {
                   className="flex items-center gap-1.5 px-4 py-2.5"
                   style={{ borderBottom: "1px solid var(--line2)" }}
                 >
-                  {s.name} <Tag>{s.symbol}</Tag> <Tag>{s.market}</Tag> <Tag variant="dark">{s.category}</Tag>
+                  {s.name} <Tag>{s.symbol}</Tag> <Tag>{s.market}</Tag>{" "}
+                  <span
+                    className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+                    style={CATEGORY_BADGE_STYLE[s.category]}
+                  >
+                    {s.category}
+                  </span>
                 </Link>
               ))
             ) : (
               <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
-                {query.trim().length === 0 ? "종목명 또는 티커를 입력해보세요" : "2자 이상 입력해보세요"}
+                2자 이상 입력해보세요
               </div>
             )}
           </div>
@@ -190,7 +275,7 @@ export default function RankingsPage() {
           const krwChange = (isUsd ? new D(item.changeAmount).times(rate) : new D(item.changeAmount))
             .round()
             .toNumber();
-          const badge = CATEGORY_BADGE[item.category];
+          const badge = CATEGORY_BADGE_STYLE[item.category];
           const liked = wishlist[item.symbol];
 
           return (
@@ -223,7 +308,7 @@ export default function RankingsPage() {
               </span>
               <span
                 className="w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
-                style={{ background: badge.bg, color: badge.text }}
+                style={badge}
               >
                 {item.category}
               </span>

@@ -8,6 +8,7 @@ import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
 import { useTheme } from "./ThemeProvider";
 import { getHolding, getMockChartPoints, AVAILABLE_CASH, type StockDetail } from "@/lib/mock-data";
+import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
 import { calculateOrderAmount } from "@/lib/order-amount";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 import { ApiError, placeOrder } from "@/lib/api";
@@ -141,7 +142,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
         <div className="mb-1.5">
           <div className="text-[19px] font-bold" style={{ color: "var(--ink)" }}>
-            {detail.name} <Tag>{detail.symbol}</Tag> <Tag>{detail.market}</Tag> <Tag variant="dark">{detail.category}</Tag>
+            {detail.name} <Tag>{detail.symbol}</Tag> <Tag>{detail.market}</Tag>{" "}
+            <span
+              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+              style={CATEGORY_BADGE_STYLE[detail.category]}
+            >
+              {detail.category}
+            </span>
           </div>
           <div className="mt-1.5 text-[29px] font-extrabold" style={{ color: "var(--ink)" }}>
             {priceLabel}{" "}
@@ -197,12 +204,23 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         </div>
 
         <div className="mb-3.5 rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
-          <h4 className="mb-2 text-[15px] font-bold" style={{ color: "var(--ink)" }}>
-            이 종목은 어떤 주식인가요? <Tag variant="dark">{detail.category}</Tag>
+          <h4 className="mb-2.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>
+            이 종목은 어떤 주식인가요?{" "}
+            <span
+              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+              style={CATEGORY_BADGE_STYLE[detail.category]}
+            >
+              {detail.category}
+            </span>
           </h4>
           <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>
             {CATEGORY_GUIDE[detail.category] ?? detail.description}
           </p>
+          {detail.category === "ETF" && (
+            <div className="mt-2.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
+              구성 종목 비중 정보는 준비 중이에요
+            </div>
+          )}
         </div>
 
         <div className="rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>

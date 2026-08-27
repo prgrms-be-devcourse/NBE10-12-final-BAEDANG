@@ -64,7 +64,7 @@ function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full rounded-xl px-4 py-3.5 text-[13.5px] outline-none"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
-              placeholder="8자 이상"
+              placeholder="비밀번호를 입력하세요"
             />
           </div>
 

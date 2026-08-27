@@ -207,18 +207,18 @@ export default function MyPage() {
         </div>
       )}
 
-      <div className="mt-6 rounded-[20px] p-5" style={{ background: "var(--dangerBg)" }}>
-        <div className="flex flex-wrap items-center gap-4">
+      <div className="mt-7 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+        <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-0.5 text-[14.5px] font-bold" style={{ color: "var(--dangerText)" }}>포트폴리오 초기화</div>
-            <div className="text-[12px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
+            <div className="mb-1 text-[15px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
+            <div className="text-[13px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
               보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 <b>5,000만원</b>으로 되돌아가요. 되돌릴 수
               없어요.
             </div>
           </div>
           <button
             onClick={handleReset}
-            className="ml-auto rounded-full px-5 py-2.5 text-[13px] font-bold"
+            className="ml-auto rounded-xl px-5 py-3 text-[14px] font-bold"
             style={{ background: "var(--card)", color: "var(--dangerText)" }}
           >
             포트폴리오 초기화
@@ -231,10 +231,10 @@ export default function MyPage() {
 
 function SummaryCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "up" | "down" }) {
   return (
-    <div className="flex-1 rounded-[20px] p-4.5" style={{ background: "var(--card)" }}>
-      <div className="text-[11.5px]" style={{ color: "var(--mut2)" }}>{label}</div>
+    <div className="flex-1 rounded-[20px] px-6 py-5.5" style={{ background: "var(--card)" }}>
+      <div className="text-[13px]" style={{ color: "var(--mut)" }}>{label}</div>
       <div
-        className="mt-1 text-[22px] font-extrabold"
+        className="mt-1.5 text-[24px] font-extrabold"
         style={{ color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)" }}
       >
         {value}

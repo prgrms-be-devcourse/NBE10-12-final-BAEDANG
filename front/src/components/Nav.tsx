@@ -49,6 +49,7 @@ export function Nav() {
         onChange={(v) => router.push(v)}
         trackClassName="w-[340px] gap-0.5 p-[3px]"
         pillRadius="8px"
+        squashAnimation="liquid"
         buttonClassName="rounded-lg px-1 py-[7px] text-[12.5px] font-bold"
         activeTextClassName="text-white"
         inactiveTextClassName="hover:brightness-95"

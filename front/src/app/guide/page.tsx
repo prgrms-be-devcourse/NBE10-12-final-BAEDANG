@@ -91,22 +91,22 @@ export default function GuidePage() {
           style={{ background: "var(--card)" }}
         >
           <span
-            className="mb-2 inline-block rounded-full px-3.5 py-1.5 text-[12.5px] font-bold"
+            className="mb-4.5 inline-block rounded-full px-3.5 py-1.5 text-[12px] font-extrabold"
             style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
           >
             준비 중
           </span>
-          <h2 className="text-[20px] font-extrabold" style={{ color: "var(--ink)" }}>
+          <h2 className="text-[24px] font-extrabold" style={{ color: "var(--ink)" }}>
             금융 용어 위키는 준비 중이에요
           </h2>
-          <p className="mt-1 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
-            모르는 용어가 나올 때마다 바로 찾아볼 수 있는 사전을 준비하고 있어요.
+          <p className="mt-1 max-w-[420px] text-[14.5px] leading-[1.75]" style={{ color: "var(--mut)" }}>
+            예수금, 시장가, 증권거래세처럼 거래 화면에 등장하는 용어를
             <br />
-            그동안은 이용가이드로 거래 흐름을 먼저 익혀보세요.
+            쉬운 말로 풀어 정리하고 있어요. 조금만 기다려 주세요.
           </p>
           <button
             onClick={() => setTab("guide")}
-            className="mt-5 rounded-full px-5 py-2.5 text-[13px] font-semibold transition-[background] duration-150"
+            className="mt-6.5 rounded-[14px] px-7 py-3.5 text-[14px] font-bold transition-[background] duration-150"
             style={{ background: "var(--fill)", color: "var(--ink)" }}
             onMouseEnter={(e) => (e.currentTarget.style.background = "var(--line)")}
             onMouseLeave={(e) => (e.currentTarget.style.background = "var(--fill)")}

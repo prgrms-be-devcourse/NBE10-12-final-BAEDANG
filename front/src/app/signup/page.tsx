@@ -124,17 +124,17 @@ function SignupForm() {
                 onChange={(e) => setPasswordConfirm(e.target.value)}
                 className="w-full rounded-xl px-4 py-3.5 text-[13.5px] outline-none"
                 style={{ background: "var(--fill)", color: "var(--ink)" }}
-                placeholder="비밀번호를 한 번 더 입력하세요"
+                placeholder="비밀번호를 다시 입력하세요"
               />
             }
           />
 
-          <label className="flex items-start gap-2 pt-1 text-[12.5px]" style={{ color: "var(--mut)" }}>
+          <label className="flex items-start gap-2.5 pt-1 text-[12.5px] leading-[1.55]" style={{ color: "var(--mut)" }}>
             <input
               type="checkbox"
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-0.5"
+              className="mt-0.5 h-4 w-4 cursor-pointer"
               style={{ accentColor: "var(--accent)" }}
             />
             <span>

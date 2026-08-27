@@ -19,6 +19,9 @@ type Props = {
   pillColor?: string | ((value: string) => string);
   /** 필박스 라운드. 기본은 완전한 필(999px), 헤더 네비만 8px 라운드 사각형을 쓴다. */
   pillRadius?: string;
+  /** 탭 전환 시 재생할 스쿼시 keyframe. 헤더 네비만 가로로만 출렁이는 `liquid`를 쓰고,
+   * 나머지(테마 토글·국내해외·매수매도 등)는 세로+가로로 눌리는 `squash`를 쓴다. */
+  squashAnimation?: "squash" | "liquid";
   buttonClassName?: string;
   activeTextClassName?: string;
   inactiveTextClassName?: string;
@@ -45,6 +48,7 @@ export function PillTabs({
   inactiveTextClassName = "",
   activeTextStyle,
   inactiveTextStyle = { color: "var(--mut)" },
+  squashAnimation = "squash",
 }: Props) {
   const activeIndex = Math.max(0, options.findIndex((o) => o.value === value));
   const count = options.length;
@@ -73,7 +77,9 @@ export function PillTabs({
           borderRadius: pillRadius,
           background: resolvedPillColor,
           transition: "left .35s cubic-bezier(.4,0,.2,1), background .25s",
-          animation: squashing ? "modeThumbSquash .35s cubic-bezier(.4,0,.2,1)" : undefined,
+          animation: squashing
+            ? `${squashAnimation === "liquid" ? "navThumbLiquid" : "modeThumbSquash"} .35s cubic-bezier(.4,0,.2,1)`
+            : undefined,
         }}
       />
       {options.map((opt) => {
