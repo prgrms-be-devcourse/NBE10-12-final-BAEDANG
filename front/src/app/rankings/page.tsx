@@ -92,19 +92,19 @@ export default function RankingsPage() {
       <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
         주식 종목 랭킹
       </h2>
-      <p className="mt-2 mb-4.5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+      <p className="mt-2 mb-4.5 text-[15px]" style={{ color: "var(--mut)" }}>
         거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
       </p>
 
       {/* 환율 배너 — 정책상 거래는 원화로만 제공되어, 미국 종목 표시는 이 환율로 환산합니다 */}
       <div
-        className="mb-4 flex items-center gap-2.5 rounded-[14px] px-4.5 py-2.5 text-[12.5px]"
+        className="mb-4 flex items-center gap-2.5 rounded-[14px] px-4.5 py-2.5 text-[14px]"
         style={{ border: "1px solid var(--line2)", background: "var(--card)" }}
       >
         <span className="font-bold" style={{ color: "var(--ink)" }}>
           USD / KRW
         </span>
-        <span className="text-[14px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
+        <span className="text-[16px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
           {rateLoading ? "불러오는 중…" : formatNumber(rate)}
         </span>
         {!rateLoading && (
@@ -138,7 +138,7 @@ export default function RankingsPage() {
             <path d="M21 21l-4.3-4.3" stroke="var(--mut2)" strokeWidth="2" strokeLinecap="round" />
           </svg>
           <input
-            className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[13.5px] outline-none"
+            className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[15px] outline-none"
             style={{ background: "#ffffff", color: "var(--ink)" }}
             placeholder="티커 또는 종목명으로 검색 (2자 이상)"
             value={query}
@@ -247,11 +247,11 @@ export default function RankingsPage() {
       />
 
       <div className="mb-3 flex items-center">
-        <span className="text-[11.5px]" style={{ color: "var(--mut2)" }}>
+        <span className="text-[13px]" style={{ color: "var(--mut2)" }}>
           최근 <b style={{ color: "var(--mut)" }}>1주 거래대금</b> 상위 100개 · 개별주 · 배당주 · ETF 모두
           포함 · 매주 월요일 갱신
         </span>
-        <span className="ml-auto text-[11.5px]" style={{ color: "var(--mut2)" }}>
+        <span className="ml-auto text-[13px]" style={{ color: "var(--mut2)" }}>
           12:36:59 기준 · 5초마다 갱신
         </span>
       </div>
