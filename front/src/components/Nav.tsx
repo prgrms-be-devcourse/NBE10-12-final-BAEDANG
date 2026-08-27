@@ -99,7 +99,7 @@ export function Nav() {
             </Link>
             <Link
               href={`/signup?next=${encodeURIComponent(pathname)}`}
-              className="whitespace-nowrap rounded-xl px-4 py-[7px] text-[13px] font-bold"
+              className="whitespace-nowrap rounded-lg px-4 py-[7px] text-[13px] font-bold"
               style={{ background: "var(--accent)", color: "#ffffff" }}
             >
               회원가입
