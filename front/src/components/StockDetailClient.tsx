@@ -176,6 +176,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
             buttonClassName="rounded-full px-4 py-1.5 text-[12.5px] font-bold"
             inactiveTextStyle={{ color: "var(--mut)" }}
+            gapPx={0}
           />
           {candleUnit === "일봉" && (
             <PillTabs
@@ -190,6 +191,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
               buttonClassName="rounded-full px-3.5 py-1.5 text-[12px] font-bold"
               inactiveTextStyle={{ color: "var(--mut)" }}
+              gapPx={0}
             />
           )}
           <span className="ml-auto text-[11.5px]" style={{ color: "var(--mut2)" }}>
@@ -277,6 +279,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             pillRadius="9px"
             buttonClassName="rounded-[9px] py-2.5 text-[14px] font-bold"
             inactiveTextStyle={{ color: "var(--mut2)" }}
+            padPx={4}
+            gapPx={0}
           />
 
           <label className="text-[11.5px]" style={{ color: "var(--mut2)" }}>주문 수량</label>

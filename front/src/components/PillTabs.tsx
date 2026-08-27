@@ -22,6 +22,11 @@ type Props = {
   /** 탭 전환 시 재생할 스쿼시 keyframe. 헤더 네비만 가로로만 출렁이는 `liquid`를 쓰고,
    * 나머지(테마 토글·국내해외·매수매도 등)는 세로+가로로 눌리는 `squash`를 쓴다. */
   squashAnimation?: "squash" | "liquid";
+  /** 트랙의 좌우/상하 padding(px). trackClassName의 p-*와 반드시 같은 값이어야 필박스가
+   * 버튼과 정확히 겹친다. */
+  padPx?: number;
+  /** 버튼 사이 gap(px). trackClassName의 gap-*와 반드시 같은 값이어야 한다. */
+  gapPx?: number;
   buttonClassName?: string;
   activeTextClassName?: string;
   inactiveTextClassName?: string;
@@ -49,6 +54,8 @@ export function PillTabs({
   activeTextStyle,
   inactiveTextStyle = { color: "var(--mut)" },
   squashAnimation = "squash",
+  padPx = 3,
+  gapPx = 2,
 }: Props) {
   const activeIndex = Math.max(0, options.findIndex((o) => o.value === value));
   const count = options.length;
@@ -67,13 +74,21 @@ export function PillTabs({
 
   const resolvedPillColor = typeof pillColor === "function" ? pillColor(value) : pillColor;
 
+  // flex-1 버튼 사이에 gap이 있으면 "트랙을 count 등분한 퍼센트"와 "버튼이 실제로 차지하는
+  // 폭"이 달라진다. 이 차이를 무시하고 단순 퍼센트로 필박스를 계산하면 gap이 누적되면서
+  // 인덱스가 뒤로 갈수록(오른쪽 탭일수록) 필박스가 실제 버튼 위치에서 점점 벗어난다.
+  // padding·gap을 그대로 계산식에 반영해 항상 버튼과 정확히 겹치도록 한다.
+  const buttonWidthExpr = `((100% - ${2 * padPx}px - ${(count - 1) * gapPx}px) / ${count})`;
+  const leftExpr = `calc(${padPx}px + ${activeIndex} * (${buttonWidthExpr} + ${gapPx}px))`;
+  const widthExpr = `calc(${buttonWidthExpr})`;
+
   return (
     <div className={`relative flex ${trackClassName}`} style={trackStyle}>
       <div
         className="absolute top-[3px] bottom-[3px]"
         style={{
-          left: `calc(${(activeIndex * 100) / count}% + 3px)`,
-          width: `calc(${100 / count}% - 4px)`,
+          left: leftExpr,
+          width: widthExpr,
           borderRadius: pillRadius,
           background: resolvedPillColor,
           transition: "left .35s cubic-bezier(.4,0,.2,1), background .25s",
