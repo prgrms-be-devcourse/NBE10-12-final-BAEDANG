@@ -4,6 +4,7 @@ import Link from "next/link";
 import { HeroDots } from "@/components/HeroDots";
 import { TiltCard } from "@/components/TiltCard";
 import { Reveal } from "@/components/Reveal";
+import { useTheme } from "@/components/ThemeProvider";
 
 const STEPS = [
   {
@@ -51,6 +52,7 @@ const COMPARE_ROWS = [
 ];
 
 export default function MainPage() {
+  const { theme } = useTheme();
   return (
     <div>
       {/* 히어로 */}
@@ -74,7 +76,7 @@ export default function MainPage() {
               <br />
               잃지 않는 법을 배워요
             </h1>
-            <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: "#000000" }}>
+            <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
               실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.
               <br />
               <b className="font-bold">모의 투자금 5,000만원</b>이 가입 즉시 지급돼요.
