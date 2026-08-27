@@ -18,7 +18,7 @@ const POPULAR_SYMBOLS = ["005930", "NVDA", "000660", "TSLA", "069500"];
 const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우주항공", "로봇"];
 
 export default function RankingsPage() {
-  const { rate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
   const [market, setMarket] = useState<MarketCountry>("KR");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
@@ -107,10 +107,19 @@ export default function RankingsPage() {
         <span className="text-[14px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
           {rateLoading ? "불러오는 중…" : formatNumber(rate)}
         </span>
+        {!rateLoading && (
+          <span className="font-semibold tabular-nums" style={{ color: "var(--up)" }}>
+            {changeAmount >= 0 ? "▲" : "▼"} {Math.abs(changeAmount).toFixed(2)} ({formatPercent(changeRate)})
+          </span>
+        )}
         <span style={{ color: "var(--mut2)" }}>
           {updatedAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 기준 · 1시간마다 갱신
         </span>
-        <span className="ml-auto cursor-default" style={{ color: "var(--mut2)" }} title="환율 추이 그래프는 2주차 MVP 예정입니다">
+        <span
+          className="ml-auto cursor-default font-semibold"
+          style={{ color: "var(--mut2)" }}
+          title="환율 추이 그래프는 2주차 MVP 예정입니다"
+        >
           환율 추이 그래프 →
         </span>
       </div>

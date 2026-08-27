@@ -7,6 +7,8 @@ const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // 1시간마다 갱신 (docs/erd.md
 
 type ExchangeRateState = {
   rate: number;
+  changeAmount: number;
+  changeRate: number;
   updatedAt: Date;
   isLoading: boolean;
 };
@@ -21,6 +23,8 @@ const ExchangeRateContext = createContext<ExchangeRateState | null>(null);
 export function ExchangeRateProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ExchangeRateState>({
     rate: DEFAULT_USD_KRW_RATE,
+    changeAmount: 0,
+    changeRate: 0,
     updatedAt: new Date(),
     isLoading: true,
   });
@@ -31,7 +35,13 @@ export function ExchangeRateProvider({ children }: { children: ReactNode }) {
     async function load() {
       const info = await fetchExchangeRate();
       if (cancelled) return;
-      setState({ rate: info.rate, updatedAt: info.updatedAt, isLoading: false });
+      setState({
+        rate: info.rate,
+        changeAmount: info.changeAmount,
+        changeRate: info.changeRate,
+        updatedAt: info.updatedAt,
+        isLoading: false,
+      });
     }
 
     load();
