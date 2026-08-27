@@ -106,11 +106,11 @@ export default function MainPage() {
       </Reveal>
 
       {/* 3단계 */}
-      <Reveal delay={0.08} className="mt-6 mb-10">
-        <h2 className="text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
+      <Reveal delay={0.08} className="mt-12 mb-10">
+        <h2 className="text-center text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
           이렇게 사용해요
         </h2>
-        <p className="mb-6 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
+        <p className="mt-4 mb-6 text-center text-[15px]" style={{ color: "var(--mut)" }}>
           가입부터 첫 거래까지 3단계
         </p>
         <div className="flex gap-4 max-md:flex-col">
