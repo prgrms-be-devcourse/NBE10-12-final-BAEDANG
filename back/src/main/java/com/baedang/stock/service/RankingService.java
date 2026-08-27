@@ -4,6 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
@@ -158,12 +159,19 @@ public class RankingService {
 
     private boolean isRealtime(Stock stock, QuoteSnapshot quote) {
         if (quote == null || quote.getQuoteAt() == null) return false;
-        Instant now = Instant.now(clock);
 
-        return marketSessionProvider.isOpen(
-                stock.getMarketCountry(),
-                now
-        );
+        Instant now = Instant.now(clock);
+        Instant quoteAt = quote.getQuoteAt().toInstant();
+
+        if (quoteAt.isAfter(now)) return false;
+
+        MarketSessionStatus currentSession = marketSessionProvider.currentSession(stock.getMarketCountry(), now);
+
+        if(!currentSession.open()) return false;
+
+        MarketSessionStatus quoteSession =  marketSessionProvider.currentSession(stock.getMarketCountry(), quoteAt);
+        
+        return quoteSession.open() && currentSession.validUntil().equals(quoteSession.validUntil());
     }
 
     private MarketCountry parseMarket(String market) {
