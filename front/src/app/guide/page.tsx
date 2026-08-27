@@ -79,9 +79,9 @@ export default function GuidePage() {
         ]}
         value={tab}
         onChange={(v) => setTab(v as "guide" | "wiki")}
-        trackClassName="mb-4.5 w-[240px] gap-0.5 rounded-full p-[3px]"
+        trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
         trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
-        buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
+        buttonClassName="rounded-full px-0 py-2.5 text-[12px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}
       />
 
@@ -121,7 +121,7 @@ export default function GuidePage() {
               이용가이드
             </h2>
           </Reveal>
-          <Reveal delay={0.08} className="mb-6">
+          <Reveal delay={0.08} className="mt-2.5 mb-6">
             <p className="text-[15px]" style={{ color: "var(--mut)" }}>
               이 서비스에서 거래가 어떻게 이루어지는지 안내해 드려요
             </p>
