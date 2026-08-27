@@ -35,9 +35,11 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPO: ${{ github.repository }}
         run: |
           node - << 'EOF'
           const https = require('https');
+          const fs = require('fs');
           const { execSync } = require('child_process');
 
           const apiKey = process.env.GEMINI_API_KEY;
@@ -45,6 +47,8 @@ jobs:
           const prTitle = process.env.PR_TITLE;
           const baseSha = process.env.BASE_SHA;
           const headSha = process.env.HEAD_SHA;
+          const repo = process.env.REPO;
+          const TAG = '<!-- GEMINI_AI_REVIEW -->';
 
           if (!apiKey) {
             console.log("GEMINI_API_KEY is not configured in Repository Secrets. Skipping Gemini code review.");
@@ -64,7 +68,7 @@ jobs:
             process.exit(0);
           }
 
-          // Truncate diff if it exceeds max payload size (approx 30,000 characters)
+          // Truncate diff if it exceeds approx 30,000 characters
           const MAX_DIFF_LEN = 30000;
           let truncated = false;
           if (diff.length > MAX_DIFF_LEN) {
@@ -131,27 +135,51 @@ ${diff}
             res.on('data', (chunk) => body += chunk);
             res.on('end', () => {
               if (res.statusCode >= 400) {
-                console.error("Gemini API Error:", res.statusCode, body);
-                process.exit(0); // Do not fail the CI build on review API errors
+                console.warn(`[WARN] Gemini API returned status ${res.statusCode}. Quota exceeded or API error. Preserving existing review without modification.`);
+                process.exit(0); // Do NOT touch existing comments on quota exhaustion or error
               }
 
               try {
                 const json = JSON.parse(body);
                 const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (!reviewText) {
-                  console.log("No review content returned from Gemini.");
-                  return;
+                if (!reviewText || !reviewText.trim()) {
+                  console.warn("[WARN] Empty review content returned. Preserving existing review.");
+                  process.exit(0);
                 }
 
-                const commentBody = `### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n*이 리뷰는 GitHub Actions와 Gemini 2.0 Flash에 의해 자동으로 생성되었습니다.*`;
+                const commentBody = `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n*이 리뷰는 GitHub Actions와 Gemini 2.0 Flash에 의해 자동으로 생성·갱신되었습니다.*`;
 
-                // Post comment to PR using GitHub CLI
-                const fs = require('fs');
-                fs.writeFileSync('/tmp/review_comment.md', commentBody);
-                execSync(`gh pr comment ${prNumber} --body-file /tmp/review_comment.md`, {
-                  env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN }
-                });
-                console.log("Successfully posted Gemini code review comment on PR #" + prNumber);
+                // Check for existing comment containing TAG
+                let existingCommentId = null;
+                try {
+                  const commentsJson = execSync(`gh api repos/${repo}/issues/${prNumber}/comments --paginate`, {
+                    env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN }
+                  }).toString();
+                  const comments = JSON.parse(commentsJson);
+                  const found = comments.find(c => c.body && c.body.includes(TAG));
+                  if (found) {
+                    existingCommentId = found.id;
+                  }
+                } catch (err) {
+                  console.error("Failed to query existing PR comments:", err.message);
+                }
+
+                const payloadPath = '/tmp/review_payload.json';
+                fs.writeFileSync(payloadPath, JSON.stringify({ body: commentBody }));
+
+                if (existingCommentId) {
+                  // Update existing comment (Overwrite cleanly)
+                  execSync(`gh api -X PATCH repos/${repo}/issues/comments/${existingCommentId} --input ${payloadPath}`, {
+                    env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN }
+                  });
+                  console.log(`Successfully updated existing Gemini code review comment (ID: ${existingCommentId}) on PR #${prNumber}`);
+                } else {
+                  // Create new comment
+                  execSync(`gh api -X POST repos/${repo}/issues/${prNumber}/comments --input ${payloadPath}`, {
+                    env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN }
+                  });
+                  console.log(`Successfully posted new Gemini code review comment on PR #${prNumber}`);
+                }
               } catch (e) {
                 console.error("Failed to parse Gemini response or post PR comment:", e.message);
               }
@@ -159,7 +187,7 @@ ${diff}
           });
 
           req.on('error', (e) => {
-            console.error("Request error:", e.message);
+            console.warn("[WARN] Gemini API request error:", e.message, "Preserving existing review.");
           });
 
           req.write(requestData);
