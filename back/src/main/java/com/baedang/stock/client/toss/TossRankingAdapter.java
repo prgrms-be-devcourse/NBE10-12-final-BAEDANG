@@ -83,42 +83,41 @@ public class TossRankingAdapter implements RankingPort {
     private RankingEntry rankingToEntryOrThrow(TossRankingResponse.Ranking ranking, String marketName) {
         requireNonNullOrThrow(ranking, "ranking", marketName);
 
-        if (ranking.rank() < 1) {
-            logger.error(
-                    "TossRankingAdapter(market={}): {} < 1.",
-                    marketName,
-                    "ranking.rank"
-            );
-            throw new BusinessException(ErrorCode.TOSS_API_ERROR);
-        }
-
         String symbol = requireNonNullOrThrow(ranking.symbol(), "ranking.symbol", marketName);
-        String currency = requireNonNullOrThrow(ranking.currency(), "ranking.currency", marketName);
-        TossRankingResponse.Price price = requireNonNullOrThrow(ranking.price(), "ranking.price", marketName);
-        String tradingVolume = requireNonNullOrThrow(ranking.tradingVolume(), "ranking.tradingVolume", marketName);
-        String tradingAmount = requireNonNullOrThrow(ranking.tradingAmount(), "ranking.tradingAmount", marketName);
 
-        String lastPrice = requireNonNullOrThrow(price.lastPrice(), "ranking.price.lastPrice", marketName);
-        String basePrice = requireNonNullOrThrow(price.basePrice(), "ranking.price.basePrice", marketName);
+        int rank = validateRankOrThrow(ranking.rank(), "ranking.rank", marketName, symbol);
+
+        String currency = requireNonNullOrThrow(ranking.currency(), "ranking.currency", marketName, symbol);
+        TossRankingResponse.Price price = requireNonNullOrThrow(ranking.price(), "ranking.price", marketName, symbol);
+        String tradingVolume = requireNonNullOrThrow(ranking.tradingVolume(), "ranking.tradingVolume", marketName, symbol);
+        String tradingAmount = requireNonNullOrThrow(ranking.tradingAmount(), "ranking.tradingAmount", marketName, symbol);
+
+        String lastPrice = requireNonNullOrThrow(price.lastPrice(), "ranking.price.lastPrice", marketName, symbol);
+        String basePrice = requireNonNullOrThrow(price.basePrice(), "ranking.price.basePrice", marketName, symbol);
         String changeRate = price.changeRate();
 
         return new RankingEntry(
-                ranking.rank(),
+                rank,
                 symbol,
                 currency,
-                stringToBigDecimalOrThrow(lastPrice, "lastPrice", marketName),
-                stringToBigDecimalOrThrow(basePrice, "basePrice", marketName),
-                changeRate == null ? null : stringToBigDecimalOrThrow(changeRate, "changeRate", marketName),
-                stringToBigDecimalOrThrow(tradingVolume, "tradingVolume", marketName),
-                stringToBigDecimalOrThrow(tradingAmount, "tradingAmount", marketName)
+                stringToBigDecimalOrThrow(lastPrice, "lastPrice", marketName, symbol),
+                stringToBigDecimalOrThrow(basePrice, "basePrice", marketName, symbol),
+                changeRate == null ? null : stringToBigDecimalOrThrow(changeRate, "changeRate", marketName, symbol),
+                stringToBigDecimalOrThrow(tradingVolume, "tradingVolume", marketName, symbol),
+                stringToBigDecimalOrThrow(tradingAmount, "tradingAmount", marketName, symbol)
         );
     }
 
     private <T> T requireNonNullOrThrow(T value, String valueName, String marketName) {
+        return requireNonNullOrThrow(value, valueName, marketName, "");
+    }
+
+    private <T> T requireNonNullOrThrow(T value, String valueName, String marketName, String symbol) {
         if (value == null) {
             logger.error(
-                    "TossRankingAdapter(market={}): {} is null.",
+                    "TossRankingAdapter(market={}{}): {} is null.",
                     marketName,
+                    symbol.isBlank() ? "" : ", symbol=" + symbol,
                     valueName
             );
             throw new BusinessException(ErrorCode.TOSS_API_ERROR);
@@ -126,16 +125,30 @@ public class TossRankingAdapter implements RankingPort {
         return value;
     }
 
-    private BigDecimal stringToBigDecimalOrThrow(String string, String stringName, String marketName) {
+    private BigDecimal stringToBigDecimalOrThrow(String string, String stringName, String marketName, String symbol) {
         try {
             return new BigDecimal(string);
         } catch (NumberFormatException exception) {
             logger.error(
-                    "TossRankingAdapter(market={}): {} is not a number format.",
+                    "TossRankingAdapter(market={}{}): {} is not a number format.",
                     marketName,
+                    symbol.isBlank() ? "" : ", symbol=" + symbol,
                     stringName
             );
             throw new BusinessException(ErrorCode.TOSS_API_ERROR);
         }
+    }
+
+    private int validateRankOrThrow(int rank, String rankName, String marketName, String symbol) {
+        if (rank < 1) {
+            logger.error(
+                    "TossRankingAdapter(market={}, symbol={}): {} < 1.",
+                    marketName,
+                    symbol,
+                    rankName
+            );
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR);
+        }
+        return rank;
     }
 }
