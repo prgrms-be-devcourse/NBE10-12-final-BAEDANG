@@ -2,12 +2,15 @@ package com.baedang.account.controller;
 
 import com.baedang.account.dto.AccountSummaryResponse;
 import com.baedang.account.dto.HoldingsResponse;
+import com.baedang.account.dto.LedgerResponse;
 import com.baedang.account.service.AccountService;
+import com.baedang.account.service.LedgerQueryService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -22,11 +25,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class AccountController {
 
     private final AccountService accountService;
+    private final LedgerQueryService ledgerQueryService;
     private final Long fallbackUserId;
 
     public AccountController(AccountService accountService,
+                            LedgerQueryService ledgerQueryService,
                             @Value("${auth.dev-fixed-user-id}") Long fallbackUserId) {
         this.accountService = accountService;
+        this.ledgerQueryService = ledgerQueryService;
         this.fallbackUserId = fallbackUserId;
     }
 
@@ -42,6 +48,17 @@ public class AccountController {
             @RequestHeader(value = "X-User-Id", required = false) Long userId
     ) {
         return ResponseEntity.ok(accountService.getHoldings(resolveUserId(userId)));
+    }
+
+    @GetMapping("/me/ledger")
+    public ResponseEntity<LedgerResponse> getLedger(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String entryType
+    ) {
+        return ResponseEntity.ok(
+                ledgerQueryService.getLedger(resolveUserId(userId), cursor, size, entryType));
     }
 
     private Long resolveUserId(Long userId) {
