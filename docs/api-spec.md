@@ -697,6 +697,16 @@ Shows the ledger (`ledger_entry`), not the order list — "**how the money moved
 ### `POST /accounts/me/reset` 🔒
 Portfolio reset
 
+**Request**
+```json
+{
+  "accountId": 1
+}
+```
+
+`accountId` is the current active account ID returned by `GET /accounts/me`. Reuse it for duplicate clicks and network retries. Retrying a successful reset with the same ID returns the account created by that reset without opening another round. Its `cashBalance` is the original post-reset `initialCash`, not the account's current balance at retry time. To intentionally reset again, first read and send the new active `accountId`.
+
+**Response · 200**
 ```json
 {
   "accountId": 2,
@@ -708,11 +718,14 @@ Portfolio reset
 
 **Server processing**
 ```
-UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id = current;
+SELECT ... FROM account WHERE account_id = requested AND user_id = current_user FOR UPDATE;
+UPDATE account SET status='CLOSED', closed_at=:resetAt WHERE account_id = requested;
 INSERT INTO account (user_id, round_no, ...) VALUES (?, prev+1, 50000000, 50000000);
-INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
+INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ...);
 ```
 **Not a delete — a new-round account opening.** The prior ledger, fills, and holdings stay preserved; queries run against the new `account_id`, so the screen clears automatically. Extensible to "past round scores" later. **The frontend must show a confirmation modal.**
+
+Closing the old account, opening the new account, and inserting its initial-deposit ledger entry are one transaction and share one UTC `resetAt`. The account-row lock serializes reset with market orders. Future limit-order locks cause `ACCOUNT_HAS_PENDING_ORDERS` (409); a stale ID whose next round is no longer active causes `ACCOUNT_RESET_CONFLICT` (409).
 
 ---
 

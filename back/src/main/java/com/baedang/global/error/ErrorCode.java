@@ -77,6 +77,8 @@ public enum ErrorCode {
     // ── 계좌 ────────────────────────────────────────────────────────────────
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "계좌 정보를 찾을 수 없어요"),
     ACCOUNT_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "종료된 회차의 계좌예요"),
+    ACCOUNT_RESET_CONFLICT(HttpStatus.CONFLICT, "이미 다른 회차가 시작되었어요. 계좌 정보를 새로고침해주세요"),
+    ACCOUNT_HAS_PENDING_ORDERS(HttpStatus.CONFLICT, "미체결 주문이 있어 포트폴리오를 초기화할 수 없어요"),
 
     // ── 외부 API ────────────────────────────────────────────────────────────
     TOSS_API_ERROR(HttpStatus.BAD_GATEWAY, "시세 서버와 통신할 수 없어요"),

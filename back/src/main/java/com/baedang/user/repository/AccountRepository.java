@@ -23,6 +23,14 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
             @Param("status") AccountStatus status
     );
 
+    /** 초기화 요청이 지정한 계좌를 소유자까지 확인하며 잠급니다. CLOSED 멱등 재요청도 조회합니다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from Account a where a.accountId = :accountId and a.userId = :userId")
+    Optional<Account> findByAccountIdAndUserIdForUpdate(
+            @Param("accountId") Long accountId,
+            @Param("userId") Long userId
+    );
+
     /** 다음 회차 번호를 구할 때 씁니다. */
     Optional<Account> findTopByUserIdOrderByRoundNoDesc(Long userId);
 }

@@ -1,7 +1,9 @@
 package com.baedang.account.controller;
 
+import com.baedang.account.dto.AccountResetResponse;
 import com.baedang.account.dto.AccountSummaryResponse;
 import com.baedang.account.dto.HoldingsResponse;
+import com.baedang.account.service.AccountResetService;
 import com.baedang.account.service.AccountService;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
@@ -17,6 +19,7 @@ import java.util.List;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -25,6 +28,46 @@ class AccountControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean AccountService accountService;
+    @MockitoBean AccountResetService accountResetService;
+
+    @Test
+    void 포트폴리오를_초기화하면_새_회차와_원화_금액을_문자열로_응답한다() throws Exception {
+        when(accountResetService.reset(7L, 1L))
+                .thenReturn(new AccountResetResponse(2L, 2, "50000000", "50000000"));
+
+        mockMvc.perform(post("/api/accounts/me/reset")
+                        .header("X-User-Id", "7")
+                        .contentType("application/json")
+                        .content("{\"accountId\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountId").value(2))
+                .andExpect(jsonPath("$.roundNo").value(2))
+                .andExpect(jsonPath("$.initialCash").value("50000000"))
+                .andExpect(jsonPath("$.cashBalance").value("50000000"));
+    }
+
+    @Test
+    void 초기화도_헤더가_없으면_설정된_시드_사용자를_사용한다() throws Exception {
+        when(accountResetService.reset(1L, 10L))
+                .thenReturn(new AccountResetResponse(11L, 2, "50000000", "50000000"));
+
+        mockMvc.perform(post("/api/accounts/me/reset")
+                        .contentType("application/json")
+                        .content("{\"accountId\":10}"))
+                .andExpect(status().isOk());
+
+        verify(accountResetService).reset(1L, 10L);
+    }
+
+    @Test
+    void 초기화_요청에_계좌_ID가_없으면_400을_응답한다() throws Exception {
+        mockMvc.perform(post("/api/accounts/me/reset")
+                        .contentType("application/json")
+                        .content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"))
+                .andExpect(jsonPath("$.data.accountId").value("현재 계좌 ID는 필수입니다"));
+    }
 
     @Test
     void 계좌_요약을_조회하면_원화_금액을_문자열로_응답한다() throws Exception {

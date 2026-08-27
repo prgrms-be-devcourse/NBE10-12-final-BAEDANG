@@ -24,4 +24,7 @@ public interface HoldingRepository extends JpaRepository<Holding, Long> {
 
     /** 계좌의 보유 종목 중 수량이 남은 것만. 마이페이지 평가에 씁니다. */
     List<Holding> findByAccountIdAndQuantityGreaterThan(Long accountId, BigDecimal quantity);
+
+    /** 지정가 주문 도입 후 초기화가 동결 수량을 남기지 않도록 방어합니다. */
+    boolean existsByAccountIdAndLockedQuantityGreaterThan(Long accountId, BigDecimal lockedQuantity);
 }

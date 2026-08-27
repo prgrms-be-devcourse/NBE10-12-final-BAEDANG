@@ -698,6 +698,16 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ### `POST /accounts/me/reset` 🔒
 포트폴리오 초기화
 
+**Request**
+```json
+{
+  "accountId": 1
+}
+```
+
+`accountId`는 `GET /accounts/me`에서 받은 현재 활성 계좌 ID입니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지합니다. 같은 계좌 ID로 성공 요청을 다시 보내면 회차를 추가하지 않고 직전에 생성한 계좌를 그대로 반환합니다. 재시도 응답의 `cashBalance`도 현재 조회 잔액이 아니라 최초 초기화 직후의 `initialCash` 값입니다. 사용자가 새 회차를 다시 초기화하려면 새로 조회한 활성 `accountId`를 보냅니다.
+
+**Response · 200**
 ```json
 {
   "accountId": 2,
@@ -709,11 +719,14 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 **서버 처리**
 ```
-UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id = 현재;
+SELECT ... FROM account WHERE account_id = 요청값 AND user_id = 현재 사용자 FOR UPDATE;
+UPDATE account SET status='CLOSED', closed_at=:resetAt WHERE account_id = 요청값;
 INSERT INTO account (user_id, round_no, ...) VALUES (?, 이전+1, 50000000, 50000000);
-INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
+INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ...);
 ```
 **삭제가 아니라 새 회차 계좌 개설입니다.** 기존 원장·체결내역·보유종목은 그대로 보존되고, 조회 시 새 `account_id` 기준이라 화면에서는 자동으로 비워집니다. 나중에 **"지난 회차 성적"** 기능으로 확장할 수 있습니다. **프론트는 확인 모달을 반드시 띄우세요.**
+
+기존 계좌 종료, 신규 계좌 개설, 초기 지급 원장은 한 트랜잭션이며 같은 UTC `resetAt`을 사용합니다. 현재 시장가 주문과는 계좌 행 잠금으로 직렬화됩니다. 향후 지정가 주문의 동결액 또는 동결 수량이 남아 있으면 `ACCOUNT_HAS_PENDING_ORDERS`(409)로 초기화를 거절합니다. 요청 계좌보다 두 회차 이상 진행된 상태에서 오래된 ID를 다시 보내면 `ACCOUNT_RESET_CONFLICT`(409)를 반환합니다.
 
 ---
 

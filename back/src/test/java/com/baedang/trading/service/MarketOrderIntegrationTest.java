@@ -685,7 +685,8 @@ class MarketOrderIntegrationTest {
         String suffix = UUID.randomUUID().toString();
         User user = userRepository.save(User.create(
                 suffix + "@example.com", "password-hash", "user-" + suffix.substring(0, 8)));
-        Account account = accountRepository.save(Account.open(user.getUserId(), 1, initialCash));
+        Account account = accountRepository.save(Account.open(
+                user.getUserId(), 1, initialCash, OffsetDateTime.now(ZoneOffset.UTC)));
         Stock stock = Stock.create(symbol, marketCountry, market, "테스트 종목", currency, "STOCK");
         stock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(stock);
