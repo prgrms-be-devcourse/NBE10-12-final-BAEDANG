@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
+import { Reveal } from "@/components/Reveal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { D } from "@/lib/decimal";
 import {
@@ -62,12 +63,14 @@ export default function MyPage() {
 
   return (
     <div>
-      <div className="mb-4.5 flex items-baseline gap-3">
-        <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
-        <span className="text-[11.5px]" style={{ color: "var(--mut2)" }}>12:36:59 기준</span>
-      </div>
+      <Reveal delay={0}>
+        <div className="mb-4.5 flex items-baseline gap-3">
+          <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
+          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>12:36:59 기준</span>
+        </div>
+      </Reveal>
 
-      <div className="mb-6 flex gap-4 max-md:flex-col">
+      <Reveal delay={0.1} className="mb-6 flex gap-4 max-md:flex-col">
         <SummaryCard label="총 자산" value={formatNumber(totalAssets.round().toNumber())} />
         <SummaryCard label="예수금" value={formatNumber(cash)} />
         <SummaryCard label="주식 평가금액" value={formatNumber(stockValue.round().toNumber())} />
@@ -81,21 +84,24 @@ export default function MyPage() {
           }
           tone={pnl.greaterThanOrEqualTo(0) ? "up" : "down"}
         />
-      </div>
+      </Reveal>
 
-      <PillTabs
-        options={[
-          { value: "holdings", label: "보유 종목" },
-          { value: "ledger", label: "체결 내역" },
-        ]}
-        value={tab}
-        onChange={(v) => setTab(v as "holdings" | "ledger")}
-        trackClassName="mb-4.5 w-[220px] gap-0.5 rounded-full p-[3px]"
-        trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
-        buttonClassName="rounded-full py-2.5 text-[13.5px] font-bold"
-        inactiveTextStyle={{ color: "var(--mut)" }}
-      />
+      <Reveal delay={0.2}>
+        <PillTabs
+          options={[
+            { value: "holdings", label: "보유 종목" },
+            { value: "ledger", label: "체결 내역" },
+          ]}
+          value={tab}
+          onChange={(v) => setTab(v as "holdings" | "ledger")}
+          trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
+          trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
+          buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
+          inactiveTextStyle={{ color: "var(--mut)" }}
+        />
+      </Reveal>
 
+      <Reveal delay={0.3}>
       {tab === "holdings" ? (
         holdings.length === 0 ? (
           <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
@@ -105,7 +111,7 @@ export default function MyPage() {
           <>
             <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
               <div
-                className="grid px-5 py-2.5 text-[12px] font-medium"
+                className="grid px-5 py-2.5 text-[12px] font-bold"
                 style={{
                   gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px",
                   borderBottom: "1px solid var(--line2)",
@@ -206,8 +212,9 @@ export default function MyPage() {
           ))}
         </div>
       )}
+      </Reveal>
 
-      <div className="mt-7 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.4} className="mt-7 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
             <div className="mb-1 text-[15px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
@@ -224,7 +231,7 @@ export default function MyPage() {
             포트폴리오 초기화
           </button>
         </div>
-      </div>
+      </Reveal>
     </div>
   );
 }
