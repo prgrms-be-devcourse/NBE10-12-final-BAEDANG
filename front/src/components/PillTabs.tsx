@@ -89,7 +89,7 @@ export function PillTabs({
             key={opt.value}
             type="button"
             onClick={() => onChange(opt.value)}
-            className={`relative z-[1] flex-1 cursor-pointer whitespace-nowrap ${
+            className={`relative z-[1] flex-1 cursor-pointer text-center whitespace-nowrap ${
               active ? activeTextClassName : inactiveTextClassName
             } ${buttonClassName}`}
             style={active ? activeTextStyle : inactiveTextStyle}
