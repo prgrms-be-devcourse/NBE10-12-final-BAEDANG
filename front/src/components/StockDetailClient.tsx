@@ -9,7 +9,7 @@ import { getHolding, getMockChartPoints, AVAILABLE_CASH, type StockDetail } from
 import { calculateOrderAmount } from "@/lib/order-amount";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 import { ApiError, placeOrder } from "@/lib/api";
-import { nextClientOrderId } from "@/lib/order-retry-policy";
+import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
   MARKET_CLOSED: "장 마감 · 거래 시간이 아니에요",
@@ -85,7 +85,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
     // 이전 시도의 clientOrderId가 남아있으면(SAME_CLIENT_ORDER_ID 재시도) 그대로 쓰고,
     // 없으면(첫 시도이거나 직전에 NOT_RETRYABLE로 리셋됨) 새로 발급한다.
-    const idToUse = clientOrderId ?? crypto.randomUUID();
+    const idToUse = clientOrderId ?? generateClientOrderId();
 
     setSubmitting(true);
     setOrderError(null);

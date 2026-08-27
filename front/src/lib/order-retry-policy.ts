@@ -26,6 +26,26 @@
 export type ClientOrderRetryPolicy = "SAME_CLIENT_ORDER_ID" | "NEW_CLIENT_ORDER_ID" | "NOT_RETRYABLE";
 
 /**
+ * 새 `clientOrderId`를 발급한다.
+ *
+ * <p>`crypto.randomUUID()`는 Secure Context(HTTPS 또는 `localhost`)에서만 지원되는
+ * 브라우저 API다. 사설 IP로 접속하는 로컬 테스트 환경이나 구형 웹뷰처럼 Secure
+ * Context가 아닌 곳에서는 `crypto.randomUUID is not a function`으로 죽을 수 있어,
+ * 그런 환경에서도 안전하게 동작하도록 폴백을 둔다. 이 ID는 암호학적 강도가 필요한
+ * 값이 아니라 주문 멱등성 키일 뿐이므로 `Math.random()` 기반 폴백으로 충분하다.
+ */
+export function generateClientOrderId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+/**
  * 다음 시도에 쓸 `clientOrderId`를 계산한다.
  *
  * @param policy 실패 응답의 `data.retryPolicy`. 없으면(네트워크 오류처럼 서버에 닿기도
@@ -41,7 +61,7 @@ export function nextClientOrderId(
 ): string | null {
   switch (policy) {
     case "NEW_CLIENT_ORDER_ID":
-      return crypto.randomUUID();
+      return generateClientOrderId();
     case "NOT_RETRYABLE":
       return null;
     case "SAME_CLIENT_ORDER_ID":
