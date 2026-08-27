@@ -5,9 +5,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { D } from "@/lib/decimal";
-import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry } from "@/lib/mock-data";
+import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry, type RankingItem } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
@@ -31,6 +32,9 @@ export default function RankingsPage() {
   const [searchMounted, setSearchMounted] = useState(false);
   const [wishlist, setWishlist] = useState<Record<string, boolean>>({});
   const searchBoxRef = useRef<HTMLDivElement>(null);
+  // 종목에 마우스를 올렸을 때 뜨는 간단 정보 + 일봉 미리보기 카드의 상태.
+  // 좌표(x,y)는 커서를 따라다니게 하려고 mousemove마다 갱신한다.
+  const [hover, setHover] = useState<{ item: RankingItem; krwPrice: number; krwChange: number; x: number; y: number } | null>(null);
 
   const rankings = market === "KR" ? KR_RANKINGS : US_RANKINGS;
   const shown = rankings.slice(0, visibleCount);
@@ -302,8 +306,15 @@ export default function RankingsPage() {
               href={`/stocks/${item.symbol}`}
               className="grid items-center px-5 py-3 text-[15px] transition-[background] duration-150"
               style={{ gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr", borderBottom: "1px solid var(--line2)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--fill)";
+                setHover({ item, krwPrice, krwChange, x: e.clientX, y: e.clientY });
+              }}
+              onMouseMove={(e) => setHover((h) => (h && h.item.symbol === item.symbol ? { ...h, x: e.clientX, y: e.clientY } : h))}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                setHover((h) => (h?.item.symbol === item.symbol ? null : h));
+              }}
             >
               <button
                 type="button"
@@ -349,6 +360,10 @@ export default function RankingsPage() {
           );
         })}
       </div>
+
+      {hover && (
+        <StockHoverPreview item={hover.item} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
+      )}
 
       <div className="mt-5 text-center">
         {hasNext ? (
