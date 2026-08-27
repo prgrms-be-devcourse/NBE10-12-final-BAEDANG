@@ -100,7 +100,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       setOrderResult(
         `${detail.name} ${response.quantity}주 시장가 ${side} 체결 (체결가 ${response.executedPrice}` +
           `${detail.currency === "USD" ? "$" : "원"} · 총 ${side === "매수" ? "차감" : "입금"}액 ` +
-          `${formatNumber(Number(response.netAmount))}원)`
+          `${formatNumber(response.netAmount)}원)`
       );
       setClientOrderId(null); // 성공했으니 다음 주문은 완전히 새로 시작한다.
     } catch (err) {
