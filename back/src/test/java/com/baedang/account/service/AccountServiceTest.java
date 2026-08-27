@@ -93,9 +93,11 @@ class AccountServiceTest {
     void 국내와_미국_보유를_각각_원화로_평가해_합산한다() {
         givenAccount(1L, "50000000", "48240000", 1);
         Holding krHolding = Holding.firstBuy(1L, 101L,
-                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE);
+                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE,
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         Holding usHolding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"));
+                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"),
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of(krHolding, usHolding));
         when(quoteSnapshotRepository.findByStockIdIn(any()))
@@ -120,7 +122,8 @@ class AccountServiceTest {
     void 미국_보유가_있는데_환율이_없으면_매입환율로_환산하고_엔드포인트를_유지한다() {
         givenAccount(1L, "50000000", "10000000", 1);
         Holding usHolding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"));
+                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"),
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of(usHolding));
         when(quoteSnapshotRepository.findByStockIdIn(any()))

@@ -46,10 +46,12 @@ public enum ErrorCode {
 
     // ── 시세 ────────────────────────────────────────────────────────────────
     QUOTE_NOT_FOUND(HttpStatus.NOT_FOUND, "시세 정보를 가져올 수 없어요"),
+    QUOTE_CURRENCY_MISMATCH(HttpStatus.BAD_GATEWAY, "시세 통화 정보가 올바르지 않아요"),
     EXCHANGE_RATE_NOT_FOUND(HttpStatus.NOT_FOUND, "환율 정보를 가져올 수 없어요"),
 
     // ── 주문 · 체결 ─────────────────────────────────────────────────────────
     MARKET_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "지금은 거래할 수 없는 시간이에요"),
+    MARKET_CONTEXT_EXPIRED(HttpStatus.UNPROCESSABLE_ENTITY, "시장 정보를 다시 확인한 뒤 주문해주세요"),
     NOT_IN_UNIVERSE(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 아직 거래를 지원하지 않아요"),
     STOCK_SUSPENDED(HttpStatus.UNPROCESSABLE_ENTITY, "거래정지 종목이에요"),
     STOCK_LIQUIDATION(HttpStatus.UNPROCESSABLE_ENTITY, "정리매매 종목이에요"),
@@ -62,6 +64,8 @@ public enum ErrorCode {
      * 오래된 가격으로 체결되면 원장의 신뢰가 무너지므로 차라리 거절합니다.
      */
     STALE_QUOTE(HttpStatus.UNPROCESSABLE_ENTITY, "시세 정보가 오래되었어요. 다시 시도해주세요"),
+    FUTURE_QUOTE(HttpStatus.UNPROCESSABLE_ENTITY, "시세 기준 시각이 올바르지 않아요. 다시 시도해주세요"),
+    INVALID_SETTLEMENT_AMOUNT(HttpStatus.UNPROCESSABLE_ENTITY, "정산 금액이 올바르지 않아요"),
 
     /**
      * 같은 {@code clientOrderId} 로 이미 처리된 주문. 중복 클릭이거나 네트워크 재시도입니다.

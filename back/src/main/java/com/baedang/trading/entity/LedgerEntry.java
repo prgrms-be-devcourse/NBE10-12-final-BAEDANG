@@ -72,7 +72,8 @@ public class LedgerEntry {
     }
 
     private LedgerEntry(Long accountId, Long orderId, EntryType entryType, BigDecimal amount,
-                        BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
+                        BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
+                        OffsetDateTime occurredAt) {
         this.accountId = accountId;
         this.orderId = orderId;
         this.entryType = entryType;
@@ -80,13 +81,18 @@ public class LedgerEntry {
         this.balanceAfter = balanceAfter;
         this.exchangeRate = exchangeRate != null ? exchangeRate : BigDecimal.ONE;
         this.memo = memo;
-        this.occurredAt = OffsetDateTime.now();
+        this.occurredAt = occurredAt;
     }
 
     /** 모의투자금 지급. 회원가입과 포트폴리오 초기화 두 곳에서 씁니다. */
-    public static LedgerEntry initialDeposit(Long accountId, BigDecimal amount, String memo) {
+    public static LedgerEntry initialDeposit(
+            Long accountId,
+            BigDecimal amount,
+            String memo,
+            OffsetDateTime occurredAt
+    ) {
         return new LedgerEntry(accountId, null, EntryType.INITIAL_DEPOSIT,
-                amount, amount, BigDecimal.ONE, memo);
+                amount, amount, BigDecimal.ONE, memo, occurredAt);
     }
 
     /**
@@ -94,16 +100,18 @@ public class LedgerEntry {
      * 호출부는 양수를 넘기면 됩니다 — 부호를 헷갈릴 일이 없습니다.
      */
     public static LedgerEntry buy(Long accountId, Long orderId, BigDecimal netAmount,
-                                  BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
+                                  BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
+                                  OffsetDateTime occurredAt) {
         return new LedgerEntry(accountId, orderId, EntryType.BUY,
-                netAmount.negate(), balanceAfter, exchangeRate, memo);
+                netAmount.negate(), balanceAfter, exchangeRate, memo, occurredAt);
     }
 
     /** 매도. {@code netAmount}(gross − fee − tax)가 그대로 양수로 들어갑니다. */
     public static LedgerEntry sell(Long accountId, Long orderId, BigDecimal netAmount,
-                                   BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
+                                   BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
+                                   OffsetDateTime occurredAt) {
         return new LedgerEntry(accountId, orderId, EntryType.SELL,
-                netAmount, balanceAfter, exchangeRate, memo);
+                netAmount, balanceAfter, exchangeRate, memo, occurredAt);
     }
 
     public Long getEntryId() { return entryId; }

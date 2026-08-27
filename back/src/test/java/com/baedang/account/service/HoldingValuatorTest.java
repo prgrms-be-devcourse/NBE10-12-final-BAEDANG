@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 
@@ -14,12 +15,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class HoldingValuatorTest {
 
+    private static final OffsetDateTime ACQUIRED_AT =
+            OffsetDateTime.of(2026, 8, 26, 3, 0, 0, 0, ZoneOffset.UTC);
+
     private final HoldingValuator valuator = new HoldingValuator();
 
     @Test
     void 국내주식은_수량과_현재가를_그대로_원단위로_평가한다() {
         Holding holding = Holding.firstBuy(1L, 101L,
-                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE);
+                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE, ACQUIRED_AT);
         QuoteSnapshot quote = quote(101L, "241500", "KRW");
 
         HoldingValuation result = valuateOne(holding, quote, null);
@@ -33,7 +37,7 @@ class HoldingValuatorTest {
     @Test
     void 미국주식은_센트로_먼저_반올림한_뒤_환율을_곱해_원화로_평가한다() {
         Holding holding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"));
+                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"), ACQUIRED_AT);
         QuoteSnapshot quote = quote(202L, "90.00", "USD");
 
         HoldingValuation result = valuateOne(holding, quote, new BigDecimal("1400"));
@@ -49,7 +53,7 @@ class HoldingValuatorTest {
     @Test
     void 미국주식인데_최신환율이_없으면_매입환율로_폴백한다() {
         Holding holding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"));
+                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"), ACQUIRED_AT);
         QuoteSnapshot quote = quote(202L, "90.00", "USD");
 
         HoldingValuation result = valuateOne(holding, quote, null);
@@ -62,7 +66,7 @@ class HoldingValuatorTest {
     @Test
     void 미국주식은_수량곱가격을_센트로_반올림한_뒤_환율을_적용한다() {
         Holding holding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("3"), new BigDecimal("80.00"), new BigDecimal("1300"));
+                new BigDecimal("3"), new BigDecimal("80.00"), new BigDecimal("1300"), ACQUIRED_AT);
         QuoteSnapshot quote = quote(202L, "90.005", "USD");
 
         HoldingValuation result = valuateOne(holding, quote, new BigDecimal("1400"));
@@ -75,7 +79,7 @@ class HoldingValuatorTest {
     @Test
     void 시세가_없으면_평가액을_원가로_두고_손익을_0으로_만든다() {
         Holding holding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"));
+                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"), ACQUIRED_AT);
 
         List<HoldingValuation> results =
                 valuator.valuate(List.of(holding), Map.of(), new BigDecimal("1400"));

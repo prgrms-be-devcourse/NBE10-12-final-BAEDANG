@@ -3,7 +3,9 @@ package com.baedang.global.error;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -27,7 +29,10 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
         log.warn("[{}] {}", code.name(), e.getMessage());
-        return ResponseEntity.status(code.getStatus()).body(ErrorResponse.of(code));
+        ErrorResponse response = e.getData() == null
+                ? ErrorResponse.of(code)
+                : ErrorResponse.of(code, e.getData());
+        return ResponseEntity.status(code.getStatus()).body(response);
     }
 
     /** @Valid 검증 실패. 어느 필드가 왜 틀렸는지 data 에 담아줍니다. */
@@ -39,6 +44,14 @@ public class GlobalExceptionHandler {
         log.warn("[INVALID_INPUT] {}", fields);
         return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
                 .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, fields));
+    }
+
+    /** 필수 헤더 누락과 읽을 수 없는 JSON은 서버 장애가 아니라 잘못된 요청입니다. */
+    @ExceptionHandler({MissingRequestHeaderException.class, HttpMessageNotReadableException.class})
+    public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception e) {
+        log.warn("[INVALID_INPUT] {}", e.getMessage());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ErrorResponse.of(ErrorCode.INVALID_INPUT));
     }
 
     /**

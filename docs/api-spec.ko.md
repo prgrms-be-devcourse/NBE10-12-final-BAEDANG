@@ -449,13 +449,16 @@ minute_candle 에 60초 이내 데이터가 있나?
 수수료 · 세금 미리보기
 
 ```
-?symbol=005930&side=BUY&quantity=10
+?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
+
+`marketCountry`는 `KR` 또는 `US`이며 필수입니다. 심볼은 시장마다 중복될 수 있으므로 서버는 `(symbol, marketCountry)`로 종목을 식별합니다.
 
 **Response**
 ```json
 {
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10",
   "executedPrice": "241500",
@@ -475,10 +478,13 @@ minute_candle 에 60초 이내 데이터가 있나?
 ```
 매수   netAmount = grossAmount + fee           (예수금에서 차감)
 매도   netAmount = grossAmount − fee − tax     (예수금으로 입금)
-grossAmount = executedPrice × quantity × exchangeRate
-fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공통)
-  tax         = KR grossAmount × 0.002                  (국내 매도만)
-             = max(USD grossAmount × 0.0000206, $0.01)  (미국 SEC Fee, 매도만)
+KR grossAmount = round(executedPriceKrw × quantity, 0)
+US priceUsd    = round(executedPriceUsd, 2)
+US grossAmount = round(priceUsd × quantity × exchangeRate, 0)
+fee            = round(grossAmount × 0.0001, 0)  거래 수수료 0.01% (매수·매도 공통)
+KR tax         = round(grossAmount × 0.002, 0)   (국내 매도만)
+US secFeeUsd   = round(max(priceUsd × quantity × 0.0000206, $0.01), 2)
+US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ```
 **예시 — 삼성전자 10주 @ 241,500**
 ```
@@ -486,7 +492,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 매도  gross 2,415,000 − fee   242 − tax 4,830  = 2,409,928 입금
 ```
 - **시장별 요율을 `.env` 설정값으로 두고 하드코딩하지 마세요.** 국내 매도 세금은 0.2%, 미국 매도는 증권거래세 대신 SEC Fee `0.0000206`과 최소 `$0.01`을 적용합니다. 거래 수수료 0.01%는 두 시장 모두 적용합니다.
-- **두 단계로 반올림합니다.** 미국 주문은 달러로 계산해 센트 단위로 먼저 반올림하고(`$0.01` 최소 포함), 최종 금액을 원화로 환산해 원 단위 **HALF_UP**으로 반올림합니다. 국내 주문은 원화 gross 를 먼저 반올림한 뒤 fee·tax 를 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
+- 통화 경계마다 **HALF_UP**으로 반올림합니다. 미국 주문은 주당 달러 가격을 센트로 먼저 반올림합니다. 그 가격으로 `grossKrw`를 계산하고, 거래 수수료와 `secFeeUsd → secFeeKrw`도 각각 원 단위로 반올림합니다. 국내 주문은 원화 gross를 먼저 반올림한 뒤 fee·tax를 각각 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
 - **견적과 실제 체결 사이에 가격이 바뀔 수 있습니다.** 견적은 참고값이고, 체결 시점에 서버가 다시 계산합니다.
 
 ### `POST /orders` 🔒
@@ -497,11 +503,27 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 {
   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10"
 }
 ```
-`clientOrderId` 는 프론트가 **UUID v4 로 생성**합니다. 주문 화면 진입 시 한 번 만들고, 성공하면 새로 발급합니다. **같은 값으로 재요청하면 중복 체결 대신 기존 주문 결과를 반환**합니다 — 버튼 두 번 클릭과 네트워크 재시도를 모두 막습니다.
+`clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 계좌 안에서 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 시장 API 호출 없이 저장된 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
+
+실패 응답의 `data.retryPolicy`가 재시도 시 `clientOrderId` 처리 방법을 알려줍니다. `SAME_CLIENT_ORDER_ID`는 주문 행이 만들어지지 않은 실패이므로 같은 ID로 안전하게 재시도하고, `NEW_CLIENT_ORDER_ID`는 `REJECTED` 행이 최종 결과로 저장된 실패이므로 조건이 바뀐 뒤 새 ID를 발급합니다. `NOT_RETRYABLE`은 같은 ID의 요청 내용 충돌처럼 그대로 재전송해도 성공할 수 없는 요청입니다.
+
+```json
+{
+  "code": "MARKET_CONTEXT_EXPIRED",
+  "message": "시장 정보를 다시 확인한 뒤 주문해주세요",
+  "timestamp": "2026-08-27T10:30:00+09:00",
+  "data": {
+    "retryPolicy": "SAME_CLIENT_ORDER_ID"
+  }
+}
+```
+
+클라이언트는 HTTP 상태나 오류 코드만으로 ID 재사용 여부를 추론하지 않고, 응답에 포함된 `data.retryPolicy`를 우선합니다. `retryPolicy`가 없는 잘못된 JSON 등의 요청은 기존 요청을 그대로 자동 재전송하지 않습니다.
 
 **Response · 201**
 ```json
@@ -509,6 +531,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "orderId": 1024,
   "status": "FILLED",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10",
   "executedPrice": "241500",
@@ -520,35 +543,52 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "quoteAt": "2026-08-11T12:36:59+09:00",
   "orderedAt": "2026-08-11T12:37:02+09:00",
   "account": {
-    "cashBalance": "45824758",
-    "totalAsset": "50412300"
+    "cashBalanceAfter": "45824758"
   }
 }
 ```
-**응답에 갱신된 계좌 요약을 포함**하면 프론트가 재조회하지 않아도 됩니다.
+주문 응답의 `cashBalanceAfter`는 현재 조회 시점 잔액이 아니라 해당 주문의 최초 체결 원장에 기록된 **체결 직후 잔액**입니다. 멱등 재응답에서도 같은 감사 값을 반환합니다. 포트폴리오 평가와 현재 계좌 상태는 체결과 분리하며, 최신 값이 필요하면 `GET /accounts/me`를 조회합니다.
 
-**서버 처리 순서 · 한 트랜잭션**
+**서버 처리 순서**
 ```
-① SELECT ... FROM account WHERE account_id = ? FOR UPDATE
-② 검증 — 장 시간 · is_ranked · 거래정지 · 시세 유효시간 · 예수금/보유수량
-③ INSERT trade_order       (clientOrderId 유니크 위반 → 중복 요청)
-④ UPDATE account.cash_balance
-⑤ INSERT ledger_entry       (append only)
-⑥ UPSERT holding            (이동평균 단가 재계산)
+① clientOrderId 조회 — 동일 요청 재시도면 저장된 결과 즉시 반환
+② 종목 조회 후 정적 검증 — 거래 대상 → 거래정지 → 정리매매
+③ 정적 검증 통과 시에만 장 운영 정보와 미국 주문 실행 환율 조회(국내는 환율 1), 외부 데이터 준비 완료 시 checkedAt 기록
+④ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
+⑤ clientOrderId 재확인 — 락 대기 중 동일 주문이 확정됐으면 저장 결과 반환
+⑥ 신규 주문만 시장 컨텍스트 만료 검사 후 시세 조회 및 통화 일치 검증, 매도 시 holding FOR UPDATE (락 순서: account → holding)
+⑦ 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
+⑧ INSERT trade_order FILLED (트랜잭션 내부의 유효한 업무 거절은 REJECTED)
+⑨ UPDATE account.cash_balance 및 holding 잠금·UPSERT
+⑩ INSERT ledger_entry (append only, FILLED만 기록)
 ```
+
+시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않습니다. 유효한 `clientOrderId`를 파싱한 뒤 발생한 입력 필드 검증 실패, 외부 시장 데이터 실패, 정적 사전 검증 실패, 락 대기 중 시장 컨텍스트 만료, 시세 통화 불일치는 주문 행을 만들지 않으며 `SAME_CLIENT_ORDER_ID`를 응답합니다. 트랜잭션 안에서 확정되어 `REJECTED` 행이 저장된 실패만 `NEW_CLIENT_ORDER_ID`를 응답하는 최종 결과입니다. 사전 검증 통과 후 락 획득 사이 종목 상태가 바뀌면 동일한 오류 코드라도 후자에 해당할 수 있으므로 프론트는 코드가 아니라 `data.retryPolicy`를 따릅니다. JSON 자체를 읽을 수 없거나 `clientOrderId`가 유효하지 않은 요청은 재사용할 정상 ID가 없으므로 이 규칙의 대상이 아닙니다.
+
+시장가 주문 유스케이스는 최상위 트랜잭션 경계로만 실행합니다. 애플리케이션 진입점은 `Propagation.NEVER`로 외부 트랜잭션 안에서의 호출을 금지하고, 실제 DB 변경 서비스가 자체 `REQUIRED` 트랜잭션을 시작합니다. 따라서 커밋된 `REJECTED` 기록이 관련 없는 외부 업무의 롤백에 함께 사라지지 않습니다.
+
+**거래 대상 범위** — 현재 MVP는 정기 수집되는 시장별 거래대금 상위 100종목만 거래하며 `is_ranked` 검증을 유지합니다. 추후 온디맨드 시세 환경이 도입되면 상위 100 밖 종목은 사용자가 견적 또는 주문을 요청할 때 Toss API에서 현재가와 거래 가능 정보를 받아 캐시에 저장한 뒤 거래합니다. 그 시점에 `is_ranked`를 거래 허용 조건에서 “정기 수집 대상 여부”로 역할을 축소하고 주문 정책을 함께 변경합니다. 온디맨드 조회가 없는 현재 단계에서는 상위 100 밖 주문을 열지 않습니다.
+
+주문 수량은 1회 최대 **1,000,000주**이며 지수 표기는 허용하지 않습니다. 상한은 `trading.max-order-quantity` 설정으로 관리합니다.
 
 **에러**
-| 코드 | HTTP | 화면 문구 |
-|---|---|---|
-| `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
-| `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
-| `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
-| `INSUFFICIENT_CASH` | 422 | 주문가능금액이 부족해요 |
-| `INSUFFICIENT_QUANTITY` | 422 | 보유 수량이 부족해요 |
-| `STALE_QUOTE` | 422 | 시세 정보가 오래되었어요. 다시 시도해주세요 |
-| `INVALID_QUANTITY` | 400 | 수량은 1주 이상의 정수로 입력해주세요 |
+| 코드 | HTTP | 기본 재시도 정책 | 화면 문구 |
+|---|---|---|---|
+| `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
+| `NOT_IN_UNIVERSE` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 이 종목은 아직 거래를 지원하지 않아요 |
+| `STOCK_SUSPENDED` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 거래정지 종목이에요 |
+| `STOCK_LIQUIDATION` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 정리매매 종목이에요 |
+| `INSUFFICIENT_CASH` | 422 | `NEW_CLIENT_ORDER_ID` | 주문가능금액이 부족해요 |
+| `INSUFFICIENT_QUANTITY` | 422 | `NEW_CLIENT_ORDER_ID` | 보유 수량이 부족해요 |
+| `STALE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 정보가 오래되었어요. 다시 시도해주세요 |
+| `FUTURE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
+| `INVALID_SETTLEMENT_AMOUNT` | 422 | `NEW_CLIENT_ORDER_ID` | 정산 금액이 올바르지 않아요 |
+| `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
+| `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
+| `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
 
-**`STALE_QUOTE`** — `quote_at` 이 현재보다 **15초 이상** 오래되면 거절합니다. 오래된 가격으로 체결되면 원장의 신뢰가 무너집니다.
+**`STALE_QUOTE`** 는 `trading.quote-max-staleness-seconds` 기준으로 `quote_at`이 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 외부 시장 데이터 준비 완료 후부터 계좌 락 획득까지의 컨텍스트 허용 시간은 별도 설정 `trading.execution-context-max-age-seconds`를 사용합니다.
 
 ---
 

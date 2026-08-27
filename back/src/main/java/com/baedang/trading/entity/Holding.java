@@ -54,20 +54,22 @@ public class Holding {
     }
 
     private Holding(Long accountId, Long stockId, BigDecimal quantity,
-                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
+                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate,
+                    OffsetDateTime updatedAt) {
         this.accountId = accountId;
         this.stockId = stockId;
         this.quantity = quantity;
         this.lockedQuantity = BigDecimal.ZERO;
         this.avgBuyPrice = avgBuyPrice;
         this.avgExchangeRate = avgExchangeRate != null ? avgExchangeRate : BigDecimal.ONE;
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt = updatedAt;
     }
 
     /** 처음 매수하는 종목일 때. 두 번째부터는 {@link #addBuy} 를 씁니다. */
     public static Holding firstBuy(Long accountId, Long stockId, BigDecimal quantity,
-                                   BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
-        return new Holding(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate);
+                                   BigDecimal avgBuyPrice, BigDecimal avgExchangeRate,
+                                   OffsetDateTime updatedAt) {
+        return new Holding(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate, updatedAt);
     }
 
     /** 매도 가능 수량. 저장하지 않고 계산합니다. */
@@ -78,25 +80,45 @@ public class Holding {
     /**
      * 매수 체결 반영 — 이동평균으로 평단가와 평균환율을 다시 계산합니다.
      *
+     * <p>평균환율은 수량이 아니라 종목 통화 기준 취득금액으로 가중합니다.
+     * 그래야 {@code quantity × avgBuyPrice × avgExchangeRate}가 원화 취득원가와 일치합니다.
+     *
      * <p>수수료는 평단가에 넣지 않습니다. 종목별 평가손익에는 안 들어가지만
      * 계좌 총 손익에는 이미 반영돼 있습니다 (예수금에서 빠졌으므로).
      */
-    public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate) {
+    public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate, OffsetDateTime updatedAt) {
+        requirePositive(price, "매수 가격");
+        requirePositive(rate, "매수 환율");
+
         BigDecimal totalQty = quantity.add(addQty);
-        this.avgBuyPrice = quantity.multiply(avgBuyPrice)
-                .add(addQty.multiply(price))
-                .divide(totalQty, 4, RoundingMode.HALF_UP);
-        this.avgExchangeRate = quantity.multiply(avgExchangeRate)
-                .add(addQty.multiply(rate))
-                .divide(totalQty, 6, RoundingMode.HALF_UP);
+        BigDecimal previousPurchaseAmount = quantity.multiply(avgBuyPrice);
+        BigDecimal addedPurchaseAmount = addQty.multiply(price);
+        BigDecimal totalPurchaseAmount = previousPurchaseAmount.add(addedPurchaseAmount);
+
+        this.avgBuyPrice = totalPurchaseAmount.divide(totalQty, 4, RoundingMode.HALF_UP);
+        this.avgExchangeRate = previousPurchaseAmount.multiply(avgExchangeRate)
+                .add(addedPurchaseAmount.multiply(rate))
+                .divide(totalPurchaseAmount, 6, RoundingMode.HALF_UP);
         this.quantity = totalQty;
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt = updatedAt;
+    }
+
+    private void requirePositive(BigDecimal value, String fieldName) {
+        if (value == null || value.signum() <= 0) {
+            throw new IllegalArgumentException(fieldName + "은 0보다 커야 합니다");
+        }
     }
 
     /** 매도 체결 반영. <b>평단가는 그대로 둡니다</b> — 평가손익의 기준이기 때문입니다. */
-    public void subtractSell(BigDecimal sellQty) {
+    public void subtractSell(BigDecimal sellQty, OffsetDateTime updatedAt) {
+        if (sellQty == null || sellQty.signum() <= 0) {
+            throw new IllegalArgumentException("매도 수량은 0보다 커야 합니다");
+        }
+        if (availableQuantity().compareTo(sellQty) < 0) {
+            throw new IllegalStateException("매도 가능 수량보다 많이 차감할 수 없습니다");
+        }
         this.quantity = this.quantity.subtract(sellQty);
-        this.updatedAt = OffsetDateTime.now();
+        this.updatedAt = updatedAt;
     }
 
     public Long getHoldingId() { return holdingId; }

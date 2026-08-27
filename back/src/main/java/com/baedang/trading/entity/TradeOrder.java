@@ -9,15 +9,22 @@ import java.util.UUID;
 /**
  * 주문 + 체결. {@code order} 는 SQL 예약어라 테이블명이 {@code trade_order} 입니다.
  *
- * <p><b>1주차 시장가는 PENDING 을 거치지 않습니다.</b> 접수와 체결이 한 트랜잭션
- * 안에서 연속 실행되므로 FILLED 또는 REJECTED 로 직행합니다.
+ * <p><b>시장가는 PENDING 을 거치지 않습니다.</b> 하나의 트랜잭션에서 즉시
+ * 체결되므로 FILLED 또는 REJECTED 로 INSERT 합니다. PENDING 은 지정가 주문의
+ * 접수·동결 트랜잭션부터 사용합니다.
  *
  * <p><b>요율은 저장하지 않습니다.</b> {@code fee}·{@code tax} 에는 계산된 <b>금액</b>이
  * 들어갑니다. 요율은 전역 정책이라 {@code application.yml} 의 {@code trading.*} 이
  * 유일한 정의 지점입니다. 금액이 남아 있으면 요율이 바뀌어도 과거 거래가 안 흔들립니다.
  */
 @Entity
-@Table(name = "trade_order")
+@Table(
+        name = "trade_order",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_account_client_order",
+                columnNames = {"account_id", "client_order_id"}
+        )
+)
 public class TradeOrder {
 
     @Id
@@ -33,9 +40,9 @@ public class TradeOrder {
 
     /**
      * 멱등성 키. 프론트가 주문 화면 진입 시 생성해 함께 보냅니다.
-     * 버튼을 두 번 눌러도 UNIQUE 제약에 걸려 중복 체결이 막힙니다.
+     * 버튼을 두 번 눌러도 계좌+멱등 키 UNIQUE 제약에 걸려 중복 체결이 막힙니다.
      */
-    @Column(name = "client_order_id", nullable = false, unique = true)
+    @Column(name = "client_order_id", nullable = false)
     private UUID clientOrderId;
 
     @Enumerated(EnumType.STRING)
@@ -58,19 +65,22 @@ public class TradeOrder {
     @Column(name = "reject_reason", length = 40)
     private String rejectReason;
 
+    /** REJECTED 판정에 사용한 기준 가격. FILLED 주문은 {@code null}입니다. */
+    @Column(name = "reference_price", precision = 19, scale = 4)
+    private BigDecimal referencePrice;
+
     /** 체결 단가. <b>종목 통화 기준</b>입니다 (미국이면 달러). */
     @Column(name = "executed_price", precision = 19, scale = 4)
     private BigDecimal executedPrice;
 
     /**
-     * 체결에 쓴 시세의 기준 시각.
-     * "왜 이 가격에 체결됐는가"를 설명하는 유일한 근거이고,
-     * 금융 도메인에서 가장 중요한 감사 항목입니다.
+     * 체결 또는 거절 판정에 쓴 시세의 기준 시각.
+     * REJECTED 주문은 {@link #referencePrice}와 함께 감사 근거로 보존합니다.
      */
     @Column(name = "quote_at")
     private OffsetDateTime quoteAt;
 
-    /** 체결 시점 환율. 원화 종목은 1. 안 남기면 환차손익을 영원히 분리할 수 없습니다. */
+    /** 체결 또는 거절 판정 시점 환율. 원화 종목은 1입니다. */
     @Column(name = "exchange_rate", precision = 19, scale = 6)
     private BigDecimal exchangeRate;
 
@@ -97,40 +107,50 @@ public class TradeOrder {
     }
 
     private TradeOrder(Long accountId, Long stockId, UUID clientOrderId,
-                       OrderSide side, BigDecimal quantity) {
+                       OrderSide side, BigDecimal quantity, OrderStatus status,
+                       OffsetDateTime orderedAt) {
         this.accountId = accountId;
         this.stockId = stockId;
         this.clientOrderId = clientOrderId;
         this.side = side;
         this.quantity = quantity;
         this.orderType = OrderType.MARKET;
-        this.status = OrderStatus.PENDING;
-        this.orderedAt = OffsetDateTime.now();
+        this.status = status;
+        this.orderedAt = orderedAt;
     }
 
-    /** 시장가 주문 접수. 1주차에는 이 상태가 커밋되지 않고 곧바로 체결로 넘어갑니다. */
-    public static TradeOrder placeMarketOrder(Long accountId, Long stockId, UUID clientOrderId,
-                                              OrderSide side, BigDecimal quantity) {
-        return new TradeOrder(accountId, stockId, clientOrderId, side, quantity);
+    /** 시장가 체결 결과를 처음부터 FILLED 상태로 생성합니다. */
+    public static TradeOrder filledMarketOrder(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, BigDecimal executedPrice, OffsetDateTime quoteAt,
+            BigDecimal exchangeRate, BigDecimal grossAmount, BigDecimal fee,
+            BigDecimal tax, BigDecimal netAmount, OffsetDateTime orderedAt
+    ) {
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.FILLED, orderedAt);
+        order.executedPrice = executedPrice;
+        order.quoteAt = quoteAt;
+        order.exchangeRate = exchangeRate;
+        order.grossAmount = grossAmount;
+        order.fee = fee;
+        order.tax = tax;
+        order.netAmount = netAmount;
+        return order;
     }
 
-    /** 체결 확정. 시장가는 접수 직후 곧바로 이 메서드로 넘어옵니다. */
-    public void fill(BigDecimal executedPrice, OffsetDateTime quoteAt, BigDecimal exchangeRate,
-                     BigDecimal grossAmount, BigDecimal fee, BigDecimal tax, BigDecimal netAmount) {
-        this.executedPrice = executedPrice;
-        this.quoteAt = quoteAt;
-        this.exchangeRate = exchangeRate;
-        this.grossAmount = grossAmount;
-        this.fee = fee;
-        this.tax = tax;
-        this.netAmount = netAmount;
-        this.status = OrderStatus.FILLED;
-    }
-
-    /** 검증 단계 거절. 자금을 동결하지 않았으므로 되돌릴 것이 없습니다. */
-    public void reject(String reasonCode) {
-        this.status = OrderStatus.REJECTED;
-        this.rejectReason = reasonCode;
+    /** 유효한 시장가 요청이 업무 규칙으로 거절된 기록을 생성합니다. */
+    public static TradeOrder rejectedMarketOrder(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, BigDecimal referencePrice, OffsetDateTime quoteAt,
+            BigDecimal exchangeRate, String reasonCode, OffsetDateTime orderedAt
+    ) {
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, orderedAt);
+        order.rejectReason = reasonCode;
+        order.referencePrice = referencePrice;
+        order.quoteAt = quoteAt;
+        order.exchangeRate = exchangeRate;
+        return order;
     }
 
     public Long getOrderId() { return orderId; }
@@ -142,6 +162,7 @@ public class TradeOrder {
     public BigDecimal getQuantity() { return quantity; }
     public OrderStatus getStatus() { return status; }
     public String getRejectReason() { return rejectReason; }
+    public BigDecimal getReferencePrice() { return referencePrice; }
     public BigDecimal getExecutedPrice() { return executedPrice; }
     public OffsetDateTime getQuoteAt() { return quoteAt; }
     public BigDecimal getExchangeRate() { return exchangeRate; }
