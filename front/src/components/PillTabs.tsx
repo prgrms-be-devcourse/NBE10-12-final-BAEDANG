@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 
 export type PillOption = {
   value: string;
@@ -60,26 +60,22 @@ export function PillTabs({
   const activeIndex = Math.max(0, options.findIndex((o) => o.value === value));
   const count = options.length;
   const [squashing, setSquashing] = useState(false);
-  // 첫 렌더에는 필박스가 바로 제자리에 나타나야 한다 — mounted가 false인 동안은
-  // transition 자체를 꺼서, 화면 진입 직후 필박스만 먼저 눈에 띄게 움직이는
-  // 현상(다른 요소들의 Reveal 등장보다 먼저 씰룩거려 보임)을 막는다.
-  const [mounted, setMounted] = useState(false);
-  const firstRender = useRef(true);
+  const squashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
-      return;
+  // 스쿼시는 "값이 바뀌었을 때" 반응하는 effect가 아니라, 실제 클릭 핸들러 안에서만
+  // 직접 트리거한다. 이전에는 useEffect(() => ..., [value])에 useRef 플래그로
+  // "처음 한 번은 건너뛴다"는 식으로 마운트 시 재생을 막았는데, React Strict Mode가
+  // 개발 모드에서 effect를 일부러 두 번 실행하면서 그 플래그가 이미 소진돼 있어
+  // 두 번째 실행에서 스쿼시가 재생돼버렸다(화면 진입 직후 필박스가 씰룩거리는
+  // 원인). 클릭 이벤트는 Strict Mode가 두 번 실행하지 않으므로 이 방식이 안전하다.
+  function handleSelect(next: string) {
+    if (next !== value) {
+      setSquashing(true);
+      if (squashTimer.current) clearTimeout(squashTimer.current);
+      squashTimer.current = setTimeout(() => setSquashing(false), 350);
     }
-    setSquashing(true);
-    const t = setTimeout(() => setSquashing(false), 350);
-    return () => clearTimeout(t);
-  }, [value]);
+    onChange(next);
+  }
 
   const resolvedPillColor = typeof pillColor === "function" ? pillColor(value) : pillColor;
 
@@ -100,7 +96,7 @@ export function PillTabs({
           width: widthExpr,
           borderRadius: pillRadius,
           background: resolvedPillColor,
-          transition: mounted ? "left .35s cubic-bezier(.4,0,.2,1), background .25s" : "none",
+          transition: "left .35s cubic-bezier(.4,0,.2,1), background .25s",
           animation: squashing
             ? `${squashAnimation === "liquid" ? "navThumbLiquid" : "modeThumbSquash"} .35s cubic-bezier(.4,0,.2,1)`
             : undefined,
@@ -112,7 +108,7 @@ export function PillTabs({
           <button
             key={opt.value}
             type="button"
-            onClick={() => onChange(opt.value)}
+            onClick={() => handleSelect(opt.value)}
             className={`relative z-[1] flex-1 cursor-pointer text-center whitespace-nowrap ${
               active ? activeTextClassName : inactiveTextClassName
             } ${buttonClassName}`}
