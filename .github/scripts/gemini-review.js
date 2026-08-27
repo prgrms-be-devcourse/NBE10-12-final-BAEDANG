@@ -12,6 +12,7 @@ const prNumber  = process.env.PR_NUMBER;
 const prTitle   = process.env.PR_TITLE;
 const baseSha   = process.env.BASE_SHA;
 const headSha   = process.env.HEAD_SHA;
+const baseRef   = process.env.BASE_REF || process.env.GITHUB_BASE_REF || 'develop';
 const repo      = process.env.REPO;
 const ghToken   = process.env.GITHUB_TOKEN;
 
@@ -48,7 +49,7 @@ if (!apiKey) {
 }
 
 // ---------------------------------------------------------------------------
-// Collect git diff
+// Collect git diff (with multi-tier fallback: SHA -> origin/baseRef -> HEAD~1)
 // ---------------------------------------------------------------------------
 let diff = '';
 try {
@@ -56,8 +57,15 @@ try {
     encoding: 'utf8',
   });
 } catch (e) {
-  console.error('Failed to get git diff:', e.message);
-  diff = execFileSync('git', ['diff', 'HEAD~1', '--', ...DIFF_PATHS], { encoding: 'utf8' });
+  console.warn(`[WARN] Failed to get git diff by SHA (${baseSha}...${headSha}):`, e.message);
+  try {
+    diff = execFileSync('git', ['diff', `origin/${baseRef}...HEAD`, '--', ...DIFF_PATHS], {
+      encoding: 'utf8',
+    });
+  } catch (err) {
+    console.error(`[ERROR] Failed to get git diff against origin/${baseRef}:`, err.message);
+    diff = execFileSync('git', ['diff', 'HEAD~1', '--', ...DIFF_PATHS], { encoding: 'utf8' });
+  }
 }
 
 if (!diff.trim()) {
