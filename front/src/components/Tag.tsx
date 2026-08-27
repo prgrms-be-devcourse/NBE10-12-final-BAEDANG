@@ -1,7 +1,7 @@
-const VARIANTS = {
-  neutral: "border-gray-300 text-gray-500",
-  dark: "border-gray-400 text-gray-700 bg-gray-100",
-} as const;
+const VARIANTS: Record<string, { background: string; color: string }> = {
+  neutral: { background: "var(--fill)", color: "var(--mut)" },
+  dark: { background: "var(--highlightSoft)", color: "var(--onHighlightSoftText)" },
+};
 
 export function Tag({
   children,
@@ -12,7 +12,8 @@ export function Tag({
 }) {
   return (
     <span
-      className={`inline-block rounded border px-1.5 py-0.5 align-middle text-[10.5px] ${VARIANTS[variant]}`}
+      className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+      style={VARIANTS[variant]}
     >
       {children}
     </span>
