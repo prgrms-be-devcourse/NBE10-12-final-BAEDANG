@@ -77,6 +77,15 @@ jobs:
             truncated = true;
           }
 
+          // Load review guidelines from dedicated markdown file
+          let guidelines = '';
+          const rulesPath = '.github/gemini-rules.md';
+          if (fs.existsSync(rulesPath)) {
+            guidelines = fs.readFileSync(rulesPath, 'utf8');
+          } else {
+            guidelines = "당신은 모의 주식 트레이딩 서비스의 시니어 코드 리뷰어 AI입니다. 코드 품질, 동시성, 금융 반올림 규칙, 예외 처리를 꼼꼼히 검토해 주세요. 이모지는 사용하지 마세요.";
+          }
+
           // Helper to find existing comment
           function getExistingComment() {
             try {
@@ -113,14 +122,7 @@ jobs:
             process.exit(0);
           }
 
-          const prompt = `당신은 '모의 주식 트레이딩 서비스 (Mock Stock Trading Service)' 프로젝트의 시니어 백엔드/프론트엔드 코드 리뷰어 AI입니다.
-
-[프로젝트 핵심 규칙]
-1. 금융/금액 계산: BigDecimal / 정수/센트 반올림(HALF_UP) 규칙 준수 여부.
-2. 시각 일원화: Instant.now()나 OffsetDateTime.now() 직접 호출 대신 TimeConfig의 Clock 빈 주입 사용 권장.
-3. 데이터 무결성: 원장(ledger_entry)은 Append-Only, 거래 트랜잭션은 계좌(account) FOR UPDATE 락 우선 획득.
-4. 외부 연동: 토스 증권 API 호출 경로 화이트리스트 준수 (실주문 POST /orders 등 절대 호출 금지).
-5. 코드 품질: 예외 처리, N+1 쿼리 방지, TypeScript 타입 안정성, 동시성 엣지 케이스.
+          const prompt = `${guidelines}
 
 [Pull Request 정보]
 - PR 번호: #${prNumber}
@@ -131,20 +133,6 @@ ${truncated ? '- (주의: diff가 너무 커서 앞부분 일부만 포함되었
 \`\`\`diff
 ${diff}
 \`\`\`
-
-위 변경사항을 면밀히 분석하고, 다음 형식으로 친절하고 명확한 한국어 코드 리뷰를 작성해 주세요. (이모지는 사용하지 마세요):
-
-## 코드 리뷰 요약
-(PR의 목적과 주요 변경사항에 대한 간략한 요약)
-
-## 긍정적인 부분 (Strengths)
-(설계 원칙 준수, 깔끔한 처리, 좋은 패턴 등)
-
-## 개선 고려 및 피드백 (Suggestions & Potential Issues)
-(잠재적 버그, 동시성/예외 처리, 성능 최적화, 컨벤션 개선점 등 - 없을 경우 생략 가능)
-
-## 총평
-(LGTM 여부 및 머지 권장 의견)
 `;
 
           const requestData = JSON.stringify({
