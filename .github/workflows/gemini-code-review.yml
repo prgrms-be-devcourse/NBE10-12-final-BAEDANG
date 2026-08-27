@@ -1,0 +1,167 @@
+name: Gemini AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    name: Automated Code Review by Gemini
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run Gemini Code Review
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node - << 'EOF'
+          const https = require('https');
+          const { execSync } = require('child_process');
+
+          const apiKey = process.env.GEMINI_API_KEY;
+          const prNumber = process.env.PR_NUMBER;
+          const prTitle = process.env.PR_TITLE;
+          const baseSha = process.env.BASE_SHA;
+          const headSha = process.env.HEAD_SHA;
+
+          if (!apiKey) {
+            console.log("GEMINI_API_KEY is not configured in Repository Secrets. Skipping Gemini code review.");
+            process.exit(0);
+          }
+
+          let diff = '';
+          try {
+            diff = execSync(`git diff ${baseSha}...${headSha}`).toString();
+          } catch (e) {
+            console.error("Failed to get git diff:", e.message);
+            diff = execSync(`git diff HEAD~1`).toString();
+          }
+
+          if (!diff.trim()) {
+            console.log("No diff found. Skipping review.");
+            process.exit(0);
+          }
+
+          // Truncate diff if it exceeds max payload size (approx 30,000 characters)
+          const MAX_DIFF_LEN = 30000;
+          let truncated = false;
+          if (diff.length > MAX_DIFF_LEN) {
+            diff = diff.substring(0, MAX_DIFF_LEN);
+            truncated = true;
+          }
+
+          const prompt = `당신은 '모의 주식 트레이딩 서비스 (Mock Stock Trading Service)' 프로젝트의 시니어 백엔드/프론트엔드 코드 리뷰어 AI입니다.
+
+[프로젝트 핵심 규칙]
+1. 금융/금액 계산: BigDecimal / 정수/센트 반올림(HALF_UP) 규칙 준수 여부.
+2. 시각 일원화: Instant.now()나 OffsetDateTime.now() 직접 호출 대신 TimeConfig의 Clock 빈 주입 사용 권장.
+3. 데이터 무결성: 원장(ledger_entry)은 Append-Only, 거래 트랜잭션은 계좌(account) FOR UPDATE 락 우선 획득.
+4. 외부 연동: 토스 증권 API 호출 경로 화이트리스트 준수 (실주문 POST /orders 등 절대 호출 금지).
+5. 코드 품질: 예외 처리, N+1 쿼리 방지, TypeScript 타입 안정성, 동시성 엣지 케이스.
+
+[Pull Request 정보]
+- PR 번호: #${prNumber}
+- PR 제목: ${prTitle}
+${truncated ? '- (주의: diff가 너무 커서 앞부분 일부만 포함되었습니다.)' : ''}
+
+[코드 변경사항 (Diff)]
+\`\`\`diff
+${diff}
+\`\`\`
+
+위 변경사항을 면밀히 분석하고, 다음 형식으로 친절하고 명확한 한국어 코드 리뷰를 작성해 주세요. (이모지는 사용하지 마세요):
+
+## 코드 리뷰 요약
+(PR의 목적과 주요 변경사항에 대한 간략한 요약)
+
+## 긍정적인 부분 (Strengths)
+(설계 원칙 준수, 깔끔한 처리, 좋은 패턴 등)
+
+## 개선 고려 및 피드백 (Suggestions & Potential Issues)
+(잠재적 버그, 동시성/예외 처리, 성능 최적화, 컨벤션 개선점 등 - 없을 경우 생략 가능)
+
+## 총평
+(LGTM 여부 및 머지 권장 의견)
+`;
+
+          const requestData = JSON.stringify({
+            contents: [
+              {
+                parts: [{ text: prompt }]
+              }
+            ],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 2048
+            }
+          });
+
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+          const req = https.request(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Content-Length': Buffer.byteLength(requestData)
+            }
+          }, (res) => {
+            let body = '';
+            res.on('data', (chunk) => body += chunk);
+            res.on('end', () => {
+              if (res.statusCode >= 400) {
+                console.error("Gemini API Error:", res.statusCode, body);
+                process.exit(0); // Do not fail the CI build on review API errors
+              }
+
+              try {
+                const json = JSON.parse(body);
+                const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!reviewText) {
+                  console.log("No review content returned from Gemini.");
+                  return;
+                }
+
+                const commentBody = `### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n*이 리뷰는 GitHub Actions와 Gemini 2.0 Flash에 의해 자동으로 생성되었습니다.*`;
+
+                // Post comment to PR using GitHub CLI
+                const fs = require('fs');
+                fs.writeFileSync('/tmp/review_comment.md', commentBody);
+                execSync(`gh pr comment ${prNumber} --body-file /tmp/review_comment.md`, {
+                  env: { ...process.env, GITHUB_TOKEN: process.env.GITHUB_TOKEN }
+                });
+                console.log("Successfully posted Gemini code review comment on PR #" + prNumber);
+              } catch (e) {
+                console.error("Failed to parse Gemini response or post PR comment:", e.message);
+              }
+            });
+          });
+
+          req.on('error', (e) => {
+            console.error("Request error:", e.message);
+          });
+
+          req.write(requestData);
+          req.end();
+          EOF
