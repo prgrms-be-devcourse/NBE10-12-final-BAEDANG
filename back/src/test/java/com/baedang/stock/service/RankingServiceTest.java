@@ -4,6 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
@@ -26,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.stream.Stream;
@@ -84,7 +86,9 @@ public class RankingServiceTest {
         when(quoteSnapshot.getQuoteAt()).thenReturn(OffsetDateTime.parse("2026-08-27T12:00:00+09:00"));
 
         when(clock.instant()).thenReturn(NOW);
-        when(marketSessionProvider.isOpen(MarketCountry.KR, NOW)).thenReturn(true);
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(
+                new MarketSessionStatus(true, Instant.parse("2026-08-27T06:30:00Z"))
+        );
 
         RankingResponse response = rankingService.getRankings("KR", 20, null);
 
@@ -181,6 +185,105 @@ public class RankingServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_CURSOR);
+    }
+
+    @Test
+    @DisplayName("quoteAt이 현재 정규장 세션에 속하면 realtime이 true")
+    void t7() {
+        Stock stock = rankedStock(1L, 1, "005930", new BigDecimal("1000"));
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+
+        QuoteSnapshot quote = mock(QuoteSnapshot.class);
+        Instant quoteAt = Instant.parse("2026-08-27T02:59:00Z");
+
+        when(quote.getStockId()).thenReturn(1L);
+        when(quote.getLastPrice()).thenReturn(new BigDecimal("100"));
+        when(quote.getPrevClose()).thenReturn(new BigDecimal("90"));
+        when(quote.changeRate()).thenReturn(new BigDecimal("0.111111"));
+        when(quote.getQuoteAt()).thenReturn(OffsetDateTime.ofInstant(quoteAt, ZoneOffset.UTC));
+
+        when(stockRepository.findRankedByMarketCountry(
+                MarketCountry.KR,
+                PageRequest.of(0, 21)
+        )).thenReturn(List.of(stock));
+
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
+
+        when(clock.instant()).thenReturn(NOW);
+
+        MarketSessionStatus currentSession =
+                new MarketSessionStatus(true, Instant.parse("2026-08-27T06:30:00Z"));
+
+        when(marketSessionProvider.currentSession(MarketCountry.KR,NOW)).thenReturn(currentSession);
+        when(marketSessionProvider.currentSession(MarketCountry.KR,quoteAt)).thenReturn(currentSession);
+
+        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        assertThat(response.items().get(0).realtime()).isTrue();
+    }
+
+    @Test
+    @DisplayName("전일 quoteAt이면 realtime이 false")
+    void t8() {
+        Stock stock = rankedStock(1L, 1, "005930", new BigDecimal("1000"));
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+
+        QuoteSnapshot quote = mock(QuoteSnapshot.class);
+        Instant quoteAt = Instant.parse("2026-08-26T06:29:00Z");
+
+        when(quote.getStockId()).thenReturn(1L);
+        when(quote.getLastPrice()).thenReturn(new BigDecimal("100"));
+        when(quote.getPrevClose()).thenReturn(new BigDecimal("90"));
+        when(quote.changeRate()).thenReturn(new BigDecimal("0.111111"));
+        when(quote.getQuoteAt()).thenReturn(OffsetDateTime.ofInstant(quoteAt, ZoneOffset.UTC));
+
+        when(stockRepository.findRankedByMarketCountry(
+                MarketCountry.KR,
+                PageRequest.of(0, 21)
+        )).thenReturn(List.of(stock));
+
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
+
+        when(clock.instant()).thenReturn(NOW);
+
+        when(marketSessionProvider.currentSession(MarketCountry.KR,NOW)).thenReturn(
+                new MarketSessionStatus(true, Instant.parse("2026-08-27T06:30:00Z"))
+        );
+
+        when(marketSessionProvider.currentSession(MarketCountry.KR,quoteAt)).thenReturn(
+                new MarketSessionStatus(true, Instant.parse("2026-08-26T06:30:00Z"))
+        );
+
+        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        assertThat(response.items().get(0).realtime()).isFalse();
+
+    }
+
+    @Test
+    @DisplayName("미래 quoteAt이면 realtime이 false")
+    void t9() {
+        Stock stock = rankedStock(1L, 1, "005930", new BigDecimal("1000"));
+
+        QuoteSnapshot quote = mock(QuoteSnapshot.class);
+        Instant quoteAt = NOW.plusSeconds(1);
+
+        when(quote.getStockId()).thenReturn(1L);
+        when(quote.getLastPrice()).thenReturn(new BigDecimal("100"));
+        when(quote.getPrevClose()).thenReturn(new BigDecimal("90"));
+        when(quote.changeRate()).thenReturn(new BigDecimal("0.111111"));
+        when(quote.getQuoteAt()).thenReturn(OffsetDateTime.ofInstant(quoteAt, ZoneOffset.UTC));
+
+        when(stockRepository.findRankedByMarketCountry(
+                MarketCountry.KR,
+                PageRequest.of(0, 21)
+        )).thenReturn(List.of(stock));
+
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
+
+        when(clock.instant()).thenReturn(NOW);
+
+        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        assertThat(response.items().get(0).realtime()).isFalse();
+
     }
 
     private static Stream<Arguments> invalidCursors() {
