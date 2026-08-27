@@ -5,12 +5,12 @@ on:
     branches: [ main, develop ]
     paths:
       - 'front/**'
-      - '.github/workflows/front-ci.yml'
+      - '.github/workflows/frontend-ci.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'front/**'
-      - '.github/workflows/front-ci.yml'
+      - '.github/workflows/frontend-ci.yml'
 
 jobs:
   lint-and-build:
