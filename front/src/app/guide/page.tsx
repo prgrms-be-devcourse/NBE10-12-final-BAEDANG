@@ -81,7 +81,7 @@ export default function GuidePage() {
         onChange={(v) => setTab(v as "guide" | "wiki")}
         trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
         trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
-        buttonClassName="rounded-full px-0 py-2.5 text-[12px] font-bold"
+        buttonClassName="rounded-full px-0 py-1.5 text-[12px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}
       />
 
