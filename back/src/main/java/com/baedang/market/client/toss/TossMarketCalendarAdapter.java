@@ -1,6 +1,8 @@
 package com.baedang.market.client.toss;
 
 import com.baedang.global.clients.toss.TossSecuritiesClient;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.market.client.toss.dto.TossExchangeRateResponse;
 import com.baedang.market.client.toss.dto.TossKrMarketCalendarResponse;
 import com.baedang.market.client.toss.dto.TossUsMarketCalendarResponse;
@@ -47,7 +49,7 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
                 Map.of("baseCurrency", BASE_CURRENCY, "quoteCurrency", QUOTE_CURRENCY),
                 TossExchangeRateResponse.class
         );
-        TossExchangeRateResponse.Result result = response.result();
+        TossExchangeRateResponse.Result result = requireBody(response.result(), "/api/v1/exchange-rate");
 
         return new ExchangeRateQuote(
                 result.baseCurrency(),
@@ -66,8 +68,8 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
                 Map.of("date", date.toString()),
                 TossKrMarketCalendarResponse.class
         );
-        TossKrMarketCalendarResponse.Result result = response.result();
-        TossKrMarketCalendarResponse.Today today = result.today();
+        TossKrMarketCalendarResponse.Result result = requireBody(response.result(), "/api/v1/market-calendar/KR");
+        TossKrMarketCalendarResponse.Today today = requireBody(result.today(), "/api/v1/market-calendar/KR (today)");
         TossKrMarketCalendarResponse.IntegratedSession integrated = today.integrated();
 
         // integrated 가 null 이거나 regularMarket 이 없으면 휴장일 — 하드코딩 없이 응답만으로 판단.
@@ -98,8 +100,8 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
                 Map.of("date", date.toString()),
                 TossUsMarketCalendarResponse.class
         );
-        TossUsMarketCalendarResponse.Result result = response.result();
-        TossUsMarketCalendarResponse.Today today = result.today();
+        TossUsMarketCalendarResponse.Result result = requireBody(response.result(), "/api/v1/market-calendar/US");
+        TossUsMarketCalendarResponse.Today today = requireBody(result.today(), "/api/v1/market-calendar/US (today)");
 
         // US는 KR과 달리 integrated로 감싸지 않고 today 바로 아래 regularMarket이 온다.
         // 휴장일엔 필드가 사라지는 게 아니라 "regularMarket": null 로 명시적으로 온다
@@ -121,5 +123,20 @@ public class TossMarketCalendarAdapter implements MarketCalendarPort {
             return null;
         }
         return nextBusinessDay.regularMarket().startTime();
+    }
+
+    /**
+     * {@code result}/{@code today} 처럼 응답 본문 필수 부분이 {@code null}이면 여기서
+     * 끊는다. (민호님 리뷰, PR #21) — 이게 없으면 다음 줄에서 NPE가 나고, NPE는
+     * {@code GlobalExceptionHandler}의 마지막 {@code catch(Exception)}으로 떨어져
+     * 500(INTERNAL_ERROR)으로 나간다. Toss 응답이 예상과 다른 건 "예상 가능한 실패"이지
+     * 우리 쪽 버그가 아니므로, {@link BusinessException}으로 명시적으로 변환해
+     * 502(TOSS_API_ERROR)로 응답하는 게 맞다.
+     */
+    private static <T> T requireBody(T value, String context) {
+        if (value == null) {
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR, context + " 응답 본문이 비어 있음");
+        }
+        return value;
     }
 }

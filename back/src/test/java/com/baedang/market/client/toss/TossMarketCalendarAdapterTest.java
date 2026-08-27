@@ -1,6 +1,8 @@
 package com.baedang.market.client.toss;
 
 import com.baedang.global.clients.toss.TossSecuritiesClient;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.port.MarketCalendarDay;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -15,6 +17,7 @@ import java.time.OffsetDateTime;
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * {@link TossMarketCalendarAdapter} 단위 테스트.
@@ -227,5 +230,51 @@ class TossMarketCalendarAdapterTest {
         // previousBusinessDay는 우리 도메인에 필요 없어 매핑 안 하지만, 응답에 있어도
         // @JsonIgnoreProperties(ignoreUnknown = true) 덕분에 역직렬화가 깨지지 않는다.
         assertThat(day.nextOpensAt()).isEqualTo(OffsetDateTime.parse("2026-08-24T22:30:00+09:00"));
+    }
+
+    // ── 민호님 리뷰(PR #21) — result/today가 null이면 NPE 대신 TOSS_API_ERROR여야 한다 ──
+
+    @Test
+    void 환율_응답의_result가_null이면_TOSS_API_ERROR로_변환한다() {
+        stubFor(get(urlPathEqualTo("/api/v1/exchange-rate"))
+                .willReturn(okJson("{ \"result\": null }")));
+
+        assertThatThrownBy(() -> adapter.fetchExchangeRate())
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
+    }
+
+    @Test
+    void KR_응답의_result가_null이면_TOSS_API_ERROR로_변환한다() {
+        stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
+                .willReturn(okJson("{ \"result\": null }")));
+
+        assertThatThrownBy(() -> adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 26)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
+    }
+
+    @Test
+    void KR_응답에_today가_없으면_TOSS_API_ERROR로_변환한다() {
+        stubFor(get(urlPathEqualTo("/api/v1/market-calendar/KR"))
+                .willReturn(okJson("{ \"result\": {} }")));
+
+        assertThatThrownBy(() -> adapter.fetchKrMarketCalendar(LocalDate.of(2026, 8, 26)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
+    }
+
+    @Test
+    void US_응답의_result가_null이면_TOSS_API_ERROR로_변환한다() {
+        stubFor(get(urlPathEqualTo("/api/v1/market-calendar/US"))
+                .willReturn(okJson("{ \"result\": null }")));
+
+        assertThatThrownBy(() -> adapter.fetchUsMarketCalendar(LocalDate.of(2026, 8, 26)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
     }
 }
