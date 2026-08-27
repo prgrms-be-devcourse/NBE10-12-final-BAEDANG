@@ -69,7 +69,7 @@
 }
 
 :root[data-theme="dark"] {
-  --bg: #000000;
+  --bg: oklch(15% 0.01 258);
   --card: #1a1a1a;
   --fill: #222222;
   --line: #333333;
@@ -128,7 +128,7 @@
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: #000000;
+    --bg: oklch(15% 0.01 258);
     --card: #1a1a1a;
     --fill: #222222;
     --line: #333333;

@@ -33,9 +33,7 @@ export function Nav() {
   return (
     <header
       className="relative z-[2] mb-6 flex w-full items-center gap-1.5 px-8 py-3"
-      style={{
-        background: transparentHeader ? "transparent" : theme === "dark" ? "var(--bg)" : "var(--headerBg)",
-      }}
+      style={{ background: transparentHeader ? "transparent" : "var(--headerBg)" }}
     >
       <Link
         href="/"
