@@ -85,7 +85,10 @@ export default function MainPage() {
               <Link
                 href="/rankings"
                 className="rounded-[12px] px-6 py-3 text-[14px] font-bold"
-                style={{ background: "var(--ctaBtn)", color: "var(--ctaBtnText)" }}
+                style={{
+                  background: theme === "dark" ? "var(--accent)" : "var(--ctaBtn)",
+                  color: theme === "dark" ? "#ffffff" : "var(--ctaBtnText)",
+                }}
               >
                 모의 투자금 받고 시작하기
               </Link>
