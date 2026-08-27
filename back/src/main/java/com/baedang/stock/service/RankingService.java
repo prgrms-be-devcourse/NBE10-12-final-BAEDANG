@@ -20,6 +20,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.*;
 import java.util.List;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
@@ -119,9 +121,7 @@ public class RankingService {
         return quoteSnapshotRepository.findByStockIdIn(stockIds)
                 .stream()
                 .collect(
-                        HashMap::new,
-                        (m, q) -> m.put(q.getStockId(), q),
-                        HashMap::putAll
+                        Collectors.toMap(QuoteSnapshot::getStockId, Function.identity())
                 );
     }
 
