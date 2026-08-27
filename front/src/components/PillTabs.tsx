@@ -60,7 +60,16 @@ export function PillTabs({
   const activeIndex = Math.max(0, options.findIndex((o) => o.value === value));
   const count = options.length;
   const [squashing, setSquashing] = useState(false);
+  // 첫 렌더에는 필박스가 바로 제자리에 나타나야 한다 — mounted가 false인 동안은
+  // transition 자체를 꺼서, 화면 진입 직후 필박스만 먼저 눈에 띄게 움직이는
+  // 현상(다른 요소들의 Reveal 등장보다 먼저 씰룩거려 보임)을 막는다.
+  const [mounted, setMounted] = useState(false);
   const firstRender = useRef(true);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (firstRender.current) {
@@ -91,7 +100,7 @@ export function PillTabs({
           width: widthExpr,
           borderRadius: pillRadius,
           background: resolvedPillColor,
-          transition: "left .35s cubic-bezier(.4,0,.2,1), background .25s",
+          transition: mounted ? "left .35s cubic-bezier(.4,0,.2,1), background .25s" : "none",
           animation: squashing
             ? `${squashAnimation === "liquid" ? "navThumbLiquid" : "modeThumbSquash"} .35s cubic-bezier(.4,0,.2,1)`
             : undefined,

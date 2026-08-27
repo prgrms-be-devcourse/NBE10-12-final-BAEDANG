@@ -72,18 +72,20 @@ export default function GuidePage() {
 
   return (
     <div>
-      <PillTabs
-        options={[
-          { value: "guide", label: "이용가이드" },
-          { value: "wiki", label: "금융 용어 위키" },
-        ]}
-        value={tab}
-        onChange={(v) => setTab(v as "guide" | "wiki")}
-        trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
-        trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
-        buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
-        inactiveTextStyle={{ color: "var(--mut)" }}
-      />
+      <Reveal delay={0}>
+        <PillTabs
+          options={[
+            { value: "guide", label: "이용가이드" },
+            { value: "wiki", label: "금융 용어 위키" },
+          ]}
+          value={tab}
+          onChange={(v) => setTab(v as "guide" | "wiki")}
+          trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
+          trackStyle={{ background: "rgba(15,56,104,.06)", border: "0.1px solid rgba(15,56,104,.12)" }}
+          buttonClassName="rounded-full px-0 py-2 text-[12px] font-bold"
+          inactiveTextStyle={{ color: "var(--mut)" }}
+        />
+      </Reveal>
 
       {tab === "wiki" ? (
         <div
