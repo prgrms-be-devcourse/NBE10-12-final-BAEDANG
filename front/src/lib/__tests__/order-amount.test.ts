@@ -9,10 +9,8 @@
 import { describe, it, expect } from 'vitest';
 import { calculateOrderAmount } from '../order-amount';
 
-// 테스트에서 쓰는 수수료·세율 (mock-data.ts 상수와 동일한 값)
-const FEE_RATE    = 0.0001;   // 0.01%
-const KR_TAX_RATE = 0.002;    // 0.2%
-const RATE        = 1400;     // USD/KRW 환율 (고정 시나리오)
+// 테스트에서 쓰는 고정 환율 시나리오
+const RATE = 1400; // USD/KRW
 
 // ─────────────────────────────────────────────
 // 국내(KRW) 매수
