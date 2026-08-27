@@ -21,14 +21,27 @@ const NOTICE_QUOTA          = `\n\n> ※ 안내: 최신 커밋에 대한 Gemini 
 const NOTICE_SERVER_OVERLOAD = `\n\n> ※ 안내: Google AI 서버의 일시적인 과부하(503/Timeout)로 인해 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 const NOTICE_EMPTY          = `\n\n> ※ 안내: Gemini API로부터 유효한 응답을 받지 못하여 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 
-const MAX_DIFF_LEN = 80_000;
-const REQUEST_TIMEOUT_MS = 60_000;
+const MAX_DIFF_LEN = 35_000;
+const REQUEST_TIMEOUT_MS = 120_000;
 const MAX_RETRIES = 3;
 const DIFF_PATHS = [
   '.',
+  // Package lockfiles
   ':(exclude)**/package-lock.json',
   ':(exclude)**/yarn.lock',
   ':(exclude)**/pnpm-lock.yaml',
+  ':(exclude)**/bun.lockb',
+  // Build artifacts / cache / source maps
+  ':(exclude)**/*.tsbuildinfo',
+  ':(exclude)**/*.map',
+  ':(exclude)**/*.min.*',
+  ':(exclude)**/.next/**',
+  ':(exclude)**/build/**',
+  ':(exclude)**/.gradle/**',
+  ':(exclude)**/*.log',
+  // Documentation HTML files (large static prototypes)
+  ':(exclude)docs/*.html',
+  // Static assets / images / media / fonts / binaries
   ':(exclude)**/*.png',
   ':(exclude)**/*.jpg',
   ':(exclude)**/*.jpeg',
@@ -40,6 +53,9 @@ const DIFF_PATHS = [
   ':(exclude)**/*.woff2',
   ':(exclude)**/*.ttf',
   ':(exclude)**/*.eot',
+  ':(exclude)**/*.mp4',
+  ':(exclude)**/*.pdf',
+  ':(exclude)**/*.zip',
 ];
 
 // ---------------------------------------------------------------------------
@@ -246,7 +262,7 @@ async function run() {
       if (statusCode >= 500) {
         console.warn(`[WARN] Gemini API returned server error ${statusCode}: ${body}`);
         if (attempt < MAX_RETRIES) {
-          const waitMs = attempt * 3000;
+          const waitMs = attempt * 5000;
           console.log(`Waiting ${waitMs / 1000}s before retry...`);
           await sleep(waitMs);
           continue;
@@ -264,7 +280,7 @@ async function run() {
       console.warn(`[WARN] Network error on attempt ${attempt}: ${err.message}`);
       lastError = err;
       if (attempt < MAX_RETRIES) {
-        const waitMs = attempt * 3000;
+        const waitMs = attempt * 5000;
         console.log(`Waiting ${waitMs / 1000}s before retry...`);
         await sleep(waitMs);
       }
