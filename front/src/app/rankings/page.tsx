@@ -89,7 +89,7 @@ export default function RankingsPage() {
 
   return (
     <div>
-      <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
+      <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
         주식 종목 랭킹
       </h2>
       <p className="mt-2 mb-4.5 text-[13.5px]" style={{ color: "var(--mut)" }}>
@@ -117,7 +117,7 @@ export default function RankingsPage() {
         </span>
         <span
           className="ml-auto cursor-default font-semibold"
-          style={{ color: "var(--mut2)" }}
+          style={{ color: "var(--accent)" }}
           title="환율 추이 그래프는 2주차 MVP 예정입니다"
         >
           환율 추이 그래프 →
@@ -139,7 +139,7 @@ export default function RankingsPage() {
           </svg>
           <input
             className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[13.5px] outline-none"
-            style={{ background: "var(--fill)", color: "var(--ink)" }}
+            style={{ background: "#ffffff", color: "var(--ink)" }}
             placeholder="티커 또는 종목명으로 검색 (2자 이상)"
             value={query}
             onFocus={() => setSearchOpen(true)}
