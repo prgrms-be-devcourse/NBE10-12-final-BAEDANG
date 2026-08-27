@@ -90,7 +90,7 @@ export default function MainPage() {
               <Link
                 href="/guide"
                 className="rounded-full px-5 py-3 text-[14px] font-semibold"
-                style={{ background: "var(--fill)", color: "var(--accentText)" }}
+                style={{ background: "#ffffff", color: "#000000" }}
               >
                 이용가이드 보기
               </Link>
