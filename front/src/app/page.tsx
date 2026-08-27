@@ -106,7 +106,7 @@ export default function MainPage() {
       </Reveal>
 
       {/* 3단계 */}
-      <Reveal delay={0.08} className="mb-10">
+      <Reveal delay={0.08} className="mt-6 mb-10">
         <h2 className="text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
           이렇게 사용해요
         </h2>
