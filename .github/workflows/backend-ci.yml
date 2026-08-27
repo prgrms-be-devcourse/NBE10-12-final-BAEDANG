@@ -36,7 +36,7 @@ jobs:
         working-directory: back
 
       - name: Run Backend Tests with Gradle
-        run: ./gradlew test --info
+        run: ./gradlew test --warn
         working-directory: back
 
       - name: Upload Test Report

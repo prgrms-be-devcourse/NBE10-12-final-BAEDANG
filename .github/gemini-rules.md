@@ -27,6 +27,10 @@
 ### 4) 트랜잭션 및 데이터 무결성
 - **거래/잔고 트랜잭션**: 동시 주문 시 이중 차감을 방지하기 위해 **`account` 행 비관적 락(`SELECT ... FOR UPDATE`)을 최우선으로 획득**해야 합니다.
 - **락 획득 순서**: 항상 `account` ➔ `holding` 순서를 엄격히 준수하여 데드락을 방지해야 합니다.
+- **매수력 및 매도가능수량 계산**:
+  - 매수력(Buying Power) = `cash_balance − locked_cash` — `cash_balance` 전체가 아닌 이 값으로 주문 가능 여부를 판단해야 합니다.
+  - 매도가능수량(Sellable Qty) = `quantity − locked_quantity` — `quantity` 전체가 아닌 이 값으로 매도 가능 여부를 판단해야 합니다.
+  - 잠금 금액: 수수료·세금을 포함한 **순 금액(`net_amount`)을 락**하며, `gross_amount`를 락해서는 안 됩니다.
 - **거래 원장(`ledger_entry`)**: **Append-Only** 테이블입니다. `UPDATE`와 `DELETE`를 절대 수행하지 않으며, 정정이 필요한 경우 반대 부호 항목을 추가해야 합니다.
 - **포트폴리오 초기화**: 물리 삭제가 아니며, 기존 계좌를 `CLOSED` 처리하고 `round_no + 1`의 새 계좌를 생성해야 합니다.
 
