@@ -96,7 +96,7 @@ export default function MainPage() {
                 href="/guide"
                 className="rounded-[12px] px-5 py-3 text-[14px] font-semibold"
                 style={{
-                  background: theme === "dark" ? "#2a2d31" : "#ffffff",
+                  background: theme === "dark" ? "#1a1c1f" : "#ffffff",
                   color: theme === "dark" ? "#ffffff" : "#000000",
                 }}
               >
@@ -151,7 +151,7 @@ export default function MainPage() {
         <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
           증권사 앱과 무엇이 다른가요?
         </h2>
-        <p className="mt-3 mb-4.5 text-[14px]" style={{ color: "#000000" }}>
+        <p className="mt-3 mb-4.5 text-[14px]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
           증권사 앱은 거래를 <b className="font-bold">체결</b>시키는 도구고, 저희는 거래를{" "}
           <b className="font-bold">이해</b>시키는 도구예요.
         </p>
