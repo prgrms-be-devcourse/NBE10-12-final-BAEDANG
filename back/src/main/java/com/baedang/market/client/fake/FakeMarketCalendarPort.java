@@ -58,7 +58,7 @@ public class FakeMarketCalendarPort implements MarketCalendarPort {
                                               LocalTime open, LocalTime close, int kstOffsetHours) {
         boolean isWeekend = date.getDayOfWeek().getValue() >= 6;
         if (isWeekend) {
-            return new MarketCalendarDay(country, date, false, null, null);
+            return new MarketCalendarDay(country, date, false, null, null, nextWeekdayOpenAt(date, open, kstOffsetHours));
         }
         ZoneOffset kst = ZoneOffset.ofHours(kstOffsetHours);
         return new MarketCalendarDay(
@@ -66,7 +66,17 @@ public class FakeMarketCalendarPort implements MarketCalendarPort {
                 date,
                 true,
                 OffsetDateTime.of(date, open, kst),
-                OffsetDateTime.of(close.isBefore(open) ? date.plusDays(1) : date, close, kst)
+                OffsetDateTime.of(close.isBefore(open) ? date.plusDays(1) : date, close, kst),
+                null
         );
+    }
+
+    /** 휴장일(주말)일 때 다음 평일 개장 시각을 계산한다 — 실제 공휴일은 고려하지 않는 개발용 근사치. */
+    private OffsetDateTime nextWeekdayOpenAt(LocalDate date, LocalTime open, int kstOffsetHours) {
+        LocalDate next = date.plusDays(1);
+        while (next.getDayOfWeek().getValue() >= 6) {
+            next = next.plusDays(1);
+        }
+        return OffsetDateTime.of(next, open, ZoneOffset.ofHours(kstOffsetHours));
     }
 }

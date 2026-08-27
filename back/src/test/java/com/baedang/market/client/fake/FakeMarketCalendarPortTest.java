@@ -26,16 +26,20 @@ class FakeMarketCalendarPortTest {
         assertThat(day.isOpen()).isTrue();
         assertThat(day.regularOpenAt()).isNotNull();
         assertThat(day.regularCloseAt()).isNotNull();
+        assertThat(day.nextOpensAt()).isNull();
     }
 
     @Test
-    void 주말에는_장이_닫힌_것으로_반환한다() {
+    void 주말에는_장이_닫힌_것으로_반환하며_다음_평일_개장_시각을_함께_준다() {
         LocalDate saturday = LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.SATURDAY));
 
         MarketCalendarDay day = port.fetchKrMarketCalendar(saturday);
 
         assertThat(day.isOpen()).isFalse();
         assertThat(day.regularOpenAt()).isNull();
+        assertThat(day.nextOpensAt()).isNotNull();
+        // 토요일 다음 평일은 월요일이다.
+        assertThat(day.nextOpensAt().getDayOfWeek()).isEqualTo(DayOfWeek.MONDAY);
     }
 
     @Test
