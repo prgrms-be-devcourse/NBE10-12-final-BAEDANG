@@ -95,7 +95,10 @@ export default function MainPage() {
               <Link
                 href="/guide"
                 className="rounded-[12px] px-5 py-3 text-[14px] font-semibold"
-                style={{ background: "#ffffff", color: "#000000" }}
+                style={{
+                  background: theme === "dark" ? "#2a2d31" : "#ffffff",
+                  color: theme === "dark" ? "#ffffff" : "#000000",
+                }}
               >
                 이용가이드 보기
               </Link>
