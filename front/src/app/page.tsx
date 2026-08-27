@@ -74,10 +74,10 @@ export default function MainPage() {
               <br />
               잃지 않는 법을 배워요
             </h1>
-            <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: "var(--heroBody)" }}>
+            <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: "#000000" }}>
               실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.
               <br />
-              모의 투자금 5,000만원이 가입 즉시 지급돼요.
+              <b className="font-bold">모의 투자금 5,000만원</b>이 가입 즉시 지급돼요.
             </p>
             <div className="mt-5 flex gap-2.5">
               <Link
