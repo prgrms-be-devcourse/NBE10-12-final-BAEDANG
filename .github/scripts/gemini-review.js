@@ -181,6 +181,7 @@ const req = https.request(
     },
   },
   (res) => {
+    res.setEncoding('utf8');
     let body = '';
     res.on('data', (chunk) => { body += chunk; });
     res.on('end', () => {
