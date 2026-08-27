@@ -1,6 +1,6 @@
 /**
- * 백엔드 API 클라이언트. `back/src/main/java/com/baedang/auth/*` 에 이미 구현된
- * `POST /api/auth/signup`, `POST /api/auth/login`을 그대로 호출합니다.
+ * 백엔드 API 클라이언트. `back/src/main/java/com/baedang/auth/*`, `.../trading/*` 에
+ * 구현된 회원가입·로그인·주문 API를 그대로 호출합니다.
  *
  * <p>1주차 백엔드는 토큰을 발급하지 않고 `userId`만 돌려줍니다 — 이후 요청은
  * `X-User-Id` 헤더로 사용자를 식별하는 개발용 방식입니다 (2주차에 JWT로 교체 예정).
@@ -15,25 +15,54 @@ export type AuthUser = {
   nickname: string;
 };
 
-/** 백엔드 ErrorResponse(code/message/data)를 그대로 감싼 에러. */
+/**
+ * 백엔드 `ErrorResponse`(code/message/data)를 그대로 감싼 에러.
+ *
+ * <p>`data`는 상황에 따라 모양이 다릅니다 — 회원가입 검증 실패면 `{필드명: 에러메시지}`,
+ * 주문 실패면 `{retryPolicy: "SAME_CLIENT_ORDER_ID" | ...}` 식입니다. `fieldErrors`/
+ * `retryPolicy` getter로 그때그때 필요한 모양으로 꺼내 씁니다.
+ */
 export class ApiError extends Error {
   code: string;
-  fieldErrors?: Record<string, string>;
+  data?: Record<string, unknown>;
 
-  constructor(code: string, message: string, fieldErrors?: Record<string, string>) {
+  constructor(code: string, message: string, data?: Record<string, unknown>) {
     super(message);
     this.code = code;
-    this.fieldErrors = fieldErrors;
+    this.data = data;
+  }
+
+  /** INVALID_INPUT일 때만 의미 있는 `{필드명: 에러메시지}` 형태 (GlobalExceptionHandler 참고). */
+  get fieldErrors(): Record<string, string> | undefined {
+    if (this.code !== "INVALID_INPUT" || !this.data) return undefined;
+    return this.data as Record<string, string>;
+  }
+
+  /**
+   * 주문 실패 응답에 실리는 재시도 정책. 없으면(정책 정보 없이 실패한 경우) `undefined`.
+   * `back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java`와 값이 같다.
+   */
+  get retryPolicy(): "SAME_CLIENT_ORDER_ID" | "NEW_CLIENT_ORDER_ID" | "NOT_RETRYABLE" | undefined {
+    const value = this.data?.retryPolicy;
+    return value === "SAME_CLIENT_ORDER_ID" || value === "NEW_CLIENT_ORDER_ID" || value === "NOT_RETRYABLE"
+      ? value
+      : undefined;
   }
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+type RequestInput = {
+  method: "GET" | "POST";
+  headers?: Record<string, string>;
+  body?: unknown;
+};
+
+async function request<T>(path: string, init: RequestInput): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      method: init.method,
+      headers: { "Content-Type": "application/json", ...init.headers },
+      body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
   } catch {
     // 백엔드가 안 떠 있거나 CORS 등으로 요청 자체가 안 나간 경우.
@@ -48,18 +77,54 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   if (!res.ok) {
     const code = json?.code ?? "UNKNOWN_ERROR";
     const message = json?.message ?? "요청을 처리하지 못했어요.";
-    // INVALID_INPUT일 때 data에 { 필드명: 에러메시지 } 형태로 옵니다 (GlobalExceptionHandler 참고).
-    const fieldErrors = code === "INVALID_INPUT" && json?.data ? (json.data as Record<string, string>) : undefined;
-    throw new ApiError(code, message, fieldErrors);
+    const data = (json?.data as Record<string, unknown> | undefined) ?? undefined;
+    throw new ApiError(code, message, data);
   }
 
   return json as T;
 }
 
 export function signUp(input: { email: string; password: string; nickname: string }): Promise<AuthUser> {
-  return postJson<AuthUser>("/api/auth/signup", input);
+  return request<AuthUser>("/api/auth/signup", { method: "POST", body: input });
 }
 
 export function login(input: { email: string; password: string }): Promise<AuthUser> {
-  return postJson<AuthUser>("/api/auth/login", input);
+  return request<AuthUser>("/api/auth/login", { method: "POST", body: input });
+}
+
+// ── 주문 ──────────────────────────────────────────────────────────────────────
+
+export type PlaceOrderInput = {
+  clientOrderId: string;
+  symbol: string;
+  marketCountry: "KR" | "US";
+  side: "BUY" | "SELL";
+  quantity: string;
+};
+
+export type OrderResponse = {
+  orderId: number;
+  status: string;
+  symbol: string;
+  marketCountry: "KR" | "US";
+  side: string;
+  quantity: string;
+  executedPrice: string;
+  exchangeRate: string;
+  grossAmount: string;
+  fee: string;
+  tax: string;
+  netAmount: string;
+  quoteAt: string;
+  orderedAt: string;
+  account: { cashBalanceAfter: string };
+};
+
+/** `POST /api/orders` — 시장가 매수/매도. 로그인한 사용자만 호출 가능(X-User-Id 헤더). */
+export function placeOrder(userId: number, input: PlaceOrderInput): Promise<OrderResponse> {
+  return request<OrderResponse>("/api/orders", {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) },
+    body: input,
+  });
 }
