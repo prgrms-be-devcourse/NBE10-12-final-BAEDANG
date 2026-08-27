@@ -38,6 +38,10 @@ describe('formatNumber', () => {
   it('큰 수 — 100,000,000', () => {
     expect(formatNumber(100_000_000)).toBe('100,000,000');
   });
+
+  it('지수 표기 범위의 큰 문자열도 전체 자릿수로 표시', () => {
+    expect(formatNumber('1000000000000000000000')).toBe('1,000,000,000,000,000,000,000');
+  });
 });
 
 describe('formatKoreanAmount', () => {

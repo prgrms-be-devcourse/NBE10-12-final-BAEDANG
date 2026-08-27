@@ -2,7 +2,7 @@
 
 const https = require('https');
 const fs = require('fs');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 
 // ---------------------------------------------------------------------------
 // Environment variables (injected by GitHub Actions workflow)
@@ -19,7 +19,14 @@ const TAG          = '<!-- GEMINI_AI_REVIEW -->';
 const QUOTA_NOTICE = `
 
 > ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
-const MAX_DIFF_LEN = 30_000;
+const MAX_DIFF_LEN = 80_000;
+const REQUEST_TIMEOUT_MS = 30_000;
+const DIFF_PATHS = [
+  '.',
+  ':(exclude)**/package-lock.json',
+  ':(exclude)**/yarn.lock',
+  ':(exclude)**/pnpm-lock.yaml',
+];
 
 // ---------------------------------------------------------------------------
 // Guard: API key must be set
@@ -34,10 +41,12 @@ if (!apiKey) {
 // ---------------------------------------------------------------------------
 let diff = '';
 try {
-  diff = execSync(`git diff ${baseSha}...${headSha}`).toString();
+  diff = execFileSync('git', ['diff', `${baseSha}...${headSha}`, '--', ...DIFF_PATHS], {
+    encoding: 'utf8',
+  });
 } catch (e) {
   console.error('Failed to get git diff:', e.message);
-  diff = execSync('git diff HEAD~1').toString();
+  diff = execFileSync('git', ['diff', 'HEAD~1', '--', ...DIFF_PATHS], { encoding: 'utf8' });
 }
 
 if (!diff.trim()) {
@@ -194,6 +203,10 @@ req.on('error', (e) => {
   // Fail the CI step explicitly so the problem is visible on the PR.
   console.error(`[ERROR] Gemini API network error: ${e.message}`);
   process.exit(1);
+});
+
+req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+  req.destroy(new Error(`Gemini API request timed out after ${REQUEST_TIMEOUT_MS}ms`));
 });
 
 req.write(requestData);

@@ -14,6 +14,7 @@ jobs:
   review:
     name: Automated Code Review by Gemini
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: github.actor != 'dependabot[bot]'
 
     steps:

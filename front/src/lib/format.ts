@@ -6,7 +6,7 @@ export type NumericValue = number | string | Decimal;
 
 export function formatNumber(value: NumericValue): string {
   const d = new D(value).toDecimalPlaces(0);
-  const parts = d.toString().split(".");
+  const parts = d.toFixed(0).split(".");
   parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return parts.join(".");
 }
