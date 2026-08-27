@@ -53,6 +53,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -66,6 +67,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 @SpringBootTest(properties = {
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
+        "trading.execution-context-max-age-seconds=1",
         "logging.level.org.hibernate.SQL=OFF"
 })
 class MarketOrderIntegrationTest {
@@ -117,7 +119,7 @@ class MarketOrderIntegrationTest {
         assertThat(account.getCashBalance()).isEqualByComparingTo("29998");
         assertThat(account.getLockedCash()).isEqualByComparingTo("0");
         assertThat(holding.getQuantity()).isEqualByComparingTo("2");
-        assertThat(response.account().cashBalance()).isEqualTo("29998");
+        assertThat(response.account().cashBalanceAfter()).isEqualTo("29998");
         assertThat(ledgerEntryRepository.findFirstByOrderIdOrderByEntryIdAsc(
                 order.getOrderId()).orElseThrow().getAmount())
                 .isEqualByComparingTo("-20002");
@@ -160,7 +162,7 @@ class MarketOrderIntegrationTest {
         assertThat(holding.getQuantity()).isEqualByComparingTo("3");
         assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo("8000");
         assertThat(response.netAmount()).isEqualTo("19958");
-        assertThat(response.account().cashBalance()).isEqualTo("29958");
+        assertThat(response.account().cashBalanceAfter()).isEqualTo("29958");
         LedgerEntry ledger = ledgerEntryRepository
                 .findFirstByOrderIdOrderByEntryIdAsc(response.orderId()).orElseThrow();
         assertThat(ledger.getEntryType()).isEqualTo(EntryType.SELL);
@@ -260,8 +262,8 @@ class MarketOrderIntegrationTest {
 
         assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("29998");
         assertThat(retried.orderId()).isEqualTo(first.orderId());
-        assertThat(retried.account().cashBalance()).isEqualTo(first.account().cashBalance());
-        assertThat(retried.account().cashBalance()).isEqualTo("39999");
+        assertThat(retried.account().cashBalanceAfter()).isEqualTo(first.account().cashBalanceAfter());
+        assertThat(retried.account().cashBalanceAfter()).isEqualTo("39999");
     }
 
     @Test
@@ -278,7 +280,7 @@ class MarketOrderIntegrationTest {
         OrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         assertThat(retried.orderId()).isEqualTo(first.orderId());
-        assertThat(retried.account().cashBalance()).isEqualTo("39999");
+        assertThat(retried.account().cashBalanceAfter()).isEqualTo("39999");
         assertThat(ledgerEntryRepository
                 .findFirstByOrderIdOrderByEntryIdAsc(first.orderId()).orElseThrow().getAmount())
                 .isEqualByComparingTo("-10001");
@@ -312,6 +314,24 @@ class MarketOrderIntegrationTest {
         marketOrderService.place(fixture.userId(), request(fixture, "BUY", "1"));
 
         verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 종목과_시세의_통화가_다르면_주문을_저장하지_않고_같은_ID_재시도를_허용한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        quoteSnapshotRepository.save(new QuoteSnapshot(
+                fixture.stockId(), new BigDecimal("10000"), "USD", OffsetDateTime.now(ZoneOffset.UTC)));
+        PlaceOrderRequest request = request(fixture, "BUY", "1");
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
+                    assertThat(exception.getData())
+                            .containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+
+        assertThat(tradeOrderRepository.findByAccountIdAndClientOrderId(
+                fixture.accountId(), UUID.fromString(request.clientOrderId()))).isEmpty();
     }
 
     @Test
@@ -552,6 +572,74 @@ class MarketOrderIntegrationTest {
         assertThat(account.getLockedCash()).isEqualByComparingTo("0");
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(2);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
+    }
+
+    @Test
+    void 락_대기중_같은_clientOrderId가_체결되면_만료검사보다_저장결과를_먼저_반환한다() throws Exception {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        UUID clientOrderId = UUID.fromString(request.clientOrderId());
+        CountDownLatch accountLocked = new CountDownLatch(1);
+        CountDownLatch contextPrepared = new CountDownLatch(1);
+        when(marketSessionProvider.currentSession(any(), any())).thenAnswer(invocation -> {
+            contextPrepared.countDown();
+            return new MarketSessionStatus(true, Instant.MAX);
+        });
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<Long> firstOrderId = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .execute(status -> {
+                        Account account = accountRepository.findByUserIdAndStatusForUpdate(
+                                fixture.userId(), AccountStatus.ACTIVE).orElseThrow();
+                        accountLocked.countDown();
+                        await(contextPrepared);
+                        pauseForContextExpiry();
+
+                        OffsetDateTime orderedAt = OffsetDateTime.now(ZoneOffset.UTC);
+                        TradeOrder order = tradeOrderRepository.save(TradeOrder.filledMarketOrder(
+                                fixture.accountId(), fixture.stockId(), clientOrderId, OrderSide.BUY,
+                                BigDecimal.ONE, new BigDecimal("10000"), orderedAt, BigDecimal.ONE,
+                                new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ZERO,
+                                new BigDecimal("10001"), orderedAt));
+                        account.debitMarketBuy(new BigDecimal("10001"));
+                        holdingRepository.save(Holding.firstBuy(
+                                fixture.accountId(), fixture.stockId(), BigDecimal.ONE,
+                                new BigDecimal("10000"), BigDecimal.ONE, orderedAt));
+                        ledgerEntryRepository.save(LedgerEntry.buy(
+                                fixture.accountId(), order.getOrderId(), new BigDecimal("10001"),
+                                account.getCashBalance(), BigDecimal.ONE, "동시 멱등 테스트", orderedAt));
+                        return order.getOrderId();
+                    }));
+
+            assertThat(accountLocked.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<OrderResponse> retry = executor.submit(
+                    () -> marketOrderService.place(fixture.userId(), request));
+
+            assertThat(retry.get().orderId()).isEqualTo(firstOrderId.get());
+        }
+
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+        assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+    }
+
+    private void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(5, TimeUnit.SECONDS)) {
+                throw new IllegalStateException("시장 컨텍스트 준비를 기다리지 못했습니다");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void pauseForContextExpiry() {
+        try {
+            Thread.sleep(1_200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
     }
 
     private Object invokeAfter(CountDownLatch start, Long userId, PlaceOrderRequest request) {

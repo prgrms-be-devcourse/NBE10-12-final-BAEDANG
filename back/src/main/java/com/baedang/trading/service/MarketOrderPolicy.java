@@ -9,6 +9,7 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.OrderAmount;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.user.entity.Account;
@@ -18,7 +19,9 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
 import java.util.regex.Pattern;
@@ -31,13 +34,16 @@ public class MarketOrderPolicy {
     private static final Pattern QUANTITY_PATTERN = Pattern.compile("\\d+(\\.0+)?");
 
     private final Duration quoteMaxStaleness;
+    private final Duration executionContextMaxAge;
     private final BigDecimal maxOrderQuantity;
 
     public MarketOrderPolicy(
             @Value("${trading.quote-max-staleness-seconds}") long quoteMaxStalenessSeconds,
+            @Value("${trading.execution-context-max-age-seconds}") long executionContextMaxAgeSeconds,
             @Value("${trading.max-order-quantity}") BigDecimal maxOrderQuantity
     ) {
         this.quoteMaxStaleness = Duration.ofSeconds(quoteMaxStalenessSeconds);
+        this.executionContextMaxAge = Duration.ofSeconds(executionContextMaxAgeSeconds);
         this.maxOrderQuantity = maxOrderQuantity;
     }
 
@@ -48,9 +54,18 @@ public class MarketOrderPolicy {
             String side,
             String quantity
     ) {
-        return new MarketOrderCommand(
-                parseClientOrderId(clientOrderId),
-                parseTerms(symbol, marketCountry, side, quantity));
+        UUID parsedClientOrderId = parseClientOrderId(clientOrderId);
+        try {
+            return new MarketOrderCommand(
+                    parsedClientOrderId,
+                    parseTerms(symbol, marketCountry, side, quantity));
+        } catch (BusinessException e) {
+            Map<String, Object> data = new LinkedHashMap<>();
+            if (e.getData() != null) data.putAll(e.getData());
+            data.putAll(ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+            if (e.getDetail() == null) throw new BusinessException(e.getErrorCode(), data);
+            throw new BusinessException(e.getErrorCode(), e.getDetail(), data);
+        }
     }
 
     public OrderTerms parseTerms(String symbol, String marketCountry, String side, String quantity) {
@@ -98,9 +113,17 @@ public class MarketOrderPolicy {
 
     public void validateExecutionContextFresh(MarketOrderExecutionContext context, Instant now) {
         Duration age = Duration.between(context.checkedAt(), now);
-        if (age.isNegative() || age.compareTo(quoteMaxStaleness) > 0) {
-            throw new BusinessException(ErrorCode.MARKET_CONTEXT_EXPIRED);
+        if (age.isNegative() || age.compareTo(executionContextMaxAge) > 0) {
+            throw new BusinessException(
+                    ErrorCode.MARKET_CONTEXT_EXPIRED,
+                    ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
         }
+    }
+
+    public boolean hasMatchingQuoteCurrency(Stock stock, QuoteSnapshot quote) {
+        return stock.getCurrency() != null
+                && quote.getCurrency() != null
+                && stock.getCurrency().trim().equalsIgnoreCase(quote.getCurrency().trim());
     }
 
     private ErrorCode validateQuoteTime(QuoteSnapshot quote, Instant now) {
@@ -111,16 +134,25 @@ public class MarketOrderPolicy {
     }
 
     private UUID parseClientOrderId(String value) {
-        if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
+        if (value == null || value.isBlank()) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    Map.of(
+                            "field", "clientOrderId",
+                            "retryPolicy", ClientOrderRetryPolicy.NOT_RETRYABLE.name()));
+        }
         try {
             return UUID.fromString(value.trim());
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "clientOrderId=" + value);
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    "clientOrderId=" + value,
+                    ClientOrderRetryPolicy.NOT_RETRYABLE.asData());
         }
     }
 
     private OrderSide parseSide(String value) {
-        if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
+        if (value == null || value.isBlank()) throw missingField("side");
         try {
             return OrderSide.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
@@ -129,7 +161,7 @@ public class MarketOrderPolicy {
     }
 
     private MarketCountry parseMarketCountry(String value) {
-        if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
+        if (value == null || value.isBlank()) throw missingField("marketCountry");
         try {
             return MarketCountry.valueOf(value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
@@ -138,7 +170,9 @@ public class MarketOrderPolicy {
     }
 
     private BigDecimal parseQuantity(String value) {
-        if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_QUANTITY);
+        if (value == null || value.isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_QUANTITY, Map.of("field", "quantity"));
+        }
         String normalized = value.trim();
         if (normalized.length() > MAX_QUANTITY_INPUT_LENGTH
                 || !QUANTITY_PATTERN.matcher(normalized).matches()) {
@@ -158,7 +192,11 @@ public class MarketOrderPolicy {
     }
 
     private String normalizeSymbol(String value) {
-        if (value == null || value.isBlank()) throw new BusinessException(ErrorCode.INVALID_INPUT);
+        if (value == null || value.isBlank()) throw missingField("symbol");
         return value.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private BusinessException missingField(String field) {
+        return new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", field));
     }
 }

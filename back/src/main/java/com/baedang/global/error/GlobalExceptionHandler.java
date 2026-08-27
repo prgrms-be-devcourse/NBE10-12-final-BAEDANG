@@ -29,7 +29,10 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
         log.warn("[{}] {}", code.name(), e.getMessage());
-        return ResponseEntity.status(code.getStatus()).body(ErrorResponse.of(code));
+        ErrorResponse response = e.getData() == null
+                ? ErrorResponse.of(code)
+                : ErrorResponse.of(code, e.getData());
+        return ResponseEntity.status(code.getStatus()).body(response);
     }
 
     /** @Valid 검증 실패. 어느 필드가 왜 틀렸는지 data 에 담아줍니다. */

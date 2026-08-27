@@ -100,6 +100,8 @@ trading:
 
   # 이 시간(초)보다 오래된 시세로는 체결하지 않습니다 → STALE_QUOTE
   quote-max-staleness-seconds: ${QUOTE_MAX_STALENESS_SECONDS:15}
+  # 장 운영 정보와 환율 준비가 끝난 뒤 계좌 락을 기다릴 수 있는 시간입니다.
+  execution-context-max-age-seconds: ${EXECUTION_CONTEXT_MAX_AGE_SECONDS:15}
 
   # 1회 주문 수량 상한. 초기 예수금 5천만원인 교육용 서비스에서 100만 주는
   # 정상 주문을 막지 않으면서 과도한 BigDecimal 계산과 DB 범위 초과를 방지합니다.

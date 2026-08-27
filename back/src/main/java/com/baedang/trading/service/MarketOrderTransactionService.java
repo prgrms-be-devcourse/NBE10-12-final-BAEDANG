@@ -17,6 +17,7 @@ import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.OrderAmount;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
@@ -107,8 +108,6 @@ public class MarketOrderTransactionService {
         Account account = accountRepository.findByUserIdAndStatusForUpdate(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
         Instant now = clock.instant();
-        // 락 대기 중 만료된 컨텍스트는 주문 행 없이 롤백하여 같은 clientOrderId 재시도를 허용합니다.
-        marketOrderPolicy.validateExecutionContextFresh(executionContext, now);
 
         OrderTerms terms = command.terms();
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(
@@ -128,8 +127,20 @@ public class MarketOrderTransactionService {
             return existingResult(existing, stock);
         }
 
+        // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
+        marketOrderPolicy.validateExecutionContextFresh(executionContext, now);
+
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.QUOTE_NOT_FOUND, "stockId=" + stock.getStockId()));
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.QUOTE_NOT_FOUND,
+                        "stockId=" + stock.getStockId(),
+                        ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
+        if (!marketOrderPolicy.hasMatchingQuoteCurrency(stock, quote)) {
+            throw new BusinessException(
+                    ErrorCode.QUOTE_CURRENCY_MISMATCH,
+                    "stockCurrency=" + stock.getCurrency() + ", quoteCurrency=" + quote.getCurrency(),
+                    ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
 
         BigDecimal executionRate = stock.getMarketCountry() == MarketCountry.KR
                 ? BigDecimal.ONE
@@ -232,7 +243,8 @@ public class MarketOrderTransactionService {
                 && order.getQuantity().compareTo(terms.quantity()) == 0;
         if (!same) {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER,
-                    "clientOrderId=" + order.getClientOrderId());
+                    "clientOrderId=" + order.getClientOrderId(),
+                    ClientOrderRetryPolicy.NOT_RETRYABLE.asData());
         }
     }
 

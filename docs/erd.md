@@ -414,7 +414,7 @@ Dividend is an **attribute, not a type**. KB금융 is both dividend-paying and a
 
 Market orders have no committed intermediate state. Start by locking the account row, validate against `cash_balance − locked_cash` or `quantity − locked_quantity`, then update the account/holding, insert a `FILLED` order, and append one ledger entry in the same transaction. Do not increase and decrease locks that no other transaction can observe.
 
-If a structurally valid request fails a business rule, insert a `REJECTED` order with `reject_reason` and commit it without changing cash, quantity, or the ledger. Malformed requests that cannot satisfy the order FKs or quantity type are returned as request errors and are not order rows.
+A structurally valid request rejected by static preflight validation, or by an expired market context, creates no order row and may be retried with the same `client_order_id`. Only a business rejection confirmed inside the transaction—including a stock state that changes after preflight while waiting for the account lock—commits a `REJECTED` order with `reject_reason` without changing cash, quantity, or the ledger. That stored rejection is final, so a new attempt uses a new `client_order_id`. Malformed requests that cannot satisfy the order FKs or quantity type are returned as request errors and are not order rows.
 
 ### Limit order — two separate transactions
 

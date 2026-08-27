@@ -64,6 +64,12 @@ public class OrderQuoteService {
         OrderQuoteQueryContext queryContext = queryService.load(userId, terms);
         Account account = queryContext.account();
         Stock stock = queryContext.stock();
+        if (!marketOrderPolicy.hasMatchingQuoteCurrency(stock, queryContext.quote())) {
+            throw new BusinessException(
+                    ErrorCode.QUOTE_CURRENCY_MISMATCH,
+                    "stockCurrency=" + stock.getCurrency()
+                            + ", quoteCurrency=" + queryContext.quote().getCurrency());
+        }
 
         BigDecimal exchangeRate = stock.getMarketCountry() == MarketCountry.KR
                 ? BigDecimal.ONE
@@ -97,6 +103,7 @@ public class OrderQuoteService {
         }
         return OrderQuoteResponse.of(
                 stock.getSymbol(),
+                stock.getMarketCountry(),
                 terms.side(),
                 terms.quantity(),
                 amount,

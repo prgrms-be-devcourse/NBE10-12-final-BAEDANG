@@ -458,6 +458,7 @@ minute_candle 에 60초 이내 데이터가 있나?
 ```json
 {
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10",
   "executedPrice": "241500",
@@ -509,7 +510,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ```
 `clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 계좌 안에서 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 시장 API 호출 없이 저장된 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
 
-`REJECTED` 응답을 받은 주문 시도는 최종 결과로 확정됩니다. 장 재개, 시세 갱신, 예수금 충전 등 조건이 바뀐 뒤 주문을 다시 시도하려면 **새 `clientOrderId`를 발급해야 합니다.** 거절된 시도의 ID를 재사용하면 시장 조건을 다시 평가하지 않고 저장된 거절 결과를 그대로 반환합니다.
+실패 응답의 `data.retryPolicy`가 재시도 시 `clientOrderId` 처리 방법을 알려줍니다. `SAME_CLIENT_ORDER_ID`는 주문 행이 만들어지지 않은 실패이므로 같은 ID로 안전하게 재시도하고, `NEW_CLIENT_ORDER_ID`는 `REJECTED` 행이 최종 결과로 저장된 실패이므로 조건이 바뀐 뒤 새 ID를 발급합니다. `NOT_RETRYABLE`은 같은 ID의 요청 내용 충돌처럼 그대로 재전송해도 성공할 수 없는 요청입니다.
 
 **Response · 201**
 ```json
@@ -517,6 +518,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
   "orderId": 1024,
   "status": "FILLED",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10",
   "executedPrice": "241500",
@@ -528,27 +530,27 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
   "quoteAt": "2026-08-11T12:36:59+09:00",
   "orderedAt": "2026-08-11T12:37:02+09:00",
   "account": {
-    "cashBalance": "45824758"
+    "cashBalanceAfter": "45824758"
   }
 }
 ```
-주문 응답에는 거래 트랜잭션이 확정한 예수금만 포함합니다. 포트폴리오 평가는 체결과 분리하며, 최신 `totalAsset`이 필요하면 `GET /accounts/me`를 조회합니다.
+주문 응답의 `cashBalanceAfter`는 현재 조회 시점 잔액이 아니라 해당 주문의 최초 체결 원장에 기록된 **체결 직후 잔액**입니다. 멱등 재응답에서도 같은 감사 값을 반환합니다. 포트폴리오 평가와 현재 계좌 상태는 체결과 분리하며, 최신 값이 필요하면 `GET /accounts/me`를 조회합니다.
 
 **서버 처리 순서**
 ```
 ① clientOrderId 조회 — 동일 요청 재시도면 저장된 결과 즉시 반환
 ② 종목 조회 후 정적 검증 — 거래 대상 → 거래정지 → 정리매매
-③ 정적 검증 통과 시에만 장 운영 정보와 미국 주문 실행 환율 조회(국내는 환율 1)
+③ 정적 검증 통과 시에만 장 운영 정보와 미국 주문 실행 환율 조회(국내는 환율 1), 외부 데이터 준비 완료 시 checkedAt 기록
 ④ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
-⑤ 시장 컨텍스트 만료 검사 후 clientOrderId 재확인
-⑥ 시세 조회 및 매도 시 holding FOR UPDATE (락 순서: account → holding)
+⑤ clientOrderId 재확인 — 락 대기 중 동일 주문이 확정됐으면 저장 결과 반환
+⑥ 신규 주문만 시장 컨텍스트 만료 검사 후 시세 조회 및 통화 일치 검증, 매도 시 holding FOR UPDATE (락 순서: account → holding)
 ⑦ 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
 ⑧ INSERT trade_order FILLED (트랜잭션 내부의 유효한 업무 거절은 REJECTED)
 ⑨ UPDATE account.cash_balance 및 holding 잠금·UPSERT
 ⑩ INSERT ledger_entry (append only, FILLED만 기록)
 ```
 
-시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않습니다. 잘못된 요청 형식, 외부 시장 데이터 실패, 정적 사전 검증 실패, 락 대기 중 시장 컨텍스트 만료는 주문 행을 만들지 않으므로 조건이 회복된 뒤 같은 `clientOrderId`로 재시도할 수 있습니다. 트랜잭션에 진입한 뒤 확정된 `REJECTED`만 최종 결과로 보존합니다.
+시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않습니다. 유효한 `clientOrderId`를 파싱한 뒤 발생한 입력 필드 검증 실패, 외부 시장 데이터 실패, 정적 사전 검증 실패, 락 대기 중 시장 컨텍스트 만료, 시세 통화 불일치는 주문 행을 만들지 않으며 `SAME_CLIENT_ORDER_ID`를 응답합니다. 트랜잭션 안에서 확정되어 `REJECTED` 행이 저장된 실패만 `NEW_CLIENT_ORDER_ID`를 응답하는 최종 결과입니다. 사전 검증 통과 후 락 획득 사이 종목 상태가 바뀌면 동일한 오류 코드라도 후자에 해당할 수 있으므로 프론트는 코드가 아니라 `data.retryPolicy`를 따릅니다. JSON 자체를 읽을 수 없거나 `clientOrderId`가 유효하지 않은 요청은 재사용할 정상 ID가 없으므로 이 규칙의 대상이 아닙니다.
 
 시장가 주문 유스케이스는 최상위 트랜잭션 경계로만 실행합니다. 애플리케이션 진입점은 `Propagation.NEVER`로 외부 트랜잭션 안에서의 호출을 금지하고, 실제 DB 변경 서비스가 자체 `REQUIRED` 트랜잭션을 시작합니다. 따라서 커밋된 `REJECTED` 기록이 관련 없는 외부 업무의 롤백에 함께 사라지지 않습니다.
 
@@ -557,22 +559,23 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 주문 수량은 1회 최대 **1,000,000주**이며 지수 표기는 허용하지 않습니다. 상한은 `trading.max-order-quantity` 설정으로 관리합니다.
 
 **에러**
-| 코드 | HTTP | 화면 문구 |
-|---|---|---|
-| `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
-| `MARKET_CONTEXT_EXPIRED` | 422 | 시장 정보를 다시 확인한 뒤 주문해주세요 |
-| `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
-| `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
-| `STOCK_LIQUIDATION` | 422 | 정리매매 종목이에요 |
-| `INSUFFICIENT_CASH` | 422 | 주문가능금액이 부족해요 |
-| `INSUFFICIENT_QUANTITY` | 422 | 보유 수량이 부족해요 |
-| `STALE_QUOTE` | 422 | 시세 정보가 오래되었어요. 다시 시도해주세요 |
-| `FUTURE_QUOTE` | 422 | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
-| `INVALID_SETTLEMENT_AMOUNT` | 422 | 정산 금액이 올바르지 않아요 |
-| `INVALID_QUANTITY` | 400 | 수량은 1주 이상의 정수로 입력해주세요 |
-| `DUPLICATE_ORDER` | 409 | 이미 처리된 주문이에요 |
+| 코드 | HTTP | 기본 재시도 정책 | 화면 문구 |
+|---|---|---|---|
+| `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
+| `NOT_IN_UNIVERSE` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 이 종목은 아직 거래를 지원하지 않아요 |
+| `STOCK_SUSPENDED` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 거래정지 종목이에요 |
+| `STOCK_LIQUIDATION` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 정리매매 종목이에요 |
+| `INSUFFICIENT_CASH` | 422 | `NEW_CLIENT_ORDER_ID` | 주문가능금액이 부족해요 |
+| `INSUFFICIENT_QUANTITY` | 422 | `NEW_CLIENT_ORDER_ID` | 보유 수량이 부족해요 |
+| `STALE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 정보가 오래되었어요. 다시 시도해주세요 |
+| `FUTURE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
+| `INVALID_SETTLEMENT_AMOUNT` | 422 | `NEW_CLIENT_ORDER_ID` | 정산 금액이 올바르지 않아요 |
+| `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
+| `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
+| `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
 
-**`STALE_QUOTE`** 는 `quote_at` 이 현재보다 **15초 이상** 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 어느 쪽이든 그대로 체결하면 원장의 신뢰가 무너집니다.
+**`STALE_QUOTE`** 는 `trading.quote-max-staleness-seconds` 기준으로 `quote_at`이 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 외부 시장 데이터 준비 완료 후부터 계좌 락 획득까지의 컨텍스트 허용 시간은 별도 설정 `trading.execution-context-max-age-seconds`를 사용합니다.
 
 ---
 

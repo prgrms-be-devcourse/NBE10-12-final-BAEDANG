@@ -1,6 +1,7 @@
 package com.baedang.trading.model;
 
 import com.baedang.stock.entity.Stock;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.TradeOrder;
 
 import java.math.BigDecimal;
@@ -11,6 +12,7 @@ public record MarketOrderReceipt(
         Long orderId,
         String status,
         String symbol,
+        MarketCountry marketCountry,
         String side,
         BigDecimal quantity,
         BigDecimal executedPrice,
@@ -21,7 +23,7 @@ public record MarketOrderReceipt(
         BigDecimal netAmount,
         OffsetDateTime quoteAt,
         OffsetDateTime orderedAt,
-        BigDecimal cashBalance
+        BigDecimal cashBalanceAfter
 ) {
 
     public static MarketOrderReceipt from(TradeOrder order, Stock stock, BigDecimal cashBalance) {
@@ -29,6 +31,7 @@ public record MarketOrderReceipt(
                 order.getOrderId(),
                 order.getStatus().name(),
                 stock.getSymbol(),
+                stock.getMarketCountry(),
                 order.getSide().name(),
                 order.getQuantity(),
                 order.getExecutedPrice(),

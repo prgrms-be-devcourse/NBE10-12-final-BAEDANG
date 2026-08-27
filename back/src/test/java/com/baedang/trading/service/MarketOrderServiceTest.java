@@ -35,6 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class MarketOrderServiceTest {
@@ -66,6 +67,10 @@ class MarketOrderServiceTest {
         when(transactionService.execute(eq(1L), eq(command), any(MarketOrderExecutionContext.class)))
                 .thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
 
+        Instant sessionLookupAt = Instant.parse("2026-08-26T01:00:00Z");
+        Instant contextCheckedAt = Instant.parse("2026-08-26T01:00:05Z");
+        Clock clock = mock(Clock.class);
+        when(clock.instant()).thenReturn(sessionLookupAt, contextCheckedAt);
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy,
                 transactionService,
@@ -73,12 +78,14 @@ class MarketOrderServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 new OrderResponseAssembler(),
-                Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC));
+                clock);
 
         assertThatThrownBy(() -> service.place(1L, request))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.INSUFFICIENT_CASH);
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INSUFFICIENT_CASH);
+                    assertThat(exception.getData())
+                            .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
+                });
 
         ArgumentCaptor<MarketOrderExecutionContext> contextCaptor =
                 ArgumentCaptor.forClass(MarketOrderExecutionContext.class);
@@ -88,7 +95,8 @@ class MarketOrderServiceTest {
                 true,
                 Instant.parse("2026-08-26T02:00:00Z"),
                 BigDecimal.ONE,
-                Instant.parse("2026-08-26T01:00:00Z")));
+                contextCheckedAt));
+        verify(marketSessionProvider).currentSession(MarketCountry.KR, sessionLookupAt);
         verifyNoInteractions(exchangeRateProvider);
     }
 
@@ -116,9 +124,11 @@ class MarketOrderServiceTest {
                 Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.INSUFFICIENT_CASH);
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INSUFFICIENT_CASH);
+                    assertThat(exception.getData())
+                            .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
+                });
 
         verifyNoInteractions(stockRepository, marketSessionProvider, exchangeRateProvider);
         verify(transactionService, never()).execute(any(), any(), any());

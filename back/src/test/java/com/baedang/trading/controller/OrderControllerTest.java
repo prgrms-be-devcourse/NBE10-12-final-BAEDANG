@@ -7,6 +7,7 @@ import com.baedang.trading.dto.OrderQuoteResponse;
 import com.baedang.trading.dto.OrderResponse;
 import com.baedang.trading.dto.PlaceOrderRequest;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.service.MarketOrderService;
 import com.baedang.trading.service.OrderQuoteService;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.OffsetDateTime;
+import java.util.Map;
 
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -47,6 +49,7 @@ class OrderControllerTest {
         when(orderQuoteService.getQuote(1L, "005930", "KR", "BUY", "10"))
                 .thenReturn(new OrderQuoteResponse(
                         "005930",
+                        MarketCountry.KR,
                         OrderSide.BUY,
                         "10",
                         "241500",
@@ -68,6 +71,7 @@ class OrderControllerTest {
                         .param("side", "BUY")
                         .param("quantity", "10"))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.marketCountry").value("KR"))
                 .andExpect(jsonPath("$.quantity").value("10"))
                 .andExpect(jsonPath("$.grossAmount").value("2415000"))
                 .andExpect(jsonPath("$.fee").value("242"))
@@ -82,7 +86,7 @@ class OrderControllerTest {
         PlaceOrderRequest request = new PlaceOrderRequest(
                 "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request)).thenReturn(new OrderResponse(
-                1024L, "FILLED", "005930", "BUY", "10", "241500", "1",
+                1024L, "FILLED", "005930", MarketCountry.KR, "BUY", "10", "241500", "1",
                 "2415000", "242", "0", "2415242",
                 OffsetDateTime.parse("2026-08-11T12:36:59+09:00"),
                 OffsetDateTime.parse("2026-08-11T12:37:02+09:00"),
@@ -103,10 +107,11 @@ class OrderControllerTest {
                                 """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("FILLED"))
+                .andExpect(jsonPath("$.marketCountry").value("KR"))
                 .andExpect(jsonPath("$.quantity").value("10"))
                 .andExpect(jsonPath("$.grossAmount").value("2415000"))
                 .andExpect(jsonPath("$.netAmount").value("2415242"))
-                .andExpect(jsonPath("$.account.cashBalance").value("45824758"))
+                .andExpect(jsonPath("$.account.cashBalanceAfter").value("45824758"))
                 .andExpect(jsonPath("$.account.totalAsset").doesNotExist());
     }
 
@@ -115,7 +120,9 @@ class OrderControllerTest {
         PlaceOrderRequest request = new PlaceOrderRequest(
                 "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request))
-                .thenThrow(new BusinessException(ErrorCode.INSUFFICIENT_CASH));
+                .thenThrow(new BusinessException(
+                        ErrorCode.INSUFFICIENT_CASH,
+                        Map.of("retryPolicy", "NEW_CLIENT_ORDER_ID")));
 
         mockMvc.perform(post("/api/orders")
                         .header("X-User-Id", "1")
@@ -131,7 +138,24 @@ class OrderControllerTest {
                                 """))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("INSUFFICIENT_CASH"))
-                .andExpect(jsonPath("$.message").value("주문가능금액이 부족해요"));
+                .andExpect(jsonPath("$.message").value("주문가능금액이 부족해요"))
+                .andExpect(jsonPath("$.data.retryPolicy").value("NEW_CLIENT_ORDER_ID"));
+    }
+
+    @Test
+    void 누락된_주문_파라미터를_data_field로_응답한다() throws Exception {
+        when(orderQuoteService.getQuote(1L, null, "KR", "BUY", "1"))
+                .thenThrow(new BusinessException(
+                        ErrorCode.INVALID_INPUT, Map.of("field", "symbol")));
+
+        mockMvc.perform(get("/api/orders/quote")
+                        .header("X-User-Id", "1")
+                        .param("marketCountry", "KR")
+                        .param("side", "BUY")
+                        .param("quantity", "1"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"))
+                .andExpect(jsonPath("$.data.field").value("symbol"));
     }
 
     @Test

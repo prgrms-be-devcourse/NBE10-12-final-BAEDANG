@@ -68,7 +68,7 @@ class OrderQuoteServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 calculator,
-                new MarketOrderPolicy(15, new BigDecimal("1000000")),
+                new MarketOrderPolicy(15, 15, new BigDecimal("1000000")),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }
@@ -80,6 +80,7 @@ class OrderQuoteServiceTest {
         OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "buy", "10");
 
         assertThat(result.symbol()).isEqualTo("005930");
+        assertThat(result.marketCountry()).isEqualTo(MarketCountry.KR);
         assertThat(result.side().name()).isEqualTo("BUY");
         assertThat(result.quantity()).isEqualTo("10");
         assertThat(result.grossAmount()).isEqualTo("2415000");
@@ -104,8 +105,10 @@ class OrderQuoteServiceTest {
     void 시장구분이_없으면_종목을_조회하기_전에_거절한다() {
         assertThatThrownBy(() -> service.getQuote(1L, "005930", null, "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getErrorCode())
-                                .isEqualTo(ErrorCode.INVALID_INPUT));
+                        exception -> {
+                            assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
+                            assertThat(exception.getData()).containsEntry("field", "marketCountry");
+                        });
 
         verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
     }
@@ -120,6 +123,25 @@ class OrderQuoteServiceTest {
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
         verifyNoInteractions(marketSessionProvider);
+    }
+
+    @Test
+    void 종목과_시세의_통화가_다르면_금액을_계산하지_않는다() {
+        when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
+                .thenReturn(Optional.of(account));
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(stock.getStockId()).thenReturn(101L);
+        when(stock.getCurrency()).thenReturn("USD");
+        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(new QuoteSnapshot(
+                101L, new BigDecimal("241500"), "KRW", NOW.atOffset(ZoneOffset.UTC))));
+
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH));
+
+        verifyNoInteractions(exchangeRateProvider, marketSessionProvider);
     }
 
     @ParameterizedTest
@@ -179,6 +201,7 @@ class OrderQuoteServiceTest {
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getSymbol()).thenReturn("005930");
         when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+        when(stock.getCurrency()).thenReturn("KRW");
         when(stock.getIsRanked()).thenReturn(false);
         QuoteSnapshot quote = new QuoteSnapshot(
                 101L,
@@ -228,6 +251,7 @@ class OrderQuoteServiceTest {
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getSymbol()).thenReturn("005930");
         when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+        when(stock.getCurrency()).thenReturn("KRW");
         when(stock.getIsRanked()).thenReturn(true);
         when(stock.getListingStatus()).thenReturn(ListingStatus.ACTIVE);
         when(stock.getIsSuspended()).thenReturn(false);
@@ -246,6 +270,7 @@ class OrderQuoteServiceTest {
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
+        when(stock.getCurrency()).thenReturn("USD");
         QuoteSnapshot quote = new QuoteSnapshot(
                 101L, price, "USD", NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
