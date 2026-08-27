@@ -232,6 +232,26 @@ class AccountServiceTest {
         verifyNoInteractions(holdingRepository, quoteSnapshotRepository, exchangeRateRepository, stockRepository);
     }
 
+    @Test
+    void 보유_종목의_종목마스터가_없으면_STOCK_NOT_FOUND_를_던진다() {
+        givenActiveAccount(1L);
+        Holding krHolding = Holding.firstBuy(1L, 101L,
+                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE, fresh());
+        when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
+                .thenReturn(List.of(krHolding));
+        when(quoteSnapshotRepository.findByStockIdIn(any()))
+                .thenReturn(List.of(quote(101L, "241500", "KRW")));
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+                .thenReturn(Optional.empty());
+        // 데이터 정합성 오류 재현: 보유는 있는데 종목 마스터가 조회되지 않는다.
+        when(stockRepository.findByStockIdIn(any()))
+                .thenReturn(List.of());
+
+        assertThatThrownBy(() -> service.getHoldings(1L))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.STOCK_NOT_FOUND));
+    }
+
     /** 보유 목록 조회는 계좌 요약과 달리 예수금·회차를 읽지 않으므로 최소 스텁만 둔다. */
     private void givenActiveAccount(Long accountId) {
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
@@ -249,7 +269,7 @@ class AccountServiceTest {
     }
 
     private QuoteSnapshot quote(Long stockId, String lastPrice, String currency) {
-        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, OffsetDateTime.now());
+        return quote(stockId, lastPrice, currency, fresh());
     }
 
     private QuoteSnapshot quote(Long stockId, String lastPrice, String currency, OffsetDateTime quoteAt) {
@@ -269,6 +289,6 @@ class AccountServiceTest {
     }
 
     private ExchangeRate rate(String rate, String midRate) {
-        return new ExchangeRate("USD", "KRW", new BigDecimal(rate), new BigDecimal(midRate), OffsetDateTime.now());
+        return new ExchangeRate("USD", "KRW", new BigDecimal(rate), new BigDecimal(midRate), fresh());
     }
 }

@@ -109,7 +109,7 @@ public class AccountService {
                 .sorted(Comparator.comparing(HoldingValuation::evalWon).reversed())
                 .map(valuation -> HoldingsResponse.Item.of(
                         valuation,
-                        stocks.get(valuation.stockId()),
+                        requireStock(stocks, valuation.stockId()),
                         isRealtime(valued.quotes().get(valuation.stockId()), now)))
                 .toList();
 
@@ -157,6 +157,19 @@ public class AccountService {
         List<Long> stockIds = holdings.stream().map(Holding::getStockId).toList();
         return stockRepository.findByStockIdIn(stockIds).stream()
                 .collect(Collectors.toMap(Stock::getStockId, Function.identity()));
+    }
+
+    /**
+     * {@code holding.stock_id} 는 {@code stock(stock_id)} FK 라 정상 데이터에선 반드시 매핑됩니다.
+     * 여기서 못 찾으면 마이그레이션 오류 등 데이터 정합성 문제이므로, {@code stock.getSymbol()} 에서
+     * 맥락 없는 NPE 로 터지는 대신 원인(어느 stockId 인지)을 담아 명시적으로 끊습니다.
+     */
+    private Stock requireStock(Map<Long, Stock> stocks, Long stockId) {
+        Stock stock = stocks.get(stockId);
+        if (stock == null) {
+            throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "보유 종목 stockId=" + stockId + " 의 종목 마스터가 없습니다");
+        }
+        return stock;
     }
 
     /** {@code quote_at} 이 임계값 안이면 실시간. 시세가 없으면(방어적) 실시간 아님. */
