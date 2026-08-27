@@ -30,6 +30,7 @@ export default function MyPage() {
   const [holdings, setHoldings] = useState<Holding[]>(MOCK_HOLDINGS);
   const [ledger, setLedger] = useState<LedgerEntry[]>(MOCK_LEDGER);
   const [cash, setCash] = useState(AVAILABLE_CASH);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
 
   const stockValue = useMemo(
     () => holdings.reduce((sum, h) => sum.plus(holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate)), new D(0)),
@@ -44,10 +45,7 @@ export default function MyPage() {
   const totalAssets = new D(cash).plus(stockValue);
 
   function handleReset() {
-    const ok = window.confirm(
-      "보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 5,000만원으로 되돌아가요. 되돌릴 수 없어요. 초기화할까요?"
-    );
-    if (!ok) return;
+    setResetModalOpen(false);
     setHoldings([]);
     setCash(INITIAL_CASH);
     setLedger([
@@ -163,7 +161,7 @@ export default function MyPage() {
                     <span className="text-right">
                       <Link
                         href={`/stocks/${h.symbol}`}
-                        className="rounded-md px-2.5 py-1 text-[12px] font-semibold"
+                        className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
                         style={{ background: "var(--fill)", color: "var(--ink)" }}
                       >
                         거래
@@ -181,7 +179,7 @@ export default function MyPage() {
       ) : (
         <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
           <div
-            className="grid px-5 py-2.5 text-[12px] font-medium"
+            className="grid px-5 py-2.5 text-[12px] font-bold"
             style={{ gridTemplateColumns: "80px 2fr 1fr 1fr 1.2fr", borderBottom: "1px solid var(--line2)", color: "var(--mut2)" }}
           >
             <span>구분</span>
@@ -217,14 +215,14 @@ export default function MyPage() {
       <Reveal delay={0.4} className="mt-7 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[15px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
-            <div className="text-[13px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
+            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
+            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
               보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 <b>5,000만원</b>으로 되돌아가요. 되돌릴 수
               없어요.
             </div>
           </div>
           <button
-            onClick={handleReset}
+            onClick={() => setResetModalOpen(true)}
             className="ml-auto rounded-xl px-5 py-3 text-[14px] font-bold"
             style={{ background: "var(--card)", color: "var(--dangerText)" }}
           >
@@ -232,6 +230,44 @@ export default function MyPage() {
           </button>
         </div>
       </Reveal>
+
+      {resetModalOpen && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+          style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+          onClick={() => setResetModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-[24px] px-7.5 pt-8 pb-6.5 text-center"
+            style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-[18px] font-bold" style={{ color: "var(--ink)" }}>
+              포트폴리오를 정말 초기화할까요?
+            </h3>
+            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
+              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
+              <b style={{ color: "var(--ink)" }}>5,000만원</b>으로 되돌아가요.
+              <br />
+              되돌릴 수 없어요.
+            </p>
+            <button
+              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white"
+              style={{ background: "var(--dangerText)" }}
+              onClick={handleReset}
+            >
+              초기화할게요
+            </button>
+            <button
+              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+              onClick={() => setResetModalOpen(false)}
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -258,7 +294,7 @@ function LedgerBadge({ type }: { type: LedgerEntry["type"] }) {
         ? { background: "var(--upBg)", color: "var(--up)" }
         : { background: "var(--accentSoft)", color: "var(--onAccentSoftText)" };
   return (
-    <span className="w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold" style={style}>
+    <span className="w-fit rounded-md px-2.5 py-1 text-[12px] font-bold" style={style}>
       {type}
     </span>
   );
