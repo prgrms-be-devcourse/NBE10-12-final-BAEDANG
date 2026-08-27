@@ -144,16 +144,16 @@ export default function MyPage() {
                 return (
                   <div
                     key={h.symbol}
-                    className="grid items-center px-5 py-3 text-[13.5px]"
+                    className="grid items-center px-5 py-3 text-[15px]"
                     style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px", borderBottom: "1px solid var(--line2)" }}
                   >
-                    <span style={{ color: "var(--ink)" }}>
+                    <span className="font-bold" style={{ color: "var(--ink)" }}>
                       {h.name} <Tag>{h.symbol}</Tag>
                     </span>
                     <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{h.quantity}</span>
                     <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.avgBuyPrice)}</span>
                     <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.lastPrice)}</span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(value.round().toNumber())}</span>
+                    <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(value.round().toNumber())}</span>
                     <span
                       className="text-right tabular-nums font-semibold"
                       style={{ color: hPnl.greaterThanOrEqualTo(0) ? "var(--up)" : "var(--down)" }}
@@ -163,7 +163,7 @@ export default function MyPage() {
                     <span className="text-right">
                       <Link
                         href={`/stocks/${h.symbol}`}
-                        className="rounded-full px-2.5 py-1 text-[12px] font-semibold"
+                        className="rounded-md px-2.5 py-1 text-[12px] font-semibold"
                         style={{ background: "var(--fill)", color: "var(--ink)" }}
                       >
                         거래
@@ -173,7 +173,7 @@ export default function MyPage() {
                 );
               })}
             </div>
-            <div className="mt-2.5 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+            <div className="mt-2.5 text-[13px]" style={{ color: "var(--mut2)" }}>
               해외 종목 평가금액은 적용 환율({formatNumber(rate)} KRW/USD)로 환산돼요
             </div>
           </>
@@ -193,7 +193,7 @@ export default function MyPage() {
           {ledger.map((entry, i) => (
             <div
               key={i}
-              className="grid items-center px-5 py-3 text-[13.5px]"
+              className="grid items-center px-5 py-3 text-[15px]"
               style={{ gridTemplateColumns: "80px 2fr 1fr 1fr 1.2fr", borderBottom: "1px solid var(--line2)" }}
             >
               <span>
