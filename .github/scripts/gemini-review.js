@@ -16,7 +16,9 @@ const repo      = process.env.REPO;
 const ghToken   = process.env.GITHUB_TOKEN;
 
 const TAG          = '<!-- GEMINI_AI_REVIEW -->';
-const QUOTA_NOTICE = '\n\n> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.';
+const QUOTA_NOTICE = `
+
+> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 const MAX_DIFF_LEN = 30_000;
 
 // ---------------------------------------------------------------------------
@@ -188,7 +190,10 @@ const req = https.request(
 );
 
 req.on('error', (e) => {
-  handleQuotaExceededNotice(`Gemini API request network error: ${e.message}`);
+  // Network-level errors (DNS failure, timeout, etc.) are not quota issues.
+  // Fail the CI step explicitly so the problem is visible on the PR.
+  console.error(`[ERROR] Gemini API network error: ${e.message}`);
+  process.exit(1);
 });
 
 req.write(requestData);
