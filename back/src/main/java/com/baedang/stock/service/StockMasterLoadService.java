@@ -52,15 +52,15 @@ public class StockMasterLoadService {
 
             List<StockUniverseEntry> stocksFromPort = symbolInfoPort.fetchAllStocks(market);
 
-            List<Stock> stocks = stocksFromPort.stream().map(stockFormPort -> Stock.create(
-                    stockFormPort.symbol(),
+            List<Stock> stocks = stocksFromPort.stream().map(stockFromPort -> Stock.create(
+                    stockFromPort.symbol(),
                     marketCountry,
                     market,
-                    stockFormPort.name(),
-                    stockFormPort.isinCode(),
+                    stockFromPort.name(),
+                    stockFromPort.isinCode(),
                     marketCountryToCurrency(marketCountry),
-                    stockFormPort.securityType(),
-                    stockFormPort.isCommonShare()
+                    stockFromPort.securityType(),
+                    stockFromPort.isCommonShare()
             )).toList();
 
             stockRepository.saveAll(stocks);
