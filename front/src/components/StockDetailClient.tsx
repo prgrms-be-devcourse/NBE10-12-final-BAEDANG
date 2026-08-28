@@ -321,9 +321,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           />
 
           <label className="text-[12.5px]" style={{ color: "var(--mut2)" }}>주문 수량</label>
-          <div className="my-1 flex items-center gap-1.5">
+          <div className="my-1">
             <input
-              className="min-w-0 flex-1 rounded-xl px-3.5 py-2.5 text-[14.5px] outline-none"
+              className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] outline-none"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               inputMode="numeric"
               value={quantityInput}
@@ -333,7 +333,6 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 setOrderError(null);
               }}
             />
-            <span className="flex-none text-[12.5px]" style={{ color: "var(--mut2)" }}>주</span>
           </div>
           {side === "매도" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
