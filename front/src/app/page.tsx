@@ -133,10 +133,12 @@ export default function MainPage() {
               // 카드 배경색(var(--card), #1a1a1a)으로 마무리했다 — 라이트 모드는
               // var(--card)가 정확히 #ffffff라 요청한 흰색 그대로다.
               style={{
+                // 베이스 블루를 좀 더 밝은 톤으로 올려달라는 요청 — 알파(농도)나
+                // 원 크기는 그대로 두고 색 자체만 한 단계 밝혔다.
                 background:
                   theme === "dark"
-                    ? "radial-gradient(120% 120% at 50% 50%, rgba(58,122,189,0.65) 0%, rgba(58,122,189,0.28) 45%, var(--card) 100%)"
-                    : "radial-gradient(120% 120% at 50% 50%, rgba(168,208,240,0.85) 0%, rgba(168,208,240,0.4) 45%, #ffffff 100%)",
+                    ? "radial-gradient(120% 120% at 50% 50%, rgba(85,148,211,0.65) 0%, rgba(85,148,211,0.28) 45%, var(--card) 100%)"
+                    : "radial-gradient(120% 120% at 50% 50%, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, #ffffff 100%)",
               }}
             >
               <span
