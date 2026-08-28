@@ -48,6 +48,7 @@ public class MarketOrderPolicy {
     }
 
     public MarketOrderCommand parseCommand(
+            Long accountId,
             String clientOrderId,
             String symbol,
             String marketCountry,
@@ -55,8 +56,10 @@ public class MarketOrderPolicy {
             String quantity
     ) {
         UUID parsedClientOrderId = parseClientOrderId(clientOrderId);
+        Long parsedAccountId = parseAccountId(accountId);
         try {
             return new MarketOrderCommand(
+                    parsedAccountId,
                     parsedClientOrderId,
                     parseTerms(symbol, marketCountry, side, quantity));
         } catch (BusinessException e) {
@@ -66,6 +69,17 @@ public class MarketOrderPolicy {
             if (e.getDetail() == null) throw new BusinessException(e.getErrorCode(), data);
             throw new BusinessException(e.getErrorCode(), e.getDetail(), data);
         }
+    }
+
+    private Long parseAccountId(Long accountId) {
+        if (accountId == null || accountId <= 0) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_INPUT,
+                    Map.of(
+                            "field", "accountId",
+                            "retryPolicy", ClientOrderRetryPolicy.NOT_RETRYABLE.name()));
+        }
+        return accountId;
     }
 
     public OrderTerms parseTerms(String symbol, String marketCountry, String side, String quantity) {

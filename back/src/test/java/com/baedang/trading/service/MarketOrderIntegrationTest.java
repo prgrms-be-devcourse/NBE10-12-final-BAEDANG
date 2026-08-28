@@ -126,6 +126,51 @@ class MarketOrderIntegrationTest {
     }
 
     @Test
+    void 초기화된_계좌의_새_주문은_새_회차로_이월하지_않고_거절한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Account oldAccount = accountRepository.findById(fixture.accountId()).orElseThrow();
+        oldAccount.close(OffsetDateTime.now(ZoneOffset.UTC));
+        accountRepository.saveAndFlush(oldAccount);
+        Account nextAccount = accountRepository.save(Account.open(
+                fixture.userId(), 2, new BigDecimal("50000"), OffsetDateTime.now(ZoneOffset.UTC)));
+        PlaceOrderRequest request = request(fixture, "BUY", "1");
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_ROUND_CHANGED);
+                    assertThat(exception.getData()).containsEntry("retryPolicy", "NOT_RETRYABLE");
+                });
+
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isZero();
+        assertThat(tradeOrderRepository.countByAccountId(nextAccount.getAccountId())).isZero();
+        assertThat(accountRepository.findById(nextAccount.getAccountId()).orElseThrow().getCashBalance())
+                .isEqualByComparingTo("50000");
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+    }
+
+    @Test
+    void 초기화_전에_체결된_주문의_멱등_재요청은_기존_결과를_반환한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        Account oldAccount = accountRepository.findById(fixture.accountId()).orElseThrow();
+        oldAccount.close(OffsetDateTime.now(ZoneOffset.UTC));
+        accountRepository.saveAndFlush(oldAccount);
+        accountRepository.saveAndFlush(Account.open(
+                fixture.userId(), 2, new BigDecimal("50000"), OffsetDateTime.now(ZoneOffset.UTC)));
+        clearInvocations(marketSessionProvider, exchangeRateProvider);
+
+        OrderResponse retried = marketOrderService.place(fixture.userId(), request);
+
+        assertThat(retried.orderId()).isEqualTo(first.orderId());
+        assertThat(retried.status()).isEqualTo(first.status());
+        assertThat(retried.netAmount()).isEqualTo(first.netAmount());
+        assertThat(retried.account().cashBalanceAfter())
+                .isEqualTo(first.account().cashBalanceAfter());
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+    }
+
+    @Test
     void 같은_심볼이_국내와_미국에_있어도_요청한_시장의_종목으로_체결한다() {
         String symbol = "DUP" + UUID.randomUUID().toString().substring(0, 5).toUpperCase();
         createFixture(
@@ -137,7 +182,9 @@ class MarketOrderIntegrationTest {
 
         OrderResponse response = marketOrderService.place(
                 usFixture.userId(),
-                request(symbol.toLowerCase(), MarketCountry.US, "BUY", "1"));
+                new PlaceOrderRequest(
+                        usFixture.accountId(), UUID.randomUUID().toString(), symbol.toLowerCase(),
+                        MarketCountry.US.name(), "BUY", "1"));
 
         TradeOrder order = tradeOrderRepository.findById(response.orderId()).orElseThrow();
         assertThat(order.getStockId()).isEqualTo(usFixture.stockId());
@@ -256,7 +303,7 @@ class MarketOrderIntegrationTest {
 
         OrderResponse first = marketOrderService.place(fixture.userId(), firstRequest);
         marketOrderService.place(fixture.userId(),
-                new PlaceOrderRequest(UUID.randomUUID().toString(), fixture.symbol(),
+                new PlaceOrderRequest(fixture.accountId(), UUID.randomUUID().toString(), fixture.symbol(),
                         fixture.marketCountry().name(), "BUY", "1"));
         OrderResponse retried = marketOrderService.place(fixture.userId(), firstRequest);
 
@@ -298,7 +345,7 @@ class MarketOrderIntegrationTest {
                 new BigDecimal("10001"), now));
 
         PlaceOrderRequest request = new PlaceOrderRequest(
-                clientOrderId.toString(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "1");
+                fixture.accountId(), clientOrderId.toString(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "1");
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -469,10 +516,10 @@ class MarketOrderIntegrationTest {
         String clientOrderId = UUID.randomUUID().toString();
 
         marketOrderService.place(first.userId(),
-                new PlaceOrderRequest(clientOrderId, first.symbol(),
+                new PlaceOrderRequest(first.accountId(), clientOrderId, first.symbol(),
                         first.marketCountry().name(), "BUY", "1"));
         marketOrderService.place(second.userId(),
-                new PlaceOrderRequest(clientOrderId, second.symbol(),
+                new PlaceOrderRequest(second.accountId(), clientOrderId, second.symbol(),
                         second.marketCountry().name(), "BUY", "1"));
 
         TradeOrder firstOrder = tradeOrderRepository.findByAccountIdAndClientOrderId(
@@ -509,7 +556,7 @@ class MarketOrderIntegrationTest {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         PlaceOrderRequest first = request(fixture, "BUY", "1");
         PlaceOrderRequest changed = new PlaceOrderRequest(
-                first.clientOrderId(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "2");
+                fixture.accountId(), first.clientOrderId(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "2");
 
         marketOrderService.place(fixture.userId(), first);
 
@@ -529,7 +576,7 @@ class MarketOrderIntegrationTest {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         PlaceOrderRequest first = request(fixture, "BUY", "1");
         PlaceOrderRequest changed = new PlaceOrderRequest(
-                first.clientOrderId(), "OTHER", fixture.marketCountry().name(), "BUY", "1");
+                fixture.accountId(), first.clientOrderId(), "OTHER", fixture.marketCountry().name(), "BUY", "1");
         marketOrderService.place(fixture.userId(), first);
         clearInvocations(marketSessionProvider, exchangeRateProvider);
 
@@ -685,8 +732,9 @@ class MarketOrderIntegrationTest {
         String suffix = UUID.randomUUID().toString();
         User user = userRepository.save(User.create(
                 suffix + "@example.com", "password-hash", "user-" + suffix.substring(0, 8)));
-        Account account = accountRepository.save(Account.open(user.getUserId(), 1, initialCash));
-        Stock stock = Stock.create(symbol, marketCountry, market, "테스트 종목", currency, "STOCK");
+        Account account = accountRepository.save(Account.open(
+                user.getUserId(), 1, initialCash, OffsetDateTime.now(ZoneOffset.UTC)));
+        Stock stock = Stock.create(symbol, marketCountry, market, "테스트 종목", null, currency, "STOCK", true);
         stock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(stock);
         quoteSnapshotRepository.save(new QuoteSnapshot(
@@ -716,7 +764,9 @@ class MarketOrderIntegrationTest {
     }
 
     private PlaceOrderRequest request(Fixture fixture, String side, String quantity) {
-        return request(fixture.symbol(), fixture.marketCountry(), side, quantity);
+        return new PlaceOrderRequest(
+                fixture.accountId(), UUID.randomUUID().toString(), fixture.symbol(),
+                fixture.marketCountry().name(), side, quantity);
     }
 
     private PlaceOrderRequest request(
@@ -726,7 +776,7 @@ class MarketOrderIntegrationTest {
             String quantity
     ) {
         return new PlaceOrderRequest(
-                UUID.randomUUID().toString(), symbol, marketCountry.name(), side, quantity);
+                1L, UUID.randomUUID().toString(), symbol, marketCountry.name(), side, quantity);
     }
 
     private record Fixture(

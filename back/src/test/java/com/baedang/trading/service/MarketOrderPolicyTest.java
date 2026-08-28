@@ -20,6 +20,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class MarketOrderPolicyTest {
 
+    @Test
+    void accountId가_없으면_같은_요청을_재전송할_수_없다() {
+        assertThatThrownBy(() -> policy.parseCommand(
+                null, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
+                    assertThat(exception.getData())
+                            .containsEntry("field", "accountId")
+                            .containsEntry("retryPolicy", "NOT_RETRYABLE");
+                });
+    }
+
     private static final Instant CHECKED_AT = Instant.parse("2026-08-26T06:29:59Z");
 
     private final MarketOrderPolicy policy =
@@ -28,7 +40,7 @@ class MarketOrderPolicyTest {
     @ParameterizedTest
     @CsvSource({"KR, KRW", "US, USD"})
     void 시장에_맞는_종목과_시세_통화면_유효하다(MarketCountry marketCountry, String currency) {
-        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", currency, "STOCK");
+        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
         QuoteSnapshot quote = new QuoteSnapshot(
                 1L, BigDecimal.ONE, currency, OffsetDateTime.now());
 
@@ -41,7 +53,7 @@ class MarketOrderPolicyTest {
             MarketCountry marketCountry,
             String currency
     ) {
-        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", currency, "STOCK");
+        Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
         QuoteSnapshot quote = new QuoteSnapshot(
                 1L, BigDecimal.ONE, currency, OffsetDateTime.now());
 
@@ -88,7 +100,7 @@ class MarketOrderPolicyTest {
     @Test
     void 주문의_누락필드는_필드명과_같은_ID_재시도_정책을_제공한다() {
         assertThatThrownBy(() -> policy.parseCommand(
-                UUID.randomUUID().toString(), "005930", "KR", null, "1"))
+                1L, UUID.randomUUID().toString(), "005930", "KR", null, "1"))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
                     assertThat(exception.getData()).containsEntry("field", "side");
                     assertThat(exception.getData())
@@ -99,7 +111,7 @@ class MarketOrderPolicyTest {
     @Test
     void 잘못된_clientOrderId는_재사용할_수_없다() {
         assertThatThrownBy(() -> policy.parseCommand(
-                "invalid", "005930", "KR", "BUY", "1"))
+                1L, "invalid", "005930", "KR", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getData())
                                 .containsEntry("retryPolicy", "NOT_RETRYABLE"));

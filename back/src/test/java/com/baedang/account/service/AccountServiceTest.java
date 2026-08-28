@@ -283,7 +283,7 @@ class AccountServiceTest {
 
     private Stock stock(Long stockId, String symbol, String name, MarketCountry country, String currency) {
         String market = country == MarketCountry.KR ? "KOSPI" : "NASDAQ";
-        Stock stock = Stock.create(symbol, country, market, name, currency, "STOCK");
+        Stock stock = Stock.create(symbol, country, market, name, null, currency, "STOCK", true);
         ReflectionTestUtils.setField(stock, "stockId", stockId);
         return stock;
     }

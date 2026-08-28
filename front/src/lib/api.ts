@@ -92,9 +92,33 @@ export function login(input: { email: string; password: string }): Promise<AuthU
   return request<AuthUser>("/api/auth/login", { method: "POST", body: input });
 }
 
+// ── 계좌 ──────────────────────────────────────────────────────────────────────
+
+export type AccountSummary = {
+  accountId: number;
+  roundNo: number;
+  initialCash: string;
+  cashBalance: string;
+  stockValue: string;
+  totalAsset: string;
+  unrealizedPnl: string;
+  unrealizedPnlRate?: string;
+  exchangeRate?: string;
+  asOf: string;
+};
+
+/** `GET /api/accounts/me` — 로그인 사용자의 현재 활성 계좌 요약. */
+export function getAccountSummary(userId: number): Promise<AccountSummary> {
+  return request<AccountSummary>("/api/accounts/me", {
+    method: "GET",
+    headers: { "X-User-Id": String(userId) },
+  });
+}
+
 // ── 주문 ──────────────────────────────────────────────────────────────────────
 
 export type PlaceOrderInput = {
+  accountId: number;
   clientOrderId: string;
   symbol: string;
   marketCountry: "KR" | "US";

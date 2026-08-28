@@ -380,6 +380,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 | 파라미터 | 필수 | 값 |
 |---|---|---|
+| `marketCountry` | O | 심볼이 속한 시장 — `KR` · `US` |
 | `interval` | O | 봉 하나의 시간 단위 — `1m` · `5m` · `10m` · `1d` · `1w` |
 | `range` | O | 조회 기간 — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
 
@@ -387,7 +388,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 | interval | 허용 range | 봉 개수 | 데이터 출처 |
 |---|---|---|---|
-| `1m` | `1D` | 약 390 | 상위 100: 1분 주기 스케줄러 · 그 외 종목: 토스 `/candles?interval=1m` 온디맨드 |
+| `1m` | `1D` | 최근 200 | 상위 100: 1분 주기 스케줄러 · 그 외 종목: 토스 `/candles?interval=1m` 온디맨드 |
 | `5m` | `1D` · `1W` | 78 / 390 | 1분봉을 집계 |
 | `10m` | `1W` | 195 | 1분봉을 집계 |
 | `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
@@ -415,7 +416,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 }
 ```
 
-**마지막 봉은 현재가로 갱신해 내려줍니다.** 장중에는 오늘 봉이 확정되지 않았으므로 `daily_candle` 의 과거 봉 + `quote_snapshot.last_price` 로 만든 오늘 봉을 붙입니다. 그러면 프론트가 차트를 다시 안 받아도 **끝점이 살아 움직입니다.**
+MVP 일봉은 금융 데이터 정합성을 위해 확정되어 저장된 `daily_candle`만 반환합니다. `quote_snapshot.last_price`만으로는 당일 시가·고가·저가를 알 수 없으므로 임의의 오늘 OHLC를 만들지 않습니다. 현재가는 `GET /stocks/{symbol}`에서 별도로 표시합니다.
 **우리 API 에는 200봉 제한이 없습니다.** 토스의 `count` 상한 200 은 **수집할 때만** 해당합니다(일봉 200개 ≈ 10개월이라 1년치는 `before` 로 두 번 받습니다). `daily_candle` 에 쌓아두면 250봉을 그대로 내려주면 됩니다.
 
 | 에러 코드 | 상황 |
@@ -423,12 +424,12 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `INVALID_INTERVAL_RANGE` | 허용되지 않은 interval × range 조합 |
 | `STOCK_NOT_FOUND` | 존재하지 않는 심볼 |
 
-**1주차 범위는 `1d` 와 `1m` 둘입니다.** 일봉은 `daily_candle`(스케줄러가 마감 후 적재)에서 제공합니다. 랭킹 상위 100종목의 분봉은 `MARKET_DATA_CHART` 별도 5 TPS 그룹에서 20종목 단위로 순차 호출해 1분마다 수집합니다. 상위 100 밖 종목과 장외 상세 차트는 `minute_candle` 60초 캐시를 사용하는 온디맨드 방식입니다. 5m·10m·1w 집계는 2주차로 미룹니다.
+**MVP 범위는 `1d` 와 `1m` 둘입니다.** 지원 조합은 `1m+1D`, `1d+1M/6M/1Y`이며 나머지는 `INVALID_INTERVAL_RANGE`로 거절합니다. 일봉은 `daily_candle`(스케줄러가 마감 후 적재)에서 제공합니다. 랭킹 상위 100종목의 분봉은 `MARKET_DATA_CHART` 별도 5 TPS 그룹에서 20종목 단위로 순차 호출해 1분마다 수집합니다. 상위 100 밖 종목과 장외 상세 차트는 `minute_candle` 60초 캐시를 사용하는 온디맨드 방식입니다. 5m·10m·1w 집계는 2주차로 미룹니다.
 
 **분봉은 상위 100종목은 스케줄러로 수집하고, 그 외에는 온디맨드로 60초 캐싱합니다**
 ```
 // 1주차 분봉 처리 흐름
-GET /stocks/NVDA/candles?interval=1m&range=1D
+GET /stocks/NVDA/candles?marketCountry=US&interval=1m&range=1D
    ↓
 minute_candle 에 60초 이내 데이터가 있나?
    ├ 있다  → DB 에서 바로 반환                      토스 호출 없음
@@ -501,6 +502,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 **Request**
 ```json
 {
+  "accountId": 42,
   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
   "symbol": "005930",
   "marketCountry": "KR",
@@ -508,6 +510,8 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
   "quantity": "10"
 }
 ```
+`accountId`는 주문을 시작한 계좌 회차를 고정합니다. 주문 처리 중 포트폴리오가 초기화되어 해당 계좌가 `CLOSED`가 되면 새 ACTIVE 계좌로 주문을 넘기지 않고 `ACCOUNT_ROUND_CHANGED`로 거절합니다. 계좌 정보를 새로 조회한 뒤 사용자가 다시 주문할 때는 최신 `accountId`와 새로운 `clientOrderId`를 사용합니다. 이미 처리된 주문의 동일 요청 재시도는 계좌가 이후 종료되었더라도 최초 저장 결과를 반환합니다.
+
 `clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 계좌 안에서 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 시장 API 호출 없이 저장된 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
 
 실패 응답의 `data.retryPolicy`가 재시도 시 `clientOrderId` 처리 방법을 알려줍니다. `SAME_CLIENT_ORDER_ID`는 주문 행이 만들어지지 않은 실패이므로 같은 ID로 안전하게 재시도하고, `NEW_CLIENT_ORDER_ID`는 `REJECTED` 행이 최종 결과로 저장된 실패이므로 조건이 바뀐 뒤 새 ID를 발급합니다. `NOT_RETRYABLE`은 같은 ID의 요청 내용 충돌처럼 그대로 재전송해도 성공할 수 없는 요청입니다.
@@ -551,10 +555,10 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 **서버 처리 순서**
 ```
-① clientOrderId 조회 — 동일 요청 재시도면 저장된 결과 즉시 반환
+① accountId 소유권 확인 및 clientOrderId 조회 — 동일 요청 재시도면 종료된 회차에서도 저장된 결과 즉시 반환
 ② 종목 조회 후 정적 검증 — 거래 대상 → 거래정지 → 정리매매
 ③ 정적 검증 통과 시에만 장 운영 정보와 미국 주문 실행 환율 조회(국내는 환율 1), 외부 데이터 준비 완료 시 checkedAt 기록
-④ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
+④ 요청의 accountId와 userId로 정확한 계좌를 SELECT ... FOR UPDATE, CLOSED이면 새 회차로 넘기지 않고 거절
 ⑤ clientOrderId 재확인 — 락 대기 중 동일 주문이 확정됐으면 저장 결과 반환
 ⑥ 신규 주문만 시장 컨텍스트 만료 검사 후 시세 조회 및 통화 일치 검증, 매도 시 holding FOR UPDATE (락 순서: account → holding)
 ⑦ 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
@@ -587,6 +591,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 | `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
 | `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
 | `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
+| `ACCOUNT_ROUND_CHANGED` | 409 | `NOT_RETRYABLE` | 포트폴리오가 초기화됐어요. 계좌 정보를 새로고침한 후 다시 주문해주세요 |
 
 **`STALE_QUOTE`** 는 `trading.quote-max-staleness-seconds` 기준으로 `quote_at`이 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 외부 시장 데이터 준비 완료 후부터 계좌 락 획득까지의 컨텍스트 허용 시간은 별도 설정 `trading.execution-context-max-age-seconds`를 사용합니다.
 
@@ -698,6 +703,16 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ### `POST /accounts/me/reset` 🔒
 포트폴리오 초기화
 
+**Request**
+```json
+{
+  "accountId": 1
+}
+```
+
+`accountId`는 `GET /accounts/me`에서 받은 현재 활성 계좌 ID입니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지합니다. 같은 계좌 ID로 성공 요청을 다시 보내면 회차를 추가하지 않고 직전에 생성한 계좌를 그대로 반환합니다. 재시도 응답의 `cashBalance`도 현재 조회 잔액이 아니라 최초 초기화 직후의 `initialCash` 값입니다. 사용자가 새 회차를 다시 초기화하려면 새로 조회한 활성 `accountId`를 보냅니다.
+
+**Response · 200**
 ```json
 {
   "accountId": 2,
@@ -709,11 +724,14 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 **서버 처리**
 ```
-UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id = 현재;
+SELECT ... FROM account WHERE account_id = 요청값 AND user_id = 현재 사용자 FOR UPDATE;
+UPDATE account SET status='CLOSED', closed_at=:resetAt WHERE account_id = 요청값;
 INSERT INTO account (user_id, round_no, ...) VALUES (?, 이전+1, 50000000, 50000000);
-INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
+INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ...);
 ```
 **삭제가 아니라 새 회차 계좌 개설입니다.** 기존 원장·체결내역·보유종목은 그대로 보존되고, 조회 시 새 `account_id` 기준이라 화면에서는 자동으로 비워집니다. 나중에 **"지난 회차 성적"** 기능으로 확장할 수 있습니다. **프론트는 확인 모달을 반드시 띄우세요.**
+
+기존 계좌 종료, 신규 계좌 개설, 초기 지급 원장은 한 트랜잭션이며 같은 UTC `resetAt`을 사용합니다. 현재 시장가 주문과는 계좌 행 잠금으로 직렬화됩니다. 향후 지정가 주문의 동결액 또는 동결 수량이 남아 있으면 `ACCOUNT_HAS_PENDING_ORDERS`(409)로 초기화를 거절합니다. 요청 계좌보다 두 회차 이상 진행된 상태에서 오래된 ID를 다시 보내면 `ACCOUNT_RESET_CONFLICT`(409)를 반환합니다.
 
 ---
 

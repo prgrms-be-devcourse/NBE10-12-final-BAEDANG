@@ -82,12 +82,16 @@ public class MarketOrderTransactionService {
     /** 처리 완료된 주문은 외부 시장 데이터 조회 없이 저장된 감사 값으로 재생합니다. */
     @Transactional(readOnly = true)
     public Optional<MarketOrderResult> findExisting(Long userId, MarketOrderCommand command) {
-        Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
+        Account account = accountRepository.findByAccountIdAndUserId(command.accountId(), userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.ACCOUNT_NOT_FOUND, "accountId=" + command.accountId()));
         TradeOrder existing = tradeOrderRepository
                 .findByAccountIdAndClientOrderId(account.getAccountId(), command.clientOrderId())
                 .orElse(null);
-        if (existing == null) return Optional.empty();
+        if (existing == null) {
+            rejectChangedRound(account);
+            return Optional.empty();
+        }
 
         Stock stock = stockRepository.findById(existing.getStockId())
                 .orElseThrow(() -> new BusinessException(
@@ -105,8 +109,10 @@ public class MarketOrderTransactionService {
             MarketOrderExecutionContext executionContext
     ) {
         // 거래 트랜잭션의 첫 DB 접근은 계좌 행 잠금입니다.
-        Account account = accountRepository.findByUserIdAndStatusForUpdate(userId, AccountStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + userId));
+        Account account = accountRepository.findByAccountIdAndUserIdForUpdate(command.accountId(), userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.ACCOUNT_NOT_FOUND, "accountId=" + command.accountId()));
+        rejectChangedRound(account);
         Instant now = clock.instant();
 
         OrderTerms terms = command.terms();
@@ -244,6 +250,15 @@ public class MarketOrderTransactionService {
         if (!same) {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER,
                     "clientOrderId=" + order.getClientOrderId(),
+                    ClientOrderRetryPolicy.NOT_RETRYABLE.asData());
+        }
+    }
+
+    private void rejectChangedRound(Account account) {
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new BusinessException(
+                    ErrorCode.ACCOUNT_ROUND_CHANGED,
+                    "accountId=" + account.getAccountId(),
                     ClientOrderRetryPolicy.NOT_RETRYABLE.asData());
         }
     }

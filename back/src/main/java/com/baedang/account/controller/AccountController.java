@@ -1,13 +1,22 @@
 package com.baedang.account.controller;
 
+import com.baedang.account.dto.AccountResetRequest;
+import com.baedang.account.dto.AccountResetResponse;
 import com.baedang.account.dto.AccountSummaryResponse;
 import com.baedang.account.dto.HoldingsResponse;
+import com.baedang.account.dto.LedgerResponse;
+import com.baedang.account.service.AccountResetService;
 import com.baedang.account.service.AccountService;
+import com.baedang.account.service.LedgerQueryService;
+import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -22,11 +31,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class AccountController {
 
     private final AccountService accountService;
+    private final AccountResetService accountResetService;
+    private final LedgerQueryService ledgerQueryService;
     private final Long fallbackUserId;
 
     public AccountController(AccountService accountService,
+                            AccountResetService accountResetService,
+                            LedgerQueryService ledgerQueryService,
                             @Value("${auth.dev-fixed-user-id}") Long fallbackUserId) {
         this.accountService = accountService;
+        this.accountResetService = accountResetService;
+        this.ledgerQueryService = ledgerQueryService;
         this.fallbackUserId = fallbackUserId;
     }
 
@@ -42,6 +57,26 @@ public class AccountController {
             @RequestHeader(value = "X-User-Id", required = false) Long userId
     ) {
         return ResponseEntity.ok(accountService.getHoldings(resolveUserId(userId)));
+    }
+
+    @PostMapping("/me/reset")
+    public ResponseEntity<AccountResetResponse> reset(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @Valid @RequestBody AccountResetRequest request
+    ) {
+        return ResponseEntity.ok(accountResetService.reset(
+                resolveUserId(userId), request.accountId()));
+    }
+
+    @GetMapping("/me/ledger")
+    public ResponseEntity<LedgerResponse> getLedger(
+            @RequestHeader(value = "X-User-Id", required = false) Long userId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(required = false) Integer size,
+            @RequestParam(required = false) String entryType
+    ) {
+        return ResponseEntity.ok(
+                ledgerQueryService.getLedger(resolveUserId(userId), cursor, size, entryType));
     }
 
     private Long resolveUserId(Long userId) {
