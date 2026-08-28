@@ -401,6 +401,23 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               비로그인 상태에서 누르면 회원가입으로 안내돼요
             </div>
           )}
+
+          <div className="my-4" style={{ borderTop: "1px dashed var(--line)" }} />
+          <div className="mb-2.5 text-[13px] font-bold" style={{ color: "var(--mut)" }}>
+            참고 — 주문 불가 상태 예시
+          </div>
+          <div className="flex flex-col gap-2.5">
+            {["장 마감 · 09:00~15:30 거래 가능", "거래정지 종목", "주문가능금액 부족"].map((example) => (
+              <div
+                key={example}
+                className="w-full rounded-xl py-3 text-center text-[14px] font-bold"
+                style={{ background: "var(--fill)", color: "var(--disabledText)" }}
+              >
+                {example}
+              </div>
+            ))}
+          </div>
+
           {orderError && (
             <div
               className="mt-3 rounded-xl px-3.5 py-3 text-[13.5px]"
