@@ -27,13 +27,14 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 @Service
 public class CandleQueryService {
 
     private static final Duration MINUTE_FRESHNESS = Duration.ofSeconds(60);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final int REFRESH_LOCK_STRIPES = 64;
 
     private final CandleQueryPolicy candleQueryPolicy;
     private final StockRepository stockRepository;
@@ -43,7 +44,7 @@ public class CandleQueryService {
     private final MinuteCandlePersistenceService persistenceService;
     private final MinuteCandleFetchCache fetchCache;
     private final Clock clock;
-    private final ConcurrentHashMap<Long, Object> refreshLocks = new ConcurrentHashMap<>();
+    private final ReentrantLock[] refreshLocks = createRefreshLocks();
 
     public CandleQueryService(
             CandleQueryPolicy candleQueryPolicy,
@@ -124,8 +125,9 @@ public class CandleQueryService {
         Instant now = clock.instant();
         if (hasFreshMinuteData(stock.getStockId(), now)) return;
 
-        Object lock = refreshLocks.computeIfAbsent(stock.getStockId(), ignored -> new Object());
-        synchronized (lock) {
+        ReentrantLock lock = refreshLockFor(stock.getStockId());
+        lock.lock();
+        try {
             now = clock.instant();
             if (hasFreshMinuteData(stock.getStockId(), now)) return;
 
@@ -134,7 +136,22 @@ public class CandleQueryService {
             validateCurrency(stock, candles);
             persistenceService.upsert(stock.getStockId(), candles);
             fetchCache.markFetched(stock.getStockId(), clock.instant());
+        } finally {
+            lock.unlock();
         }
+    }
+
+    private ReentrantLock refreshLockFor(Long stockId) {
+        int index = Long.hashCode(stockId) & (REFRESH_LOCK_STRIPES - 1);
+        return refreshLocks[index];
+    }
+
+    private ReentrantLock[] createRefreshLocks() {
+        ReentrantLock[] locks = new ReentrantLock[REFRESH_LOCK_STRIPES];
+        for (int index = 0; index < locks.length; index++) {
+            locks[index] = new ReentrantLock();
+        }
+        return locks;
     }
 
     private boolean hasFreshMinuteData(Long stockId, Instant now) {
