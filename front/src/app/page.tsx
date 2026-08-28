@@ -126,15 +126,15 @@ export default function MainPage() {
             <TiltCard
               key={s.step}
               className="flex-1 rounded-[20px] p-6.5 text-center"
-              // 그림자는 넣지 않습니다 (design_handoff README). 배경은 좌상단에서
-              // 은은하게 번지는 블루 계열 radial gradient — 라이트는 하늘색이
-              // 흰색(카드 배경)으로, 다크는 짙은 남색이 카드 배경(#1a1a1a)으로
-              // 자연스럽게 잦아든다.
+              // 그림자는 넣지 않습니다 (design_handoff README). 배경은 카드 정중앙에서
+              // 바깥으로 퍼지는 radial gradient — 색상은 로그인/회원가입 화면의
+              // --loginBg 그라데이션과 같은 색 단계(위→중간→아래 색을 중심→중간→
+              // 바깥 순으로 그대로 옮김)를 쓴다.
               style={{
                 background:
                   theme === "dark"
-                    ? "radial-gradient(140% 140% at 15% 15%, #2d4f7c 0%, #16283f 45%, #1a1a1a 78%)"
-                    : "radial-gradient(140% 140% at 15% 15%, #8ec5f7 0%, #cfe6fb 45%, #ffffff 78%)",
+                    ? "radial-gradient(150% 150% at 50% 50%, #114f8c 0%, #0a2b4c 50%, #000000 100%)"
+                    : "radial-gradient(150% 150% at 50% 50%, #7fb6e3 0%, #dceefa 50%, #ffffff 100%)",
               }}
             >
               <span
