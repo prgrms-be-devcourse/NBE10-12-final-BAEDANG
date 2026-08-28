@@ -90,7 +90,9 @@
   --heroBody: rgba(255, 255, 255, 0.85);
   --heroSub: rgba(255, 255, 255, 0.7);
   --loginBg: linear-gradient(180deg, #114f8c 0%, #0a2b4c 50%, #000000 100%);
-  --registerBg: var(--loginBg);
+  /* 회원가입 화면 전용 배경 — 로그인 화면과 공유하던 loginBg에서 분리해, 좀 더
+     세련된 톤(짙은 사파이어 블루)으로 위→검정 그라데이션을 만든다. */
+  --registerBg: linear-gradient(180deg, #23456f 0%, #101c33 55%, #000000 100%);
   --ctaBtn: #e9c253;
   --ctaBtnText: #3a2a00;
   --ctaBanner: #114f8c;
@@ -149,7 +151,7 @@
     --heroBody: rgba(255, 255, 255, 0.85);
     --heroSub: rgba(255, 255, 255, 0.7);
     --loginBg: linear-gradient(180deg, #114f8c 0%, #0a2b4c 50%, #000000 100%);
-    --registerBg: var(--loginBg);
+    --registerBg: linear-gradient(180deg, #23456f 0%, #101c33 55%, #000000 100%);
     --ctaBtn: #e9c253;
     --ctaBtnText: #3a2a00;
     --ctaBanner: #114f8c;
