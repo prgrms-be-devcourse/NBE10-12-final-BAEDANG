@@ -269,9 +269,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <tbody>
               <tr>
                 <td className="w-1/4 py-1" style={{ color: "var(--mut)" }}>상한가</td>
-                <td className="py-1 font-medium" style={{ color: "var(--up)" }}>{detail.upperLimit ? formatNumber(detail.upperLimit) : "—"}</td>
+                <td className="py-1 font-bold" style={{ color: "var(--up)" }}>{detail.upperLimit ? formatNumber(detail.upperLimit) : "—"}</td>
                 <td className="w-1/4 py-1" style={{ color: "var(--mut)" }}>하한가</td>
-                <td className="py-1" style={{ color: "var(--down)" }}>{detail.lowerLimit ? formatNumber(detail.lowerLimit) : "—"}</td>
+                <td className="py-1 font-bold" style={{ color: "var(--down)" }}>{detail.lowerLimit ? formatNumber(detail.lowerLimit) : "—"}</td>
               </tr>
               <tr>
                 <td className="py-1" style={{ color: "var(--mut)" }}>시가총액</td>
