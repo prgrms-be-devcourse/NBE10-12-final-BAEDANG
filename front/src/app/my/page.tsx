@@ -3,7 +3,10 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Tag } from "@/components/Tag";
+import { PillTabs } from "@/components/PillTabs";
+import { Reveal } from "@/components/Reveal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
 import {
   AVAILABLE_CASH,
@@ -24,10 +27,12 @@ function holdingAmountKrw(quantity: number, unitPrice: number, currency: "KRW" |
 
 export default function MyPage() {
   const { rate } = useExchangeRate();
+  const { theme } = useTheme();
   const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
   const [holdings, setHoldings] = useState<Holding[]>(MOCK_HOLDINGS);
   const [ledger, setLedger] = useState<LedgerEntry[]>(MOCK_LEDGER);
   const [cash, setCash] = useState(AVAILABLE_CASH);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
 
   const stockValue = useMemo(
     () => holdings.reduce((sum, h) => sum.plus(holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate)), new D(0)),
@@ -42,10 +47,7 @@ export default function MyPage() {
   const totalAssets = new D(cash).plus(stockValue);
 
   function handleReset() {
-    const ok = window.confirm(
-      "보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 5,000만원으로 되돌아갑니다. 되돌릴 수 없습니다. 초기화할까요?"
-    );
-    if (!ok) return;
+    setResetModalOpen(false);
     setHoldings([]);
     setCash(INITIAL_CASH);
     setLedger([
@@ -60,13 +62,15 @@ export default function MyPage() {
   }
 
   return (
-    <div className="p-6">
-      <div className="mb-4 flex items-baseline gap-3">
-        <h2 className="text-[19px] font-bold text-gray-900">내 계좌</h2>
-        <span className="text-[11.5px] text-gray-400">12:36:59 기준</span>
-      </div>
+    <div>
+      <Reveal delay={0}>
+        <div className="mb-4.5 flex items-baseline gap-3">
+          <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
+          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>12:36:59 기준</span>
+        </div>
+      </Reveal>
 
-      <div className="mb-5 flex gap-4">
+      <Reveal delay={0.1} className="mb-6 flex gap-4 max-md:flex-col">
         <SummaryCard label="총 자산" value={formatNumber(totalAssets.round().toNumber())} />
         <SummaryCard label="예수금" value={formatNumber(cash)} />
         <SummaryCard label="주식 평가금액" value={formatNumber(stockValue.round().toNumber())} />
@@ -75,163 +79,237 @@ export default function MyPage() {
           value={
             <>
               {formatSigned(pnl.round().toNumber())}{" "}
-              <span className="text-[14px]">({formatPercent(pnlRate)})</span>
+              <span className="text-[15px]">({formatPercent(pnlRate)})</span>
             </>
           }
-          emphasize={pnl.greaterThanOrEqualTo(0)}
+          tone={pnl.greaterThanOrEqualTo(0) ? "up" : "down"}
         />
-      </div>
+      </Reveal>
 
-      <div className="mb-3.5 flex gap-0.5 border-b border-gray-200">
-        {(["holdings", "ledger"] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`border-b-2 px-3.5 py-1.5 text-[13px] ${
-              tab === t ? "border-gray-900 font-semibold text-gray-900" : "border-transparent text-gray-400"
-            }`}
-          >
-            {t === "holdings" ? "보유 종목" : "체결 내역"}
-          </button>
-        ))}
-      </div>
+      <Reveal delay={0.2}>
+        <PillTabs
+          options={[
+            { value: "holdings", label: "보유 종목" },
+            { value: "ledger", label: "체결 내역" },
+          ]}
+          value={tab}
+          onChange={(v) => setTab(v as "holdings" | "ledger")}
+          trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
+          trackStyle={{
+            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
+            border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+          }}
+          buttonClassName="rounded-full px-0 py-2 text-[13px] font-bold"
+          inactiveTextStyle={{ color: "var(--mut)" }}
+        />
+      </Reveal>
 
+      <Reveal delay={0.3}>
       {tab === "holdings" ? (
         holdings.length === 0 ? (
-          <div className="py-14 text-center text-[13px] text-gray-400">보유 중인 종목이 없어요</div>
+          <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+            보유 중인 종목이 없어요
+          </div>
         ) : (
           <>
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr>
-                  <th className="border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">종목</th>
-                  <th className="border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">보유수량</th>
-                  <th className="border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">평균단가</th>
-                  <th className="border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">현재가</th>
-                  <th className="border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">평가금액</th>
-                  <th className="border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">평가손익</th>
-                  <th className="w-16 border-b border-gray-200 py-2.5" />
-                </tr>
-              </thead>
-              <tbody>
-                {holdings.map((h) => {
-                  const isUsd = h.currency === "USD";
-                  const value = holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate);
-                  const cost = holdingAmountKrw(h.quantity, h.avgBuyPrice, h.currency, rate);
-                  const hPnl = value.minus(cost);
-                  const hRate = cost.greaterThan(0) ? hPnl.dividedBy(cost).toNumber() : 0;
-                  // 정책상 원화만 거래에 쓰이므로, 미국 종목은 단가도 원화 환산액을
-                  // 우선 표시하고 원래 달러 값은 보조 텍스트로 같이 보여준다.
-                  const priceCell = (usdValue: number) => {
-                    const krw = isUsd ? new D(usdValue).times(rate) : new D(usdValue);
-                    return (
-                      <>
-                        {formatNumber(krw.round().toNumber())}
-                        {isUsd && <div className="text-[10.5px] text-gray-400">{formatUsd(usdValue)}</div>}
-                      </>
-                    );
-                  };
+            <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+              <div
+                className="grid px-5 py-2.5 text-[12px] font-bold"
+                style={{
+                  gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px",
+                  borderBottom: "1px solid var(--line2)",
+                  color: "var(--mut2)",
+                }}
+              >
+                <span>종목</span>
+                <span className="text-right">보유수량</span>
+                <span className="text-right">평균단가</span>
+                <span className="text-right">현재가</span>
+                <span className="text-right">평가금액</span>
+                <span className="text-right">평가손익</span>
+                <span />
+              </div>
+              {holdings.map((h) => {
+                const isUsd = h.currency === "USD";
+                const value = holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate);
+                const cost = holdingAmountKrw(h.quantity, h.avgBuyPrice, h.currency, rate);
+                const hPnl = value.minus(cost);
+                const hRate = cost.greaterThan(0) ? hPnl.dividedBy(cost).toNumber() : 0;
+                const priceCell = (usdValue: number) => {
+                  const krw = isUsd ? new D(usdValue).times(rate) : new D(usdValue);
                   return (
-                    <tr key={h.symbol}>
-                      <td className="border-b border-gray-100 py-2.5">
-                        {h.name} <Tag>{h.symbol}</Tag>
-                      </td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{h.quantity}</td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{priceCell(h.avgBuyPrice)}</td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{priceCell(h.lastPrice)}</td>
-                      <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{formatNumber(value.round().toNumber())}</td>
-                      <td
-                        className={`border-b border-gray-100 py-2.5 text-right tabular-nums ${
-                          hPnl.greaterThanOrEqualTo(0) ? "font-semibold text-gray-900" : "text-gray-400"
-                        }`}
-                      >
-                        {formatSigned(hPnl.round().toNumber())} <span className="text-[11.5px]">({formatPercent(hRate)})</span>
-                      </td>
-                      <td className="border-b border-gray-100 py-2.5">
-                        <Link
-                          href={`/stocks/${h.symbol}`}
-                          className="rounded border border-gray-300 px-2.5 py-1 text-[12px] text-gray-900 hover:bg-gray-50"
-                        >
-                          거래
-                        </Link>
-                      </td>
-                    </tr>
+                    <>
+                      {formatNumber(krw.round().toNumber())}
+                      {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(usdValue)}</div>}
+                    </>
                   );
-                })}
-              </tbody>
-            </table>
-            <div className="mt-2.5 text-[11.5px] text-gray-400">
-              해외 종목 금액은 적용 환율({formatNumber(rate)} KRW/USD)로 환산 · 매시 정각 갱신
+                };
+                return (
+                  <div
+                    key={h.symbol}
+                    className="grid items-center px-5 py-3 text-[15px]"
+                    style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px", borderBottom: "1px solid var(--line2)" }}
+                  >
+                    <span className="font-bold" style={{ color: "var(--ink)" }}>
+                      {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{h.quantity}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.avgBuyPrice)}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.lastPrice)}</span>
+                    <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(value.round().toNumber())}</span>
+                    <span
+                      className="text-right tabular-nums font-semibold"
+                      style={{ color: hPnl.greaterThanOrEqualTo(0) ? "var(--up)" : "var(--down)" }}
+                    >
+                      {formatSigned(hPnl.round().toNumber())} <span className="text-[11.5px]">({formatPercent(hRate)})</span>
+                    </span>
+                    <span className="text-right">
+                      <Link
+                        href={`/stocks/${h.symbol}`}
+                        className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
+                        style={{ background: "var(--fill)", color: "var(--ink)" }}
+                      >
+                        거래
+                      </Link>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="mt-2.5 text-[13px]" style={{ color: "var(--mut2)" }}>
+              해외 종목 평가금액은 적용 환율({formatNumber(rate)} KRW/USD)로 환산돼요
             </div>
           </>
         )
       ) : (
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr>
-              <th className="w-24 border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">구분</th>
-              <th className="border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">설명</th>
-              <th className="w-32 border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">증감액</th>
-              <th className="w-32 border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">잔액</th>
-              <th className="w-36 border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">발생시각</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ledger.map((entry, i) => (
-              <tr key={i}>
-                <td className="border-b border-gray-100 py-2.5">
-                  <Tag variant="dark">{entry.type}</Tag>
-                </td>
-                <td className="border-b border-gray-100 py-2.5 text-gray-600">{entry.memo}</td>
-                <td
-                  className={`border-b border-gray-100 py-2.5 text-right tabular-nums ${
-                    entry.amount >= 0 ? "font-semibold text-gray-900" : "text-gray-400"
-                  }`}
-                >
-                  {formatSigned(entry.amount)}
-                </td>
-                <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">{formatNumber(entry.balanceAfter)}</td>
-                <td className="border-b border-gray-100 py-2.5 text-[11.5px] text-gray-400">{entry.occurredAt}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+          <div
+            className="grid px-5 py-2.5 text-[12px] font-bold"
+            style={{
+              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              columnGap: "20px",
+              borderBottom: "1px solid var(--line2)",
+              color: "var(--mut2)",
+            }}
+          >
+            <span>구분</span>
+            <span>설명</span>
+            <span className="text-right">증감액</span>
+            <span className="text-right">잔액</span>
+            <span>발생시각</span>
+          </div>
+          {ledger.map((entry, i) => (
+            <div
+              key={i}
+              className="grid items-center px-5 py-3 text-[15px]"
+              style={{
+                gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                columnGap: "20px",
+                borderBottom: "1px solid var(--line2)",
+              }}
+            >
+              <span>
+                <LedgerBadge type={entry.type} />
+              </span>
+              <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
+              <span
+                className="text-right tabular-nums font-semibold"
+                style={{ color: entry.amount >= 0 ? "var(--up)" : "var(--down)" }}
+              >
+                {formatSigned(entry.amount)}
+              </span>
+              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
+              <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{entry.occurredAt}</span>
+            </div>
+          ))}
+        </div>
       )}
+      </Reveal>
 
-      <div className="mt-6 rounded-lg border border-gray-300 bg-gray-50 p-4">
-        <div className="flex flex-wrap items-center gap-4">
+      <Reveal delay={0.4} className="mt-7 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+        <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-0.5 text-[14px] font-semibold text-gray-900">포트폴리오 초기화</div>
-            <div className="text-[11.5px] leading-relaxed text-gray-500">
-              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 <b>5,000만원</b>으로 되돌아갑니다. 되돌릴 수
-              없습니다.
+            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
+            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
+              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 <b>5,000만원</b>으로 되돌아가요. 되돌릴 수
+              없어요.
             </div>
           </div>
           <button
-            onClick={handleReset}
-            className="ml-auto rounded-md border border-gray-400 bg-white px-4 py-2 text-[13px] font-medium text-gray-900 hover:bg-gray-100"
+            onClick={() => setResetModalOpen(true)}
+            className="ml-auto rounded-xl px-5 py-3 text-[14px] font-bold"
+            style={{ background: "var(--card)", color: "var(--dangerText)" }}
           >
             포트폴리오 초기화
           </button>
         </div>
+      </Reveal>
+
+      {resetModalOpen && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+          style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+          onClick={() => setResetModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-[24px] px-7.5 pt-8 pb-6.5 text-center"
+            style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-[18px] font-bold" style={{ color: "var(--ink)" }}>
+              포트폴리오를 정말 초기화할까요?
+            </h3>
+            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
+              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
+              <b style={{ color: "var(--ink)" }}>5,000만원</b>으로 되돌아가요.
+              <br />
+              되돌릴 수 없어요.
+            </p>
+            <button
+              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white"
+              style={{ background: "var(--dangerText)" }}
+              onClick={handleReset}
+            >
+              초기화할게요
+            </button>
+            <button
+              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+              onClick={() => setResetModalOpen(false)}
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SummaryCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "up" | "down" }) {
+  return (
+    <div className="flex-1 rounded-[20px] px-6 py-5.5" style={{ background: "var(--card)" }}>
+      <div className="text-[13px]" style={{ color: "var(--mut)" }}>{label}</div>
+      <div
+        className="mt-1.5 text-[24px] font-extrabold"
+        style={{ color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)" }}
+      >
+        {value}
       </div>
     </div>
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  emphasize,
-}: {
-  label: string;
-  value: React.ReactNode;
-  emphasize?: boolean;
-}) {
+function LedgerBadge({ type }: { type: LedgerEntry["type"] }) {
+  const style =
+    type === "매수"
+      ? { background: "var(--downBg)", color: "var(--down)" }
+      : type === "매도"
+        ? { background: "var(--upBg)", color: "var(--up)" }
+        : { background: "var(--accentSoft)", color: "var(--onAccentSoftText)" };
   return (
-    <div className="flex-1 rounded-lg border border-gray-200 p-4">
-      <div className="text-[11.5px] text-gray-400">{label}</div>
-      <div className={`mt-0.5 text-[22px] font-bold ${emphasize ? "text-gray-900" : "text-gray-900"}`}>{value}</div>
-    </div>
+    <span className="w-fit rounded-md px-2.5 py-1 text-[12px] font-bold" style={style}>
+      {type}
+    </span>
   );
 }

@@ -18,14 +18,23 @@
 
 export type ExchangeRateInfo = {
   rate: number; // 1 USD당 원화
+  changeAmount: number; // 전일 대비 등락(원)
+  changeRate: number; // 전일 대비 등락률(비율, 0.0016 = +0.16%)
   updatedAt: Date;
 };
 
 /** 실제 API가 없을 때의 기본값 겸 초기 렌더링용 값. */
 export const DEFAULT_USD_KRW_RATE = 1398.5;
+const DEFAULT_CHANGE_AMOUNT = 2.3;
+const DEFAULT_CHANGE_RATE = 0.0016;
 
 export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
   // 실제 네트워크 호출처럼 약간의 지연을 흉내낸다 — 응답속도 체감 테스트용.
   await new Promise((resolve) => setTimeout(resolve, 150));
-  return { rate: DEFAULT_USD_KRW_RATE, updatedAt: new Date() };
+  return {
+    rate: DEFAULT_USD_KRW_RATE,
+    changeAmount: DEFAULT_CHANGE_AMOUNT,
+    changeRate: DEFAULT_CHANGE_RATE,
+    updatedAt: new Date(),
+  };
 }

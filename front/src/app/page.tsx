@@ -1,9 +1,47 @@
+"use client";
+
 import Link from "next/link";
+import { HeroDots } from "@/components/HeroDots";
+import { TiltCard } from "@/components/TiltCard";
+import { Reveal } from "@/components/Reveal";
+import { useTheme } from "@/components/ThemeProvider";
 
 const STEPS = [
-  { step: "STEP 1", title: "모의 투자금 5,000만원 받기", desc: "가입하면 자동 지급됩니다. 다 쓰면 포트폴리오를 초기화해 다시 시작할 수 있습니다." },
-  { step: "STEP 2", title: "랭킹에서 종목 고르기", desc: "거래대금 상위 100개 종목을 국내·해외로 나눠 보여드립니다." },
-  { step: "STEP 3", title: "실제 시세로 매수·매도", desc: "장 운영 시간에 시장가로 즉시 체결됩니다. 수수료와 세금도 그대로 반영됩니다." },
+  {
+    step: "STEP 1",
+    title: "모의 투자금 5,000만원 받기",
+    desc: (
+      <>
+        가입하면 자동 지급돼요.
+        <br />
+        다 쓰면 포트폴리오를 초기화해
+        <br />
+        다시 시작할 수 있어요.
+      </>
+    ),
+  },
+  {
+    step: "STEP 2",
+    title: "랭킹에서 종목 고르기",
+    desc: (
+      <>
+        거래대금 상위 100개 종목을
+        <br />
+        국내·해외로 나눠 보여드려요.
+      </>
+    ),
+  },
+  {
+    step: "STEP 3",
+    title: "실제 시세로 매수·매도",
+    desc: (
+      <>
+        장 운영 시간에 시장가로 즉시 체결돼요.
+        <br />
+        수수료와 세금도 그대로 반영돼요.
+      </>
+    ),
+  },
 ];
 
 const COMPARE_ROWS = [
@@ -14,115 +52,194 @@ const COMPARE_ROWS = [
 ];
 
 export default function MainPage() {
+  const { theme } = useTheme();
   return (
-    <div className="p-6">
+    <div>
       {/* 히어로 */}
-      <div className="mb-8 flex items-center gap-8 rounded-lg bg-gray-100 p-10">
-        <div className="flex-[1.15]">
-          <span className="inline-block rounded border border-gray-300 px-1.5 py-0.5 text-[10.5px] text-gray-500">
-            투자 연습장
-          </span>
-          <h1 className="mt-3 text-[26px] font-bold leading-snug text-gray-900">
-            잃어도 괜찮은 돈으로,
-            <br />
-            잃지 않는 법을 배웁니다
-          </h1>
-          <p className="my-3 max-w-[440px] text-[14px] text-gray-500">
-            실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.{" "}
-            <b className="text-gray-900">모의 투자금 5,000만원</b>이 가입 즉시 지급됩니다.
-          </p>
-          <div className="flex gap-2.5">
-            <Link
-              href="/rankings"
-              className="rounded-md bg-gray-900 px-6 py-2.5 text-[13px] text-white hover:bg-black"
+      <Reveal delay={0} duration={1}>
+        <div
+          className="my-4 flex items-center gap-10 rounded-[28px] px-12 py-14 max-md:flex-col"
+          style={{ background: "var(--heroBg)" }}
+        >
+          <div className="flex-[1.2]">
+            <span
+              className="inline-block rounded-full px-3.5 py-1.5 text-[13px] font-bold"
+              style={{ background: "var(--highlight)", color: "var(--highlightText)" }}
             >
-              모의 투자금 받고 시작하기
-            </Link>
-            <Link
-              href="/guide"
-              className="rounded-md border border-gray-300 bg-white px-5 py-2.5 text-[13px] text-gray-900 hover:bg-gray-50"
+              투자 연습장
+            </span>
+            <h1
+              className="mt-4.5 mb-3.5 text-[38px] leading-[1.35] font-extrabold tracking-[-0.02em]"
+              style={{ color: "var(--heroText)" }}
             >
-              이용가이드 보기
-            </Link>
+              잃어도 괜찮은 돈으로,
+              <br />
+              잃지 않는 법을 배워요
+            </h1>
+            <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
+              실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.
+              <br />
+              <b className="font-bold">모의 투자금 5,000만원</b>이 가입 즉시 지급돼요.
+            </p>
+            <div className="mt-5 flex gap-2.5">
+              <Link
+                href="/rankings"
+                className="rounded-[12px] px-6 py-3 text-[14px] font-bold"
+                style={{
+                  background: theme === "dark" ? "var(--accent)" : "var(--ctaBtn)",
+                  color: theme === "dark" ? "#ffffff" : "var(--ctaBtnText)",
+                }}
+              >
+                모의 투자금 받고 시작하기
+              </Link>
+              <Link
+                href="/guide"
+                className="rounded-[12px] px-5 py-3 text-[14px] font-semibold"
+                style={{
+                  background: theme === "dark" ? "#1a1c1f" : "#ffffff",
+                  color: theme === "dark" ? "#ffffff" : "#000000",
+                }}
+              >
+                이용가이드 보기
+              </Link>
+            </div>
+            <div className="mt-3.5 text-[14px]" style={{ color: "var(--heroSub)" }}>
+              실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요
+            </div>
           </div>
-          <div className="mt-3 text-[11.5px] text-gray-400">
-            실제 돈이 오가지 않습니다 · 언제든 포트폴리오를 초기화할 수 있습니다
+          <div className="flex flex-1 items-center justify-center">
+            <HeroDots />
           </div>
         </div>
-        <div className="flex h-[200px] flex-1 flex-col items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white text-[12.5px] text-gray-400">
-          <b className="text-[13px] text-gray-900">서비스 화면 미리보기</b>
-          <span>거래 화면 · 보유 종목</span>
-        </div>
-      </div>
+      </Reveal>
 
       {/* 3단계 */}
-      <div className="mb-8">
-        <h2 className="text-center text-[17px] font-bold text-gray-900">이렇게 사용합니다</h2>
-        <p className="mb-4.5 text-center text-[13px] text-gray-500">가입부터 첫 거래까지 3단계</p>
-        <div className="flex gap-4">
+      <Reveal delay={0.16} duration={1} className="mt-12 mb-10">
+        <h2 className="text-center text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
+          이렇게 사용해요
+        </h2>
+        <p className="mt-2 mb-6 text-center text-[15px]" style={{ color: "var(--mut)" }}>
+          가입부터 첫 거래까지 3단계
+        </p>
+        <div className="flex gap-4 max-md:flex-col">
           {STEPS.map((s) => (
-            <div key={s.step} className="flex-1 rounded-lg border border-gray-200 p-4">
-              <div className="text-[11.5px] font-bold text-gray-500">{s.step}</div>
-              <h4 className="my-1.5 text-[14px] font-semibold text-gray-900">{s.title}</h4>
-              <p className="text-[11.5px] leading-relaxed text-gray-500">{s.desc}</p>
+            <TiltCard
+              key={s.step}
+              className="flex-1 rounded-[20px] p-6.5 text-center"
+              // 그림자는 넣지 않습니다 (design_handoff README). 배경은 카드 정중앙이
+              // 가장 진하고 바깥으로 갈수록 옅어지는 radial gradient. 테두리는
+              // 요청대로 흰색으로 마무리하되, 다크 모드에서 그대로 흰색을 쓰면
+              // 카드가 어두운 배경 위에 하얗게 떠 보이므로 다크 모드의 "흰색 역할"인
+              // 카드 배경색(var(--card), #1a1a1a)으로 마무리했다 — 라이트 모드는
+              // var(--card)가 정확히 #ffffff라 요청한 흰색 그대로다.
+              style={{
+                // 다크 모드만 좀 더 어둡게 해달라는 요청 — 베이스 블루 자체를 한
+                // 단계 낮췄다(라이트 모드 값은 그대로 유지).
+                background:
+                  theme === "dark"
+                    ? "radial-gradient(120% 120% at 50% 50%, rgba(45,95,155,0.65) 0%, rgba(45,95,155,0.28) 45%, var(--card) 100%)"
+                    : "radial-gradient(120% 120% at 50% 50%, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, #ffffff 100%)",
+              }}
+            >
+              <span
+                className="inline-block text-[12px] font-extrabold"
+                // 사각형 배지가 카드 위에서 어색해 보인다는 피드백을 받아 배경·
+                // 패딩·라운드를 없애고 글자만 남겼다. 색은 그대로 accentSoft
+                // 텍스트 톤을 써서 카드의 블루 그라데이션과 계속 어울리게 했다.
+                style={{ color: "var(--onAccentSoftText)" }}
+              >
+                {s.step}
+              </span>
+              <h4 className="my-2 text-[16px] font-bold" style={{ color: "var(--ink)" }}>
+                {s.title}
+              </h4>
+              <p className="text-[14px] leading-[1.6]" style={{ color: "var(--mut)" }}>
+                {s.desc}
+              </p>
+            </TiltCard>
+          ))}
+        </div>
+      </Reveal>
+
+      {/* 비교표 */}
+      <Reveal delay={0.32} duration={1} className="mb-10">
+        <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
+          증권사 앱과 무엇이 다른가요?
+        </h2>
+        <p className="mt-3 mb-4.5 text-[14px]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
+          증권사 앱은 거래를 <b className="font-bold">체결</b>시키는 도구고, 저희는 거래를{" "}
+          <b className="font-bold">이해</b>시키는 도구예요.
+        </p>
+        <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+          <div
+            className="grid text-[13.5px] opacity-0"
+            style={{
+              gridTemplateColumns: "1fr 1.2fr 1.2fr",
+              animation: "riseIn .9s cubic-bezier(.22,1,.36,1) .5s forwards",
+            }}
+          >
+            <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)" }} />
+            <div className="px-6 py-4 font-bold" style={{ borderBottom: "1px solid var(--line2)", color: "var(--mut)" }}>
+              일반 증권사 앱
+            </div>
+            <div
+              className="px-6 py-4 font-extrabold"
+              style={{ borderBottom: "1px solid var(--line2)", color: "var(--accentText)" }}
+            >
+              모의주식 트레이딩
+            </div>
+          </div>
+          {COMPARE_ROWS.map((row, i) => (
+            <div
+              key={row.label}
+              className="grid text-[13.5px] opacity-0"
+              style={{
+                gridTemplateColumns: "1fr 1.2fr 1.2fr",
+                animation: `riseIn .9s cubic-bezier(.22,1,.36,1) ${0.5 + (i + 1) * 0.17}s forwards`,
+              }}
+            >
+              <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)", color: "var(--mut)" }}>
+                {row.label}
+              </div>
+              <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)", color: "var(--body)" }}>
+                {row.other}
+              </div>
+              <div className="px-6 py-4 font-bold" style={{ borderBottom: "1px solid var(--line2)", color: "var(--ink)" }}>
+                {row.ours}
+              </div>
             </div>
           ))}
         </div>
-      </div>
+      </Reveal>
 
-      {/* 비교표 */}
-      <div className="mb-8">
-        <h2 className="text-[17px] font-bold text-gray-900">증권사 앱과 무엇이 다른가요?</h2>
-        <p className="mb-4.5 text-[13px] text-gray-500">
-          증권사 앱은 거래를 <b className="text-gray-900">체결</b>시키는 도구이고, 저희는 거래를{" "}
-          <b className="text-gray-900">이해</b>시키는 도구입니다.
+      {/* CTA 배너 */}
+      <Reveal delay={0.48} duration={1} className="mb-10">
+        <div className="rounded-[24px] px-11 py-11 text-center" style={{ background: "var(--ctaBanner)" }}>
+          <h2 className="text-[24px] font-extrabold text-white">첫 거래는 오늘, 첫 손실은 0원</h2>
+          <p className="mx-auto my-2.5 max-w-[420px] text-[14px] text-white/80">
+            모의 투자금 5,000만원으로 지금 시작해보세요
+          </p>
+          <Link
+            href="/rankings"
+            className="mt-2 inline-block rounded-[12px] px-8 py-3 text-[14px] font-extrabold transition-[background] duration-[180ms]"
+            style={{ background: "#fff", color: "var(--ctaBannerBtnText)" }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--ctaBannerBtnHover)")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
+          >
+            시작하기
+          </Link>
+        </div>
+      </Reveal>
+
+      {/* 푸터 고지 */}
+      <Reveal delay={0.64} duration={1}>
+        <p className="text-center text-[12.5px] leading-[1.8]" style={{ color: "var(--mut2)" }}>
+          본 서비스는 투자 교육을 목적으로 하는 모의 투자 서비스예요. 실제 매매가 이루어지지 않으며, 특정
+          종목에 대한 투자 조언이나 매매 권유를 제공하지 않아요.
+          <br />
+          시세는 토스증권 Open API를 통해 제공되며 실시간과 수 초의 차이가 있을 수 있어요.
         </p>
-        <table className="w-full overflow-hidden rounded-lg border border-gray-200 text-[13px]">
-          <thead>
-            <tr>
-              <th className="w-[26%] border-b border-gray-200 p-2.5" />
-              <th className="w-[37%] border-b border-gray-200 p-2.5 text-left font-medium">
-                일반 증권사 앱
-              </th>
-              <th className="w-[37%] border-b border-gray-200 p-2.5 text-left font-bold text-gray-900">
-                모의주식 트레이딩
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {COMPARE_ROWS.map((row) => (
-              <tr key={row.label}>
-                <td className="border-b border-gray-100 p-2.5 text-gray-500">{row.label}</td>
-                <td className="border-b border-gray-100 p-2.5">{row.other}</td>
-                <td className="border-b border-gray-100 p-2.5">
-                  <b>{row.ours}</b>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* CTA */}
-      <div className="rounded-lg bg-gray-100 p-8 text-center">
-        <h2 className="text-[19px] font-bold text-gray-900">첫 거래는 오늘, 첫 손실은 0원</h2>
-        <p className="mx-auto my-2 max-w-[420px] text-[13px] text-gray-500">
-          모의 투자금 5,000만원으로 지금 시작해보세요
-        </p>
-        <Link
-          href="/rankings"
-          className="inline-block rounded-md bg-gray-900 px-7 py-2.5 text-[13px] text-white hover:bg-black"
-        >
-          시작하기
-        </Link>
-      </div>
-
-      <p className="mt-4 text-center text-[11.5px] leading-relaxed text-gray-400">
-        본 서비스는 <b>투자 교육을 목적으로 하는 모의 투자 서비스</b>입니다. 실제 매매가 이루어지지
-        않으며, 특정 종목에 대한 투자 조언이나 매매 권유를 제공하지 않습니다.
-        <br />
-        시세는 토스증권 Open API를 통해 제공되며 실시간과 수 초의 차이가 있을 수 있습니다.
-      </p>
+      </Reveal>
     </div>
   );
 }
