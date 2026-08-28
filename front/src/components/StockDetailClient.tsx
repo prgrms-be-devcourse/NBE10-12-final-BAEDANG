@@ -169,9 +169,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
         <div className="mb-1.5">
           <div className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>
-            {detail.name} <Tag>{detail.symbol}</Tag> <Tag>{detail.market}</Tag>{" "}
+            {detail.name} <Tag weightClassName="font-bold">{detail.symbol}</Tag>{" "}
+            <Tag weightClassName="font-bold">{detail.market}</Tag>{" "}
             <span
-              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-medium"
+              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-bold"
               style={CATEGORY_BADGE_STYLE[detail.category]}
             >
               {detail.category}
