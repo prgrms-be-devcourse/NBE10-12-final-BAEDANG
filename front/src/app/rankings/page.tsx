@@ -1,21 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
+import { PillTabs } from "@/components/PillTabs";
+import { Reveal } from "@/components/Reveal";
+import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
-import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry } from "@/lib/mock-data";
+import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry, type RankingItem } from "@/lib/mock-data";
+import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
 const PAGE_SIZE = 20;
 
+// 검색창 클릭 시(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
+// 하드코딩된 예시 그대로다. 산업은 연결할 실제 화면이 없어 장식용으로만 둔다.
+const POPULAR_SYMBOLS = ["005930", "NVDA", "000660", "TSLA", "069500"];
+const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우주항공", "로봇"];
+
 export default function RankingsPage() {
-  const { rate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
+  // 검색 팝업은 열기/닫기 애니메이션이 서로 달라(searchPanelOpen .22s / searchPanelClose .18s)
+  // "지금 열려 있어야 하는가"(searchOpen)와 "지금 DOM에 있어야 하는가"(searchMounted)를
+  // 분리해서 관리한다 — 닫힐 때도 닫힘 애니메이션이 끝날 때까지는 DOM에 남아 있어야 한다.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchMounted, setSearchMounted] = useState(false);
+  const [wishlist, setWishlist] = useState<Record<string, boolean>>({});
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  // 종목에 마우스를 올렸을 때 뜨는 간단 정보 + 일봉 미리보기 카드의 상태.
+  // 좌표(x,y)는 커서를 따라다니게 하려고 mousemove마다 갱신한다.
+  const [hover, setHover] = useState<{ item: RankingItem; krwPrice: number; krwChange: number; x: number; y: number } | null>(null);
 
   const rankings = market === "KR" ? KR_RANKINGS : US_RANKINGS;
   const shown = rankings.slice(0, visibleCount);
@@ -29,8 +50,33 @@ export default function RankingsPage() {
     ).slice(0, 8);
   }, [query]);
 
-  function switchMarket(next: MarketCountry) {
-    setMarket(next);
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  // 열고 닫힘에 따라 DOM 마운트 여부를 지연시켜 닫힘 애니메이션(searchPanelClose)이
+  // 끝까지 재생되게 한다. AuthProvider와 마찬가지로 외부 트리거(searchOpen)에 반응해
+  // 타이머를 거는 것이라 effect 안 setState가 맞는 자리다.
+  useEffect(() => {
+    if (searchOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearchMounted(true);
+      return;
+    }
+    if (!searchMounted) return;
+    const t = setTimeout(() => setSearchMounted(false), 180); // searchPanelClose 재생 시간
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen]);
+
+  function switchMarket(next: string) {
+    setMarket(next as MarketCountry);
     setVisibleCount(PAGE_SIZE);
   }
 
@@ -44,175 +90,307 @@ export default function RankingsPage() {
     }, 500);
   }
 
+  function toggleWishlist(symbol: string) {
+    setWishlist((w) => ({ ...w, [symbol]: !w[symbol] }));
+  }
+
   return (
-    <div className="p-6">
-      <h2 className="text-[19px] font-bold text-gray-900">주식 종목 랭킹</h2>
-      <p className="mb-4.5 text-[13px] text-gray-500">
-        거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
-      </p>
+    <div>
+      <Reveal delay={0}>
+        <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
+          주식 종목 랭킹
+        </h2>
+        <p className="mt-2 mb-4.5 text-[15px]" style={{ color: "var(--mut)" }}>
+          거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
+        </p>
+      </Reveal>
 
       {/* 환율 배너 — 정책상 거래는 원화로만 제공되어, 미국 종목 표시는 이 환율로 환산합니다 */}
-      <div className="mb-4 flex items-center gap-2.5 rounded-lg border border-gray-200 bg-gray-50 px-3.5 py-2 text-[12.5px]">
-        <span className="font-bold text-gray-900">USD / KRW</span>
-        <span className="text-[14px] font-bold tabular-nums text-gray-900">
+      <Reveal
+        delay={0.12}
+        className="mb-4 flex items-center gap-2.5 rounded-[14px] px-4.5 py-2.5 text-[14px]"
+        style={{ border: "1px solid var(--line2)", background: "var(--card)" }}
+      >
+        <span className="font-bold" style={{ color: "var(--ink)" }}>
+          USD / KRW
+        </span>
+        <span className="text-[16px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
           {rateLoading ? "불러오는 중…" : formatNumber(rate)}
         </span>
-        <span className="text-gray-400">
+        {!rateLoading && (
+          <span className="font-semibold tabular-nums" style={{ color: "var(--up)" }}>
+            {changeAmount >= 0 ? "▲" : "▼"} {Math.abs(changeAmount).toFixed(2)} ({formatPercent(changeRate)})
+          </span>
+        )}
+        <span style={{ color: "var(--mut2)" }}>
           {updatedAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 기준 · 1시간마다 갱신
         </span>
         <span
-          className="ml-auto cursor-default text-gray-300"
+          className="ml-auto cursor-default font-semibold"
+          style={{ color: "var(--accent)" }}
           title="환율 추이 그래프는 2주차 MVP 예정입니다"
         >
           환율 추이 그래프 →
         </span>
-      </div>
+      </Reveal>
 
       {/* 검색 */}
-      <div className="relative mb-5 max-w-[760px]">
-        <input
-          className="w-full rounded-md border border-gray-300 px-3 py-2 text-[13px] text-gray-900 outline-none focus:border-gray-500"
-          placeholder="티커 또는 종목명으로 검색 (2자 이상)"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        {searchResults.length > 0 && (
-          <div className="absolute z-10 w-full rounded-b-md border border-t-0 border-gray-300 bg-white text-[13px] shadow-sm">
-            {searchResults.map((s) => (
-              <Link
-                key={`${s.market}-${s.symbol}`}
-                href={`/stocks/${s.symbol}`}
-                className="flex items-center gap-1.5 border-b border-gray-100 px-3 py-2 last:border-b-0 hover:bg-gray-50"
-              >
-                {s.name} <Tag>{s.symbol}</Tag> <Tag>{s.market}</Tag> <Tag variant="dark">{s.category}</Tag>
-              </Link>
-            ))}
+      <Reveal delay={0.24}>
+      <div ref={searchBoxRef} className="relative z-30 mb-5 max-w-[480px]">
+        <div className="relative">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2"
+          >
+            <circle cx="11" cy="11" r="7" stroke="var(--mut2)" strokeWidth="2" />
+            <path d="M21 21l-4.3-4.3" stroke="var(--mut2)" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <input
+            className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[15px] outline-none"
+            style={{ background: theme === "dark" ? "var(--card)" : "#ffffff", color: "var(--ink)" }}
+            placeholder="티커 또는 종목명으로 검색 (2자 이상)"
+            value={query}
+            onFocus={() => setSearchOpen(true)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSearchOpen(true);
+            }}
+          />
+        </div>
+        {searchMounted && (
+          <div
+            className="absolute top-full z-[31] mt-1.5 w-full origin-top overflow-hidden rounded-[14px] text-[13px]"
+            style={{
+              background: "var(--card)",
+              boxShadow: "0 8px 24px rgba(8,14,26,.12)",
+              animation: searchOpen
+                ? "searchPanelOpen .22s cubic-bezier(.2,.9,.3,1) both"
+                : "searchPanelClose .18s cubic-bezier(.2,.9,.3,1) both",
+            }}
+          >
+            {query.trim().length === 0 ? (
+              <>
+                <div className="px-4.5 pt-4 pb-2.5 text-[12.5px] font-bold" style={{ color: "var(--mut2)" }}>
+                  지금 인기 있는 종목
+                </div>
+                <div className="flex flex-col px-1.5 pb-2.5">
+                  {POPULAR_SYMBOLS.map((symbol, i) => {
+                    const s = SEARCHABLE_STOCKS.find((item) => item.symbol === symbol);
+                    if (!s) return null;
+                    return (
+                      <Link
+                        key={symbol}
+                        href={`/stocks/${symbol}`}
+                        className="flex items-center gap-2.5 rounded-[10px] px-3 py-2"
+                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
+                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      >
+                        <span className="w-4 text-[13px] font-extrabold" style={{ color: "var(--accentText)" }}>
+                          {i + 1}
+                        </span>
+                        <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+                          {s.name}
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+                <div
+                  className="px-4.5 pt-3.5 pb-2.5 text-[12.5px] font-bold"
+                  style={{ color: "var(--mut2)", borderTop: "1px solid var(--line2)" }}
+                >
+                  요즘 뜨는 산업
+                </div>
+                <div className="flex flex-col px-1.5 pb-2.5">
+                  {TRENDING_INDUSTRIES.map((name, i) => (
+                    <div key={name} className="flex items-center gap-2.5 rounded-[10px] px-3 py-2">
+                      <span className="w-4 text-[13px] font-extrabold" style={{ color: "var(--accentText)" }}>
+                        {i + 1}
+                      </span>
+                      <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+                        {name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : searchResults.length > 0 ? (
+              searchResults.map((s) => (
+                <Link
+                  key={`${s.market}-${s.symbol}`}
+                  href={`/stocks/${s.symbol}`}
+                  className="flex items-center gap-1.5 px-4 py-2.5"
+                  style={{ borderBottom: "1px solid var(--line2)" }}
+                >
+                  {s.name} <Tag>{s.symbol}</Tag> <Tag>{s.market}</Tag>{" "}
+                  <span
+                    className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+                    style={CATEGORY_BADGE_STYLE[s.category]}
+                  >
+                    {s.category}
+                  </span>
+                </Link>
+              ))
+            ) : (
+              <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
+                2자 이상 입력해보세요
+              </div>
+            )}
           </div>
         )}
       </div>
+      </Reveal>
 
       {/* 탭 */}
-      <div className="mb-3 flex gap-0.5 border-b border-gray-200">
-        {(["KR", "US"] as const).map((m) => (
-          <button
-            key={m}
-            onClick={() => switchMarket(m)}
-            className={`border-b-2 px-3.5 py-1.5 text-[13px] ${
-              market === m
-                ? "border-gray-900 font-semibold text-gray-900"
-                : "border-transparent text-gray-400 hover:text-gray-700"
-            }`}
-          >
-            {m === "KR" ? "국내 주식" : "해외 주식"}
-          </button>
-        ))}
-      </div>
+      <Reveal delay={0.36}>
+      <PillTabs
+        options={[
+          { value: "KR", label: "국내 주식" },
+          { value: "US", label: "해외 주식" },
+        ]}
+        value={market}
+        onChange={switchMarket}
+        trackClassName="mb-3 w-[200px] gap-0.5 rounded-full p-[3px]"
+        trackStyle={{
+          background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
+          border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+        }}
+        buttonClassName="rounded-full py-2 text-[13px] font-bold"
+        inactiveTextStyle={{ color: "var(--mut)" }}
+      />
 
       <div className="mb-3 flex items-center">
-        <span className="text-[11.5px] text-gray-400">
-          최근 <b className="text-gray-600">1주 거래대금</b> 상위 100개 · 개별주 · 배당주 · ETF 모두
+        <span className="text-[13px]" style={{ color: "var(--mut2)" }}>
+          최근 <b style={{ color: "var(--mut)" }}>1주 거래대금</b> 상위 100개 · 개별주 · 배당주 · ETF 모두
           포함 · 매주 월요일 갱신
         </span>
-        <span className="ml-auto text-[11.5px] text-gray-400">12:36:59 기준 · 5초마다 갱신</span>
+        <span className="ml-auto text-[13px]" style={{ color: "var(--mut2)" }}>
+          12:36:59 기준 · 5초마다 갱신
+        </span>
       </div>
+      </Reveal>
 
-      <table className="w-full text-[13px]">
-        <thead>
-          <tr>
-            <th className="w-11 border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">
-              순위
-            </th>
-            <th className="border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">
-              종목명
-            </th>
-            <th className="w-24 border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">
-              티커
-            </th>
-            <th className="w-20 border-b border-gray-200 py-2.5 text-left text-[12px] font-medium text-gray-500">
-              종류
-            </th>
-            <th className="border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">
-              현재가
-            </th>
-            <th className="w-36 border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">
-              전일대비
-            </th>
-            <th className="w-24 border-b border-gray-200 py-2.5 text-right text-[12px] font-medium text-gray-500">
-              거래대금
-            </th>
-            <th className="w-16 border-b border-gray-200 py-2.5" />
-          </tr>
-        </thead>
-        <tbody>
-          {shown.map((item) => {
-            const isUp = item.changeAmount >= 0;
-            const isUsd = item.currency === "USD";
-            // 정책상 원화만 거래에 쓰이므로, 미국 종목은 원화 환산액을 우선 표시하고
-            // 원래 달러 값은 보조 텍스트로 같이 보여준다. 부동소수점 오차를 피하려고
-            // decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17).
-            const krwPrice = (isUsd ? new D(item.lastPrice).times(rate) : new D(item.lastPrice)).round().toNumber();
-            const krwChange = (isUsd ? new D(item.changeAmount).times(rate) : new D(item.changeAmount))
-              .round()
-              .toNumber();
-            return (
-              <tr key={item.symbol}>
-                <td className="border-b border-gray-100 py-2.5 text-gray-500">{item.rank}</td>
-                <td className="border-b border-gray-100 py-2.5">{item.name}</td>
-                <td className="border-b border-gray-100 py-2.5">
-                  <Tag>{item.symbol}</Tag>
-                </td>
-                <td className="border-b border-gray-100 py-2.5">
-                  <Tag variant="dark">{item.category}</Tag>
-                </td>
-                <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">
-                  {formatNumber(krwPrice)}
-                  {isUsd && <div className="text-[10.5px] text-gray-400">{formatUsd(item.lastPrice)}</div>}
-                </td>
-                <td
-                  className={`border-b border-gray-100 py-2.5 text-right tabular-nums ${
-                    isUp ? "font-semibold text-gray-900" : "text-gray-400"
-                  }`}
+      <Reveal delay={0.48}>
+      <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+        <div
+          className="grid items-center px-5 py-2.5 text-[12px] font-bold"
+          style={{
+            gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr",
+            borderBottom: "1px solid var(--line2)",
+            color: "var(--mut2)",
+          }}
+        >
+          <span />
+          <span>순위</span>
+          <span>종목명</span>
+          <span />
+          <span className="text-right">현재가</span>
+          <span className="text-right">전일대비</span>
+          <span className="text-right">거래대금</span>
+        </div>
+
+        {shown.map((item) => {
+          const isUp = item.changeAmount >= 0;
+          const isUsd = item.currency === "USD";
+          // 정책상 원화만 거래에 쓰이므로, 미국 종목은 원화 환산액을 우선 표시하고
+          // 원래 달러 값은 보조 텍스트로 같이 보여준다. 부동소수점 오차를 피하려고
+          // decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17).
+          const krwPrice = (isUsd ? new D(item.lastPrice).times(rate) : new D(item.lastPrice)).round().toNumber();
+          const krwChange = (isUsd ? new D(item.changeAmount).times(rate) : new D(item.changeAmount))
+            .round()
+            .toNumber();
+          const badge = CATEGORY_BADGE_STYLE[item.category];
+          const liked = wishlist[item.symbol];
+
+          return (
+            <Link
+              key={item.symbol}
+              href={`/stocks/${item.symbol}`}
+              className="grid items-center px-5 py-3 text-[15px] transition-[background] duration-150"
+              style={{ gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr", borderBottom: "1px solid var(--line2)" }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--fill)";
+                setHover({ item, krwPrice, krwChange, x: e.clientX, y: e.clientY });
+              }}
+              onMouseMove={(e) => setHover((h) => (h && h.item.symbol === item.symbol ? { ...h, x: e.clientX, y: e.clientY } : h))}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                setHover((h) => (h?.item.symbol === item.symbol ? null : h));
+              }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  toggleWishlist(item.symbol);
+                }}
+                className="cursor-pointer text-[16px] leading-none"
+                style={{
+                  color: liked ? "var(--heartActive)" : "var(--mut2)",
+                  WebkitTextStroke: "1.3px",
+                }}
+                aria-label="찜하기"
+              >
+                ♥
+              </button>
+              <span style={{ color: "var(--mut2)" }}>{item.rank}</span>
+              <span style={{ color: "var(--ink)" }}>
+                {item.name} <Tag>{item.symbol}</Tag>
+              </span>
+              <span
+                className="w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
+                style={badge}
+              >
+                {item.category}
+              </span>
+              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                {formatNumber(krwPrice)}
+                {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(item.lastPrice)}</div>}
+              </span>
+              <span className="flex justify-end">
+                <span
+                  className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
+                  style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
                 >
                   {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
-                  {isUsd && (
-                    <div className="font-normal text-[10.5px] text-gray-400">
-                      {isUp ? "▲" : "▼"} {formatUsd(item.changeAmount)}
-                    </div>
-                  )}
-                </td>
-                <td className="border-b border-gray-100 py-2.5 text-right tabular-nums">
-                  {formatKoreanAmount(item.tradingAmount)}
-                </td>
-                <td className="border-b border-gray-100 py-2.5">
-                  <Link
-                    href={`/stocks/${item.symbol}`}
-                    className="rounded border border-gray-300 px-2.5 py-1 text-[12px] text-gray-900 hover:bg-gray-50"
-                  >
-                    거래
-                  </Link>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                </span>
+              </span>
+              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                {formatKoreanAmount(item.tradingAmount)}
+              </span>
+            </Link>
+          );
+        })}
+      </div>
 
       <div className="mt-5 text-center">
         {hasNext ? (
           <button
             onClick={loadMore}
             disabled={loading}
-            className="rounded-md border border-gray-300 px-8 py-2 text-[13px] text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
+            className="rounded-full px-8 py-2.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "#ffffff", color: "var(--ink)" }}
           >
-            {loading ? "불러오는 중…" : "더 보기"}
+            {loading ? "불러오는 중…" : `더 보기 (${shown.length} / ${rankings.length})`}
           </button>
         ) : (
-          <span className="text-[13px] text-gray-400">모든 종목을 불러왔어요</span>
+          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>
+            모든 종목을 불러왔어요
+          </span>
         )}
-        <div className="mt-1.5 text-[11.5px] text-gray-400">
-          {shown.length} / {rankings.length}개 표시 중
-        </div>
       </div>
+      </Reveal>
+
+      {/* Reveal은 등장 애니메이션에 transform을 쓰는데, transform이 걸린 조상 안에서는
+          position:fixed가 뷰포트가 아니라 그 조상 기준으로 계산돼버린다(CSS 스펙상
+          transform이 새 containing block을 만든다). 그래서 호버 카드는 반드시
+          모든 Reveal 바깥, 최상위에 렌더링해야 실제 커서 좌표에 제대로 뜬다. */}
+      {hover && (
+        <StockHoverPreview item={hover.item} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
+      )}
     </div>
   );
 }
