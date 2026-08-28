@@ -335,10 +335,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             />
             <span className="flex-none text-[12.5px]" style={{ color: "var(--mut2)" }}>주</span>
           </div>
-          <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
-            정수만 입력 · 최소 1주
-            {side === "매도" && ` · 보유 ${availableQuantity}주`}
-          </div>
+          {side === "매도" && (
+            <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
+              보유 {availableQuantity}주
+            </div>
+          )}
 
           <div className="mb-3.5 flex justify-between text-[12.5px]" style={{ color: "var(--mut)" }}>
             <span>체결 예상 단가</span>
