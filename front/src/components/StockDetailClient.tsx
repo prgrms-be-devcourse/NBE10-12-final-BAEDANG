@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { PillTabs } from "./PillTabs";
@@ -45,6 +45,33 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 백엔드가 응답에 실어주는 retryPolicy로 결정한다 (lib/order-retry-policy.ts 참고).
   // null이면 "지금 이 주문 시도는 끝났다" — 다음 제출 때 완전히 새로 발급한다.
   const [clientOrderId, setClientOrderId] = useState<string | null>(null);
+
+  // 투자경고 배너("이 종목은 ... 매수 전 확인하세요")가 있으면 왼쪽 컬럼이 그만큼
+  // 아래로 밀리는데, 오른쪽 거래하기 패널은 그대로 두면 배너가 없을 때와 같은
+  // 높이에서 시작해 왼쪽 종목명·현재가 영역보다 위쪽에 떠 보인다. 배너의 실제
+  // 렌더 높이(+ 배너 아래 여백)를 측정해 거래하기 패널에 그만큼 위쪽 여백을 줘서
+  // 두 컬럼이 나란히 시작하도록 맞춘다.
+  const warningRef = useRef<HTMLDivElement>(null);
+  const [measuredWarningHeight, setMeasuredWarningHeight] = useState(0);
+  // detail.warning이 없어지는 순간(다른 종목으로 이동 등)엔 배너 div 자체가 사라져
+  // warningRef.current가 null이 되므로, 실제로 화면에 적용하는 값은 이 삼항식으로
+  // 매번 0으로 되돌린다 — 측정값(state)은 배너가 있을 때만 갱신하면 된다.
+  const warningHeight = detail.warning ? measuredWarningHeight : 0;
+
+  function measureWarningHeight() {
+    const el = warningRef.current;
+    if (el) setMeasuredWarningHeight(el.offsetHeight + 14); // mb-3.5(14px) = 배너와 다음 요소 사이 여백
+  }
+
+  useLayoutEffect(measureWarningHeight, [detail.warning]);
+
+  useEffect(() => {
+    const el = warningRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measureWarningHeight);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [detail.warning]);
 
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
   const isUp = detail.changeAmount >= 0;
@@ -133,6 +160,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
         {detail.warning && (
           <div
+            ref={warningRef}
             className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[14.5px]"
             style={{ background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }}
           >
@@ -259,7 +287,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       </div>
 
       {/* 거래 패널 */}
-      <div className="min-w-[300px] flex-1 self-start md:sticky md:top-[70px]">
+      <div
+        className="min-w-[300px] flex-1 self-start md:sticky md:top-[70px]"
+        style={{ marginTop: warningHeight }}
+      >
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
           <div className="mb-1 text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
           <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
