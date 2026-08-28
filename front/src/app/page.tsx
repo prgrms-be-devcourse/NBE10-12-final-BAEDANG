@@ -142,11 +142,11 @@ export default function MainPage() {
               }}
             >
               <span
-                className="inline-block rounded-lg px-2.5 py-1 text-[12px] font-extrabold"
-                // 무채색 highlightSoft(회색 계열)가 어둡고 칙칙해 보인다는 피드백을
-                // 받아, 카드 배경과 같은 계열인 accentSoft(하늘색 배경 + 남색 글자)로
-                // 바꿨다 — 카드의 새 블루 톤 그라데이션과도 자연스럽게 어울린다.
-                style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
+                className="inline-block text-[12px] font-extrabold"
+                // 사각형 배지가 카드 위에서 어색해 보인다는 피드백을 받아 배경·
+                // 패딩·라운드를 없애고 글자만 남겼다. 색은 그대로 accentSoft
+                // 텍스트 톤을 써서 카드의 블루 그라데이션과 계속 어울리게 했다.
+                style={{ color: "var(--onAccentSoftText)" }}
               >
                 {s.step}
               </span>
