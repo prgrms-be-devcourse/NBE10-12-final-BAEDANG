@@ -250,9 +250,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           <p className="text-[14.5px] leading-relaxed" style={{ color: "var(--body)" }}>
             {CATEGORY_GUIDE[detail.category] ?? detail.description}
           </p>
-          {detail.category === "ETF" && (
+          {detail.category === "ETF" ? (
             <div className="mt-2.5 text-[13.5px]" style={{ color: "var(--mut2)" }}>
               구성 종목 비중 정보는 준비 중이에요
+            </div>
+          ) : (
+            <div className="mt-2.5 text-[13.5px]" style={{ color: "var(--mut2)" }}>
+              ETF 종목이라면 이 자리에 <b>구성 종목 비중</b>이 표시돼요
             </div>
           )}
         </div>
