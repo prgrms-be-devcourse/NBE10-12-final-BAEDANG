@@ -84,7 +84,7 @@ class OrderControllerTest {
     @Test
     void 시장가_주문을_즉시_체결하고_금액을_문자열로_응답한다() throws Exception {
         PlaceOrderRequest request = new PlaceOrderRequest(
-                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
+                10L, "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request)).thenReturn(new OrderResponse(
                 1024L, "FILLED", "005930", MarketCountry.KR, "BUY", "10", "241500", "1",
                 "2415000", "242", "0", "2415242",
@@ -98,6 +98,7 @@ class OrderControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "accountId": 10,
                                   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
                                   "symbol": "005930",
                                   "marketCountry": "KR",
@@ -118,7 +119,7 @@ class OrderControllerTest {
     @Test
     void 시장가_주문_업무거절을_표준_에러응답으로_변환한다() throws Exception {
         PlaceOrderRequest request = new PlaceOrderRequest(
-                "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
+                10L, "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request))
                 .thenThrow(new BusinessException(
                         ErrorCode.INSUFFICIENT_CASH,
@@ -129,6 +130,7 @@ class OrderControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
+                                  "accountId": 10,
                                   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
                                   "symbol": "005930",
                                   "marketCountry": "KR",

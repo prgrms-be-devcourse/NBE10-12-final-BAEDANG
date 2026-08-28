@@ -453,7 +453,7 @@ Limit orders use the following two phases. Phase 1 commits `PENDING` with a rese
 2. **All timestamps are `TIMESTAMPTZ`** — with KR/US sessions and DST mixed, store UTC and convert only for display.
 3. **Buy transactions start by locking the account row** — begin with `SELECT … FROM account WHERE account_id = ? FOR UPDATE` to stop concurrent orders double-deducting the deposit. Locking per-stock can't prevent it.
 4. **The ledger is append-only** — offset mistakes with an opposite-sign entry, never edit.
-5. **Portfolio reset is not a delete** — close the account (`CLOSED`) and create a new one with `round_no + 1`. Prior ledgers/orders/holdings are preserved.
+5. **Portfolio reset is not a delete** — lock the requested current `account_id` with `FOR UPDATE`, close it, then create the `round_no + 1` account and its `INITIAL_DEPOSIT` ledger entry in one transaction. Closing, opening, and ledger insertion share one UTC timestamp; prior ledgers/orders/holdings are preserved. An immediate retry with the same closed account ID returns the previously created account instead of opening another round.
 6. **Five things are unrecoverable if omitted now** — `trade_order.quote_at`, `trade_order.exchange_rate`, `ledger_entry.exchange_rate`, `holding.avg_exchange_rate`, and the `daily_account_snapshot` batch. Columns can be added later, but **past values can't be restored**.
 
 > 🧪 **Good verification tests** — after every trade, check `buy: net_amount = gross_amount + fee` and `sell: net_amount = gross_amount − fee − tax` always hold, and the cumulative sum of `ledger_entry.amount` (fee included) equals `account.cash_balance`. The surest proof you understand the ledger.

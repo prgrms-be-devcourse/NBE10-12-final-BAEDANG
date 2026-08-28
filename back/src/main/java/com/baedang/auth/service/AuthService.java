@@ -19,6 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Locale;
 
 @Service
@@ -30,24 +33,27 @@ public class AuthService {
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
     private final BigDecimal initialCash;
+    private final Clock clock;
 
     /**
      * 생성자 주입.
      *
      * <p>필드에 {@code @Autowired} 를 붙이지 않는 이유 — 생성자로 받으면
      * <b>final 로 선언할 수 있어서</b> 주입 이후 바뀌지 않는 게 보장되고,
-     * 테스트에서 {@code new AuthService(mock, mock, mock, cash)} 로 바로 만들 수 있습니다.
+     * 테스트에서 {@code new AuthService(mock, mock, mock, cash, clock)} 로 바로 만들 수 있습니다.
      *
      * <p>생성자가 하나뿐이면 {@code @Autowired} 도 생략할 수 있습니다.
      */
     public AuthService(UserRepository userRepository,
                        AccountRepository accountRepository,
                        PasswordEncoder passwordEncoder,
-                       @Value("${trading.initial-cash}") BigDecimal initialCash) {
+                       @Value("${trading.initial-cash}") BigDecimal initialCash,
+                       Clock clock) {
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.passwordEncoder = passwordEncoder;
         this.initialCash = initialCash;
+        this.clock = clock;
     }
 
     /**
@@ -84,7 +90,8 @@ public class AuthService {
             throw new BusinessException(ErrorCode.EMAIL_DUPLICATED, email);
         }
 
-        accountRepository.save(Account.open(user.getUserId(), 1, initialCash));
+        OffsetDateTime openedAt = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        accountRepository.save(Account.open(user.getUserId(), 1, initialCash, openedAt));
 
         // TODO(거래 도메인): 초기 지급을 ledger_entry 에 INITIAL_DEPOSIT 으로 기록
         //   LedgerEntry.initialDeposit(accountId, initialCash, "모의투자금 지급", openedAt)

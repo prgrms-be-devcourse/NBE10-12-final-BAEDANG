@@ -61,7 +61,7 @@ public class MarketOrderService {
             throw new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", "request"));
         }
         MarketOrderCommand command = marketOrderPolicy.parseCommand(
-                request.clientOrderId(), request.symbol(), request.marketCountry(),
+                request.accountId(), request.clientOrderId(), request.symbol(), request.marketCountry(),
                 request.side(), request.quantity());
 
         Optional<MarketOrderResult> existing = transactionService.findExisting(userId, command);

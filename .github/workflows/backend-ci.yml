@@ -8,9 +8,6 @@ on:
       - '.github/workflows/backend-ci.yml'
   pull_request:
     branches: [ main, develop ]
-    paths:
-      - 'back/**'
-      - '.github/workflows/backend-ci.yml'
 
 jobs:
   test:

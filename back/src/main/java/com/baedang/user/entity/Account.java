@@ -69,19 +69,25 @@ public class Account {
     protected Account() {
     }
 
-    private Account(Long userId, Integer roundNo, BigDecimal initialCash) {
+    private Account(Long userId, Integer roundNo, BigDecimal initialCash, OffsetDateTime openedAt) {
+        validateOpen(userId, roundNo, initialCash, openedAt);
         this.userId = userId;
         this.roundNo = roundNo;
         this.initialCash = initialCash;
         this.cashBalance = initialCash;
         this.lockedCash = BigDecimal.ZERO;
         this.status = AccountStatus.ACTIVE;
-        this.openedAt = OffsetDateTime.now();
+        this.openedAt = openedAt;
     }
 
     /** 새 회차 계좌 개설. 예수금은 지급액에서 시작합니다. */
-    public static Account open(Long userId, int roundNo, BigDecimal initialCash) {
-        return new Account(userId, roundNo, initialCash);
+    public static Account open(
+            Long userId,
+            int roundNo,
+            BigDecimal initialCash,
+            OffsetDateTime openedAt
+    ) {
+        return new Account(userId, roundNo, initialCash, openedAt);
     }
 
     /** 주문가능금액. 저장하지 않고 매번 계산합니다. */
@@ -110,9 +116,28 @@ public class Account {
         }
     }
 
-    public void close() {
+    public void close(OffsetDateTime closedAt) {
+        if (closedAt == null) throw new IllegalArgumentException("계좌 종료 시각은 필수입니다");
+        if (status == AccountStatus.CLOSED) throw new IllegalStateException("이미 종료된 계좌입니다");
+        if (closedAt.isBefore(openedAt)) {
+            throw new IllegalArgumentException("계좌 종료 시각은 개설 시각보다 빠를 수 없습니다");
+        }
         this.status = AccountStatus.CLOSED;
-        this.closedAt = OffsetDateTime.now();
+        this.closedAt = closedAt;
+    }
+
+    private static void validateOpen(
+            Long userId,
+            int roundNo,
+            BigDecimal initialCash,
+            OffsetDateTime openedAt
+    ) {
+        if (userId == null) throw new IllegalArgumentException("사용자 ID는 필수입니다");
+        if (roundNo < 1) throw new IllegalArgumentException("계좌 회차는 1 이상이어야 합니다");
+        if (initialCash == null || initialCash.signum() <= 0) {
+            throw new IllegalArgumentException("초기 지급액은 0보다 커야 합니다");
+        }
+        if (openedAt == null) throw new IllegalArgumentException("계좌 개설 시각은 필수입니다");
     }
 
     public Long getAccountId() {

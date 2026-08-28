@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { useAuth } from "./AuthProvider";
@@ -8,7 +8,7 @@ import { useExchangeRate } from "./ExchangeRateProvider";
 import { getHolding, getMockChartPoints, AVAILABLE_CASH, type StockDetail } from "@/lib/mock-data";
 import { calculateOrderAmount } from "@/lib/order-amount";
 import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
-import { ApiError, placeOrder } from "@/lib/api";
+import { ApiError, getAccountSummary, placeOrder, type AccountSummary } from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
@@ -29,6 +29,7 @@ const CATEGORY_GUIDE: Record<string, string> = {
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
   const { rate: usdKrwRate } = useExchangeRate();
+  const [account, setAccount] = useState<AccountSummary | null>(null);
   const [candleUnit, setCandleUnit] = useState<"일봉" | "1분봉">("일봉");
   const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
   const [side, setSide] = useState<"매수" | "매도">("매수");
@@ -42,10 +43,26 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // null이면 "지금 이 주문 시도는 끝났다" — 다음 제출 때 완전히 새로 발급한다.
   const [clientOrderId, setClientOrderId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!isLoggedIn || !user) return;
+    let cancelled = false;
+    getAccountSummary(user.userId)
+      .then((acc) => {
+        if (!cancelled) setAccount(acc);
+      })
+      .catch(() => {
+        if (!cancelled) setAccount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, user]);
+
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
   const isUp = detail.changeAmount >= 0;
   const holding = getHolding(detail.symbol);
   const availableQuantity = holding?.quantity ?? 0;
+  const availableCash = account ? Number(account.cashBalance) : AVAILABLE_CASH;
 
   const chartPoints = useMemo(
     () => getMockChartPoints(detail.symbol + candleUnit + period),
@@ -72,7 +89,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     blockReason = "수량은 1주 이상의 정수로 입력해주세요";
   } else if (side === "매도" && quantity > availableQuantity) {
     blockReason = "보유 수량이 부족해요";
-  } else if (side === "매수" && amount.netAmount > AVAILABLE_CASH) {
+  } else if (side === "매수" && amount.netAmount > availableCash) {
     blockReason = "주문가능금액이 부족해요";
   }
 
@@ -83,14 +100,29 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       return;
     }
 
+    setSubmitting(true);
+    setOrderError(null);
+
+    // 계좌 정보가 아직 로드되지 않은 경우 최신 정보를 조회한다.
+    let currentAccount = account;
+    if (!currentAccount) {
+      try {
+        currentAccount = await getAccountSummary(user.userId);
+        setAccount(currentAccount);
+      } catch {
+        setOrderError("계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
+        setSubmitting(false);
+        return;
+      }
+    }
+
     // 이전 시도의 clientOrderId가 남아있으면(SAME_CLIENT_ORDER_ID 재시도) 그대로 쓰고,
     // 없으면(첫 시도이거나 직전에 NOT_RETRYABLE로 리셋됨) 새로 발급한다.
     const idToUse = clientOrderId ?? generateClientOrderId();
 
-    setSubmitting(true);
-    setOrderError(null);
     try {
       const response = await placeOrder(user.userId, {
+        accountId: currentAccount.accountId,
         clientOrderId: idToUse,
         symbol: detail.symbol,
         marketCountry: detail.marketCountry,
@@ -103,10 +135,18 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           `${formatNumber(response.netAmount)}원)`
       );
       setClientOrderId(null); // 성공했으니 다음 주문은 완전히 새로 시작한다.
+      // 체결 후 잔여 예수금 즉시 반영
+      setAccount((prev) =>
+        prev ? { ...prev, cashBalance: response.account.cashBalanceAfter } : null
+      );
     } catch (err) {
       if (err instanceof ApiError) {
         setOrderError(err.message);
         setClientOrderId(nextClientOrderId(err.retryPolicy, idToUse));
+        // 포트폴리오 초기화로 회차가 변경된 경우 계좌 정보 자동 갱신
+        if (err.code === "ACCOUNT_ROUND_CHANGED" || err.code === "ACCOUNT_NOT_FOUND") {
+          getAccountSummary(user.userId).then(setAccount).catch(() => {});
+        }
       } else {
         setOrderError("주문 처리 중 오류가 발생했어요.");
         setClientOrderId(idToUse); // 정책 정보가 없는 예상 밖 오류는 안전하게 같은 ID로 재시도 허용.

@@ -448,7 +448,7 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 2. **시각은 전부 `TIMESTAMPTZ`** — 국내장·미국장·서머타임이 섞이므로 DB 에는 UTC 로 저장하고 표시할 때만 변환합니다.
 3. **매수 트랜잭션은 계좌 행 잠금부터** — `SELECT … FROM account WHERE account_id = ? FOR UPDATE` 로 시작해야 동시 주문 시 예수금 이중 차감을 막습니다. 종목 단위로 잠그면 못 막습니다.
 4. **원장은 append-only** — 잘못 기록했으면 수정하지 말고 반대 부호 항목을 넣어 상쇄합니다.
-5. **포트폴리오 초기화는 삭제가 아니다** — 기존 계좌를 CLOSED 로 바꾸고 `round_no + 1` 인 새 계좌를 만듭니다. 기존 원장·체결·보유는 보존.
+5. **포트폴리오 초기화는 삭제가 아니다** — 요청한 현재 `account_id`를 `FOR UPDATE`로 잠그고 기존 계좌를 CLOSED 로 바꾼 뒤 `round_no + 1` 인 새 계좌와 `INITIAL_DEPOSIT` 원장을 한 트랜잭션으로 만듭니다. 종료·개설·원장에는 같은 UTC 시각을 사용하고 기존 원장·체결·보유는 보존합니다. 같은 종료 계좌 ID의 즉시 재요청은 직전 신규 계좌를 반환하여 회차를 중복 생성하지 않습니다.
 6. **지금 안 넣으면 복구 불가능한 것 다섯 가지** — `trade_order.quote_at`, `trade_order.exchange_rate`, `ledger_entry.exchange_rate`, `holding.avg_exchange_rate`, 그리고 `daily_account_snapshot` 배치입니다. 컬럼은 나중에 추가할 수 있지만 **과거 값은 복원할 수 없습니다.**
 
 > 🧪 **검증 테스트로 만들면 좋은 것** — 모든 거래 후 `매수 시 net_amount = gross_amount + fee`, `매도 시 net_amount = gross_amount − fee − tax` 가 항상 성립하는지, 그리고 `ledger_entry.amount`(수수료 포함) 의 누적 합이 `account.cash_balance` 와 일치하는지 확인하는 테스트를 두세요. 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.

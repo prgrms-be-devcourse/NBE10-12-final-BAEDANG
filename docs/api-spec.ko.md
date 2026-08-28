@@ -501,6 +501,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 **Request**
 ```json
 {
+  "accountId": 42,
   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
   "symbol": "005930",
   "marketCountry": "KR",
@@ -508,6 +509,8 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
   "quantity": "10"
 }
 ```
+`accountId`는 주문을 시작한 계좌 회차를 고정합니다. 주문 처리 중 포트폴리오가 초기화되어 해당 계좌가 `CLOSED`가 되면 새 ACTIVE 계좌로 주문을 넘기지 않고 `ACCOUNT_ROUND_CHANGED`로 거절합니다. 계좌 정보를 새로 조회한 뒤 사용자가 다시 주문할 때는 최신 `accountId`와 새로운 `clientOrderId`를 사용합니다. 이미 처리된 주문의 동일 요청 재시도는 계좌가 이후 종료되었더라도 최초 저장 결과를 반환합니다.
+
 `clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 계좌 안에서 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 시장 API 호출 없이 저장된 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
 
 실패 응답의 `data.retryPolicy`가 재시도 시 `clientOrderId` 처리 방법을 알려줍니다. `SAME_CLIENT_ORDER_ID`는 주문 행이 만들어지지 않은 실패이므로 같은 ID로 안전하게 재시도하고, `NEW_CLIENT_ORDER_ID`는 `REJECTED` 행이 최종 결과로 저장된 실패이므로 조건이 바뀐 뒤 새 ID를 발급합니다. `NOT_RETRYABLE`은 같은 ID의 요청 내용 충돌처럼 그대로 재전송해도 성공할 수 없는 요청입니다.
@@ -551,10 +554,10 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 **서버 처리 순서**
 ```
-① clientOrderId 조회 — 동일 요청 재시도면 저장된 결과 즉시 반환
+① accountId 소유권 확인 및 clientOrderId 조회 — 동일 요청 재시도면 종료된 회차에서도 저장된 결과 즉시 반환
 ② 종목 조회 후 정적 검증 — 거래 대상 → 거래정지 → 정리매매
 ③ 정적 검증 통과 시에만 장 운영 정보와 미국 주문 실행 환율 조회(국내는 환율 1), 외부 데이터 준비 완료 시 checkedAt 기록
-④ SELECT ... FROM account ... FOR UPDATE로 트랜잭션 시작
+④ 요청의 accountId와 userId로 정확한 계좌를 SELECT ... FOR UPDATE, CLOSED이면 새 회차로 넘기지 않고 거절
 ⑤ clientOrderId 재확인 — 락 대기 중 동일 주문이 확정됐으면 저장 결과 반환
 ⑥ 신규 주문만 시장 컨텍스트 만료 검사 후 시세 조회 및 통화 일치 검증, 매도 시 holding FOR UPDATE (락 순서: account → holding)
 ⑦ 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
@@ -587,6 +590,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 | `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
 | `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
 | `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
+| `ACCOUNT_ROUND_CHANGED` | 409 | `NOT_RETRYABLE` | 포트폴리오가 초기화됐어요. 계좌 정보를 새로고침한 후 다시 주문해주세요 |
 
 **`STALE_QUOTE`** 는 `trading.quote-max-staleness-seconds` 기준으로 `quote_at`이 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 외부 시장 데이터 준비 완료 후부터 계좌 락 획득까지의 컨텍스트 허용 시간은 별도 설정 `trading.execution-context-max-age-seconds`를 사용합니다.
 
@@ -698,6 +702,16 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ### `POST /accounts/me/reset` 🔒
 포트폴리오 초기화
 
+**Request**
+```json
+{
+  "accountId": 1
+}
+```
+
+`accountId`는 `GET /accounts/me`에서 받은 현재 활성 계좌 ID입니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지합니다. 같은 계좌 ID로 성공 요청을 다시 보내면 회차를 추가하지 않고 직전에 생성한 계좌를 그대로 반환합니다. 재시도 응답의 `cashBalance`도 현재 조회 잔액이 아니라 최초 초기화 직후의 `initialCash` 값입니다. 사용자가 새 회차를 다시 초기화하려면 새로 조회한 활성 `accountId`를 보냅니다.
+
+**Response · 200**
 ```json
 {
   "accountId": 2,
@@ -709,11 +723,14 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 **서버 처리**
 ```
-UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id = 현재;
+SELECT ... FROM account WHERE account_id = 요청값 AND user_id = 현재 사용자 FOR UPDATE;
+UPDATE account SET status='CLOSED', closed_at=:resetAt WHERE account_id = 요청값;
 INSERT INTO account (user_id, round_no, ...) VALUES (?, 이전+1, 50000000, 50000000);
-INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
+INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ...);
 ```
 **삭제가 아니라 새 회차 계좌 개설입니다.** 기존 원장·체결내역·보유종목은 그대로 보존되고, 조회 시 새 `account_id` 기준이라 화면에서는 자동으로 비워집니다. 나중에 **"지난 회차 성적"** 기능으로 확장할 수 있습니다. **프론트는 확인 모달을 반드시 띄우세요.**
+
+기존 계좌 종료, 신규 계좌 개설, 초기 지급 원장은 한 트랜잭션이며 같은 UTC `resetAt`을 사용합니다. 현재 시장가 주문과는 계좌 행 잠금으로 직렬화됩니다. 향후 지정가 주문의 동결액 또는 동결 수량이 남아 있으면 `ACCOUNT_HAS_PENDING_ORDERS`(409)로 초기화를 거절합니다. 요청 계좌보다 두 회차 이상 진행된 상태에서 오래된 ID를 다시 보내면 `ACCOUNT_RESET_CONFLICT`(409)를 반환합니다.
 
 ---
 
