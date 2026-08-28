@@ -127,13 +127,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   return (
     <div className="flex gap-6 max-md:flex-col">
       <div className="flex-[1.9]">
-        <div className="mb-3.5 text-[13px]" style={{ color: "var(--mut2)" }}>
+        <div className="mb-3.5 text-[14px]" style={{ color: "var(--mut2)" }}>
           <span className="cursor-pointer">주식 종목 랭킹</span> › {detail.name}
         </div>
 
         {detail.warning && (
           <div
-            className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[13.5px]"
+            className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[14.5px]"
             style={{ background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }}
           >
             ⚠ 이 종목은 {detail.warning}
@@ -141,24 +141,24 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         )}
 
         <div className="mb-1.5">
-          <div className="text-[19px] font-bold" style={{ color: "var(--ink)" }}>
+          <div className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>
             {detail.name} <Tag>{detail.symbol}</Tag> <Tag>{detail.market}</Tag>{" "}
             <span
-              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-medium"
               style={CATEGORY_BADGE_STYLE[detail.category]}
             >
               {detail.category}
             </span>
           </div>
-          <div className="mt-1.5 text-[29px] font-extrabold" style={{ color: "var(--ink)" }}>
+          <div className="mt-1.5 text-[30px] font-extrabold" style={{ color: "var(--ink)" }}>
             {priceLabel}{" "}
-            <span className="text-[15px] font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
+            <span className="text-[16px] font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
               {isUp ? "▲" : "▼"}{" "}
               {detail.currency === "USD" ? formatUsd(detail.changeAmount) : formatSigned(detail.changeAmount)} (
               {formatPercent(detail.changeRate)})
             </span>
           </div>
-          <div className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+          <div className="mt-1 text-[12.5px]" style={{ color: "var(--mut2)" }}>
             2026-08-25 12:36:59 기준 · 5초마다 갱신 · 조회는 장 시간과 무관하게 항상 가능
           </div>
         </div>
@@ -177,7 +177,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
               border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
             }}
-            buttonClassName="rounded-full px-4 py-1.5 text-[12.5px] font-bold"
+            buttonClassName="rounded-full px-4 py-1.5 text-[13.5px] font-bold"
             inactiveTextStyle={{ color: "var(--mut)" }}
           />
           {candleUnit === "일봉" && (
@@ -194,11 +194,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
                 border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
               }}
-              buttonClassName="rounded-full px-3.5 py-1.5 text-[12px] font-bold"
+              buttonClassName="rounded-full px-3.5 py-1.5 text-[13px] font-bold"
               inactiveTextStyle={{ color: "var(--mut)" }}
             />
           )}
-          <span className="ml-auto text-[11.5px]" style={{ color: "var(--mut2)" }}>
+          <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
             {candleUnit === "일봉" ? `일봉 · ${period} · 08/25 종가까지` : "1분봉 · 최근 200봉"}
           </span>
         </div>
@@ -210,30 +210,30 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         </div>
 
         <div className="mb-3.5 rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
-          <h4 className="mb-2.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>
+          <h4 className="mb-2.5 text-[16px] font-bold" style={{ color: "var(--ink)" }}>
             이 종목은 어떤 주식인가요?{" "}
             <span
-              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
+              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-medium"
               style={CATEGORY_BADGE_STYLE[detail.category]}
             >
               {detail.category}
             </span>
           </h4>
-          <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>
+          <p className="text-[14.5px] leading-relaxed" style={{ color: "var(--body)" }}>
             {CATEGORY_GUIDE[detail.category] ?? detail.description}
           </p>
           {detail.category === "ETF" && (
-            <div className="mt-2.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
+            <div className="mt-2.5 text-[13.5px]" style={{ color: "var(--mut2)" }}>
               구성 종목 비중 정보는 준비 중이에요
             </div>
           )}
         </div>
 
         <div className="rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
-          <h4 className="mb-2 text-[15px] font-bold" style={{ color: "var(--ink)" }}>
+          <h4 className="mb-2 text-[16px] font-bold" style={{ color: "var(--ink)" }}>
             종목 정보
           </h4>
-          <table className="w-full text-[13.5px]">
+          <table className="w-full text-[14.5px]">
             <tbody>
               <tr>
                 <td className="w-1/4 py-1" style={{ color: "var(--mut)" }}>상한가</td>
@@ -261,8 +261,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       {/* 거래 패널 */}
       <div className="min-w-[300px] flex-1 self-start md:sticky md:top-[70px]">
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
-          <div className="mb-1 text-[15px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
-          <div className="mb-3.5 text-[11.5px]" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
+          <div className="mb-1 text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
+          <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
 
           <PillTabs
             options={[
@@ -281,14 +281,14 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             trackStyle={{ background: "var(--fill)" }}
             pillColor={txPillColor}
             pillRadius="9px"
-            buttonClassName="rounded-[9px] py-2.5 text-[14px] font-bold"
+            buttonClassName="rounded-[9px] py-2.5 text-[15px] font-bold"
             inactiveTextStyle={{ color: "var(--mut2)" }}
           />
 
-          <label className="text-[11.5px]" style={{ color: "var(--mut2)" }}>주문 수량</label>
+          <label className="text-[12.5px]" style={{ color: "var(--mut2)" }}>주문 수량</label>
           <div className="my-1 flex items-center gap-1.5">
             <input
-              className="min-w-0 flex-1 rounded-xl px-3.5 py-2.5 text-[13.5px] outline-none"
+              className="min-w-0 flex-1 rounded-xl px-3.5 py-2.5 text-[14.5px] outline-none"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               inputMode="numeric"
               value={quantityInput}
@@ -298,43 +298,43 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 setOrderError(null);
               }}
             />
-            <span className="flex-none text-[11.5px]" style={{ color: "var(--mut2)" }}>주</span>
+            <span className="flex-none text-[12.5px]" style={{ color: "var(--mut2)" }}>주</span>
           </div>
-          <div className="mb-3.5 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+          <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
             정수만 입력 · 최소 1주
             {side === "매도" && ` · 보유 ${availableQuantity}주`}
           </div>
 
-          <div className="mb-3.5 flex justify-between text-[11.5px]" style={{ color: "var(--mut)" }}>
+          <div className="mb-3.5 flex justify-between text-[12.5px]" style={{ color: "var(--mut)" }}>
             <span>체결 예상 단가</span>
             <span>{priceLabel} (현재가)</span>
           </div>
 
           <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }}>
-            <div className="mb-1 flex justify-between text-[12.5px]">
+            <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>주문 금액</span>
               <b style={{ color: "var(--ink)" }}>{formatNumber(amount.grossAmount)}</b>
             </div>
-            <div className="mb-1 flex justify-between text-[12.5px]">
+            <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>수수료 0.01%</span>
               <span style={{ color: "var(--ink)" }}>{formatNumber(amount.fee)}</span>
             </div>
-            <div className="mb-1.5 flex justify-between text-[12.5px]">
+            <div className="mb-1.5 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>
                 세금{" "}
-                <span className="text-[11px]">
+                <span className="text-[12px]">
                   ({side === "매수" ? "매수는 없음" : detail.marketCountry === "KR" ? "증권거래세 0.2%" : "SEC Fee"})
                 </span>
               </span>
               <span style={{ color: "var(--ink)" }}>{formatNumber(amount.tax)}</span>
             </div>
-            <div className="flex justify-between pt-1.5 text-[13px]" style={{ borderTop: "1px solid var(--line)" }}>
+            <div className="flex justify-between pt-1.5 text-[14px]" style={{ borderTop: "1px solid var(--line)" }}>
               <b style={{ color: "var(--ink)" }}>{side === "매수" ? "총 차감액" : "총 입금액"}</b>
               <b style={{ color: "var(--ink)" }}>{formatNumber(amount.netAmount)}</b>
             </div>
           </div>
 
-          <div className="mb-3 flex justify-between text-[11.5px]" style={{ color: "var(--mut)" }}>
+          <div className="mb-3 flex justify-between text-[12.5px]" style={{ color: "var(--mut)" }}>
             <span>주문가능금액</span>
             <span>{formatNumber(AVAILABLE_CASH)}원</span>
           </div>
@@ -342,7 +342,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           {blockReason ? (
             <button
               disabled
-              className="w-full cursor-not-allowed rounded-xl py-3 text-[14px] font-bold"
+              className="w-full cursor-not-allowed rounded-xl py-3 text-[15px] font-bold"
               style={{ background: "var(--fill)", color: "var(--disabledText)" }}
             >
               {blockReason}
@@ -351,7 +351,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <button
               onClick={handleSubmit}
               disabled={submitting}
-              className="w-full rounded-xl py-3 text-[14px] font-bold text-white transition-[background] duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-xl py-3 text-[15px] font-bold text-white transition-[background] duration-200 disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--accent)" }}
               onMouseEnter={(e) => {
                 if (!submitting) e.currentTarget.style.background = txPillColor;
@@ -362,23 +362,23 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             </button>
           )}
           {!isLoggedIn && (
-            <div className="mt-1.5 text-center text-[11.5px]" style={{ color: "var(--mut2)" }}>
+            <div className="mt-1.5 text-center text-[12.5px]" style={{ color: "var(--mut2)" }}>
               비로그인 상태에서 누르면 회원가입으로 안내돼요
             </div>
           )}
           {orderError && (
             <div
-              className="mt-3 rounded-xl px-3.5 py-3 text-[12.5px]"
+              className="mt-3 rounded-xl px-3.5 py-3 text-[13.5px]"
               style={{ background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }}
             >
               {orderError}
               {clientOrderId && (
-                <div className="mt-1 text-[11px]" style={{ color: "var(--mut2)" }}>
+                <div className="mt-1 text-[12px]" style={{ color: "var(--mut2)" }}>
                   같은 주문으로 다시 시도하시려면 버튼을 다시 눌러주세요.
                 </div>
               )}
               {!clientOrderId && (
-                <div className="mt-1 text-[11px]" style={{ color: "var(--mut2)" }}>
+                <div className="mt-1 text-[12px]" style={{ color: "var(--mut2)" }}>
                   주문 내용을 확인한 뒤 다시 시도해주세요.
                 </div>
               )}
@@ -386,7 +386,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           )}
           {orderResult && (
             <div
-              className="mt-3 rounded-xl px-3.5 py-3 text-[12.5px]"
+              className="mt-3 rounded-xl px-3.5 py-3 text-[13.5px]"
               style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
             >
               {orderResult}
