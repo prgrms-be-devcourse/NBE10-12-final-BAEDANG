@@ -4,7 +4,7 @@
  * global.fetch를 vi.fn()으로 모킹합니다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { signUp, login, ApiError } from '../api';
+import { signUp, login, getAccountSummary, placeOrder, ApiError } from '../api';
 
 // ─── fetch 모킹 헬퍼 ───────────────────────────────────────────────────────
 function mockFetch(status: number, body: unknown) {
@@ -37,6 +37,56 @@ describe('login — 성공', () => {
     mockFetch(200, { userId: 2, email: 'b@c.com', nickname: 'user2' });
     const user = await login({ email: 'b@c.com', password: 'pw' });
     expect(user).toEqual({ userId: 2, email: 'b@c.com', nickname: 'user2' });
+  });
+});
+
+describe('getAccountSummary — 성공', () => {
+  it('200 → AccountSummary 반환 및 X-User-Id 헤더 전송', async () => {
+    const summaryData = {
+      accountId: 10,
+      roundNo: 1,
+      initialCash: '50000000',
+      cashBalance: '48000000',
+      stockValue: '2000000',
+      totalAsset: '50000000',
+      unrealizedPnl: '0',
+      asOf: '2026-08-28T00:00:00Z',
+    };
+    mockFetch(200, summaryData);
+    const summary = await getAccountSummary(1);
+    expect(summary).toEqual(summaryData);
+  });
+});
+
+describe('placeOrder — 성공 (accountId 포함)', () => {
+  it('201 → OrderResponse 반환 및 accountId 바디 전송', async () => {
+    const orderData = {
+      orderId: 100,
+      status: 'FILLED',
+      symbol: '005930',
+      marketCountry: 'KR' as const,
+      side: 'BUY',
+      quantity: '10',
+      executedPrice: '70000',
+      exchangeRate: '1',
+      grossAmount: '700000',
+      fee: '70',
+      tax: '0',
+      netAmount: '700070',
+      quoteAt: '2026-08-28T00:00:00Z',
+      orderedAt: '2026-08-28T00:00:01Z',
+      account: { cashBalanceAfter: '49299930' },
+    };
+    mockFetch(201, orderData);
+    const response = await placeOrder(1, {
+      accountId: 10,
+      clientOrderId: 'uuid-1234',
+      symbol: '005930',
+      marketCountry: 'KR',
+      side: 'BUY',
+      quantity: '10',
+    });
+    expect(response).toEqual(orderData);
   });
 });
 
@@ -88,3 +138,4 @@ describe('postJson — HTTP 에러 응답', () => {
     expect(err.message).toBe('요청을 처리하지 못했어요.');
   });
 });
+
