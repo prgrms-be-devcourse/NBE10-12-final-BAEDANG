@@ -323,7 +323,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           <label className="text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>주문 수량</label>
           <div className="mt-1 mb-3">
             <input
-              className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] outline-none"
+              className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               inputMode="numeric"
               value={quantityInput}
