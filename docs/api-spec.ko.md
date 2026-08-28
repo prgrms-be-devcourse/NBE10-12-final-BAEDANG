@@ -380,6 +380,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 | 파라미터 | 필수 | 값 |
 |---|---|---|
+| `marketCountry` | O | 심볼이 속한 시장 — `KR` · `US` |
 | `interval` | O | 봉 하나의 시간 단위 — `1m` · `5m` · `10m` · `1d` · `1w` |
 | `range` | O | 조회 기간 — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
 
@@ -387,7 +388,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 | interval | 허용 range | 봉 개수 | 데이터 출처 |
 |---|---|---|---|
-| `1m` | `1D` | 약 390 | 상위 100: 1분 주기 스케줄러 · 그 외 종목: 토스 `/candles?interval=1m` 온디맨드 |
+| `1m` | `1D` | 최근 200 | 상위 100: 1분 주기 스케줄러 · 그 외 종목: 토스 `/candles?interval=1m` 온디맨드 |
 | `5m` | `1D` · `1W` | 78 / 390 | 1분봉을 집계 |
 | `10m` | `1W` | 195 | 1분봉을 집계 |
 | `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
@@ -415,7 +416,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 }
 ```
 
-**마지막 봉은 현재가로 갱신해 내려줍니다.** 장중에는 오늘 봉이 확정되지 않았으므로 `daily_candle` 의 과거 봉 + `quote_snapshot.last_price` 로 만든 오늘 봉을 붙입니다. 그러면 프론트가 차트를 다시 안 받아도 **끝점이 살아 움직입니다.**
+MVP 일봉은 금융 데이터 정합성을 위해 확정되어 저장된 `daily_candle`만 반환합니다. `quote_snapshot.last_price`만으로는 당일 시가·고가·저가를 알 수 없으므로 임의의 오늘 OHLC를 만들지 않습니다. 현재가는 `GET /stocks/{symbol}`에서 별도로 표시합니다.
 **우리 API 에는 200봉 제한이 없습니다.** 토스의 `count` 상한 200 은 **수집할 때만** 해당합니다(일봉 200개 ≈ 10개월이라 1년치는 `before` 로 두 번 받습니다). `daily_candle` 에 쌓아두면 250봉을 그대로 내려주면 됩니다.
 
 | 에러 코드 | 상황 |
@@ -423,12 +424,12 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `INVALID_INTERVAL_RANGE` | 허용되지 않은 interval × range 조합 |
 | `STOCK_NOT_FOUND` | 존재하지 않는 심볼 |
 
-**1주차 범위는 `1d` 와 `1m` 둘입니다.** 일봉은 `daily_candle`(스케줄러가 마감 후 적재)에서 제공합니다. 랭킹 상위 100종목의 분봉은 `MARKET_DATA_CHART` 별도 5 TPS 그룹에서 20종목 단위로 순차 호출해 1분마다 수집합니다. 상위 100 밖 종목과 장외 상세 차트는 `minute_candle` 60초 캐시를 사용하는 온디맨드 방식입니다. 5m·10m·1w 집계는 2주차로 미룹니다.
+**MVP 범위는 `1d` 와 `1m` 둘입니다.** 지원 조합은 `1m+1D`, `1d+1M/6M/1Y`이며 나머지는 `INVALID_INTERVAL_RANGE`로 거절합니다. 일봉은 `daily_candle`(스케줄러가 마감 후 적재)에서 제공합니다. 랭킹 상위 100종목의 분봉은 `MARKET_DATA_CHART` 별도 5 TPS 그룹에서 20종목 단위로 순차 호출해 1분마다 수집합니다. 상위 100 밖 종목과 장외 상세 차트는 `minute_candle` 60초 캐시를 사용하는 온디맨드 방식입니다. 5m·10m·1w 집계는 2주차로 미룹니다.
 
 **분봉은 상위 100종목은 스케줄러로 수집하고, 그 외에는 온디맨드로 60초 캐싱합니다**
 ```
 // 1주차 분봉 처리 흐름
-GET /stocks/NVDA/candles?interval=1m&range=1D
+GET /stocks/NVDA/candles?marketCountry=US&interval=1m&range=1D
    ↓
 minute_candle 에 60초 이내 데이터가 있나?
    ├ 있다  → DB 에서 바로 반환                      토스 호출 없음

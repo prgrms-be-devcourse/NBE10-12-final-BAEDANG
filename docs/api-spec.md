@@ -379,6 +379,7 @@ Daily & minute chart
 
 | Param | Req | Value |
 |---|---|---|
+| `marketCountry` | O | symbol market — `KR` · `US` |
 | `interval` | O | time unit per candle — `1m` · `5m` · `10m` · `1d` · `1w` |
 | `range` | O | period — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
 
@@ -386,7 +387,7 @@ Daily & minute chart
 
 | interval | allowed ranges | # candles | data source |
 |---|---|---|---|
-| `1m` | `1D` | ~390 | top 100: 1-minute scheduler · other stocks: on-demand Toss `/candles?interval=1m` |
+| `1m` | `1D` | latest 200 | top 100: 1-minute scheduler · other stocks: on-demand Toss `/candles?interval=1m` |
 | `5m` | `1D` · `1W` | 78 / 390 | aggregate 1-min |
 | `10m` | `1W` | 195 | aggregate 1-min |
 | `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
@@ -414,7 +415,7 @@ Daily & minute chart
 }
 ```
 
-**The last candle is refreshed to the current price.** Mid-session today's candle isn't finalized, so append a today-candle built from past `daily_candle` rows + `quote_snapshot.last_price` — the endpoint stays alive without the frontend re-fetching.
+For financial-data integrity, the MVP daily chart returns only finalized rows stored in `daily_candle`. A current price alone cannot supply today's open, high, and low, so the API does not fabricate today's OHLC. Display the current price separately from `GET /stocks/{symbol}`.
 **Our API has no 200-candle cap.** Toss's `count` ceiling of 200 applies only at collection time (200 daily ≈ 10 months, so a 1-year chart is fetched in two `before` calls). Once stored in `daily_candle`, serve all 250 candles directly.
 
 | Error code | When |
@@ -422,12 +423,12 @@ Daily & minute chart
 | `INVALID_INTERVAL_RANGE` | disallowed interval × range combination |
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
 
-**Week-1 scope is `1d` and `1m` only.** Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 5 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
+**MVP scope is `1d` and `1m` only.** Supported combinations are `1m+1D` and `1d+1M/6M/1Y`; all others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 5 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
 
 **Minute candles: scheduled for the ranked universe + on-demand cache elsewhere**
 ```
 // week-1 minute-candle flow
-GET /stocks/NVDA/candles?interval=1m&range=1D
+GET /stocks/NVDA/candles?marketCountry=US&interval=1m&range=1D
    ↓
 is there data within 60s in minute_candle?
    ├ yes → return from the DB directly                  no Toss call
