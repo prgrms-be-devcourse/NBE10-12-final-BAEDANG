@@ -126,8 +126,16 @@ export default function MainPage() {
             <TiltCard
               key={s.step}
               className="flex-1 rounded-[20px] p-6.5 text-center"
-              // 그림자는 넣지 않습니다 (design_handoff README)
-              style={{ background: "var(--card)" }}
+              // 그림자는 넣지 않습니다 (design_handoff README). 배경은 좌상단에서
+              // 은은하게 번지는 블루 계열 radial gradient — 라이트는 하늘색이
+              // 흰색(카드 배경)으로, 다크는 짙은 남색이 카드 배경(#1a1a1a)으로
+              // 자연스럽게 잦아든다.
+              style={{
+                background:
+                  theme === "dark"
+                    ? "radial-gradient(140% 140% at 15% 15%, #2d4f7c 0%, #16283f 45%, #1a1a1a 78%)"
+                    : "radial-gradient(140% 140% at 15% 15%, #8ec5f7 0%, #cfe6fb 45%, #ffffff 78%)",
+              }}
             >
               <span
                 className="inline-block rounded-lg px-2.5 py-1 text-[12px] font-extrabold"
