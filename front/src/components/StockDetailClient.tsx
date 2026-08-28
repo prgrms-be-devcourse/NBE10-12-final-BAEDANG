@@ -312,11 +312,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               setClientOrderId(null);
               setOrderError(null);
             }}
-            trackClassName="mb-4 rounded-xl p-1"
+            trackClassName="mb-4 w-full rounded-xl p-1"
             trackStyle={{ background: "var(--fill)" }}
             pillColor={txPillColor}
             pillRadius="9px"
-            buttonClassName="rounded-[9px] py-2.5 text-[15px] font-bold"
+            buttonClassName="rounded-[9px] py-2 text-[15px] font-bold"
             inactiveTextStyle={{ color: "var(--mut2)" }}
           />
 
