@@ -297,7 +297,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       >
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
           <div className="mb-1 text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
-          <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
+          <div className="mb-3.5 text-[13.5px]" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
 
           <PillTabs
             options={[
@@ -320,8 +320,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             inactiveTextStyle={{ color: "var(--mut2)" }}
           />
 
-          <label className="text-[12.5px]" style={{ color: "var(--mut2)" }}>주문 수량</label>
-          <div className="my-1">
+          <label className="text-[13.5px]" style={{ color: "var(--mut2)" }}>주문 수량</label>
+          <div className="mt-1 mb-3">
             <input
               className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] outline-none"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
@@ -340,7 +340,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             </div>
           )}
 
-          <div className="mb-3.5 flex justify-between text-[12.5px]" style={{ color: "var(--mut)" }}>
+          <div className="mb-3.5 flex justify-between text-[13.5px]" style={{ color: "var(--mut)" }}>
             <span>체결 예상 단가</span>
             <span><b>{priceLabel}</b> (현재가)</span>
           </div>
@@ -369,7 +369,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             </div>
           </div>
 
-          <div className="mb-3 flex justify-between text-[12.5px]" style={{ color: "var(--mut)" }}>
+          <div className="mb-3 flex justify-between text-[13.5px]" style={{ color: "var(--mut)" }}>
             <span>주문가능금액</span>
             <span>{formatNumber(AVAILABLE_CASH)}원</span>
           </div>
