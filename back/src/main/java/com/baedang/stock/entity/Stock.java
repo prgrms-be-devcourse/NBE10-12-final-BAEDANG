@@ -167,16 +167,29 @@ public class Stock extends BaseEntity {
     }
 
     /** 매주 월요일 07:00 마스터 갱신. 선택 정보는 여기서 덮어씁니다. */
-    public void updateMasterInfo(String englishName, String isinCode, StockCategory category,
-                                 BigDecimal leverageFactor, Boolean isCommonShare,
-                                 BigDecimal sharesOutstanding, LocalDate listDate) {
-        this.englishName = englishName;
+    public void updateMasterInfo(
+            MarketCountry marketCountry, String market,
+            String name, String englishName,
+            String isinCode,
+            String currency,
+            String securityType,
+            BigDecimal leverageFactor,
+            Boolean isCommonShare,
+            BigDecimal sharesOutstanding,
+            LocalDate listDate, LocalDate delistDate,
+            ListingStatus listingStatus
+    ) {
+        this.marketCountry = marketCountry; this.market = market;
+        this.name = name; this.englishName = englishName;
         this.isinCode = isinCode;
-        if (category != null) this.stockCategory = category;
+        this.currency = currency;
+        this.securityType = securityType;
         this.leverageFactor = leverageFactor;
         this.isCommonShare = isCommonShare;
         this.sharesOutstanding = sharesOutstanding;
         this.listDate = listDate;
+        this.delistDate = delistDate;
+        this.listingStatus = listingStatus;
     }
 
     /** 매수 유의사항 배치. 주문을 막지는 않고 화면에 배너를 띄우는 용도도 있습니다. */
