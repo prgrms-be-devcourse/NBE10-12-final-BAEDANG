@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 export type PillOption = {
   value: string;
@@ -22,11 +22,6 @@ type Props = {
   /** 탭 전환 시 재생할 스쿼시 keyframe. 헤더 네비만 가로로만 출렁이는 `liquid`를 쓰고,
    * 나머지(테마 토글·국내해외·매수매도 등)는 세로+가로로 눌리는 `squash`를 쓴다. */
   squashAnimation?: "squash" | "liquid";
-  /** 트랙의 좌우/상하 padding(px). trackClassName의 p-*와 반드시 같은 값이어야 필박스가
-   * 버튼과 정확히 겹친다. */
-  padPx?: number;
-  /** 버튼 사이 gap(px). trackClassName의 gap-*와 반드시 같은 값이어야 한다. */
-  gapPx?: number;
   buttonClassName?: string;
   activeTextClassName?: string;
   inactiveTextClassName?: string;
@@ -37,8 +32,16 @@ type Props = {
 /**
  * 토스 스타일 디자인의 "슬라이딩 필박스" 세그먼트 탭. 전 화면의 탭 전환(헤더 네비,
  * 테마 토글, 국내/해외, 일봉/1분봉, 기간, 매수/매도, 가이드/위키, 보유/체결)이
- * 전부 이 컴포넌트 하나로 구현된다 — design_handoff의 `segThumbN` 공식을 그대로 따른다:
- * `left: calc(index * (100/count)% + 3px)`, `width: calc((100/count)% - 4px)`.
+ * 전부 이 컴포넌트 하나로 구현된다.
+ *
+ * 필박스의 위치·너비는 "트랙을 버튼 개수로 등분한다"는 계산식이 아니라, 활성 버튼의
+ * 실제 DOM 위치(offsetLeft/offsetWidth)를 측정해서 그대로 적용한다. 예전에는 퍼센트
+ * 계산식(padding·gap을 반영한 등분)을 썼는데, 이는 "모든 버튼의 폭이 같다"는 가정
+ * 위에서만 맞는다 — 헤더 네비처럼 트랙 폭이 고정이고 버튼이 flex-1로 균등 분할되는
+ * 경우엔 문제없지만, 종목 상세의 일봉/1분봉·기간(1개월/6개월/1년) 탭처럼 트랙이
+ * `w-fit`이고 버튼마다 글자 길이가 달라 폭이 제각각인 경우엔 등분 계산과 실제 버튼
+ * 폭이 어긋나 필박스 안에서 문구가 한쪽으로 쏠려 보이는 원인이 됐다. DOM을 직접
+ * 측정하면 버튼 폭이 균등하든 제각각이든 항상 정확히 겹친다.
  */
 export function PillTabs({
   options,
@@ -54,13 +57,34 @@ export function PillTabs({
   activeTextStyle,
   inactiveTextStyle = { color: "var(--mut)" },
   squashAnimation = "squash",
-  padPx = 3,
-  gapPx = 2,
 }: Props) {
   const activeIndex = Math.max(0, options.findIndex((o) => o.value === value));
-  const count = options.length;
   const [squashing, setSquashing] = useState(false);
   const squashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [pillRect, setPillRect] = useState<{ left: number; width: number } | null>(null);
+
+  function measure() {
+    const btn = buttonRefs.current[activeIndex];
+    if (btn) setPillRect({ left: btn.offsetLeft, width: btn.offsetWidth });
+  }
+
+  // 값이 바뀌거나(activeIndex) 옵션 개수가 바뀌면 다시 측정한다. useLayoutEffect라
+  // 브라우저가 화면을 그리기 전에 동기적으로 값을 세팅해 필박스가 잘못된 위치에
+  // 잠깐 보이는 깜빡임이 없다.
+  useLayoutEffect(measure, [activeIndex, options.length]);
+
+  // 트랙 크기 자체가 바뀌는 경우(창 크기 변경, 반응형 줄바꿈, 폰트 로딩 등)에도
+  // 다시 측정해서 필박스가 계속 버튼과 겹치게 한다.
+  useEffect(() => {
+    const track = trackRef.current;
+    if (!track || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(track);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndex]);
 
   // 스쿼시는 "값이 바뀌었을 때" 반응하는 effect가 아니라, 실제 클릭 핸들러 안에서만
   // 직접 트리거한다. 이전에는 useEffect(() => ..., [value])에 useRef 플래그로
@@ -79,21 +103,14 @@ export function PillTabs({
 
   const resolvedPillColor = typeof pillColor === "function" ? pillColor(value) : pillColor;
 
-  // flex-1 버튼 사이에 gap이 있으면 "트랙을 count 등분한 퍼센트"와 "버튼이 실제로 차지하는
-  // 폭"이 달라진다. 이 차이를 무시하고 단순 퍼센트로 필박스를 계산하면 gap이 누적되면서
-  // 인덱스가 뒤로 갈수록(오른쪽 탭일수록) 필박스가 실제 버튼 위치에서 점점 벗어난다.
-  // padding·gap을 그대로 계산식에 반영해 항상 버튼과 정확히 겹치도록 한다.
-  const buttonWidthExpr = `((100% - ${2 * padPx}px - ${(count - 1) * gapPx}px) / ${count})`;
-  const leftExpr = `calc(${padPx}px + ${activeIndex} * (${buttonWidthExpr} + ${gapPx}px))`;
-  const widthExpr = `calc(${buttonWidthExpr})`;
-
   return (
-    <div className={`relative flex overflow-hidden ${trackClassName}`} style={trackStyle}>
+    <div ref={trackRef} className={`relative flex overflow-hidden ${trackClassName}`} style={trackStyle}>
       <div
         className="absolute top-[3px] bottom-[3px]"
         style={{
-          left: leftExpr,
-          width: widthExpr,
+          left: pillRect ? `${pillRect.left}px` : 0,
+          width: pillRect ? `${pillRect.width}px` : 0,
+          opacity: pillRect ? 1 : 0,
           borderRadius: pillRadius,
           background: resolvedPillColor,
           transition: "left .35s cubic-bezier(.4,0,.2,1), background .25s",
@@ -102,11 +119,14 @@ export function PillTabs({
             : undefined,
         }}
       />
-      {options.map((opt) => {
+      {options.map((opt, i) => {
         const active = opt.value === value;
         return (
           <button
             key={opt.value}
+            ref={(el) => {
+              buttonRefs.current[i] = el;
+            }}
             type="button"
             onClick={() => handleSelect(opt.value)}
             className={`relative z-[1] flex-1 cursor-pointer text-center whitespace-nowrap ${
