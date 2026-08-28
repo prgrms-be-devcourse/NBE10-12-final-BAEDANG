@@ -3,8 +3,6 @@ package com.baedang.stock.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.port.MarketSessionProvider;
-import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
@@ -24,7 +22,6 @@ import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -48,10 +45,7 @@ public class RankingServiceTest {
     private QuoteSnapshotRepository quoteSnapshotRepository;
 
     @Mock
-    private MarketSessionProvider marketSessionProvider;
-
-    @Mock
-    private Clock clock;
+    private QuoteRealtimePolicy quoteRealtimePolicy;
 
     @InjectMocks
     private RankingService rankingService;
@@ -85,10 +79,7 @@ public class RankingServiceTest {
         when(quoteSnapshot.changeRate()).thenReturn(new BigDecimal("0.023069"));
         when(quoteSnapshot.getQuoteAt()).thenReturn(OffsetDateTime.parse("2026-08-27T12:00:00+09:00"));
 
-        when(clock.instant()).thenReturn(NOW);
-        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(
-                new MarketSessionStatus(true, Instant.parse("2026-08-27T06:30:00Z"))
-        );
+        when(quoteRealtimePolicy.isRealtime(MarketCountry.KR, quoteSnapshot)).thenReturn(true);
 
         RankingResponse response = rankingService.getRankings("KR", 20, null);
 
@@ -209,13 +200,7 @@ public class RankingServiceTest {
 
         when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
 
-        when(clock.instant()).thenReturn(NOW);
-
-        MarketSessionStatus currentSession =
-                new MarketSessionStatus(true, Instant.parse("2026-08-27T06:30:00Z"));
-
-        when(marketSessionProvider.currentSession(MarketCountry.KR,NOW)).thenReturn(currentSession);
-        when(marketSessionProvider.currentSession(MarketCountry.KR,quoteAt)).thenReturn(currentSession);
+        when(quoteRealtimePolicy.isRealtime(MarketCountry.KR, quote)).thenReturn(true);
 
         RankingResponse response = rankingService.getRankings("KR", 20, null);
         assertThat(response.items().get(0).realtime()).isTrue();
@@ -243,15 +228,6 @@ public class RankingServiceTest {
 
         when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
 
-        when(clock.instant()).thenReturn(NOW);
-
-        when(marketSessionProvider.currentSession(MarketCountry.KR,NOW)).thenReturn(
-                new MarketSessionStatus(true, Instant.parse("2026-08-27T06:30:00Z"))
-        );
-
-        when(marketSessionProvider.currentSession(MarketCountry.KR,quoteAt)).thenReturn(
-                new MarketSessionStatus(true, Instant.parse("2026-08-26T06:30:00Z"))
-        );
 
         RankingResponse response = rankingService.getRankings("KR", 20, null);
         assertThat(response.items().get(0).realtime()).isFalse();
@@ -279,7 +255,6 @@ public class RankingServiceTest {
 
         when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
 
-        when(clock.instant()).thenReturn(NOW);
 
         RankingResponse response = rankingService.getRankings("KR", 20, null);
         assertThat(response.items().get(0).realtime()).isFalse();

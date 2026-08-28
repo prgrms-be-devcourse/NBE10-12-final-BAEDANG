@@ -3,8 +3,6 @@ package com.baedang.stock.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.port.MarketSessionProvider;
-import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
@@ -12,19 +10,15 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.time.Instant;
 import java.util.*;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
 public class RankingService {
 
     private static final int DEFAULT_SIZE = 20;
@@ -33,19 +27,16 @@ public class RankingService {
 
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
-    private final MarketSessionProvider marketSessionProvider;
-    private final Clock clock;
+    private final QuoteRealtimePolicy quoteRealtimePolicy;
 
     public RankingService(
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
-            MarketSessionProvider marketSessionProvider,
-            Clock clock
+            QuoteRealtimePolicy quoteRealtimePolicy
     ) {
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
-        this.marketSessionProvider = marketSessionProvider;
-        this.clock = clock;
+        this.quoteRealtimePolicy = quoteRealtimePolicy;
     }
 
     public RankingResponse getRankings(
@@ -131,7 +122,7 @@ public class RankingService {
         BigDecimal changeAmount = calculateChangeAmount(lastPrice, prevClose);
         BigDecimal changeRate = quote == null ? null : quote.changeRate();
 
-        boolean realtime = isRealtime(stock, quote);
+        boolean realtime = quoteRealtimePolicy.isRealtime(stock.getMarketCountry(), quote);
 
         return new RankingResponse.Item(
                 stock.getRankNo() == null ? 0 : stock.getRankNo(),
@@ -155,23 +146,6 @@ public class RankingService {
     private BigDecimal calculateChangeAmount(BigDecimal lastPrice, BigDecimal prevClose) {
         if (lastPrice == null || prevClose == null) return null;
         return lastPrice.subtract(prevClose);
-    }
-
-    private boolean isRealtime(Stock stock, QuoteSnapshot quote) {
-        if (quote == null || quote.getQuoteAt() == null) return false;
-
-        Instant now = Instant.now(clock);
-        Instant quoteAt = quote.getQuoteAt().toInstant();
-
-        if (quoteAt.isAfter(now)) return false;
-
-        MarketSessionStatus currentSession = marketSessionProvider.currentSession(stock.getMarketCountry(), now);
-
-        if(!currentSession.open()) return false;
-
-        MarketSessionStatus quoteSession =  marketSessionProvider.currentSession(stock.getMarketCountry(), quoteAt);
-        
-        return quoteSession.open() && currentSession.validUntil().equals(quoteSession.validUntil());
     }
 
     private MarketCountry parseMarket(String market) {

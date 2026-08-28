@@ -310,8 +310,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 |---|---|
 | `INVALID_QUERY` | 검색어 2자 미만 |
 
-### `GET /stocks/{symbol}`
+### `GET /stocks/{symbol}?marketCountry={KR|US}`
 종목 상세 — 전 종목 대상
+
+`marketCountry`는 필수입니다. 종목은 `(UPPER(symbol), market_country)` 조합으로 식별하므로 동일한 심볼의 국내·미국 종목을 구분합니다.
 
 시세를 어디서 가져올지는 **"그 종목의 시장이 열려 있는가"** 로 갈립니다. 보는 사람의 시각이 아니라 **종목이 속한 시장 기준**입니다 — 한국 낮에 엔비디아를 열면 미국장이 닫혀 있으므로 전일 종가가 나갑니다.
 
@@ -368,12 +370,14 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `NOT_IN_UNIVERSE` | 이 종목은 아직 거래를 지원하지 않아요 |
 | `SUSPENDED` | 거래정지 종목 |
 | `LIQUIDATION` | 정리매매 종목 |
+| `QUOTE_NOT_FOUND` | 아직 적재된 시세가 없음 |
 
-`quote_snapshot` 이 전 종목을 담고 있어서, **상위 100 여부와 무관하게 이 엔드포인트 하나로 모든 종목의 상세가 응답**됩니다. 차이는 `realtime` 과 `tradable` 두 플래그뿐이라 **프론트가 분기를 짤 필요가 없습니다.**
+`quote_snapshot` 적재는 별도 시세 적재 작업이 담당합니다. 아직 시세가 없는 경우에도 종목 메타데이터와 null 가격 필드를 반환하며 `realtime: false`, `tradable: false`, `tradableReason: "QUOTE_NOT_FOUND"`로 표시합니다.
 
 | 에러 코드 | 상황 |
 |---|---|
 | `STOCK_NOT_FOUND` | 존재하지 않는 심볼 |
+| `INVALID_INPUT` | `marketCountry` 누락 또는 KR/US 이외의 값 |
 
 ### `GET /stocks/{symbol}/candles`
 일봉 · 분봉 차트
