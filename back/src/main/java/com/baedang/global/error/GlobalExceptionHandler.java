@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -46,8 +47,12 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, fields));
     }
 
-    /** 필수 헤더 누락과 읽을 수 없는 JSON은 서버 장애가 아니라 잘못된 요청입니다. */
-    @ExceptionHandler({MissingRequestHeaderException.class, HttpMessageNotReadableException.class})
+    /** 필수 헤더/파라미터 누락과 읽을 수 없는 JSON은 서버 장애가 아니라 잘못된 요청입니다. */
+    @ExceptionHandler({
+            MissingRequestHeaderException.class,
+            MissingServletRequestParameterException.class,
+            HttpMessageNotReadableException.class
+    })
     public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception e) {
         log.warn("[INVALID_INPUT] {}", e.getMessage());
         return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())

@@ -39,7 +39,7 @@ public class StockController {
     @GetMapping("/{symbol}")
     public ResponseEntity<StockDetailResponse> detail(
             @PathVariable String symbol,
-            @RequestParam(required = false) String marketCountry
+            @RequestParam String marketCountry
     ) {
         return ResponseEntity.ok(stockDetailService.getDetail(symbol, marketCountry));
     }

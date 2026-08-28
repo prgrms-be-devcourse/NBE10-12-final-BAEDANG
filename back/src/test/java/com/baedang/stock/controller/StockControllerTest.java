@@ -222,12 +222,26 @@ public class StockControllerTest {
     }
 
     @Test
-    @DisplayName("종목 상세 API의 시장 국가가 누락되면 400을 반환한다")
+    @DisplayName("종목 상세 API의 시장 국가가 누락되면 400 INVALID_INPUT을 반환한다")
     void detailRequiresMarketCountry() throws Exception {
-        when(stockDetailService.getDetail("005930", null))
-                .thenThrow(new BusinessException(ErrorCode.INVALID_INPUT));
-
         mockMvc.perform(get("/api/stocks/005930"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("종목 랭킹 API의 market 파라미터가 누락되면 400 INVALID_INPUT을 반환한다")
+    void rankingsRequiresMarket() throws Exception {
+        mockMvc.perform(get("/api/stocks/rankings"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("종목 검색 API의 q 파라미터가 누락되면 400 INVALID_INPUT을 반환한다")
+    void searchRequiresQuery() throws Exception {
+        mockMvc.perform(get("/api/stocks/search"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }
 }
