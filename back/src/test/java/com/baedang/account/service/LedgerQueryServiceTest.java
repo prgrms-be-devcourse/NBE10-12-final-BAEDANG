@@ -42,13 +42,20 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class LedgerQueryServiceTest {
 
-    @Mock AccountRepository accountRepository;
-    @Mock LedgerEntryRepository ledgerEntryRepository;
-    @Mock TradeOrderRepository tradeOrderRepository;
-    @Mock StockRepository stockRepository;
-    @Mock Account account;
+    @Mock
+    AccountRepository accountRepository;
+    @Mock
+    LedgerEntryRepository ledgerEntryRepository;
+    @Mock
+    TradeOrderRepository tradeOrderRepository;
+    @Mock
+    StockRepository stockRepository;
+    @Mock
+    Account account;
 
-    /** occurredAt 을 단언하지 않는 테스트용 고정 시각 — now() 를 쓰지 않아 결정적으로 유지한다. */
+    /**
+     * occurredAt 을 단언하지 않는 테스트용 고정 시각 — now() 를 쓰지 않아 결정적으로 유지한다.
+     */
     private static final OffsetDateTime AT = OffsetDateTime.parse("2026-08-10T00:00:00Z");
 
     private LedgerQueryService service() {
@@ -189,7 +196,7 @@ class LedgerQueryServiceTest {
     }
 
     private Stock stock(Long stockId, String symbol, String name) {
-        Stock stock = Stock.create(symbol, MarketCountry.KR, "KOSPI", name, "KRW", "STOCK");
+        Stock stock = Stock.create(symbol, MarketCountry.KR, "KOSPI", name, null, "KRW", "STOCK", true);
         ReflectionTestUtils.setField(stock, "stockId", stockId);
         return stock;
     }
