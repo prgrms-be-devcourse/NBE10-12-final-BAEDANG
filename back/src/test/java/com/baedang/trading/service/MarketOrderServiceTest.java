@@ -59,7 +59,7 @@ class MarketOrderServiceTest {
                 request.side(), request.quantity()))
                 .thenReturn(command);
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
-        Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", "KRW", "STOCK");
+        Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
                 .thenReturn(Optional.of(stock));
         when(marketSessionProvider.currentSession(eq(MarketCountry.KR), any()))

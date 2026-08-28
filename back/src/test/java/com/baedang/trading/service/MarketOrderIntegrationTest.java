@@ -734,7 +734,7 @@ class MarketOrderIntegrationTest {
                 suffix + "@example.com", "password-hash", "user-" + suffix.substring(0, 8)));
         Account account = accountRepository.save(Account.open(
                 user.getUserId(), 1, initialCash, OffsetDateTime.now(ZoneOffset.UTC)));
-        Stock stock = Stock.create(symbol, marketCountry, market, "테스트 종목", currency, "STOCK");
+        Stock stock = Stock.create(symbol, marketCountry, market, "테스트 종목", null, currency, "STOCK", true);
         stock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(stock);
         quoteSnapshotRepository.save(new QuoteSnapshot(
