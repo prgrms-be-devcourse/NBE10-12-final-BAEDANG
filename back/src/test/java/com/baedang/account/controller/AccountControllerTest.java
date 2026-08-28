@@ -2,7 +2,9 @@ package com.baedang.account.controller;
 
 import com.baedang.account.dto.AccountSummaryResponse;
 import com.baedang.account.dto.HoldingsResponse;
+import com.baedang.account.dto.LedgerResponse;
 import com.baedang.account.service.AccountService;
+import com.baedang.account.service.LedgerQueryService;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import org.junit.jupiter.api.Test;
@@ -25,6 +27,7 @@ class AccountControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean AccountService accountService;
+    @MockitoBean LedgerQueryService ledgerQueryService;
 
     @Test
     void 계좌_요약을_조회하면_원화_금액을_문자열로_응답한다() throws Exception {
@@ -89,6 +92,41 @@ class AccountControllerTest {
                 .andExpect(status().isOk());
 
         verify(accountService).getHoldings(1L);
+    }
+
+    @Test
+    void 체결_내역을_조회하면_커서와_항목을_응답한다() throws Exception {
+        when(ledgerQueryService.getLedger(7L, null, null, null)).thenReturn(sampleLedger());
+
+        mockMvc.perform(get("/api/accounts/me/ledger").header("X-User-Id", "7"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].entryId").value(3041))
+                .andExpect(jsonPath("$.items[0].entryType").value("BUY"))
+                .andExpect(jsonPath("$.items[0].amount").value("-2415242"))
+                .andExpect(jsonPath("$.items[0].orderId").value(1024))
+                .andExpect(jsonPath("$.items[0].symbol").value("005930"))
+                .andExpect(jsonPath("$.hasNext").value(true))
+                .andExpect(jsonPath("$.nextCursor").value("eyJlbnRyeUlkIjozMDQwfQ"));
+    }
+
+    @Test
+    void 체결_내역_파라미터를_서비스로_그대로_전달한다() throws Exception {
+        when(ledgerQueryService.getLedger(1L, "eyJlbnRyeUlkIjozMDQwfQ", 10, "BUY")).thenReturn(sampleLedger());
+
+        mockMvc.perform(get("/api/accounts/me/ledger")
+                        .param("cursor", "eyJlbnRyeUlkIjozMDQwfQ")
+                        .param("size", "10")
+                        .param("entryType", "BUY"))
+                .andExpect(status().isOk());
+
+        verify(ledgerQueryService).getLedger(1L, "eyJlbnRyeUlkIjozMDQwfQ", 10, "BUY");
+    }
+
+    private LedgerResponse sampleLedger() {
+        LedgerResponse.Item item = new LedgerResponse.Item(
+                3041L, "BUY", "-2415242", "47584758", "1", "삼성전자 10주 @ 241,500 (수수료 포함)",
+                1024L, "005930", "삼성전자", OffsetDateTime.parse("2026-08-11T03:37:02Z"));
+        return new LedgerResponse(List.of(item), "eyJlbnRyeUlkIjozMDQwfQ", true);
     }
 
     private AccountSummaryResponse sampleSummary() {
