@@ -46,29 +46,29 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // null이면 "지금 이 주문 시도는 끝났다" — 다음 제출 때 완전히 새로 발급한다.
   const [clientOrderId, setClientOrderId] = useState<string | null>(null);
 
-  // 투자경고 배너("이 종목은 ... 매수 전 확인하세요")가 있으면 왼쪽 컬럼이 그만큼
-  // 아래로 밀리는데, 오른쪽 거래하기 패널은 그대로 두면 배너가 없을 때와 같은
-  // 높이에서 시작해 왼쪽 종목명·현재가 영역보다 위쪽에 떠 보인다. 배너의 실제
-  // 렌더 높이(+ 배너 아래 여백)를 측정해 거래하기 패널에 그만큼 위쪽 여백을 줘서
-  // 두 컬럼이 나란히 시작하도록 맞춘다.
-  const warningRef = useRef<HTMLDivElement>(null);
-  const [measuredWarningHeight, setMeasuredWarningHeight] = useState(0);
-  // detail.warning이 없어지는 순간(다른 종목으로 이동 등)엔 배너 div 자체가 사라져
-  // warningRef.current가 null이 되므로, 실제로 화면에 적용하는 값은 이 삼항식으로
-  // 매번 0으로 되돌린다 — 측정값(state)은 배너가 있을 때만 갱신하면 된다.
-  const warningHeight = detail.warning ? measuredWarningHeight : 0;
+  // 투자경고 배너("이 종목은 ... 매수 전 확인하세요")가 있으면 왼쪽 컬럼은
+  // breadcrumb → 배너 → 종목명 순으로 내려가는데, 오른쪽 거래하기 패널이 왼쪽
+  // 컬럼과 같은 높이(맨 위, breadcrumb 높이)에서 시작하면 배너보다 훨씬 위에
+  // 떠서 "나란히"가 아니라 배너보다 위에 있는 것처럼 보인다. 배너와 나란히
+  // 시작하게 하려면, 배너 앞에 있는 breadcrumb의 실제 렌더 높이(+ 아래 여백)만큼만
+  // 거래하기 패널을 내리면 된다 — 배너 자체의 높이가 아니라 배너 "앞"의 높이다.
+  const breadcrumbRef = useRef<HTMLDivElement>(null);
+  const [measuredBreadcrumbHeight, setMeasuredBreadcrumbHeight] = useState(0);
+  // 경고가 없는 종목은 애초에 거래하기 패널이 breadcrumb과 같은 높이에서 시작해도
+  // 문제없으므로(맞춰야 할 배너 자체가 없다), 이 경우엔 오프셋을 적용하지 않는다.
+  const tradePanelOffset = detail.warning ? measuredBreadcrumbHeight : 0;
 
-  function measureWarningHeight() {
-    const el = warningRef.current;
-    if (el) setMeasuredWarningHeight(el.offsetHeight + 14); // mb-3.5(14px) = 배너와 다음 요소 사이 여백
+  function measureBreadcrumbHeight() {
+    const el = breadcrumbRef.current;
+    if (el) setMeasuredBreadcrumbHeight(el.offsetHeight + 14); // mb-3.5(14px) = breadcrumb과 배너 사이 여백
   }
 
-  useLayoutEffect(measureWarningHeight, [detail.warning]);
+  useLayoutEffect(measureBreadcrumbHeight, [detail.warning]);
 
   useEffect(() => {
-    const el = warningRef.current;
+    const el = breadcrumbRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measureWarningHeight);
+    const observer = new ResizeObserver(measureBreadcrumbHeight);
     observer.observe(el);
     return () => observer.disconnect();
   }, [detail.warning]);
@@ -154,13 +154,12 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   return (
     <div className="flex gap-6 max-md:flex-col">
       <div className="flex-[1.9]">
-        <div className="mb-3.5 text-[14px]" style={{ color: "var(--mut2)" }}>
+        <div ref={breadcrumbRef} className="mb-3.5 text-[14px]" style={{ color: "var(--mut2)" }}>
           <span className="cursor-pointer">주식 종목 랭킹</span> › {detail.name}
         </div>
 
         {detail.warning && (
           <div
-            ref={warningRef}
             className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[14.5px]"
             style={{ background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }}
           >
@@ -289,7 +288,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       {/* 거래 패널 */}
       <div
         className="min-w-[300px] flex-1 self-start md:sticky md:top-[70px]"
-        style={{ marginTop: warningHeight }}
+        style={{ marginTop: tradePanelOffset }}
       >
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
           <div className="mb-1 text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
