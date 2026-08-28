@@ -151,7 +151,7 @@ export default function MyPage() {
                     style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px", borderBottom: "1px solid var(--line2)" }}
                   >
                     <span className="font-bold" style={{ color: "var(--ink)" }}>
-                      {h.name} <Tag>{h.symbol}</Tag>
+                      {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
                     </span>
                     <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{h.quantity}</span>
                     <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.avgBuyPrice)}</span>
