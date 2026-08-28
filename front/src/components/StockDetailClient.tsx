@@ -161,7 +161,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         {detail.warning && (
           <div
             className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[14.5px]"
-            style={{ background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }}
+            style={
+              // 라이트 모드에서만 좀 더 세련된 레드 계열(와인빛이 도는 딥레드)로 바꿔달라는
+              // 요청 — 다크 모드는 기존 warnBg/warnText/warnBorder 토큰을 그대로 쓴다.
+              // 이 토큰들은 주문 실패 안내(orderError) 등 다른 곳에서도 공유해서 쓰기
+              // 때문에, 전역 토큰이 아니라 이 배너에만 인라인으로 색을 지정했다.
+              theme === "light"
+                ? { background: "oklch(95% 0.035 16)", border: "1px solid oklch(83% 0.09 16)", color: "oklch(40% 0.17 14)" }
+                : { background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }
+            }
           >
             ⚠ 이 종목은 {detail.warning}
           </div>
