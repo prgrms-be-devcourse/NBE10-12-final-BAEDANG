@@ -67,4 +67,8 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             @Param("stockId") Long stockId,
             Pageable pageable
     );
+
+    List<Stock> findByMarketCountryAndIsRankedTrue(MarketCountry marketCountry);
+
+    List<Stock> findByMarketCountryAndSymbolIn(MarketCountry marketCountry, Collection<String> symbols);
 }
