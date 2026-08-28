@@ -21,6 +21,9 @@ const TRADABLE_REASON_LABEL: Record<string, string> = {
   LIQUIDATION: "정리매매 종목이에요",
 };
 
+// 투자경고 배너 문구("투자경고 종목으로 지정되어 있습니다...") 중 이 부분만 굵게 강조한다.
+const WARNING_HIGHLIGHT = "투자경고 종목";
+
 const CATEGORY_GUIDE: Record<string, string> = {
   개별주:
     "개별주는 특정 기업 한 곳의 지분을 사는 거예요. 그 회사가 잘되면 오르고 어려워지면 내려요. 여러 기업에 나눠 담는 ETF보다 변동이 크기 때문에, 한 종목에 자산을 몰아넣지 않는 게 중요해요.",
@@ -171,7 +174,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 : { background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }
             }
           >
-            ⚠ 이 종목은 {detail.warning}
+            ⚠ 이 종목은{" "}
+            {detail.warning.startsWith(WARNING_HIGHLIGHT) ? (
+              <>
+                <b>{WARNING_HIGHLIGHT}</b>
+                {detail.warning.slice(WARNING_HIGHLIGHT.length)}
+              </>
+            ) : (
+              detail.warning
+            )}
           </div>
         )}
 
