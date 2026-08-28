@@ -342,7 +342,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
           <div className="mb-3.5 flex justify-between text-[12.5px]" style={{ color: "var(--mut)" }}>
             <span>체결 예상 단가</span>
-            <span>{priceLabel} (현재가)</span>
+            <span><b>{priceLabel}</b> (현재가)</span>
           </div>
 
           <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }}>
