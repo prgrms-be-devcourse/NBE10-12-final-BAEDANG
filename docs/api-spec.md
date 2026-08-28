@@ -309,8 +309,10 @@ Partial match on Korean name · English name · ticker
 |---|---|
 | `INVALID_QUERY` | query under 2 chars |
 
-### `GET /stocks/{symbol}`
+### `GET /stocks/{symbol}?marketCountry={KR|US}`
 Stock detail — all stocks in scope
+
+`marketCountry` is required. Stocks are identified by `(UPPER(symbol), market_country)`, which disambiguates equal symbols across KR and US markets.
 
 Where the price comes from depends on **whether that stock's own market is open** — not the viewer's viewpoint. Opening NVDA in the Korean daytime returns the prior close because the US market is closed.
 
@@ -367,12 +369,14 @@ Where the price comes from depends on **whether that stock's own market is open*
 | `NOT_IN_UNIVERSE` | 이 종목은 아직 거래를 지원하지 않아요 |
 | `SUSPENDED` | 거래정지 종목 |
 | `LIQUIDATION` | 정리매매 종목 |
+| `QUOTE_NOT_FOUND` | no quote has been loaded yet |
 
-Since `quote_snapshot` covers all stocks, this one endpoint answers every stock's detail regardless of top-100 status — the only difference is the `realtime` and `tradable` flags, so the frontend needs no branching.
+Quote loading is owned by the separate market-data ingestion work. When no quote exists yet, the endpoint still returns stock metadata with null price fields, `realtime: false`, `tradable: false`, and `tradableReason: "QUOTE_NOT_FOUND"`.
 
 | Error code | When |
 |---|---|
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
+| `INVALID_INPUT` | missing `marketCountry` or a value other than KR/US |
 
 ### `GET /stocks/{symbol}/candles`
 Daily & minute chart

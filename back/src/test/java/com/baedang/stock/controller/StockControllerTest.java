@@ -5,11 +5,13 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.dto.CandleResponse;
 import com.baedang.stock.dto.StockSearchResponse;
+import com.baedang.stock.dto.StockDetailResponse;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.CandleQueryService;
 import com.baedang.stock.service.StockSearchService;
+import com.baedang.stock.service.StockDetailService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.List;
 import java.time.OffsetDateTime;
+import java.time.LocalDate;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -41,6 +44,9 @@ public class StockControllerTest {
 
     @MockitoBean
     private CandleQueryService candleQueryService;
+
+    @MockitoBean
+    private StockDetailService stockDetailService;
 
     @Test
     @DisplayName("종목 검색 API가 검색 결과 반환")
@@ -189,5 +195,39 @@ public class StockControllerTest {
                 .andExpect(jsonPath("$.items[0].close").value("241500"));
 
         verify(candleQueryService).getCandles("005930", "KR", "1d", "6M");
+    }
+
+    @Test
+    @DisplayName("종목 상세 API가 시장 국가를 서비스에 전달한다")
+    void detail() throws Exception {
+        StockDetailResponse response = new StockDetailResponse(
+                "005930", "삼성전자", "SamsungElec", "KOSPI", MarketCountry.KR,
+                "KRW", "KR7005930003", StockCategory.INDIVIDUAL, null, false,
+                new StockDetailResponse.Price("241500", "236050", "5450", "0.023089",
+                        "313500", "169500", OffsetDateTime.parse("2026-08-27T12:00:00+09:00"), true),
+                new StockDetailResponse.Info("1441498485825000", "5968935760", LocalDate.parse("1975-06-11")),
+                List.of(), true, null);
+        when(stockDetailService.getDetail("005930", "KR")).thenReturn(response);
+
+        mockMvc.perform(get("/api/stocks/005930").param("marketCountry", "KR"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.symbol").value("005930"))
+                .andExpect(jsonPath("$.marketCountry").value("KR"))
+                .andExpect(jsonPath("$.price.lastPrice").value("241500"))
+                .andExpect(jsonPath("$.price.realtime").value(true))
+                .andExpect(jsonPath("$.info.marketCap").isString())
+                .andExpect(jsonPath("$.tradable").value(true));
+
+        verify(stockDetailService).getDetail("005930", "KR");
+    }
+
+    @Test
+    @DisplayName("종목 상세 API의 시장 국가가 누락되면 400을 반환한다")
+    void detailRequiresMarketCountry() throws Exception {
+        when(stockDetailService.getDetail("005930", null))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_INPUT));
+
+        mockMvc.perform(get("/api/stocks/005930"))
+                .andExpect(status().isBadRequest());
     }
 }
