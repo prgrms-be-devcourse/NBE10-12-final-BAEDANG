@@ -127,14 +127,15 @@ export default function MainPage() {
               key={s.step}
               className="flex-1 rounded-[20px] p-6.5 text-center"
               // 그림자는 넣지 않습니다 (design_handoff README). 배경은 카드 정중앙에서
-              // 바깥으로 퍼지는 radial gradient — 색상은 로그인/회원가입 화면의
-              // --loginBg 그라데이션과 같은 색 단계(위→중간→아래 색을 중심→중간→
-              // 바깥 순으로 그대로 옮김)를 쓴다.
+              // 바깥으로 퍼지는 radial gradient. 처음엔 로그인 화면의 --loginBg
+              // 색상을 그대로 옮겨왔는데, 실제로 보니 탁하다는 피드백을 받아 채도를
+              // 조금 더 올린 선명한 블루 톤으로 조정했다(로그인 화면과는 더 이상
+              // 완전히 같은 색은 아님).
               style={{
                 background:
                   theme === "dark"
-                    ? "radial-gradient(150% 150% at 50% 50%, #114f8c 0%, #0a2b4c 50%, #000000 100%)"
-                    : "radial-gradient(150% 150% at 50% 50%, #7fb6e3 0%, #dceefa 50%, #ffffff 100%)",
+                    ? "radial-gradient(150% 150% at 50% 50%, #1f5fa0 0%, #0d3559 50%, #000000 100%)"
+                    : "radial-gradient(150% 150% at 50% 50%, #5ea0eb 0%, #cfe6fc 50%, #ffffff 100%)",
               }}
             >
               <span
