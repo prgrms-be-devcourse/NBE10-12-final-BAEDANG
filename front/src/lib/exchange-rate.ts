@@ -9,10 +9,12 @@
  *
  * <p>`GET /api/exchange-rates/latest`(back/src/main/java/com/baedang/market)를 호출합니다.
  * 백엔드가 안 떠 있거나 아직 환율 데이터가 없을 때는(EXCHANGE_RATE_NOT_FOUND 등)
- * 배너 자체가 깨지면 안 되므로 기본값으로 대체합니다.
+ * 배너 자체가 깨지면 안 되므로 기본값으로 대체합니다. 다만 "데이터가 아직 없다"처럼
+ * 예상 가능한 실패와 그 외의 예상 못한 에러(응답 형식이 깨졌다 등)는 구분해서,
+ * 후자는 콘솔에 남겨 조용히 묻히지 않게 합니다.
  */
 
-import { getExchangeRateLatest } from "@/lib/api";
+import { ApiError, getExchangeRateLatest } from "@/lib/api";
 
 export type ExchangeRateInfo = {
   rate: number; // 1 USD당 원화
@@ -26,21 +28,30 @@ export const DEFAULT_USD_KRW_RATE = 1398.5;
 const DEFAULT_CHANGE_AMOUNT = 2.3;
 const DEFAULT_CHANGE_RATE = 0.0016;
 
+const DEFAULT_INFO: Omit<ExchangeRateInfo, "updatedAt"> = {
+  rate: DEFAULT_USD_KRW_RATE,
+  changeAmount: DEFAULT_CHANGE_AMOUNT,
+  changeRate: DEFAULT_CHANGE_RATE,
+};
+
 export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
   try {
     const latest = await getExchangeRateLatest();
-    return {
-      rate: Number(latest.rate),
-      changeAmount: Number(latest.changeAmount),
-      changeRate: Number(latest.changeRate),
-      updatedAt: new Date(latest.rateAt),
-    };
-  } catch {
-    return {
-      rate: DEFAULT_USD_KRW_RATE,
-      changeAmount: DEFAULT_CHANGE_AMOUNT,
-      changeRate: DEFAULT_CHANGE_RATE,
-      updatedAt: new Date(),
-    };
+    const rate = Number(latest.rate);
+    const changeAmount = Number(latest.changeAmount);
+    const changeRate = Number(latest.changeRate);
+    // 백엔드 응답 필드가 숫자로 파싱 안 되면(형식 오류 등) 조용히 NaN을 내보내는 대신
+    // 명시적으로 실패시켜 아래 catch의 기본값 대체 경로를 타게 한다.
+    if ([rate, changeAmount, changeRate].some((n) => Number.isNaN(n))) {
+      throw new Error(`환율 응답 형식이 올바르지 않아요: ${JSON.stringify(latest)}`);
+    }
+    return { rate, changeAmount, changeRate, updatedAt: new Date(latest.rateAt) };
+  } catch (err) {
+    // 아직 데이터가 없는 경우(EXCHANGE_RATE_NOT_FOUND — 서비스 초기 등)는 예상 가능한
+    // 실패라 조용히 기본값으로 대체하지만, 그 외 예상 못한 에러는 콘솔에 남겨서
+    // "배너가 계속 기본값만 보여준다"는 증상의 원인을 나중에 추적할 수 있게 한다.
+    const expected = err instanceof ApiError && err.code === "EXCHANGE_RATE_NOT_FOUND";
+    if (!expected) console.warn("환율 조회 실패, 기본값으로 대체합니다.", err);
+    return { ...DEFAULT_INFO, updatedAt: new Date() };
   }
 }

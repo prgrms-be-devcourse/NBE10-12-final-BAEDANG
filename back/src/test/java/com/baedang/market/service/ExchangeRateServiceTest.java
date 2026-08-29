@@ -42,13 +42,19 @@ class ExchangeRateServiceTest {
         service = new ExchangeRateService(exchangeRateRepository, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    @Test
-    @DisplayName("최신 환율과 전일 자정 대비 등락을 계산한다")
-    void t1_정상_조회() {
-        ExchangeRate latest = new ExchangeRate(
+    /** 두 테스트 이상에서 재사용하는 "최신 행" 픽스처. rate와 midRate를 다르게 둬서
+     * 응답이 rate가 아니라 midRate를 쓰는지 구분해서 검증할 수 있게 한다. */
+    private static ExchangeRate sampleLatest() {
+        return new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), new BigDecimal("1400.000000"),
                 OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+    }
+
+    @Test
+    @DisplayName("최신 환율과 전일 자정 대비 등락을 계산한다")
+    void t1_정상_조회() {
+        ExchangeRate latest = sampleLatest();
         ExchangeRate reference = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1399.500000"), new BigDecimal("1398.000000"),
@@ -88,10 +94,7 @@ class ExchangeRateServiceTest {
     @Test
     @DisplayName("전일 자정 기준값이 없으면(서비스 초기 등) 등락을 0으로 보고 최신 환율은 그대로 내려준다")
     void t3_기준값_없음() {
-        ExchangeRate latest = new ExchangeRate(
-                "USD", "KRW",
-                new BigDecimal("1401.500000"), new BigDecimal("1400.000000"),
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+        ExchangeRate latest = sampleLatest();
 
         when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latest));
@@ -104,5 +107,44 @@ class ExchangeRateServiceTest {
         assertThat(new BigDecimal(response.rate())).isEqualByComparingTo("1400.000000");
         assertThat(new BigDecimal(response.changeAmount())).isEqualByComparingTo(BigDecimal.ZERO);
         assertThat(new BigDecimal(response.changeRate())).isEqualByComparingTo(BigDecimal.ZERO);
+    }
+
+    @Test
+    @DisplayName("mid_rate가 비어 있으면(nullable 컬럼) 실거래 rate로 대체한다")
+    void t4_midRate_없음() {
+        // mid_rate가 NULL인 행 — AccountService.displayRate()가 이미 방어하는 것과 같은 상황.
+        ExchangeRate latestWithoutMidRate = new ExchangeRate(
+                "USD", "KRW",
+                new BigDecimal("1401.500000"), null,
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+                .thenReturn(Optional.of(latestWithoutMidRate));
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(
+                "USD", "KRW", TODAY_MIDNIGHT_KST))
+                .thenReturn(Optional.empty());
+
+        ExchangeRateLatestResponse response = service.getLatest("USD", "KRW");
+
+        // NPE 없이, mid_rate 대신 rate(1401.5)로 대체돼야 한다.
+        assertThat(new BigDecimal(response.rate())).isEqualByComparingTo("1401.500000");
+    }
+
+    @Test
+    @DisplayName("base/quote는 대소문자를 가리지 않고 대문자로 정규화해서 조회한다")
+    void t5_대소문자_정규화() {
+        ExchangeRate latest = sampleLatest();
+
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+                .thenReturn(Optional.of(latest));
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(
+                "USD", "KRW", TODAY_MIDNIGHT_KST))
+                .thenReturn(Optional.empty());
+
+        // 소문자로 넘겨도 대문자로 저장된 행과 매치돼야 한다.
+        ExchangeRateLatestResponse response = service.getLatest("usd", "krw");
+
+        assertThat(response.baseCurrency()).isEqualTo("USD");
+        assertThat(response.quoteCurrency()).isEqualTo("KRW");
     }
 }
