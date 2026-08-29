@@ -7,34 +7,40 @@
  * {@link import("@/components/ExchangeRateProvider").ExchangeRateProvider} 가
  * 이 함수를 최초 1회 + 매 1시간마다 다시 호출해서 값을 갱신합니다.
  *
- * <p>⚠️ <b>아직 백엔드에 `GET /exchange-rates/latest`를 노출하는 컨트롤러가 없어서</b>
- * (Port/Adapter 레이어까지만 구현돼 있음) 지금은 목값을 비동기로 흉내냅니다.
- * 실제 엔드포인트가 준비되면 이 함수 내부만 `fetch` 호출로 바꾸면 되고, 이 함수를
- * 쓰는 화면 코드(랭킹·마이페이지·상세 거래 패널)는 손댈 필요가 없습니다.
- *
- * <p>건우님 메모에 있던 "응답속도 테스트 후 백엔드-프론트 트레이드오프 논의"는
- * 실제 엔드포인트가 붙는 시점에 이 함수의 응답 시간을 재보고 진행하면 됩니다.
+ * <p>`GET /api/exchange-rates/latest`(back/src/main/java/com/baedang/market)를 호출합니다.
+ * 백엔드가 안 떠 있거나 아직 환율 데이터가 없을 때는(EXCHANGE_RATE_NOT_FOUND 등)
+ * 배너 자체가 깨지면 안 되므로 기본값으로 대체합니다.
  */
+
+import { getExchangeRateLatest } from "@/lib/api";
 
 export type ExchangeRateInfo = {
   rate: number; // 1 USD당 원화
-  changeAmount: number; // 전일 대비 등락(원)
-  changeRate: number; // 전일 대비 등락률(비율, 0.0016 = +0.16%)
+  changeAmount: number; // 전일 자정(00:00 KST) 대비 등락(원)
+  changeRate: number; // 전일 자정(00:00 KST) 대비 등락률(비율, 0.0016 = +0.16%)
   updatedAt: Date;
 };
 
-/** 실제 API가 없을 때의 기본값 겸 초기 렌더링용 값. */
+/** 백엔드 호출이 실패했을 때의 대체값 겸 초기 렌더링용 값. */
 export const DEFAULT_USD_KRW_RATE = 1398.5;
 const DEFAULT_CHANGE_AMOUNT = 2.3;
 const DEFAULT_CHANGE_RATE = 0.0016;
 
 export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
-  // 실제 네트워크 호출처럼 약간의 지연을 흉내낸다 — 응답속도 체감 테스트용.
-  await new Promise((resolve) => setTimeout(resolve, 150));
-  return {
-    rate: DEFAULT_USD_KRW_RATE,
-    changeAmount: DEFAULT_CHANGE_AMOUNT,
-    changeRate: DEFAULT_CHANGE_RATE,
-    updatedAt: new Date(),
-  };
+  try {
+    const latest = await getExchangeRateLatest();
+    return {
+      rate: Number(latest.rate),
+      changeAmount: Number(latest.changeAmount),
+      changeRate: Number(latest.changeRate),
+      updatedAt: new Date(latest.rateAt),
+    };
+  } catch {
+    return {
+      rate: DEFAULT_USD_KRW_RATE,
+      changeAmount: DEFAULT_CHANGE_AMOUNT,
+      changeRate: DEFAULT_CHANGE_RATE,
+      updatedAt: new Date(),
+    };
+  }
 }
