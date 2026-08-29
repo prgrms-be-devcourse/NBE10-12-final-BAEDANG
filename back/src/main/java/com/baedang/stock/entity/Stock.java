@@ -127,7 +127,7 @@ public class Stock extends BaseEntity {
         this.isinCode = isinCode;
         this.currency = currency;
         this.securityType = securityType;
-        this.stockCategory = StockCategory.INDIVIDUAL;
+        this.stockCategory = StockCategory.from(securityType, isCommonShare);
         this.isCommonShare = isCommonShare;
         this.isDividend = false;
         this.isSuspended = false;
@@ -184,6 +184,7 @@ public class Stock extends BaseEntity {
         this.isinCode = isinCode;
         this.currency = currency;
         this.securityType = securityType;
+        this.stockCategory = StockCategory.from(securityType, isCommonShare);
         this.leverageFactor = leverageFactor;
         this.isCommonShare = isCommonShare;
         this.sharesOutstanding = sharesOutstanding;

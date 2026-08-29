@@ -7,15 +7,11 @@ import com.baedang.stock.port.SymbolInfoPort;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.standard.utils.Pacer;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
 
-import static org.springframework.transaction.annotation.Propagation.NEVER;
-
 @Service
-@Transactional(readOnly = true)
 public class StockMasterLoadService {
     private final SymbolInfoPort symbolInfoPort;
     private final StockRepository stockRepository;
@@ -30,7 +26,6 @@ public class StockMasterLoadService {
 
     private static final int TPS = 1;
 
-    @Transactional(propagation = NEVER)
     public void loadAll() {
         Pacer pacer = Pacer.forTps(TPS);
 
@@ -40,6 +35,7 @@ public class StockMasterLoadService {
 
             List<StockUniverseEntry> stocksFromPort = symbolInfoPort.fetchAllStocks(market);
 
+            // stock_category 는 create() 안에서 securityType + isCommonShare 로 판정된다
             List<Stock> stocks = stocksFromPort.stream().map(stockFromPort -> Stock.create(
                     stockFromPort.symbol(),
                     marketCountry,
