@@ -8,6 +8,7 @@ import com.baedang.market.repository.ExchangeRateRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -21,6 +22,7 @@ import java.time.ZoneId;
  * 최신 환율 + 전일 대비 등락 계산을 담당한다.
  */
 @Service
+@Transactional(readOnly = true)
 public class ExchangeRateService {
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeRateService.class);
