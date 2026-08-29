@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
@@ -22,6 +23,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -51,7 +53,8 @@ class MinuteCandleCollectionServiceTest {
                 stockRepository,
                 marketDataPort,
                 persistenceService,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                100);
     }
 
     @Test
@@ -107,6 +110,24 @@ class MinuteCandleCollectionServiceTest {
         verify(persistenceService).upsert(eq(2L), any());
         // US는 닫혀 있으니 US 쪽 종목 조회 자체가 없어야 한다.
         verify(stockRepository, never()).findRankedByMarketCountry(eq(MarketCountry.US), any());
+    }
+
+    @Test
+    @DisplayName("설정된 universe-size만큼만 상위 종목을 조회한다 (전체 조회 방지)")
+    void t5_상위_종목_개수_제한() {
+        when(marketSessionProvider.isOpen(eq(MarketCountry.KR), any())).thenReturn(true);
+        when(marketSessionProvider.isOpen(eq(MarketCountry.US), any())).thenReturn(false);
+        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any(Pageable.class)))
+                .thenReturn(List.of());
+
+        service.collectOpenMarkets();
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(stockRepository).findRankedByMarketCountry(eq(MarketCountry.KR), pageable.capture());
+        // Pageable.unpaged()를 쓰면 is_ranked 행이 어떤 이유로든 100개를 넘었을 때
+        // 전부 조회해버릴 수 있다 — 생성자로 주입된 universe-size(테스트에서는 100)로
+        // 명시적으로 페이지 크기를 제한해야 한다.
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(100);
     }
 
     @Test
