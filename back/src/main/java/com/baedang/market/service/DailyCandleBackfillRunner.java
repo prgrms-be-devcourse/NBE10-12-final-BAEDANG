@@ -28,10 +28,14 @@ public class DailyCandleBackfillRunner {
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
         CompletableFuture.runAsync(() -> {
-            log.info("[daily-candle-backfill] 비동기 초기 적재 시작 (KR → US 순)");
-            dailyCandleCollectionService.backfill(MarketCountry.KR);
-            dailyCandleCollectionService.backfill(MarketCountry.US);
-            log.info("[daily-candle-backfill] 비동기 초기 적재 완료");
+            try {
+                log.info("[daily-candle-backfill] 비동기 초기 적재 시작 (KR → US 순)");
+                dailyCandleCollectionService.backfill(MarketCountry.KR);
+                dailyCandleCollectionService.backfill(MarketCountry.US);
+                log.info("[daily-candle-backfill] 비동기 초기 적재 완료");
+            } catch (Throwable t) {
+                log.error("[daily-candle-backfill] 비동기 초기 적재 중 예외 발생", t);
+            }
         });
     }
 }

@@ -90,7 +90,7 @@ class DailyCandleCollectionIntegrationTest {
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));
         assertThat(rows).hasSize(3);
-        assertThat(rows).extracting(r -> r.getClosePrice().toPlainString())
+        assertThat(rows).extracting(r -> r.getClosePrice().stripTrailingZeros().toPlainString())
                 .containsExactlyInAnyOrder("100", "110", "120");
     }
 
