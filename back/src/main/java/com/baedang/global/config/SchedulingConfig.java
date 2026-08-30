@@ -12,7 +12,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @EnableScheduling
 public class SchedulingConfig {
 
-    /** 일봉 백필과 정기 수집을 직렬화해 현재 수집 정책인 5 TPS 안에서 관리합니다. */
+    /** 일봉 정기 수집을 별도 스레드에서 실행해 스케줄러 스레드 점유를 방지합니다. */
     @Bean(name = "dailyCandleTaskExecutor")
     public ThreadPoolTaskExecutor dailyCandleTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

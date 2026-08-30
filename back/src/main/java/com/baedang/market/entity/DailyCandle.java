@@ -11,13 +11,13 @@ import java.util.Objects;
  * 일봉. <b>TimescaleDB 하이퍼테이블</b>입니다 (infra/timescale.sql).
  *
  * <p>용도가 둘입니다 — 일봉 차트, 그리고 {@code prev_close} 의 원천.
- * 장 마감 10분 후 수집합니다(국내 15:40 KST, 미국 16:10 ET).
+ * 장 마감 10분 후 수집합니다 (국내 15:40 / 미국 05:10).
  *
  * <p>하이퍼테이블이라도 JPA 에서는 평범한 테이블처럼 다루면 됩니다.
  * 주봉은 연속 집계 뷰({@code candle_1w})로 파생하므로 여기서 만들지 마세요.
  *
  * <p>{@code tradeDate} 는 <b>KST 기준 날짜</b>입니다. 토스 응답의
- * {@code timestamp} 는 시각이므로 UTC 날짜를 그대로 사용하지 않습니다.
+ * {@code timestamp} 는 시각이라 UTC 로 자르면 미국 종목이 하루씩 밀립니다.
  */
 @Entity
 @Table(name = "daily_candle")

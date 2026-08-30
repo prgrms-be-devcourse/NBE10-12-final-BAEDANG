@@ -22,19 +22,17 @@ import java.time.ZoneId;
 import java.util.List;
 
 /**
- * 상위 종목 일봉 정기 수집 및 초기 백필 서비스.
+ * 상위 종목 일봉 정기 수집 서비스.
  */
 @Service
 public class DailyCandleCollectionService {
 
     private static final Logger log = LoggerFactory.getLogger(DailyCandleCollectionService.class);
 
-    /** MARKET_DATA_CHART 공식 한도는 20 TPS이며, 현재 수집기는 여유를 두고 5 TPS로 호출합니다. */
-    private static final int CHART_TPS = 5;
+    /** MARKET_DATA_CHART 일봉 호출 한도 */
+    private static final int CHART_TPS = 20;
     /** 일별 정기 수집: 마감 봉 1개 */
     private static final int DAILY_CANDLE_COUNT = 1;
-    /** 초기 백필: 약 1년치 거래일 250봉 */
-    private static final int BACKFILL_CANDLE_COUNT = 250;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final ZoneId NY = ZoneId.of("America/New_York");
 
@@ -100,51 +98,6 @@ public class DailyCandleCollectionService {
             log.warn("[daily-candle] 전량 실패: market={} — Toss 어댑터 장애 가능성", marketCountry);
         } else {
             log.info("[daily-candle] 수집 완료: market={} success={}/{}", marketCountry, successCount, stocks.size());
-        }
-    }
-
-    /** 일봉이 없는 종목 대상 과거 250봉 초기 백필 */
-    public void backfill(MarketCountry marketCountry) {
-        List<Stock> stocks = stockRepository.findRankedByMarketCountry(
-                marketCountry, PageRequest.of(0, universeSize));
-
-        if (stocks.isEmpty()) {
-            log.info("[daily-candle-backfill] 백필 대상 없음: market={}", marketCountry);
-            return;
-        }
-
-        // 별도 상태 테이블 없이 최근 250봉을 항상 다시 요청합니다. UPSERT가 멱등이므로
-        // 기존 행은 갱신되고, 이전 실행 중단이나 일일 수집 실패로 생긴 내부 누락도 복구됩니다.
-        List<Stock> targets = stocks;
-
-        log.info("[daily-candle-backfill] 백필 시작: market={} targets={}", marketCountry, targets.size());
-        Pacer pacer = Pacer.forTps(CHART_TPS);
-        int successCount = 0;
-
-        for (Stock stock : targets) {
-            try {
-                List<Candle> candles = marketDataPort.fetchCandles(
-                        stock.getSymbol(), CandleInterval.ONE_DAY, BACKFILL_CANDLE_COUNT);
-                if (candles.isEmpty()) {
-                    log.warn("[daily-candle-backfill] 빈 응답: market={} symbol={}",
-                            marketCountry, stock.getSymbol());
-                    continue;
-                }
-                persistenceService.upsert(
-                        stock.getStockId(), stock.getMarketCountry(), stock.getCurrency(), candles);
-                successCount++;
-            } catch (Exception e) {
-                log.warn("[daily-candle-backfill] 백필 실패: market={} symbol={} reason={}",
-                        marketCountry, stock.getSymbol(), e.getMessage());
-            } finally {
-                pacer.pace();
-            }
-        }
-
-        if (successCount == 0) {
-            log.warn("[daily-candle-backfill] 전량 실패: market={} — Toss 어댑터 장애 가능성", marketCountry);
-        } else {
-            log.info("[daily-candle-backfill] 백필 완료: market={} success={}/{}", marketCountry, successCount, targets.size());
         }
     }
 

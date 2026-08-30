@@ -9,5 +9,4 @@ import java.util.List;
 public interface DailyCandleRepository extends JpaRepository<DailyCandle, DailyCandle.Pk> {
 
     List<DailyCandle> findByStockIdOrderByTradeDateDesc(Long stockId, Pageable pageable);
-
 }
