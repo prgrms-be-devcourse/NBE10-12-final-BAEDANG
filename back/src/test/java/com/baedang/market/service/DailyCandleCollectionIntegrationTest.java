@@ -1,0 +1,143 @@
+package com.baedang.market.service;
+
+import com.baedang.market.port.Candle;
+import com.baedang.market.repository.DailyCandleRepository;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.MountableFile;
+
+import java.math.BigDecimal;
+import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 실제 PostgreSQL(TimescaleDB) 로 {@code DailyCandlePersistenceService} 의
+ * UPSERT 동작과 KST 날짜 변환을 검증합니다.
+ *
+ * <p>수집 스케줄러·백필 러너는 {@code toss.enabled=false} 로 비활성화하고,
+ * 저장 계층만 격리하여 테스트합니다.
+ */
+@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@SpringBootTest(properties = {
+        "spring.jpa.hibernate.ddl-auto=validate",
+        "spring.sql.init.mode=never",
+        "toss.enabled=false",
+        "logging.level.org.hibernate.SQL=OFF"
+})
+class DailyCandleCollectionIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
+            .withCopyFileToContainer(
+                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
+                            .toAbsolutePath().normalize()),
+                    "/docker-entrypoint-initdb.d/01-schema.sql");
+
+    @Autowired DailyCandlePersistenceService persistenceService;
+    @Autowired DailyCandleRepository dailyCandleRepository;
+    @Autowired StockRepository stockRepository;
+    @Autowired JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void cleanUp() {
+        jdbcTemplate.execute("TRUNCATE TABLE daily_candle");
+    }
+
+    @Test
+    @DisplayName("동일 (stock_id, trade_date) 재삽입 시 최신값으로 갱신된다")
+    void UPSERT_동일날짜_재삽입시_최신값으로_갱신된다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        OffsetDateTime candleAt = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
+
+        persistenceService.upsert(stock.getStockId(), "KRW",
+                List.of(candle(candleAt, "100", "KRW")));
+        persistenceService.upsert(stock.getStockId(), "KRW",
+                List.of(candle(candleAt, "110", "KRW")));
+
+        var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
+                stock.getStockId(), PageRequest.of(0, 10));
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).getClosePrice()).isEqualByComparingTo("110");
+    }
+
+    @Test
+    @DisplayName("여러 날짜의 캔들을 한 번에 배치 저장한다")
+    void 여러날짜_캔들_배치_저장된다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+
+        persistenceService.upsert(stock.getStockId(), "KRW", List.of(
+                candle(OffsetDateTime.of(2026, 8, 26, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW"),
+                candle(OffsetDateTime.of(2026, 8, 27, 6, 0, 0, 0, ZoneOffset.UTC), "110", "KRW"),
+                candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "120", "KRW")));
+
+        var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
+                stock.getStockId(), PageRequest.of(0, 10));
+        assertThat(rows).hasSize(3);
+        assertThat(rows).extracting(r -> r.getClosePrice().toPlainString())
+                .containsExactlyInAnyOrder("100", "110", "120");
+    }
+
+    @Test
+    @DisplayName("UTC 기준 전날 밤 타임스탬프가 KST 기준으로 변환되어 저장된다")
+    void 미국종목_UTC전날밤_타임스탬프_KST기준_저장() {
+        Stock stock = saveStock(MarketCountry.US, "USD");
+        // UTC 2026-08-27 20:00:00 = KST 2026-08-28 05:00:00
+        // UTC 기준으로 잘라내면 2026-08-27이 되어 하루 밀림
+        OffsetDateTime usCloseUtc = OffsetDateTime.of(2026, 8, 27, 20, 0, 0, 0, ZoneOffset.UTC);
+
+        persistenceService.upsert(stock.getStockId(), "USD",
+                List.of(candle(usCloseUtc, "150", "USD")));
+
+        var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
+                stock.getStockId(), PageRequest.of(0, 10));
+        assertThat(rows).hasSize(1);
+        // KST 기준 2026-08-28 로 저장되어야 함
+        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 28));
+    }
+
+    @Test
+    @DisplayName("existsByStockId 는 일봉이 있으면 true 를 반환한다")
+    void existsByStockId_일봉있으면_true() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        assertThat(dailyCandleRepository.existsByStockId(stock.getStockId())).isFalse();
+
+        persistenceService.upsert(stock.getStockId(), "KRW",
+                List.of(candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW")));
+
+        assertThat(dailyCandleRepository.existsByStockId(stock.getStockId())).isTrue();
+    }
+
+    private Stock saveStock(MarketCountry country, String currency) {
+        String symbol = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
+        return stockRepository.save(Stock.create(
+                symbol, country,
+                country == MarketCountry.KR ? "KOSPI" : "NASDAQ",
+                "테스트 종목", null, currency, "STOCK", true));
+    }
+
+    private Candle candle(OffsetDateTime at, String close, String currency) {
+        BigDecimal p = new BigDecimal(close);
+        return new Candle(at, p, p, p, p, new BigDecimal("1000"), currency);
+    }
+}
