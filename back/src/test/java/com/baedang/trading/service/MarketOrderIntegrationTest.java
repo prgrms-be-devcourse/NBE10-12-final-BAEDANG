@@ -250,7 +250,9 @@ class MarketOrderIntegrationTest {
 
         marketOrderService.place(fixture.userId(), request(fixture, "BUY", "10"));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
-        quote.updatePrice(new BigDecimal("200"), OffsetDateTime.now(ZoneOffset.UTC));
+        quote.updatePrice(new BigDecimal("200"),
+                quote.getCurrency(),
+                OffsetDateTime.now(ZoneOffset.UTC));
         quoteSnapshotRepository.save(quote);
 
         marketOrderService.place(fixture.userId(), request(fixture, "BUY", "10"));
@@ -414,7 +416,9 @@ class MarketOrderIntegrationTest {
     void 미래_시각의_시세는_REJECTED로_기록한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
-        quote.updatePrice(new BigDecimal("10000"), OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(1));
+        quote.updatePrice(new BigDecimal("10000"),
+                quote.getCurrency(),
+                OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(1));
         quoteSnapshotRepository.save(quote);
 
         assertRejected(fixture, request(fixture, "BUY", "1"), ErrorCode.FUTURE_QUOTE);
@@ -484,7 +488,9 @@ class MarketOrderIntegrationTest {
     void 오래된_시세와_보유수량_부족은_REJECTED로_기록한다() {
         Fixture stale = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         QuoteSnapshot staleQuote = quoteSnapshotRepository.findById(stale.stockId()).orElseThrow();
-        staleQuote.updatePrice(new BigDecimal("10000"), OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
+        staleQuote.updatePrice(new BigDecimal("10000"),
+                staleQuote.getCurrency(),
+                OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1));
         quoteSnapshotRepository.save(staleQuote);
         assertRejected(stale, request(stale, "BUY", "1"), ErrorCode.STALE_QUOTE);
 

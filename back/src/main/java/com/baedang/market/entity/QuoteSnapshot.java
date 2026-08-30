@@ -70,8 +70,9 @@ public class QuoteSnapshot {
     }
 
     /** 5초 수집기가 호출합니다. */
-    public void updatePrice(BigDecimal lastPrice, OffsetDateTime quoteAt) {
+    public void updatePrice(BigDecimal lastPrice, String currency, OffsetDateTime quoteAt) {
         this.lastPrice = lastPrice;
+        this.currency = currency;
         this.quoteAt = quoteAt;
         this.collectedAt = OffsetDateTime.now();
     }
