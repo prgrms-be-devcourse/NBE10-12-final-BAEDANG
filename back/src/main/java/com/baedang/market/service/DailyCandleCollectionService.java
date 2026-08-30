@@ -29,7 +29,7 @@ public class DailyCandleCollectionService {
 
     private static final Logger log = LoggerFactory.getLogger(DailyCandleCollectionService.class);
 
-    /** MARKET_DATA_CHART 그룹 5 TPS 제한 */
+    /** MARKET_DATA_CHART 공식 한도는 20 TPS이며, 현재 수집기는 여유를 두고 5 TPS로 호출합니다. */
     private static final int CHART_TPS = 5;
     /** 일별 정기 수집: 마감 봉 1개 */
     private static final int DAILY_CANDLE_COUNT = 1;

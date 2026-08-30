@@ -449,7 +449,7 @@ COMMENT ON COLUMN quote_snapshot.upper_limit IS '미국 종목은 NULL. 상하�
 CREATE TABLE daily_candle (
     stock_id     BIGINT        NOT NULL REFERENCES stock(stock_id),
     -- 토스 Candle.timestamp 는 '봉 시작 시각'(타임스탬프)이다.
-    -- 거래소 현지 날짜(KR=Asia/Seoul, US=America/New_York)로 저장한다.
+    -- KST 기준으로 날짜를 뽑아 저장할 것. UTC 로 자르면 미국 종목이 하루씩 밀린다.
     trade_date   DATE          NOT NULL,
     open_price   NUMERIC(19,4) NOT NULL,
     high_price   NUMERIC(19,4) NOT NULL,
@@ -514,7 +514,7 @@ CREATE TABLE market_calendar (
 --     · 사용자가 종목 상세를 열 때 /candles?interval=1m 을 호출한다.
 --     · 받은 봉을 이 테이블에 UPSERT 하고, 60초 동안은 DB 에서 바로 내려준다.
 --       테이블이 저장소이자 캐시 역할을 겸한다.
---     · 동시 시청 30명 기준 0.5 req/s → MARKET_DATA_CHART 5 TPS 의 10%.
+--     · 동시 시청 30명 기준 0.5 req/s → MARKET_DATA_CHART 20 TPS 의 2.5%.
 --       상시 적재(1.67 req/s)보다 오히려 싸다. 아무도 안 보는 종목까지
 --       1분마다 긁을 이유가 없기 때문이다.
 --

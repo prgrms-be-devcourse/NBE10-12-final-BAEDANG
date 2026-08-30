@@ -12,7 +12,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @EnableScheduling
 public class SchedulingConfig {
 
-    /** 일봉 백필과 정기 수집을 직렬화해 차트 API 호출량을 5 TPS 안에서 관리합니다. */
+    /** 일봉 백필과 정기 수집을 직렬화해 현재 수집 정책인 5 TPS 안에서 관리합니다. */
     @Bean(name = "dailyCandleTaskExecutor")
     public ThreadPoolTaskExecutor dailyCandleTaskExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

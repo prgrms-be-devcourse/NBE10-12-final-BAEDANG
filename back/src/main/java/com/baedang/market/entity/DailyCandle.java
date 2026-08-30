@@ -16,8 +16,8 @@ import java.util.Objects;
  * <p>하이퍼테이블이라도 JPA 에서는 평범한 테이블처럼 다루면 됩니다.
  * 주봉은 연속 집계 뷰({@code candle_1w})로 파생하므로 여기서 만들지 마세요.
  *
- * <p>{@code tradeDate} 는 <b>거래소 현지 거래일</b>입니다. 국내는 Asia/Seoul,
- * 미국은 America/New_York 기준으로 변환하며 UTC 날짜를 그대로 사용하지 않습니다.
+ * <p>{@code tradeDate} 는 <b>KST 기준 날짜</b>입니다. 토스 응답의
+ * {@code timestamp} 는 시각이므로 UTC 날짜를 그대로 사용하지 않습니다.
  */
 @Entity
 @Table(name = "daily_candle")

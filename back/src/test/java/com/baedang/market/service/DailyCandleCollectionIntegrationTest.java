@@ -95,11 +95,11 @@ class DailyCandleCollectionIntegrationTest {
     }
 
     @Test
-    @DisplayName("미국 종목은 뉴욕 현지 거래일 기준으로 변환되어 저장된다")
-    void 미국종목_뉴욕_현지_거래일자_기준_저장() {
+    @DisplayName("미국 종목도 KST 기준 날짜로 변환되어 저장된다")
+    void 미국종목_KST_기준_거래일자_저장() {
         Stock stock = saveStock(MarketCountry.US, "USD");
         // UTC 2026-08-27 20:00:00 = 뉴욕 현지 2026-08-27 16:00:00 (KST 8/28 05:00)
-        // 현지 거래일자인 2026-08-27로 저장되어야 함
+        // 프로젝트 명세에 따라 KST 날짜인 2026-08-28로 저장되어야 함
         OffsetDateTime usCloseUtc = OffsetDateTime.of(2026, 8, 27, 20, 0, 0, 0, ZoneOffset.UTC);
 
         persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "USD",
@@ -108,7 +108,7 @@ class DailyCandleCollectionIntegrationTest {
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));
         assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 27));
+        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 28));
     }
 
     private Stock saveStock(MarketCountry country, String currency) {

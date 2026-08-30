@@ -50,10 +50,10 @@ class DailyCandlePersistenceServiceTest {
     }
 
     @Test
-    @DisplayName("미국 종목은 America/New_York 기준으로 현지 실제 거래일자를 산출한다")
-    void 미국종목_뉴욕_현지_거래일자_변환() {
+    @DisplayName("미국 종목도 KST 기준 날짜로 변환한다")
+    void 미국종목_KST_기준_일자_변환() {
         // UTC 2026-08-27 20:00:00 = 뉴욕 현지 2026-08-27 16:00:00 (KST로는 8/28 05:00)
-        // 현지 거래일 기준인 2026-08-27로 저장되어야 함
+        // 프로젝트 명세에 따라 KST 날짜인 2026-08-28로 저장되어야 함
         OffsetDateTime usCloseUtc = OffsetDateTime.of(2026, 8, 27, 20, 0, 0, 0, ZoneOffset.UTC);
 
         service.upsert(1L, MarketCountry.US, "USD", List.of(candle(usCloseUtc, "USD")));
@@ -61,7 +61,7 @@ class DailyCandlePersistenceServiceTest {
         ArgumentCaptor<List<DailyCandle>> captor = ArgumentCaptor.captor();
         verify(repository).upsertAll(captor.capture());
         assertThat(captor.getValue().get(0).getTradeDate())
-                .isEqualTo(LocalDate.of(2026, 8, 27));
+                .isEqualTo(LocalDate.of(2026, 8, 28));
     }
 
     @Test

@@ -17,13 +17,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 일봉 데이터를 검증 및 시장 국가별 현지 거래일자로 변환하여 daily_candle 테이블에 저장하는 서비스.
+ * 일봉 데이터를 검증하고 KST 기준 날짜로 변환하여 daily_candle 테이블에 저장하는 서비스.
  */
 @Service
 public class DailyCandlePersistenceService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final ZoneId NY = ZoneId.of("America/New_York");
 
     private final DailyCandleBatchRepository dailyCandleBatchRepository;
 
@@ -31,7 +30,7 @@ public class DailyCandlePersistenceService {
         this.dailyCandleBatchRepository = dailyCandleBatchRepository;
     }
 
-    /** 일봉 목록을 시장 국가별 현지 거래일자로 변환하여 저장합니다. */
+    /** 일봉 목록을 KST 기준 날짜로 변환하여 저장합니다. */
     @Transactional
     public void upsert(Long stockId, MarketCountry marketCountry, String stockCurrency, List<Candle> candles) {
         if (candles == null) {
@@ -43,20 +42,12 @@ public class DailyCandlePersistenceService {
         }
         validateCurrency(stockId, stockCurrency, candles);
 
-        ZoneId zoneId = zoneIdFor(marketCountry);
         Set<LocalDate> tradeDates = new HashSet<>();
         List<DailyCandle> rows = candles.stream()
-                .map(candle -> toRow(stockId, zoneId, candle, tradeDates))
+                .map(candle -> toRow(stockId, candle, tradeDates))
                 .toList();
 
         dailyCandleBatchRepository.upsertAll(rows);
-    }
-
-    private ZoneId zoneIdFor(MarketCountry marketCountry) {
-        return switch (marketCountry) {
-            case KR -> KST;
-            case US -> NY;
-        };
     }
 
     /** 토스 응답 통화와 종목 통화 일치 여부 검증 */
@@ -77,12 +68,11 @@ public class DailyCandlePersistenceService {
 
     private DailyCandle toRow(
             Long stockId,
-            ZoneId zoneId,
             Candle candle,
             Set<LocalDate> tradeDates
     ) {
         validateValues(stockId, candle);
-        LocalDate tradeDate = candle.candleAt().atZoneSameInstant(zoneId).toLocalDate();
+        LocalDate tradeDate = candle.candleAt().atZoneSameInstant(KST).toLocalDate();
         if (!tradeDates.add(tradeDate)) {
             throw invalidCandle(stockId, "중복 거래일=" + tradeDate);
         }

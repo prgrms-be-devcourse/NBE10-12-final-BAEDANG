@@ -123,8 +123,8 @@ quote_snapshot.prev_close
 | `GET /api/v1/rankings` | RANKING · 5 TPS | 유니버스: 월요일 KR 08:00 · US 21:00 / 화면 랭킹: 30초 TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, 신규 편입의 `prev_close`(`price.basePrice`). **시장별 100개씩이라 KR·US 각 1콜로 완결**. `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. 주말엔 집계가 없을 수 있으니 **빈 배열이면 지난주 유니버스 유지**. |
 | `GET /api/v1/prices` | MARKET_DATA · **15 TPS** | **5초** (정규장 시간에만) | `quote_snapshot.last_price`, `quote_at`, `currency`. **시장별 100종목이 배치 1콜** — 5초 주기여도 **한도의 1.3%**. 국내장·미국장이 겹치지 않아 동시 부하 없음. **장이 닫히면 스케줄러 멈춤** → 마지막 값(=종가)이 남아 "전일 종가" 조회. 가격이 **문자열로 오므로 BigDecimal 로 파싱**. |
 | `GET /api/v1/price-limits` | MARKET_DATA · 15 TPS | 장 시작 전 1회 | `quote_snapshot.upper_limit`, `lower_limit`. **전일 종가 기준으로 정해져 하루 동안 안 바뀌므로** 실시간 폴링 불필요. 단건 조회라 국내 100종목이면 100콜, 약 7초. **미국 종목은 가격제한이 없어 NULL**. |
-| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **5 TPS** | 국내 15:40 / 미국 05:10(겨울 06:10) | `daily_candle`. 일봉과 분봉이 같은 호출 그룹을 공유하므로 단일 작업 큐에서 직렬화합니다. 확정된 `close_price` 가 다음 장 시작 전 `quote_snapshot.prev_close` 로 복사되어 **등락률 기준**. `timestamp` 는 **거래소 현지 거래일(KR=서울, US=뉴욕)**로 변환합니다. |
-| `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **5 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 2주차에는 지정가 체결 판정과 5m·10m 집계를 추가합니다. |
+| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | 국내 15:40 / 미국 05:10(겨울 06:10) | `daily_candle`. 일봉과 분봉이 같은 호출 그룹을 공유하므로 단일 작업 큐에서 직렬화합니다. 확정된 `close_price` 가 다음 장 시작 전 `quote_snapshot.prev_close` 로 복사되어 **등락률 기준**. `timestamp` 는 **KST 기준 날짜**로 변환합니다. |
+| `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **20 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 2주차에는 지정가 체결 판정과 5m·10m 집계를 추가합니다. |
 | `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS | **1주차 미사용** · 필요 시 08:00 배치 | `stock.is_warned`. 정리매매·단기과열·투자경고/위험·VI 발동. **단건 조회라 100종목이면 100콜, 약 20초.** **확정 스케줄에는 넣지 않았습니다** — 랭킹 API 의 `excludeInvestmentCaution=true` 로 이미 대부분 걸러지기 때문. |
 | `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS | 이력 적재: **매시 정각** / 현재 환율: 1분 TTL 캐시 | **두 경로가 다릅니다.** 그래프용 이력은 매시 정각 `exchange_rate` 로 적재(하루 24콜), 체결용 현재 환율은 **1분 TTL 메모리 캐시**. 응답의 `validFrom` 을 `rate_at` 으로, `ON CONFLICT DO NOTHING` 으로 **주말 중복 자동 차단**. |
 | `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS | 앱 기동 시 + 매일 1회 | **메모리 캐시로 충분**(이력을 남기고 싶으면 `schema.sql` 의 `market_calendar` 테이블 선택). 세 곳에 쓰임 — **① 주문 가능 시간 판정, ② 시세 수집 스케줄러 on/off, ③ 화면 "실시간/종가" 분기**. 서머타임·수능일·임시휴장 때문에 **절대 하드코딩 금지**. |
@@ -331,7 +331,7 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| `stock_id` + `trade_date` | 복합 PK | 종목 × 거래일로 하루 한 행. 응답의 `timestamp` 는 **거래소 현지 거래일(KR=Asia/Seoul, US=America/New_York)**로 변환합니다. |
+| `stock_id` + `trade_date` | 복합 PK | 종목 × 거래일로 하루 한 행. 응답의 `timestamp` 는 **KST 기준 날짜**로 변환합니다. |
 | `open_price` | NUMERIC(19,4) | 시가. |
 | `high_price` `low_price` | NUMERIC(19,4) | 고가/저가. 캔들 차트의 꼬리. |
 | `close_price` | NUMERIC(19,4) | 종가. 다음 거래일의 `prev_close` 로 복사되어 등락률 계산의 분모. |
