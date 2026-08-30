@@ -16,10 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import static org.springframework.transaction.annotation.Propagation.NEVER;
-
 @Service
-@Transactional(readOnly = true)
 public class StockRankingLoadService {
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
@@ -37,7 +34,6 @@ public class StockRankingLoadService {
 
     private static final int TPS = 5;
 
-    @Transactional(propagation = NEVER)
     public void loadAll() {
         Pacer pacer = Pacer.forTps(TPS);
 
