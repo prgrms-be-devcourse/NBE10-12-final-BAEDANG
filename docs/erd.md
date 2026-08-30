@@ -87,7 +87,7 @@ How the Toss candles API close becomes the screen's change rate:
 
 ```
 GET /api/v1/candles?symbol=005930&interval=1d&count=200
-     └ KR 15:40 / US 06:10 KST · 100 calls per market · serialized at 5 TPS
+     └ KR 15:40 / US 05:10 (06:10 in winter) · 100 calls per market · serialized at 5 TPS
         ↓ store closePrice
 daily_candle.close_price          today's close finalized
         ↓ copy right before the next session opens (KR 08:50 / US 22:00)
@@ -123,7 +123,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `GET /api/v1/rankings` | RANKING · 5 TPS | universe: Mon KR 08:00 · US 21:00 / screen rankings: 30s TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, `prev_close` for newly included (`price.basePrice`). **100 per market, so 1 call each for KR·US completes it.** `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. On weekends there may be no aggregation — **keep last week's universe if empty**. |
 | `GET /api/v1/prices` | MARKET_DATA · **15 TPS** | **5s** (regular session only) | `quote_snapshot.last_price`, `quote_at`, `currency`. **100 stocks per market in 1 batch call** — even at 5s this is **1.3% of the limit**. KR and US sessions don't overlap, so no concurrent load. **Stop the scheduler when the market closes** → the last value (= close) stays, naturally serving "prior close". Prices arrive as **strings — parse to BigDecimal**. |
 | `GET /api/v1/price-limits` | MARKET_DATA · 15 TPS | once before session opens | `quote_snapshot.upper_limit`, `lower_limit`. **Set from prior close and fixed all day**, so no realtime polling needed. Single-item call: 100 KR stocks = 100 calls, ~7s. **US stocks have no price limits → NULL.** |
-| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **5 TPS** | KR 15:40 / US 06:10 KST | `daily_candle`. Daily and minute candles share one serialized task queue for this call group. The finalized `close_price` is copied to `quote_snapshot.prev_close` before the next session. Convert timestamps to the exchange-local trade date (KR=Seoul, US=New York). |
+| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **5 TPS** | KR 15:40 / US 05:10 (06:10 in winter) | `daily_candle`. Daily and minute candles share one serialized task queue for this call group. The finalized `close_price` is copied to `quote_snapshot.prev_close` before the next session. Convert timestamps to the exchange-local trade date (KR=Seoul, US=New York). |
 | `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **5 TPS** | **top 100: every minute, sequential 20-stock groups** / other stocks: detail-page on-demand | `minute_candle`. Top-100 calls are scheduled during each regular session. Off-hours or foreign-market stocks call on demand and reuse the last 60 seconds of cached rows. Week 2 adds limit-order fill determination and 5m/10m aggregation. |
 | `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS | **not used in week 1** · 08:00 batch if needed | `stock.is_warned`. Reports liquidation·short-term overheating·investment warning/risk·VI. **Single-item call** — 100 stocks = 100 calls, ~20s. **Not in the confirmed schedule** — the rankings API's `excludeInvestmentCaution=true` already filters most of it. |
 | `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS | history: **every hour on the hour** / current: 1-min TTL cache | **Two separate paths.** Chart history is stored to `exchange_rate` hourly (24 calls/day); the current rate used for execution comes from a **1-min TTL memory cache**. Store the response `validFrom` as `rate_at` with `ON CONFLICT DO NOTHING` — **weekend duplicates filtered automatically**. |
@@ -159,7 +159,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | **22:00** * | daily | US `prev_close` refresh — 30 min before regular open. 23:00 in DST. |
 | 22:30 ~ 05:00 * | 5s | US top-100 current-price collection — 1 batch call. 23:30 ~ 06:00 in standard time (winter). |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group. |
-| **06:10** | daily | US daily-candle storage. Runs after regular close in both DST modes and skips holidays using the market calendar. |
+| **05:10** * | daily | US daily-candle storage — 10 min after close. 06:10 in standard time. |
 | every hour on the hour | hourly | **FX storage** — 24 calls/day. Runs on weekends/holidays too (dupes blocked by UNIQUE). |
 | other times | — | **Quote collection stopped.** Reads still work but show prior close; orders rejected. |
 

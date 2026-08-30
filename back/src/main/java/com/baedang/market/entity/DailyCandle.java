@@ -11,7 +11,7 @@ import java.util.Objects;
  * 일봉. <b>TimescaleDB 하이퍼테이블</b>입니다 (infra/timescale.sql).
  *
  * <p>용도가 둘입니다 — 일봉 차트, 그리고 {@code prev_close} 의 원천.
- * 국내는 장 마감 10분 후, 미국은 DST와 무관하게 마감 이후인 06:10 KST에 수집합니다.
+ * 장 마감 10분 후 수집합니다(국내 15:40 KST, 미국 16:10 ET).
  *
  * <p>하이퍼테이블이라도 JPA 에서는 평범한 테이블처럼 다루면 됩니다.
  * 주봉은 연속 집계 뷰({@code candle_1w})로 파생하므로 여기서 만들지 마세요.

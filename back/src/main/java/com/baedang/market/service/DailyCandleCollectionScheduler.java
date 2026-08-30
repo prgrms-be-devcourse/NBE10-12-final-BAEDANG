@@ -38,8 +38,8 @@ public class DailyCandleCollectionScheduler {
         submit(MarketCountry.KR);
     }
 
-    /** DST 여부와 무관하게 미국 정규장 마감 이후인 06:10 KST에 실행하고 캘린더로 휴장 여부를 확인합니다. */
-    @Scheduled(cron = "0 10 6 * * TUE-SAT", zone = "Asia/Seoul")
+    /** 미국 현지 정규장 마감(16:00 ET) 10분 후 실행하며 DST 변환은 스케줄러 시간대에 맡깁니다. */
+    @Scheduled(cron = "0 10 16 * * MON-FRI", zone = "America/New_York")
     public void collectUs() {
         log.info("[daily-candle] US 장 마감 수집 트리거");
         submit(MarketCountry.US);
