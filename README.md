@@ -20,7 +20,7 @@
 .
 ├── front/    Next.js 화면
 ├── back/     Spring Boot API
-├── infra/    DB 스키마 · 로컬 Docker(local/) · AWS Terraform(production/)
+├── infra/    DB 스키마 · 로컬 Docker(local/) · AWS Terraform(development/)
 └── docs/     설계 문서 (ERD · 와이어프레임 · API 명세)
 ```
 

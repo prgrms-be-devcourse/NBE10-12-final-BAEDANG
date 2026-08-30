@@ -19,7 +19,7 @@ cd infra/local && docker compose up -d        # 로컬 PG + Redis
 back/                                  # Spring Boot 백엔드
 front/                                 # Next.js 프론트엔드 (예정)
 infra/local/                           # 로컬 DB 인프라 (Docker Compose)
-infra/production/                      # 개발 서버 AWS 인프라 (Terraform)
+infra/development/                     # 개발 서버 AWS 인프라 (Terraform)
 docs/                                  # 설계 문서
 ```
 

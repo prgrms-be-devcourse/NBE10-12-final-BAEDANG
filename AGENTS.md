@@ -23,7 +23,7 @@ cd infra/local && docker compose up -d        # local PostgreSQL/TimescaleDB + R
 back/                                  # Spring Boot backend
 front/                                 # Next.js frontend (planned)
 infra/local/                           # Local database infrastructure (Docker Compose)
-infra/production/                      # Dev-server AWS infrastructure (Terraform)
+infra/development/                     # Dev-server AWS infrastructure (Terraform)
 docs/                                  # Design documents
 ```
 
