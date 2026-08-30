@@ -20,7 +20,7 @@
 .
 ├── front/    Next.js 화면
 ├── back/     Spring Boot API
-├── infra/    DB 스키마 · Docker
+├── infra/    DB 스키마 · 로컬 Docker(local/) · AWS Terraform(production/)
 └── docs/     설계 문서 (ERD · 와이어프레임 · API 명세)
 ```
 
@@ -41,7 +41,7 @@
 Docker Desktop 을 켠 뒤:
 
 ```bash
-cd infra
+cd infra/local
 docker compose up -d
 ```
 

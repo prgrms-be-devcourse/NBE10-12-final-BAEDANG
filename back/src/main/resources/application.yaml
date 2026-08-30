@@ -35,7 +35,7 @@ spring:
       #    validate 는 "엔티티와 실제 테이블이 어긋나면 기동을 거부"합니다.
       #    update 로 두면 Hibernate 가 조용히 컬럼을 만들어버려서,
       #    내 PC 에서만 되는 상태가 됩니다.
-      #    스키마를 바꿨다면 infra 에서 docker compose down -v && up -d
+      #    스키마를 바꿨다면 infra/local 에서 docker compose down -v && up -d
       ddl-auto: validate
     properties:
       hibernate:
