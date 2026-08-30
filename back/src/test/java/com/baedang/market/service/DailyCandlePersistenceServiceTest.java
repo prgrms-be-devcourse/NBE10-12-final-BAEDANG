@@ -5,6 +5,7 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.repository.DailyCandleBatchRepository;
+import com.baedang.stock.entity.MarketCountry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -35,12 +36,12 @@ class DailyCandlePersistenceServiceTest {
     DailyCandlePersistenceService service;
 
     @Test
-    @DisplayName("KST 기준으로 trade_date 를 변환한다 — UTC 날짜와 동일한 경우")
-    void KST_날짜가_UTC와_같은_경우_그대로_저장된다() {
-        // UTC 2026-08-28 06:00:00 = KST 2026-08-28 15:00:00 (같은 날)
+    @DisplayName("국내 종목은 KST 기준으로 trade_date 를 변환한다")
+    void 국내종목_KST_기준_일자_변환() {
+        // UTC 2026-08-28 06:00:00 = KST 2026-08-28 15:00:00
         OffsetDateTime utcTime = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
 
-        service.upsert(1L, "KRW", List.of(candle(utcTime, "KRW")));
+        service.upsert(1L, MarketCountry.KR, "KRW", List.of(candle(utcTime, "KRW")));
 
         ArgumentCaptor<List<DailyCandle>> captor = ArgumentCaptor.captor();
         verify(repository).upsertAll(captor.capture());
@@ -49,18 +50,18 @@ class DailyCandlePersistenceServiceTest {
     }
 
     @Test
-    @DisplayName("UTC 기준 전날 밤 = KST 당일 새벽인 미국 종목 날짜를 KST 로 변환한다")
-    void 미국종목_마감시각_KST_변환시_날짜가_하루_앞당겨진다() {
-        // UTC 2026-08-27 20:00:00 = KST 2026-08-28 05:00:00 (미국 장 KST 기준 다음날 새벽 마감)
-        // UTC 기준으로 자르면 2026-08-27, KST 기준이면 2026-08-28
+    @DisplayName("미국 종목은 America/New_York 기준으로 현지 실제 거래일자를 산출한다")
+    void 미국종목_뉴욕_현지_거래일자_변환() {
+        // UTC 2026-08-27 20:00:00 = 뉴욕 현지 2026-08-27 16:00:00 (KST로는 8/28 05:00)
+        // 현지 거래일 기준인 2026-08-27로 저장되어야 함
         OffsetDateTime usCloseUtc = OffsetDateTime.of(2026, 8, 27, 20, 0, 0, 0, ZoneOffset.UTC);
 
-        service.upsert(1L, "USD", List.of(candle(usCloseUtc, "USD")));
+        service.upsert(1L, MarketCountry.US, "USD", List.of(candle(usCloseUtc, "USD")));
 
         ArgumentCaptor<List<DailyCandle>> captor = ArgumentCaptor.captor();
         verify(repository).upsertAll(captor.capture());
         assertThat(captor.getValue().get(0).getTradeDate())
-                .isEqualTo(LocalDate.of(2026, 8, 28)); // UTC 기준이면 8/27 로 하루 밀림
+                .isEqualTo(LocalDate.of(2026, 8, 27));
     }
 
     @Test
@@ -68,7 +69,7 @@ class DailyCandlePersistenceServiceTest {
     void 통화_불일치_캔들은_예외를_던진다() {
         Candle usdCandle = candle(OffsetDateTime.now(), "USD");
 
-        assertThatThrownBy(() -> service.upsert(1L, "KRW", List.of(usdCandle)))
+        assertThatThrownBy(() -> service.upsert(1L, MarketCountry.KR, "KRW", List.of(usdCandle)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
@@ -79,7 +80,7 @@ class DailyCandlePersistenceServiceTest {
     @Test
     @DisplayName("빈 캔들 목록은 저장을 호출하지 않는다")
     void 빈_캔들_목록은_저장을_스킵한다() {
-        service.upsert(1L, "KRW", List.of());
+        service.upsert(1L, MarketCountry.KR, "KRW", List.of());
 
         verify(repository, never()).upsertAll(any());
     }
@@ -91,7 +92,7 @@ class DailyCandlePersistenceServiceTest {
                 OffsetDateTime.now(), BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, null);
 
-        assertThatThrownBy(() -> service.upsert(1L, "KRW", List.of(nullCurrency)))
+        assertThatThrownBy(() -> service.upsert(1L, MarketCountry.KR, "KRW", List.of(nullCurrency)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);

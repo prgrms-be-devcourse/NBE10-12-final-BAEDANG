@@ -66,9 +66,9 @@ class DailyCandleCollectionIntegrationTest {
         Stock stock = saveStock(MarketCountry.KR, "KRW");
         OffsetDateTime candleAt = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
 
-        persistenceService.upsert(stock.getStockId(), "KRW",
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW",
                 List.of(candle(candleAt, "100", "KRW")));
-        persistenceService.upsert(stock.getStockId(), "KRW",
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW",
                 List.of(candle(candleAt, "110", "KRW")));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
@@ -82,7 +82,7 @@ class DailyCandleCollectionIntegrationTest {
     void 여러날짜_캔들_배치_저장된다() {
         Stock stock = saveStock(MarketCountry.KR, "KRW");
 
-        persistenceService.upsert(stock.getStockId(), "KRW", List.of(
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW", List.of(
                 candle(OffsetDateTime.of(2026, 8, 26, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW"),
                 candle(OffsetDateTime.of(2026, 8, 27, 6, 0, 0, 0, ZoneOffset.UTC), "110", "KRW"),
                 candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "120", "KRW")));
@@ -95,21 +95,20 @@ class DailyCandleCollectionIntegrationTest {
     }
 
     @Test
-    @DisplayName("UTC 기준 전날 밤 타임스탬프가 KST 기준으로 변환되어 저장된다")
-    void 미국종목_UTC전날밤_타임스탬프_KST기준_저장() {
+    @DisplayName("미국 종목은 뉴욕 현지 거래일 기준으로 변환되어 저장된다")
+    void 미국종목_뉴욕_현지_거래일자_기준_저장() {
         Stock stock = saveStock(MarketCountry.US, "USD");
-        // UTC 2026-08-27 20:00:00 = KST 2026-08-28 05:00:00
-        // UTC 기준으로 잘라내면 2026-08-27이 되어 하루 밀림
+        // UTC 2026-08-27 20:00:00 = 뉴욕 현지 2026-08-27 16:00:00 (KST 8/28 05:00)
+        // 현지 거래일자인 2026-08-27로 저장되어야 함
         OffsetDateTime usCloseUtc = OffsetDateTime.of(2026, 8, 27, 20, 0, 0, 0, ZoneOffset.UTC);
 
-        persistenceService.upsert(stock.getStockId(), "USD",
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "USD",
                 List.of(candle(usCloseUtc, "150", "USD")));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));
         assertThat(rows).hasSize(1);
-        // KST 기준 2026-08-28 로 저장되어야 함
-        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 28));
+        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 27));
     }
 
     @Test
@@ -118,7 +117,7 @@ class DailyCandleCollectionIntegrationTest {
         Stock stock = saveStock(MarketCountry.KR, "KRW");
         assertThat(dailyCandleRepository.existsByStockId(stock.getStockId())).isFalse();
 
-        persistenceService.upsert(stock.getStockId(), "KRW",
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW",
                 List.of(candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW")));
 
         assertThat(dailyCandleRepository.existsByStockId(stock.getStockId())).isTrue();

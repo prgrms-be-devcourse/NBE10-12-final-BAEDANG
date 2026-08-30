@@ -62,7 +62,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService).upsert(1L, "KRW", candles);
+        verify(persistenceService).upsert(1L, MarketCountry.KR, "KRW", candles);
     }
 
     @Test
@@ -79,8 +79,8 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), eq(MarketCountry.KR), anyString(), any());
+        verify(persistenceService, never()).upsert(eq(1L), any(), anyString(), any());
     }
 
     @Test
@@ -109,7 +109,7 @@ class DailyCandleCollectionServiceTest {
 
         service().backfill(MarketCountry.KR);
 
-        verify(persistenceService).upsert(1L, "KRW", candles);
+        verify(persistenceService).upsert(1L, MarketCountry.KR, "KRW", candles);
     }
 
     @Test
@@ -152,8 +152,8 @@ class DailyCandleCollectionServiceTest {
 
         service().backfill(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), eq(MarketCountry.KR), anyString(), any());
+        verify(persistenceService, never()).upsert(eq(1L), any(), anyString(), any());
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {
@@ -161,6 +161,7 @@ class DailyCandleCollectionServiceTest {
         when(stock.getStockId()).thenReturn(id);
         when(stock.getSymbol()).thenReturn(symbol);
         when(stock.getCurrency()).thenReturn(currency);
+        when(stock.getMarketCountry()).thenReturn(currency.equalsIgnoreCase("USD") ? MarketCountry.US : MarketCountry.KR);
         return stock;
     }
 

@@ -69,7 +69,8 @@ public class DailyCandleCollectionService {
             try {
                 List<Candle> candles = marketDataPort.fetchCandles(
                         stock.getSymbol(), CandleInterval.ONE_DAY, DAILY_CANDLE_COUNT);
-                persistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
+                persistenceService.upsert(
+                        stock.getStockId(), stock.getMarketCountry(), stock.getCurrency(), candles);
                 successCount++;
             } catch (Exception e) {
                 log.info("[daily-candle] 수집 실패 무시: symbol={} reason={}", stock.getSymbol(), e.getMessage());
@@ -107,7 +108,8 @@ public class DailyCandleCollectionService {
             try {
                 List<Candle> candles = marketDataPort.fetchCandles(
                         stock.getSymbol(), CandleInterval.ONE_DAY, BACKFILL_CANDLE_COUNT);
-                persistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
+                persistenceService.upsert(
+                        stock.getStockId(), stock.getMarketCountry(), stock.getCurrency(), candles);
                 successCount++;
             } catch (Exception e) {
                 log.info("[daily-candle-backfill] 백필 실패 무시: symbol={} reason={}", stock.getSymbol(), e.getMessage());
