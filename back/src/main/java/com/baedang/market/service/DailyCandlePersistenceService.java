@@ -9,8 +9,12 @@ import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.ZoneId;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * 일봉 데이터를 검증 및 시장 국가별 현지 거래일자로 변환하여 daily_candle 테이블에 저장하는 서비스.
@@ -30,38 +34,94 @@ public class DailyCandlePersistenceService {
     /** 일봉 목록을 시장 국가별 현지 거래일자로 변환하여 저장합니다. */
     @Transactional
     public void upsert(Long stockId, MarketCountry marketCountry, String stockCurrency, List<Candle> candles) {
+        if (candles == null) {
+            throw invalidCandle(stockId, "candles=null");
+        }
         if (candles.isEmpty()) return;
+        if (stockId == null || marketCountry == null) {
+            throw invalidCandle(stockId, "종목 식별 정보가 비어 있음");
+        }
         validateCurrency(stockId, stockCurrency, candles);
 
         ZoneId zoneId = zoneIdFor(marketCountry);
+        Set<LocalDate> tradeDates = new HashSet<>();
         List<DailyCandle> rows = candles.stream()
-                .map(candle -> new DailyCandle(
-                        stockId,
-                        candle.candleAt().atZoneSameInstant(zoneId).toLocalDate(),
-                        candle.openPrice(),
-                        candle.highPrice(),
-                        candle.lowPrice(),
-                        candle.closePrice(),
-                        candle.volume()))
+                .map(candle -> toRow(stockId, zoneId, candle, tradeDates))
                 .toList();
 
         dailyCandleBatchRepository.upsertAll(rows);
     }
 
     private ZoneId zoneIdFor(MarketCountry marketCountry) {
-        return marketCountry == MarketCountry.US ? NY : KST;
+        return switch (marketCountry) {
+            case KR -> KST;
+            case US -> NY;
+        };
     }
 
     /** 토스 응답 통화와 종목 통화 일치 여부 검증 */
     private void validateCurrency(Long stockId, String stockCurrency, List<Candle> candles) {
         boolean mismatch = candles.stream().anyMatch(candle ->
-                candle.currency() == null
+                candle == null
+                        || candle.currency() == null
+                        || candle.currency().isBlank()
                         || stockCurrency == null
+                        || stockCurrency.isBlank()
                         || !stockCurrency.equalsIgnoreCase(candle.currency().trim()));
         if (mismatch) {
             throw new BusinessException(
                     ErrorCode.QUOTE_CURRENCY_MISMATCH,
                     "stockId=" + stockId);
         }
+    }
+
+    private DailyCandle toRow(
+            Long stockId,
+            ZoneId zoneId,
+            Candle candle,
+            Set<LocalDate> tradeDates
+    ) {
+        validateValues(stockId, candle);
+        LocalDate tradeDate = candle.candleAt().atZoneSameInstant(zoneId).toLocalDate();
+        if (!tradeDates.add(tradeDate)) {
+            throw invalidCandle(stockId, "중복 거래일=" + tradeDate);
+        }
+        return new DailyCandle(
+                stockId,
+                tradeDate,
+                candle.openPrice(),
+                candle.highPrice(),
+                candle.lowPrice(),
+                candle.closePrice(),
+                candle.volume());
+    }
+
+    private void validateValues(Long stockId, Candle candle) {
+        if (candle.candleAt() == null
+                || !positive(candle.openPrice())
+                || !positive(candle.highPrice())
+                || !positive(candle.lowPrice())
+                || !positive(candle.closePrice())) {
+            throw invalidCandle(stockId, "캔들 시각 또는 OHLC가 올바르지 않음");
+        }
+        if (candle.highPrice().compareTo(candle.openPrice()) < 0
+                || candle.highPrice().compareTo(candle.closePrice()) < 0
+                || candle.highPrice().compareTo(candle.lowPrice()) < 0
+                || candle.lowPrice().compareTo(candle.openPrice()) > 0
+                || candle.lowPrice().compareTo(candle.closePrice()) > 0) {
+            throw invalidCandle(stockId, "OHLC 범위가 올바르지 않음");
+        }
+        if (candle.volume() != null
+                && (candle.volume().signum() < 0 || candle.volume().stripTrailingZeros().scale() > 0)) {
+            throw invalidCandle(stockId, "거래량이 음수이거나 정수가 아님");
+        }
+    }
+
+    private boolean positive(BigDecimal value) {
+        return value != null && value.signum() > 0;
+    }
+
+    private BusinessException invalidCandle(Long stockId, String reason) {
+        return new BusinessException(ErrorCode.TOSS_API_ERROR, "stockId=" + stockId + ", " + reason);
     }
 }

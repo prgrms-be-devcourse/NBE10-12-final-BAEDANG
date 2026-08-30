@@ -98,6 +98,47 @@ class DailyCandlePersistenceServiceTest {
                 .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
     }
 
+    @Test
+    @DisplayName("OHLC 범위가 올바르지 않으면 저장하지 않는다")
+    void 잘못된_OHLC를_거절한다() {
+        Candle invalid = new Candle(
+                OffsetDateTime.now(), new BigDecimal("100"), new BigDecimal("90"),
+                new BigDecimal("80"), new BigDecimal("95"), BigDecimal.ONE, "KRW");
+
+        assertThatThrownBy(() -> service.upsert(1L, MarketCountry.KR, "KRW", List.of(invalid)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
+        verify(repository, never()).upsertAll(any());
+    }
+
+    @Test
+    @DisplayName("음수 또는 소수 거래량은 저장하지 않는다")
+    void 잘못된_거래량을_거절한다() {
+        Candle invalid = new Candle(
+                OffsetDateTime.now(), BigDecimal.ONE, BigDecimal.ONE,
+                BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("-1"), "KRW");
+
+        assertThatThrownBy(() -> service.upsert(1L, MarketCountry.KR, "KRW", List.of(invalid)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
+        verify(repository, never()).upsertAll(any());
+    }
+
+    @Test
+    @DisplayName("한 응답에 같은 거래일이 중복되면 저장하지 않는다")
+    void 중복_거래일을_거절한다() {
+        OffsetDateTime at = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
+
+        assertThatThrownBy(() -> service.upsert(
+                1L, MarketCountry.KR, "KRW", List.of(candle(at, "KRW"), candle(at.plusHours(1), "KRW"))))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.TOSS_API_ERROR);
+        verify(repository, never()).upsertAll(any());
+    }
+
     private Candle candle(OffsetDateTime at, String currency) {
         BigDecimal p = BigDecimal.ONE;
         return new Candle(at, p, p, p, p, p, currency);

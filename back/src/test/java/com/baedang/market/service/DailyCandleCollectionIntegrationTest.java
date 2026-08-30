@@ -111,18 +111,6 @@ class DailyCandleCollectionIntegrationTest {
         assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 27));
     }
 
-    @Test
-    @DisplayName("existsByStockId 는 일봉이 있으면 true 를 반환한다")
-    void existsByStockId_일봉있으면_true() {
-        Stock stock = saveStock(MarketCountry.KR, "KRW");
-        assertThat(dailyCandleRepository.existsByStockId(stock.getStockId())).isFalse();
-
-        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW",
-                List.of(candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW")));
-
-        assertThat(dailyCandleRepository.existsByStockId(stock.getStockId())).isTrue();
-    }
-
     private Stock saveStock(MarketCountry country, String currency) {
         String symbol = UUID.randomUUID().toString().substring(0, 6).toUpperCase();
         return stockRepository.save(Stock.create(

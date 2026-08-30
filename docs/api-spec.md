@@ -769,7 +769,7 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 | 22:00 * | daily | US `prev_close` refresh — 30 min before regular open |
 | 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
-| 05:10 * | daily | US daily-candle storage — 10 min after close. 06:10 in winter |
+| 06:10 | daily | US daily-candle storage — runs after close in both DST modes and skips holidays using the market calendar |
 | every hour on the hour | hourly | FX storage — 24 calls/day |
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
