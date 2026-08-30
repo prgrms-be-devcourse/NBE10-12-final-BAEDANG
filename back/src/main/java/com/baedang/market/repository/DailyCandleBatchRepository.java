@@ -9,14 +9,8 @@ import java.sql.Types;
 import java.util.List;
 
 /**
- * {@code daily_candle} 테이블 대량 UPSERT 전용 저장소.
- *
- * <p>JPA {@code saveAll} 대신 {@link JdbcTemplate#batchUpdate}를 쓰는 이유:
- * JPA 는 엔티티 당 UPDATE/INSERT 를 분기하려고 SELECT 를 먼저 날립니다.
- * {@code ON CONFLICT DO UPDATE} 는 DB 가 직접 분기하므로 왕복이 절반으로 줄고,
- * 100 종목 1봉을 단일 배치로 처리합니다.
- *
- * <p>{@code MinuteCandleBatchRepository} 와 동일한 패턴입니다.
+ * daily_candle 테이블 배치 UPSERT 저장소.
+ * JdbcTemplate batchUpdate 기반 ON CONFLICT DO UPDATE를 수행합니다.
  */
 @Repository
 public class DailyCandleBatchRepository {
@@ -39,7 +33,7 @@ public class DailyCandleBatchRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** 주어진 일봉 목록을 단일 배치로 UPSERT 합니다. */
+    /** 일봉 목록을 단일 배치로 UPSERT 합니다. */
     public void upsertAll(List<DailyCandle> candles) {
         if (candles.isEmpty()) return;
         jdbcTemplate.batchUpdate(

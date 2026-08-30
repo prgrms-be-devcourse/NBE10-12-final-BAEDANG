@@ -17,29 +17,18 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 /**
- * 거래대금 상위 종목의 일봉(Daily OHLCV)을 수집합니다.
- *
- * <p>역할 두 가지:
- * <ol>
- *   <li>{@link #collect(MarketCountry)} — 장 마감 직후 스케줄러가 호출. 최신 봉 1개를 저장합니다.</li>
- *   <li>{@link #backfill(MarketCountry)} — 앱 기동 시 {@code DailyCandleBackfillRunner} 가 호출.
- *       일봉이 한 개도 없는 종목에 대해 최대 250개(약 1년)의 과거 봉을 적재합니다.</li>
- * </ol>
- *
- * <p>두 경우 모두 {@link Pacer}로 {@code MARKET_DATA_CHART} 그룹 5 TPS 제한을 준수하며,
- * 개별 종목 수집 실패는 로그만 남기고 나머지 종목 수집을 계속합니다(배치 부분 실패 허용).
- * 전량 실패 시에는 Toss 어댑터 자체 장애 가능성이 높으므로 WARN 으로 격상합니다.
+ * 상위 종목 일봉 정기 수집 및 초기 백필 서비스.
  */
 @Service
 public class DailyCandleCollectionService {
 
     private static final Logger log = LoggerFactory.getLogger(DailyCandleCollectionService.class);
 
-    /** MARKET_DATA_CHART 그룹 TPS 제한 (docs/erd.md) */
+    /** MARKET_DATA_CHART 그룹 5 TPS 제한 */
     private static final int CHART_TPS = 5;
-    /** 일별 정기 수집: 마감 봉 1개만 확인 */
+    /** 일별 정기 수집: 마감 봉 1개 */
     private static final int DAILY_CANDLE_COUNT = 1;
-    /** 초기 백필: 약 1년치 거래일 봉 */
+    /** 초기 백필: 약 1년치 거래일 250봉 */
     private static final int BACKFILL_CANDLE_COUNT = 250;
 
     private final MarketDataPort marketDataPort;
@@ -62,10 +51,7 @@ public class DailyCandleCollectionService {
         this.universeSize = universeSize;
     }
 
-    /**
-     * 지정 시장의 거래대금 상위 종목의 당일 마감 일봉 1개를 수집합니다.
-     * 국내(15:40 KST), 해외(06:10 KST) 스케줄러에서 호출합니다.
-     */
+    /** 장 마감 후 당일 마감 일봉 1개 수집 */
     public void collect(MarketCountry marketCountry) {
         List<Stock> stocks = stockRepository.findRankedByMarketCountry(
                 marketCountry, PageRequest.of(0, universeSize));
@@ -99,12 +85,7 @@ public class DailyCandleCollectionService {
         }
     }
 
-    /**
-     * 일봉 데이터가 한 개도 없는 종목에 대해 초기 적재(Backfill)를 수행합니다.
-     * 앱 기동 시 {@code DailyCandleBackfillRunner} 에서 호출합니다.
-     *
-     * <p>이미 일봉이 있는 종목은 건너뜁니다 — 재배포 시 불필요한 API 호출을 방지합니다.
-     */
+    /** 일봉이 없는 종목 대상 과거 250봉 초기 백필 */
     public void backfill(MarketCountry marketCountry) {
         List<Stock> stocks = stockRepository.findRankedByMarketCountry(
                 marketCountry, PageRequest.of(0, universeSize));

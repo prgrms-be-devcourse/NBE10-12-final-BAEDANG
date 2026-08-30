@@ -10,6 +10,6 @@ public interface DailyCandleRepository extends JpaRepository<DailyCandle, DailyC
 
     List<DailyCandle> findByStockIdOrderByTradeDateDesc(Long stockId, Pageable pageable);
 
-    /** 해당 종목의 일봉이 하나라도 존재하는지 확인합니다. 초기 백필 대상 선별에 사용합니다. */
+    /** 해당 종목의 일봉 존재 여부 확인 (초기 백필 대상 선별용) */
     boolean existsByStockId(Long stockId);
 }

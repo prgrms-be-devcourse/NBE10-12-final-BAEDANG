@@ -30,11 +30,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 실제 PostgreSQL(TimescaleDB) 로 {@code DailyCandlePersistenceService} 의
- * UPSERT 동작과 KST 날짜 변환을 검증합니다.
- *
- * <p>수집 스케줄러·백필 러너는 {@code toss.enabled=false} 로 비활성화하고,
- * 저장 계층만 격리하여 테스트합니다.
+ * PostgreSQL 컨테이너 환경에서 일봉 배치 UPSERT 및 KST 날짜 변환 검증.
  */
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
