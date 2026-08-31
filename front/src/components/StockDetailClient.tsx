@@ -7,11 +7,23 @@ import { PillTabs } from "./PillTabs";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
 import { useTheme } from "./ThemeProvider";
-import { getHolding, getMockChartPoints, AVAILABLE_CASH, type StockDetail } from "@/lib/mock-data";
-import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
+import { INITIAL_CASH } from "@/lib/mock-data";
+import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { calculateOrderAmount } from "@/lib/order-amount";
-import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
-import { ApiError, getAccountSummary, placeOrder, type AccountSummary } from "@/lib/api";
+import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
+import {
+  ApiError,
+  getAccountSummary,
+  getCandles,
+  getHoldings,
+  placeOrder,
+  type AccountSummary,
+  type Candle,
+  type CandleInterval,
+  type CandleRange,
+  type HoldingItem,
+  type StockDetail,
+} from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
@@ -19,10 +31,8 @@ const TRADABLE_REASON_LABEL: Record<string, string> = {
   NOT_IN_UNIVERSE: "이 종목은 아직 거래를 지원하지 않아요",
   SUSPENDED: "거래정지 종목이에요",
   LIQUIDATION: "정리매매 종목이에요",
+  QUOTE_NOT_FOUND: "시세 정보가 아직 없어요",
 };
-
-// 투자경고 배너 문구("투자경고 종목으로 지정되어 있습니다...") 중 이 부분만 굵게 강조한다.
-const WARNING_HIGHLIGHT = "투자경고 종목";
 
 const CATEGORY_GUIDE: Record<string, string> = {
   개별주:
@@ -32,13 +42,23 @@ const CATEGORY_GUIDE: Record<string, string> = {
   ETF: "ETF는 여러 기업에 나눠 투자하는 상품이에요. 한 기업이 흔들려도 전체 영향은 희석돼서, 개별주보다 변동이 작아요.",
 };
 
+/** 화면에 넣을 캔들 구간 옵션 → 백엔드 interval/range 쌍. 1분봉은 반드시 range=1D (CandleQueryPolicy). */
+function toCandleQuery(candleUnit: "일봉" | "1분봉", period: "1개월" | "6개월" | "1년"): { interval: CandleInterval; range: CandleRange } {
+  if (candleUnit === "1분봉") return { interval: "1m", range: "1D" };
+  const range: CandleRange = period === "1개월" ? "1M" : period === "6개월" ? "6M" : "1Y";
+  return { interval: "1d", range };
+}
+
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
   const { rate: usdKrwRate } = useExchangeRate();
   const { theme } = useTheme();
   const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [candleUnit, setCandleUnit] = useState<"일봉" | "1분봉">("일봉");
   const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
+  const [candleItems, setCandleItems] = useState<Candle[]>([]);
+  const [candleLoading, setCandleLoading] = useState(true);
   const [side, setSide] = useState<"매수" | "매도">("매수");
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
@@ -50,6 +70,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // null이면 "지금 이 주문 시도는 끝났다" — 다음 제출 때 완전히 새로 발급한다.
   const [clientOrderId, setClientOrderId] = useState<string | null>(null);
 
+  const categoryLabelValue = categoryLabel(detail.category, detail.isDividend);
+  const changeDecimal = toDecimal(detail.price.changeAmount);
+  const isUp = !changeDecimal || changeDecimal.greaterThanOrEqualTo(0);
+  const warningLabel = detail.warnings.find((w) => w.type === "INVESTMENT_WARNING")?.label ?? null;
+
   // 투자경고 배너("이 종목은 ... 매수 전 확인하세요")가 있으면 왼쪽 컬럼은
   // breadcrumb → 배너 → 종목명 순으로 내려가는데, 오른쪽 거래하기 패널이 왼쪽
   // 컬럼과 같은 높이(맨 위, breadcrumb 높이)에서 시작하면 배너보다 훨씬 위에
@@ -60,14 +85,14 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [measuredBreadcrumbHeight, setMeasuredBreadcrumbHeight] = useState(0);
   // 경고가 없는 종목은 애초에 거래하기 패널이 breadcrumb과 같은 높이에서 시작해도
   // 문제없으므로(맞춰야 할 배너 자체가 없다), 이 경우엔 오프셋을 적용하지 않는다.
-  const tradePanelOffset = detail.warning ? measuredBreadcrumbHeight : 0;
+  const tradePanelOffset = warningLabel ? measuredBreadcrumbHeight : 0;
 
   function measureBreadcrumbHeight() {
     const el = breadcrumbRef.current;
     if (el) setMeasuredBreadcrumbHeight(el.offsetHeight + 14); // mb-3.5(14px) = breadcrumb과 배너 사이 여백
   }
 
-  useLayoutEffect(measureBreadcrumbHeight, [detail.warning]);
+  useLayoutEffect(measureBreadcrumbHeight, [warningLabel]);
 
   useEffect(() => {
     const el = breadcrumbRef.current;
@@ -75,10 +100,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     const observer = new ResizeObserver(measureBreadcrumbHeight);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [detail.warning]);
+  }, [warningLabel]);
 
   useEffect(() => {
-    if (!isLoggedIn || !user) return;
+    if (!isLoggedIn || !user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAccount(null);
+      setHoldings([]);
+      return;
+    }
     let cancelled = false;
     getAccountSummary(user.userId)
       .then((acc) => {
@@ -87,34 +117,63 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       .catch(() => {
         if (!cancelled) setAccount(null);
       });
+    getHoldings(user.userId)
+      .then((res) => {
+        if (!cancelled) setHoldings(res.items);
+      })
+      .catch(() => {
+        if (!cancelled) setHoldings([]);
+      });
     return () => {
       cancelled = true;
     };
   }, [isLoggedIn, user]);
 
-  const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-  const isUp = detail.changeAmount >= 0;
-  const holding = getHolding(detail.symbol);
-  const availableQuantity = holding?.quantity ?? 0;
-  const availableCash = account ? Number(account.cashBalance) : AVAILABLE_CASH;
+  // 캔들 차트 — 세그먼트(일봉/1분봉, 기간)가 바뀔 때마다 다시 조회한다.
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCandleLoading(true);
+    const { interval, range } = toCandleQuery(candleUnit, period);
+    getCandles(detail.symbol, detail.marketCountry, interval, range)
+      .then((data) => {
+        if (!cancelled) setCandleItems(data.items);
+      })
+      .catch(() => {
+        if (!cancelled) setCandleItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCandleLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.symbol, detail.marketCountry, candleUnit, period]);
 
-  const chartPoints = useMemo(
-    () => getMockChartPoints(detail.symbol + candleUnit + period),
-    [detail.symbol, candleUnit, period]
-  );
-  const polyline = chartPoints
-    .map((v, i) => `${(i / (chartPoints.length - 1)) * 600},${145 - v}`)
-    .join(" ");
+  const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
+  const holding = holdings.find((h) => h.symbol === detail.symbol);
+  const availableQuantity = holding ? Number(holding.quantity) : 0;
+  const availableCash = account ? Number(account.cashBalance) : INITIAL_CASH;
+
+  const closes = useMemo(() => candleItems.map((c) => Number(c.close)), [candleItems]);
+  const polyline = useMemo(() => {
+    if (closes.length < 2) return "";
+    const min = Math.min(...closes);
+    const max = Math.max(...closes);
+    const range = max - min || 1;
+    return closes.map((v, i) => `${(i / (closes.length - 1)) * 600},${145 - ((v - min) / range) * 145}`).join(" ");
+  }, [closes]);
+  const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
   const amount = calculateOrderAmount({
     side,
     quantity,
-    price: detail.lastPrice,
-    currency: detail.currency,
+    price: detail.price.lastPrice ?? 0,
+    currency: detail.currency === "USD" ? "USD" : "KRW",
     usdKrwRate,
   });
 
-  const priceLabel = detail.currency === "USD" ? formatUsd(detail.lastPrice) : formatNumber(detail.lastPrice);
+  const priceLabel = detail.currency === "USD" ? formatUsd(detail.price.lastPrice) : formatNumber(detail.price.lastPrice);
 
   let blockReason: string | null = null;
   if (!detail.tradable) {
@@ -173,10 +232,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           `${formatNumber(response.netAmount)}원)`
       );
       setClientOrderId(null); // 성공했으니 다음 주문은 완전히 새로 시작한다.
-      // 체결 후 잔여 예수금 즉시 반영
+      // 체결 후 잔여 예수금·보유 수량 즉시 반영
       setAccount((prev) =>
         prev ? { ...prev, cashBalance: response.account.cashBalanceAfter } : null
       );
+      getHoldings(user.userId).then((res) => setHoldings(res.items)).catch(() => {});
     } catch (err) {
       if (err instanceof ApiError) {
         setOrderError(err.message);
@@ -201,7 +261,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           <span className="cursor-pointer">주식 종목 랭킹</span> › {detail.name}
         </div>
 
-        {detail.warning && (
+        {warningLabel && (
           <div
             className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[14.5px]"
             style={
@@ -214,15 +274,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 : { background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }
             }
           >
-            ⚠ 이 종목은{" "}
-            {detail.warning.startsWith(WARNING_HIGHLIGHT) ? (
-              <>
-                <b>{WARNING_HIGHLIGHT}</b>
-                {detail.warning.slice(WARNING_HIGHLIGHT.length)}
-              </>
-            ) : (
-              detail.warning
-            )}
+            ⚠ 이 종목은 <b>{warningLabel}</b> 종목으로 지정되어 있습니다. 매수 전 확인하세요.
           </div>
         )}
 
@@ -232,21 +284,24 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <Tag weightClassName="font-bold">{detail.market}</Tag>{" "}
             <span
               className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-bold"
-              style={CATEGORY_BADGE_STYLE[detail.category]}
+              style={CATEGORY_BADGE_STYLE[categoryLabelValue]}
             >
-              {detail.category}
+              {categoryLabelValue}
             </span>
           </div>
           <div className="mt-1.5 text-[30px] font-extrabold" style={{ color: "var(--ink)" }}>
             {priceLabel}{" "}
             <span className="text-[16px] font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
               {isUp ? "▲" : "▼"}{" "}
-              {detail.currency === "USD" ? formatUsd(detail.changeAmount) : formatSigned(detail.changeAmount)} (
-              {formatPercent(detail.changeRate)})
+              {detail.currency === "USD" ? formatUsd(detail.price.changeAmount) : formatSigned(detail.price.changeAmount)} (
+              {formatPercent(detail.price.changeRate)})
             </span>
           </div>
           <div className="mt-1 text-[12.5px]" style={{ color: "var(--mut2)" }}>
-            2026-08-25 12:36:59 기준 · 5초마다 갱신 · 조회는 장 시간과 무관하게 항상 가능
+            {detail.price.quoteAt
+              ? `${new Date(detail.price.quoteAt).toLocaleString("ko-KR")} 기준`
+              : "시세 정보가 아직 없어요"}{" "}
+            · 조회는 장 시간과 무관하게 항상 가능
           </div>
         </div>
 
@@ -286,14 +341,22 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             />
           )}
           <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
-            {candleUnit === "일봉" ? `일봉 · ${period} · 08/25 종가까지` : "1분봉 · 최근 200봉"}
+            {candleUnit === "일봉"
+              ? `일봉 · ${period}${lastCandleAt ? ` · ${new Date(lastCandleAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} 종가까지` : ""}`
+              : `1분봉 · 최근 ${closes.length}봉`}
           </span>
         </div>
 
         <div className="mb-4 flex h-[200px] items-center justify-center rounded-[20px]" style={{ background: "var(--card)" }}>
-          <svg width="94%" height="145" viewBox="0 0 600 145" preserveAspectRatio="none">
-            <polyline points={polyline} fill="none" stroke="var(--mut)" strokeWidth={2} />
-          </svg>
+          {candleLoading ? (
+            <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트를 불러오는 중…</span>
+          ) : closes.length >= 2 ? (
+            <svg width="94%" height="145" viewBox="0 0 600 145" preserveAspectRatio="none">
+              <polyline points={polyline} fill="none" stroke="var(--mut)" strokeWidth={2} />
+            </svg>
+          ) : (
+            <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트 데이터가 아직 없어요</span>
+          )}
         </div>
 
         <div className="mb-3.5 rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
@@ -301,15 +364,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             이 종목은 어떤 주식인가요?{" "}
             <span
               className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-medium"
-              style={CATEGORY_BADGE_STYLE[detail.category]}
+              style={CATEGORY_BADGE_STYLE[categoryLabelValue]}
             >
-              {detail.category}
+              {categoryLabelValue}
             </span>
           </h4>
           <p className="text-[14.5px] leading-relaxed" style={{ color: "var(--body)" }}>
-            {CATEGORY_GUIDE[detail.category] ?? detail.description}
+            {CATEGORY_GUIDE[categoryLabelValue]}
           </p>
-          {detail.category === "ETF" ? (
+          {categoryLabelValue === "ETF" ? (
             <div className="mt-2.5 text-[13.5px]" style={{ color: "var(--mut2)" }}>
               구성 종목 비중 정보는 준비 중이에요
             </div>
@@ -328,15 +391,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <tbody>
               <tr>
                 <td className="w-1/4 py-1" style={{ color: "var(--mut)" }}>상한가</td>
-                <td className="py-1 font-bold" style={{ color: "var(--up)" }}>{detail.upperLimit ? formatNumber(detail.upperLimit) : "—"}</td>
+                <td className="py-1 font-bold" style={{ color: "var(--up)" }}>{formatNumber(detail.price.upperLimit, "—")}</td>
                 <td className="w-1/4 py-1" style={{ color: "var(--mut)" }}>하한가</td>
-                <td className="py-1 font-bold" style={{ color: "var(--down)" }}>{detail.lowerLimit ? formatNumber(detail.lowerLimit) : "—"}</td>
+                <td className="py-1 font-bold" style={{ color: "var(--down)" }}>{formatNumber(detail.price.lowerLimit, "—")}</td>
               </tr>
               <tr>
                 <td className="py-1" style={{ color: "var(--mut)" }}>시가총액</td>
-                <td className="py-1" style={{ color: "var(--ink)" }}>{detail.marketCap}</td>
+                <td className="py-1" style={{ color: "var(--ink)" }}>{formatKoreanAmount(detail.info.marketCap, "—")}</td>
                 <td className="py-1" style={{ color: "var(--mut)" }}>상장주식수</td>
-                <td className="py-1" style={{ color: "var(--ink)" }}>{detail.sharesOutstanding}</td>
+                <td className="py-1" style={{ color: "var(--ink)" }}>{formatNumber(detail.info.sharesOutstanding, "—")}</td>
               </tr>
               <tr>
                 <td className="py-1" style={{ color: "var(--mut)" }}>거래 상태</td>
