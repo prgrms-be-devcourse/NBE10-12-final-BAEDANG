@@ -125,10 +125,10 @@ resource "aws_iam_role" "ec2_role_1" {
   })
 }
 
-# resource "aws_iam_role_policy_attachment" "s3_full_access" {
-#   role       = aws_iam_role.ec2_role_1.name
-#   policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-# }
+resource "aws_iam_role_policy_attachment" "s3_full_access" {
+  role       = aws_iam_role.ec2_role_1.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+}
 
 resource "aws_iam_role_policy_attachment" "ec2_ssm" {
   role       = aws_iam_role.ec2_role_1.name
