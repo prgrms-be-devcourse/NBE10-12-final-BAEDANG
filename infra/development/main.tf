@@ -63,28 +63,34 @@ resource "aws_route_table_association" "association_1" {
 resource "aws_security_group" "ec2_sg_1" {
   name = "${var.prefix}-ec2-sg-1"
 
+  # ingress {
+  #   from_port   = 80
+  #   to_port     = 80
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
+  # ingress {
+  #   from_port   = 81
+  #   to_port     = 81
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
+  # ingress {
+  #   from_port   = 443
+  #   to_port     = 443
+  #   protocol    = "tcp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
+  # ingress {
+  #   from_port   = 443
+  #   to_port     = 443
+  #   protocol    = "udp"
+  #   cidr_blocks = ["0.0.0.0/0"]
+  # }
   ingress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = 8080
+    to_port     = 8080
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 81
-    to_port     = 81
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
