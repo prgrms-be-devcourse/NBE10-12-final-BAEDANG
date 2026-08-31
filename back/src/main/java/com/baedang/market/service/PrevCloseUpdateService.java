@@ -1,14 +1,14 @@
 package com.baedang.market.service;
 
 import com.baedang.market.model.PrevCloseUpdateResult;
-import com.baedang.market.repository.PrevCloseUpdateRepository;
 import com.baedang.stock.entity.MarketCountry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.Objects;
+import java.util.Optional;
 
 /** 다음 정규장 시작 전에 상위 종목의 등락률 기준가를 갱신합니다. */
 @Service
@@ -16,20 +16,33 @@ public class PrevCloseUpdateService {
 
     private static final Logger log = LoggerFactory.getLogger(PrevCloseUpdateService.class);
 
-    private final PrevCloseUpdateRepository prevCloseUpdateRepository;
+    private final PreviousTradingDayResolver previousTradingDayResolver;
+    private final PrevCloseUpdateTransactionService transactionService;
 
-    public PrevCloseUpdateService(PrevCloseUpdateRepository prevCloseUpdateRepository) {
-        this.prevCloseUpdateRepository = prevCloseUpdateRepository;
+    public PrevCloseUpdateService(
+            PreviousTradingDayResolver previousTradingDayResolver,
+            PrevCloseUpdateTransactionService transactionService
+    ) {
+        this.previousTradingDayResolver = previousTradingDayResolver;
+        this.transactionService = transactionService;
     }
 
-    @Transactional
     public PrevCloseUpdateResult update(MarketCountry marketCountry) {
         Objects.requireNonNull(marketCountry, "marketCountry must not be null");
 
-        PrevCloseUpdateResult result = prevCloseUpdateRepository.update(marketCountry);
+        Optional<LocalDate> expectedTradeDate = previousTradingDayResolver.resolve(marketCountry);
+        if (expectedTradeDate.isEmpty()) {
+            log.warn(
+                    "[prev-close] 직전 거래일 확인 불가, last_price 전체 폴백: market={}",
+                    marketCountry
+            );
+        }
+
+        PrevCloseUpdateResult result = transactionService.update(marketCountry, expectedTradeDate);
         log.info(
-                "[prev-close] 갱신 완료: market={} target={} updated={} fallback={} skipped={}",
+                "[prev-close] 갱신 완료: market={} expectedTradeDate={} target={} updated={} fallback={} skipped={}",
                 marketCountry,
+                expectedTradeDate.map(LocalDate::toString).orElse("LAST_PRICE_FALLBACK"),
                 result.targetCount(),
                 result.updatedCount(),
                 result.fallbackCount(),
