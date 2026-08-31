@@ -188,7 +188,7 @@ class MarketOrderIntegrationTest {
 
         TradeOrder order = tradeOrderRepository.findById(response.orderId()).orElseThrow();
         assertThat(order.getStockId()).isEqualTo(usFixture.stockId());
-        assertThat(response.exchangeRate()).isEqualTo("1383.6");
+        assertThat(response.exchangeRate()).isEqualTo("1383.60");
     }
 
     @Test
@@ -399,7 +399,7 @@ class MarketOrderIntegrationTest {
                 fixture.userId(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "1");
 
         assertThat(response.executable()).isTrue();
-        assertThat(response.exchangeRate()).isEqualTo("1383.6");
+        assertThat(response.exchangeRate()).isEqualTo("1383.60");
     }
 
     @Test

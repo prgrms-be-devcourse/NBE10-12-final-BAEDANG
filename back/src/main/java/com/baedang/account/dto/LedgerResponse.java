@@ -3,10 +3,12 @@ package com.baedang.account.dto;
 import com.baedang.stock.entity.Stock;
 import com.baedang.trading.entity.LedgerEntry;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.preserveScale;
 
 /**
  * 마이페이지 체결 내역. {@code GET /accounts/me/ledger} 의 응답입니다.
@@ -43,9 +45,9 @@ public record LedgerResponse(
             return new Item(
                     entry.getEntryId(),
                     entry.getEntryType().name(),
-                    plain(entry.getAmount()),
-                    plain(entry.getBalanceAfter()),
-                    plain(entry.getExchangeRate()),
+                    krw(entry.getAmount()),
+                    krw(entry.getBalanceAfter()),
+                    preserveScale(entry.getExchangeRate()),
                     entry.getMemo(),
                     entry.getOrderId(),
                     stock != null ? stock.getSymbol() : null,
@@ -53,10 +55,5 @@ public record LedgerResponse(
                     OffsetDateTime.ofInstant(entry.getOccurredAt().toInstant(), ZoneOffset.UTC)
             );
         }
-    }
-
-    private static String plain(BigDecimal value) {
-        if (value.signum() == 0) return "0";
-        return value.stripTrailingZeros().toPlainString();
     }
 }

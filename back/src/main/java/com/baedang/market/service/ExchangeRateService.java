@@ -17,6 +17,8 @@ import java.time.*;
 import java.util.List;
 import java.util.Locale;
 
+import static com.baedang.global.formatter.FinancialDecimalFormatter.preserveScale;
+
 /**
  * 환율 조회 서비스. 랭킹 화면 환율 배너({@code GET /api/exchange-rates/latest})를 위한
  * 최신 환율 + 전일 대비 등락 계산을 담당한다.
@@ -81,9 +83,9 @@ public class ExchangeRateService {
         return new ExchangeRateLatestResponse(
                 latest.getBaseCurrency(),
                 latest.getQuoteCurrency(),
-                latestRate.toPlainString(),
-                changeAmount.toPlainString(),
-                changeRate.toPlainString(),
+                preserveScale(latestRate),
+                preserveScale(changeAmount),
+                preserveScale(changeRate),
                 latest.getRateAt());
     }
 
@@ -96,7 +98,7 @@ public class ExchangeRateService {
                 )
                         .stream()
                         .map(exchangeRate -> new ExchangeRateHistoryResponse.Item(
-                                exchangeRate.getRateAt(), displayRate(exchangeRate).toPlainString())
+                                exchangeRate.getRateAt(), preserveScale(displayRate(exchangeRate)))
                         ).toList();
         return new ExchangeRateHistoryResponse(items);
     }

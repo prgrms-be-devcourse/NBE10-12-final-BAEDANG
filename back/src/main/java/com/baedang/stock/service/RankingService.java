@@ -18,6 +18,10 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+
 @Service
 public class RankingService {
 
@@ -131,13 +135,13 @@ public class RankingService {
                 stock.getMarket(),
                 stock.getStockCategory(),
                 stock.getIsDividend(),
-                number(stock.getLeverageFactor()),
+                plain(stock.getLeverageFactor()),
                 stock.getCurrency(),
-                number(lastPrice),
-                number(prevClose),
-                number(changeAmount),
-                number(changeRate),
-                number(stock.getTradingAmount()),
+                currency(lastPrice, stock.getCurrency()),
+                currency(prevClose, stock.getCurrency()),
+                currency(changeAmount, stock.getCurrency()),
+                plain(changeRate),
+                krw(stock.getTradingAmount()),
                 quote == null ? null : quote.getQuoteAt(),
                 realtime
         );
@@ -206,10 +210,6 @@ public class RankingService {
              */
             throw new BusinessException(ErrorCode.INVALID_CURSOR);
         }
-    }
-
-    private String number(BigDecimal value) {
-        return value == null ? null : value.toPlainString();
     }
 
     private record RankingCursor(

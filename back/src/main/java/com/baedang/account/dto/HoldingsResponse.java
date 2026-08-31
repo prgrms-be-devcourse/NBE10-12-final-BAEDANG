@@ -1,12 +1,17 @@
 package com.baedang.account.dto;
 
 import com.baedang.account.support.HoldingValuation;
+import com.baedang.global.formatter.FinancialDecimalFormatter;
 import com.baedang.stock.entity.Stock;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.List;
+
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.preserveScale;
 
 /**
  * 마이페이지 보유 종목 목록. {@code GET /accounts/me/holdings} 의 응답입니다.
@@ -55,23 +60,14 @@ public record HoldingsResponse(
                     stock.getName(),
                     stock.getCurrency(),
                     plain(valuation.quantity()),
-                    plain(valuation.avgBuyPrice()),
-                    plain(valuation.avgExchangeRate()),
-                    plainOrNull(valuation.lastPrice()),
-                    plain(valuation.evalWon()),
-                    plain(pnlWon),
-                    plainOrNull(pnlRate),
+                    FinancialDecimalFormatter.currency(valuation.avgBuyPrice(), stock.getCurrency()),
+                    preserveScale(valuation.avgExchangeRate()),
+                    FinancialDecimalFormatter.currency(valuation.lastPrice(), stock.getCurrency()),
+                    krw(valuation.evalWon()),
+                    krw(pnlWon),
+                    plain(pnlRate),
                     realtime
             );
         }
-    }
-
-    private static String plain(BigDecimal value) {
-        if (value.signum() == 0) return "0";
-        return value.stripTrailingZeros().toPlainString();
-    }
-
-    private static String plainOrNull(BigDecimal value) {
-        return value == null ? null : plain(value);
     }
 }

@@ -102,7 +102,8 @@ public class CandleQueryService {
                         row.getHighPrice(),
                         row.getLowPrice(),
                         row.getClosePrice(),
-                        row.getVolume()))
+                        row.getVolume(),
+                        stock.getCurrency()))
                 .toList();
     }
 
@@ -117,7 +118,8 @@ public class CandleQueryService {
                         row.getHighPrice(),
                         row.getLowPrice(),
                         row.getClosePrice(),
-                        row.getVolume()))
+                        row.getVolume(),
+                        stock.getCurrency()))
                 .toList();
     }
 

@@ -38,7 +38,8 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
 
-import static com.baedang.trading.model.AmountFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 
 /** 시장가 주문의 DB 변경을 하나의 트랜잭션으로 즉시 확정합니다. */
 @Service
@@ -265,7 +266,7 @@ public class MarketOrderTransactionService {
 
     private String createMemo(Stock stock, TradeOrder order) {
         String memo = stock.getName() + " " + plain(order.getQuantity()) + "주 @ "
-                + plain(order.getExecutedPrice()) + " (수수료·세금 포함)";
+                + currency(order.getExecutedPrice(), stock.getCurrency()) + " (수수료·세금 포함)";
         return memo.length() <= MAX_MEMO_LENGTH ? memo : memo.substring(0, MAX_MEMO_LENGTH);
     }
 }
