@@ -400,7 +400,8 @@ COMMENT ON COLUMN quote_snapshot.upper_limit IS '미국 종목은 NULL. 상하�
 --                          AND c.trade_date = (직전 거래일)
 --      WHERE s.stock_id = q.stock_id AND s.market_country = 'KR';
 --
---   미국 (매일 22:00, 정규장 시작 30분 전) — market_country = 'US'
+--   미국 (평일 09:00 ET, 정규장 시작 30분 전) — market_country = 'US'
+--        KST 기준 서머타임 22:00, 표준시 23:00
 --
 --   폴백: 일봉 수집이 실패했다면 last_price 를 복사한다.
 --         장 마감 시점의 last_price 가 곧 그날 종가이기 때문이다.
