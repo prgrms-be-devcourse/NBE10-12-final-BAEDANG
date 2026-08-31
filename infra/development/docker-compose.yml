@@ -1,1 +1,32 @@
-# development용 docker-compose.yml 작성 후 S3로 관리
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg18
+    container_name: trading-db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: trading
+      POSTGRES_USER: trading
+      POSTGRES_PASSWORD: trading
+      TZ: Asia/Seoul
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    volumes:
+      - pgdata:/var/lib/postgresql
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./timescale.sql:/docker-entrypoint-initdb.d/02-timescale.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - common
+
+volumes:
+  pgdata:
+
+networks:
+  common:
+    name: common
+    driver: bridge
