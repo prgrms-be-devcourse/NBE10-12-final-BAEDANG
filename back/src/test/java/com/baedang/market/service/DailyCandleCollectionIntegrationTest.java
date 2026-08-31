@@ -25,6 +25,7 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -66,9 +67,9 @@ class DailyCandleCollectionIntegrationTest {
         Stock stock = saveStock(MarketCountry.KR, "KRW");
         OffsetDateTime candleAt = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
 
-        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW",
+        persistenceService.upsert(stock.getStockId(), "KRW",
                 List.of(candle(candleAt, "100", "KRW")));
-        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW",
+        persistenceService.upsert(stock.getStockId(), "KRW",
                 List.of(candle(candleAt, "110", "KRW")));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
@@ -82,7 +83,7 @@ class DailyCandleCollectionIntegrationTest {
     void 여러날짜_캔들_배치_저장된다() {
         Stock stock = saveStock(MarketCountry.KR, "KRW");
 
-        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "KRW", List.of(
+        persistenceService.upsert(stock.getStockId(), "KRW", List.of(
                 candle(OffsetDateTime.of(2026, 8, 26, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW"),
                 candle(OffsetDateTime.of(2026, 8, 27, 6, 0, 0, 0, ZoneOffset.UTC), "110", "KRW"),
                 candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "120", "KRW")));
@@ -95,20 +96,35 @@ class DailyCandleCollectionIntegrationTest {
     }
 
     @Test
+    @DisplayName("재시도 대상 선별을 위해 당일 저장된 종목 ID를 한 번에 조회한다")
+    void 당일_저장된_종목_ID를_조회한다() {
+        Stock stored = saveStock(MarketCountry.KR, "KRW");
+        Stock missing = saveStock(MarketCountry.KR, "KRW");
+        OffsetDateTime candleAt = OffsetDateTime.parse("2026-08-28T09:00:00+09:00");
+        persistenceService.upsert(stored.getStockId(), "KRW",
+                List.of(candle(candleAt, "100", "KRW")));
+
+        Set<Long> storedIds = dailyCandleRepository.findStoredStockIds(
+                LocalDate.of(2026, 8, 28),
+                List.of(stored.getStockId(), missing.getStockId()));
+
+        assertThat(storedIds).containsExactly(stored.getStockId());
+    }
+
+    @Test
     @DisplayName("미국 종목도 KST 기준 날짜로 변환되어 저장된다")
     void 미국종목_KST_기준_거래일자_저장() {
         Stock stock = saveStock(MarketCountry.US, "USD");
-        // UTC 2026-08-27 20:00:00 = 뉴욕 현지 2026-08-27 16:00:00 (KST 8/28 05:00)
-        // 프로젝트 명세에 따라 KST 날짜인 2026-08-28로 저장되어야 함
-        OffsetDateTime usCloseUtc = OffsetDateTime.of(2026, 8, 27, 20, 0, 0, 0, ZoneOffset.UTC);
+        // 실제 계약인 봉 시작 시각을 사용한다. 미국 09:30 ET는 같은 날 22:30 KST다.
+        OffsetDateTime usCandleStart = OffsetDateTime.parse("2026-08-27T09:30:00-04:00");
 
-        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), "USD",
-                List.of(candle(usCloseUtc, "150", "USD")));
+        persistenceService.upsert(stock.getStockId(), "USD",
+                List.of(candle(usCandleStart, "150", "USD")));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));
         assertThat(rows).hasSize(1);
-        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 28));
+        assertThat(rows.get(0).getTradeDate()).isEqualTo(LocalDate.of(2026, 8, 27));
     }
 
     private Stock saveStock(MarketCountry country, String currency) {

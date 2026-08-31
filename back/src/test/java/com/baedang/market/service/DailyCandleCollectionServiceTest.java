@@ -5,6 +5,7 @@ import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -22,6 +23,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -41,13 +43,15 @@ class DailyCandleCollectionServiceTest {
     @Mock MarketDataPort marketDataPort;
     @Mock StockRepository stockRepository;
     @Mock DailyCandlePersistenceService persistenceService;
+    @Mock DailyCandleRepository dailyCandleRepository;
     @Mock MarketCalendarPort marketCalendarPort;
 
     /** universeSize=2 로 고정하여 테스트 속도를 높입니다. */
     private DailyCandleCollectionService service() {
         return new DailyCandleCollectionService(
                 marketDataPort, stockRepository, persistenceService,
-                marketCalendarPort, Clock.fixed(NOW, ZoneOffset.UTC), 2);
+                dailyCandleRepository, marketCalendarPort,
+                Clock.fixed(NOW, ZoneOffset.UTC), 2);
     }
 
     // ── collect ──────────────────────────────────────────────────────────────
@@ -65,7 +69,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService).upsert(1L, MarketCountry.KR, "KRW", candles);
+        verify(persistenceService).upsert(1L, "KRW", candles);
     }
 
     @Test
@@ -83,31 +87,26 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), eq(MarketCountry.KR), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), any(), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
     }
 
     @Test
     @DisplayName("휴장일이면 캔들 API를 호출하지 않는다")
     void collect_휴장일이면_수집하지_않는다() {
-        Stock stock = mockStock(1L, "005930", "KRW");
-        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any()))
-                .thenReturn(List.of(stock));
         LocalDate tradeDate = NOW.atZone(ZoneOffset.ofHours(9)).toLocalDate();
         when(marketCalendarPort.fetchKrMarketCalendar(tradeDate))
                 .thenReturn(new MarketCalendarDay(MarketCountry.KR, tradeDate, false, null, null, null));
 
         service().collect(MarketCountry.KR);
 
+        verify(stockRepository, never()).findRankedByMarketCountry(any(), any());
         verify(marketDataPort, never()).fetchCandles(anyString(), any(), anyInt());
     }
 
     @Test
     @DisplayName("정규장 마감 10분 전에는 캔들 API를 호출하지 않는다")
     void collect_장마감_전에_수집하지_않는다() {
-        Stock stock = mockStock(1L, "005930", "KRW");
-        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any()))
-                .thenReturn(List.of(stock));
         LocalDate tradeDate = NOW.atZone(ZoneOffset.ofHours(9)).toLocalDate();
         when(marketCalendarPort.fetchKrMarketCalendar(tradeDate)).thenReturn(new MarketCalendarDay(
                 MarketCountry.KR, tradeDate, true,
@@ -116,6 +115,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
+        verify(stockRepository, never()).findRankedByMarketCountry(any(), any());
         verify(marketDataPort, never()).fetchCandles(anyString(), any(), anyInt());
     }
 
@@ -130,18 +130,68 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any());
     }
 
     @Test
     @DisplayName("수집 대상 종목이 없으면 API 를 호출하지 않는다")
     void collect_대상_없으면_API_호출_안한다() {
+        allowCollection(MarketCountry.KR);
         when(stockRepository.findRankedByMarketCountry(any(), any()))
                 .thenReturn(List.of());
 
         service().collect(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles(anyString(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("캘린더 조회 실패는 종목 조회와 캔들 수집을 시작하지 않는다")
+    void collect_캘린더_조회_실패시_수집하지_않는다() {
+        LocalDate tradeDate = NOW.atZone(ZoneOffset.ofHours(9)).toLocalDate();
+        when(marketCalendarPort.fetchKrMarketCalendar(tradeDate))
+                .thenThrow(new RuntimeException("502 Bad Gateway"));
+
+        service().collect(MarketCountry.KR);
+
+        verify(stockRepository, never()).findRankedByMarketCountry(any(), any());
+        verify(marketDataPort, never()).fetchCandles(anyString(), any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("아직 당일 확정 일봉이 아니면 저장하거나 성공 처리하지 않는다")
+    void collect_이전_거래일_캔들은_저장하지_않는다() {
+        Stock stock = mockStock(1L, "STALE", "KRW");
+        allowCollection(MarketCountry.KR);
+        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any()))
+                .thenReturn(List.of(stock));
+        when(marketDataPort.fetchCandles("STALE", CandleInterval.ONE_DAY, 1))
+                .thenReturn(List.of(candleAt(NOW.minusSeconds(86_400), "KRW")));
+
+        service().collect(MarketCountry.KR);
+
+        verify(persistenceService, never()).upsert(any(), anyString(), any());
+    }
+
+    @Test
+    @DisplayName("재시도에서는 당일 저장이 완료된 종목을 건너뛴다")
+    void collect_재시도시_저장된_종목은_건너뛴다() {
+        Stock completed = mockStock(1L, "DONE", "KRW");
+        Stock missing = mockStock(2L, "MISSING", "KRW");
+        allowCollection(MarketCountry.KR);
+        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any()))
+                .thenReturn(List.of(completed, missing));
+        LocalDate expectedTradeDate = NOW.atZone(ZoneOffset.ofHours(9)).toLocalDate();
+        when(dailyCandleRepository.findStoredStockIds(expectedTradeDate, List.of(1L, 2L)))
+                .thenReturn(Set.of(1L));
+        List<Candle> candles = List.of(candle("KRW"));
+        when(marketDataPort.fetchCandles("MISSING", CandleInterval.ONE_DAY, 1))
+                .thenReturn(candles);
+
+        service().collect(MarketCountry.KR);
+
+        verify(marketDataPort, never()).fetchCandles("DONE", CandleInterval.ONE_DAY, 1);
+        verify(persistenceService).upsert(2L, "KRW", candles);
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {
@@ -155,8 +205,12 @@ class DailyCandleCollectionServiceTest {
     }
 
     private Candle candle(String currency) {
+        return candleAt(NOW.minusSeconds(1_800), currency);
+    }
+
+    private Candle candleAt(Instant instant, String currency) {
         BigDecimal p = BigDecimal.ONE;
-        return new Candle(OffsetDateTime.now(ZoneOffset.UTC), p, p, p, p, p, currency);
+        return new Candle(OffsetDateTime.ofInstant(instant, ZoneOffset.UTC), p, p, p, p, p, currency);
     }
 
     private void allowCollection(MarketCountry marketCountry) {

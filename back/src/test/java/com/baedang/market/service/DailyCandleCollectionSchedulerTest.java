@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 
 import java.util.concurrent.Executor;
+import java.util.Arrays;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -30,12 +31,29 @@ class DailyCandleCollectionSchedulerTest {
     }
 
     @Test
-    void 미국_수집은_뉴욕_현지_16시10분에_실행한다() throws NoSuchMethodException {
-        Scheduled scheduled = DailyCandleCollectionScheduler.class
+    void 미국_수집은_뉴욕_현지_16시10분부터_30분마다_재시도한다() throws NoSuchMethodException {
+        Scheduled[] schedules = DailyCandleCollectionScheduler.class
                 .getMethod("collectUs")
-                .getAnnotation(Scheduled.class);
+                .getAnnotationsByType(Scheduled.class);
 
-        assertThat(scheduled.cron()).isEqualTo("0 10 16 * * MON-FRI");
-        assertThat(scheduled.zone()).isEqualTo("America/New_York");
+        assertThat(Arrays.stream(schedules).map(Scheduled::cron))
+                .containsExactlyInAnyOrder(
+                        "0 10,40 16 * * MON-FRI",
+                        "0 10 17 * * MON-FRI");
+        assertThat(schedules).allMatch(schedule -> schedule.zone().equals("America/New_York"));
+    }
+
+    @Test
+    void 국내_수집은_15시40분부터_30분마다_재시도한다() throws NoSuchMethodException {
+        Scheduled[] schedules = DailyCandleCollectionScheduler.class
+                .getMethod("collectKr")
+                .getAnnotationsByType(Scheduled.class);
+
+        assertThat(Arrays.stream(schedules).map(Scheduled::cron))
+                .containsExactlyInAnyOrder(
+                        "0 40 15 * * MON-FRI",
+                        "0 10,40 16 * * MON-FRI",
+                        "0 10 17 * * MON-FRI");
+        assertThat(schedules).allMatch(schedule -> schedule.zone().equals("Asia/Seoul"));
     }
 }

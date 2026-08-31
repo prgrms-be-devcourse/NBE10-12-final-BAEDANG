@@ -5,7 +5,6 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.repository.DailyCandleBatchRepository;
-import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,13 +31,13 @@ public class DailyCandlePersistenceService {
 
     /** 일봉 목록을 KST 기준 날짜로 변환하여 저장합니다. */
     @Transactional
-    public void upsert(Long stockId, MarketCountry marketCountry, String stockCurrency, List<Candle> candles) {
+    public void upsert(Long stockId, String stockCurrency, List<Candle> candles) {
         if (candles == null) {
             throw invalidCandle(stockId, "candles=null");
         }
         if (candles.isEmpty()) return;
-        if (stockId == null || marketCountry == null) {
-            throw invalidCandle(stockId, "종목 식별 정보가 비어 있음");
+        if (stockId == null) {
+            throw invalidCandle(null, "종목 식별 정보가 비어 있음");
         }
         validateCurrency(stockId, stockCurrency, candles);
 
