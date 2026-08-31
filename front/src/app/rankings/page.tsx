@@ -204,8 +204,12 @@ export default function RankingsPage() {
       </Reveal>
 
       {/* 검색 */}
-      <Reveal delay={0.24}>
-      <div ref={searchBoxRef} className="relative z-30 mb-5 max-w-[480px]">
+      {/* Reveal 자체가 등장 애니메이션에 opacity/transform을 쓰기 때문에 각 Reveal은 저마다
+          새 스태킹 컨텍스트를 만든다 — 안쪽 요소에 아무리 높은 z-index를 줘도 형제 Reveal
+          "바깥"으로는 못 나간다(호버 카드 관련 주석 참고). 검색 팝업이 아래 탭·목록 Reveal에
+          가려지지 않으려면 이 Reveal 자체에 z-index를 줘야 한다. */}
+      <Reveal delay={0.24} className="relative z-30">
+      <div ref={searchBoxRef} className="relative mb-5 max-w-[480px]">
         <div className="relative">
           <svg
             width="16"
