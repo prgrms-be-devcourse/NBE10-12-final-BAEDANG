@@ -2,6 +2,7 @@ package com.baedang.market.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.dto.ExchangeRateHistoryResponse;
 import com.baedang.market.dto.ExchangeRateLatestResponse;
 import com.baedang.market.entity.ExchangeRate;
 import com.baedang.market.repository.ExchangeRateRepository;
@@ -9,6 +10,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -18,7 +22,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,6 +40,7 @@ class ExchangeRateServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-26T06:00:00Z");
     private static final OffsetDateTime TODAY_MIDNIGHT_KST =
             OffsetDateTime.parse("2026-08-26T00:00:00+09:00");
+    private static final OffsetDateTime COLLECTED_AT = OffsetDateTime.parse("2026-08-26T06:00:00Z");
 
     private ExchangeRateService service;
 
@@ -48,7 +55,18 @@ class ExchangeRateServiceTest {
         return new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), new BigDecimal("1400.000000"),
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"), COLLECTED_AT);
+    }
+
+    private static Stream<Arguments> historyPeriods() {
+        OffsetDateTime now = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        return Stream.of(
+                Arguments.of("1d", now.minusDays(1)),
+                Arguments.of("1w", now.minusWeeks(1)),
+                Arguments.of("1m", now.minusMonths(1)),
+                Arguments.of("3m", now.minusMonths(3)),
+                Arguments.of("1y", now.minusYears(1))
+        );
     }
 
     @Test
@@ -58,7 +76,7 @@ class ExchangeRateServiceTest {
         ExchangeRate reference = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1399.500000"), new BigDecimal("1398.000000"),
-                TODAY_MIDNIGHT_KST);
+                TODAY_MIDNIGHT_KST, COLLECTED_AT);
 
         when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latest));
@@ -116,7 +134,7 @@ class ExchangeRateServiceTest {
         ExchangeRate latestWithoutMidRate = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), null,
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"), COLLECTED_AT);
 
         when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latestWithoutMidRate));
@@ -147,4 +165,80 @@ class ExchangeRateServiceTest {
         assertThat(response.baseCurrency()).isEqualTo("USD");
         assertThat(response.quoteCurrency()).isEqualTo("KRW");
     }
+
+    @Test
+    @DisplayName("기간에 해당하는 환율 이력을 오래된 순서로 조회한다")
+    void t6_환율_이력_조회() {
+        OffsetDateTime from = OffsetDateTime.parse("2026-08-25T06:00:00Z");
+
+        ExchangeRate first = new ExchangeRate(
+                "USD",
+                "KRW",
+                new BigDecimal("1400.000000"),
+                new BigDecimal("1398.000000"),
+                OffsetDateTime.parse("2026-08-25T07:00:00Z"),
+                COLLECTED_AT
+        );
+
+        ExchangeRate second = new ExchangeRate(
+                "USD",
+                "KRW",
+                new BigDecimal("1402.000000"),
+                new BigDecimal("1400.000000"),
+                OffsetDateTime.parse("2026-08-26T07:00:00Z"),
+                COLLECTED_AT
+        );
+
+        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+                "USD", "KRW", from
+        )).thenReturn(List.of(first, second));
+
+        ExchangeRateHistoryResponse response = service.getHistory("1d");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).rate()).isEqualTo("1398.000000");
+        assertThat(response.items().get(1).rate()).isEqualTo("1400.000000");
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 기간은 INVALID_INPUT으로 거절한다")
+    void t7_잘못된_period() {
+        assertThatThrownBy(() -> service.getHistory("2d"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+    }
+
+    @Test
+    @DisplayName("이력에서도 midRate가 없으면 rate를 사용한다")
+    void t8_이력_midRate_없음() {
+        ExchangeRate exchangeRate = new ExchangeRate(
+                "USD",
+                "KRW",
+                new BigDecimal("1401.500000"),
+                null,
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"),
+                COLLECTED_AT
+        );
+
+        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+                "USD", "KRW", OffsetDateTime.parse("2026-08-25T06:00:00Z")
+        )).thenReturn(List.of(exchangeRate));
+
+        ExchangeRateHistoryResponse response = service.getHistory("1d");
+
+        assertThat(response.items().get(0).rate()).isEqualTo("1401.500000");
+    }
+
+    @ParameterizedTest
+    @MethodSource("historyPeriods")
+    @DisplayName("지원하는 period를 조회 시작 시각으로 변환한다")
+    void t9_지원하는_period_조회(String period, OffsetDateTime expectedFrom) {
+        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+                "USD", "KRW", expectedFrom
+        )).thenReturn(List.of());
+
+        ExchangeRateHistoryResponse response = service.getHistory(period);
+        assertThat(response.items()).isEmpty();
+    }
+
 }

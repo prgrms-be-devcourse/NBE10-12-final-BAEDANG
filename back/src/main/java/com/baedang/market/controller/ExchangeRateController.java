@@ -1,5 +1,6 @@
 package com.baedang.market.controller;
 
+import com.baedang.market.dto.ExchangeRateHistoryResponse;
 import com.baedang.market.dto.ExchangeRateLatestResponse;
 import com.baedang.market.service.ExchangeRateService;
 import org.springframework.http.ResponseEntity;
@@ -25,5 +26,12 @@ public class ExchangeRateController {
             @RequestParam(defaultValue = "KRW") String quote
     ) {
         return ResponseEntity.ok(exchangeRateService.getLatest(base, quote));
+    }
+
+    @GetMapping("/history")
+    public ResponseEntity<ExchangeRateHistoryResponse> history(
+            @RequestParam String period
+    ) {
+        return ResponseEntity.ok(exchangeRateService.getHistory(period));
     }
 }
