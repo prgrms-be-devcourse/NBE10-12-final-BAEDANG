@@ -2,6 +2,7 @@ package com.baedang.market.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.dto.ExchangeRateHistoryResponse;
 import com.baedang.market.dto.ExchangeRateLatestResponse;
 import com.baedang.market.entity.ExchangeRate;
 import com.baedang.market.repository.ExchangeRateRepository;
@@ -12,10 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.Clock;
-import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
+import java.time.*;
+import java.util.List;
+import java.util.Locale;
 
 /**
  * 환율 조회 서비스. 랭킹 화면 환율 배너({@code GET /api/exchange-rates/latest})를 위한
@@ -29,6 +29,9 @@ public class ExchangeRateService {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int CHANGE_RATE_SCALE = 6;
+    private static final String DEFAULT_BASE_CURRENCY = "USD";
+    private static final String DEFAULT_QUOTE_CURRENCY = "KRW";
+
 
     private final ExchangeRateRepository exchangeRateRepository;
     private final Clock clock;
@@ -84,6 +87,20 @@ public class ExchangeRateService {
                 latest.getRateAt());
     }
 
+    public ExchangeRateHistoryResponse getHistory(String period) {
+        OffsetDateTime from = periodStart(period);
+
+        List<ExchangeRateHistoryResponse.Item> items =
+                exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+                        DEFAULT_BASE_CURRENCY, DEFAULT_QUOTE_CURRENCY, from
+                )
+                        .stream()
+                        .map(exchangeRate -> new ExchangeRateHistoryResponse.Item(
+                                exchangeRate.getRateAt(), displayRate(exchangeRate).toPlainString())
+                        ).toList();
+        return new ExchangeRateHistoryResponse(items);
+    }
+
     /**
      * 화면 표시용 환율. mid_rate가 비어 있으면(nullable 컬럼) 매매기준율 대신
      * 실거래 환율(rate)로 대체한다 — {@code AccountService.displayRate()}와 같은 방어.
@@ -95,5 +112,20 @@ public class ExchangeRateService {
     private OffsetDateTime todayMidnightKst() {
         LocalDate today = OffsetDateTime.ofInstant(clock.instant(), KST).toLocalDate();
         return today.atStartOfDay(KST).toOffsetDateTime();
+    }
+
+    private OffsetDateTime periodStart(String period) {
+        OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+
+        String normalized = period == null ? "" : period.trim().toLowerCase(Locale.ROOT);
+
+        return switch (normalized){
+            case "1d" -> now.minusDays(1);
+            case "1w" -> now.minusWeeks(1);
+            case "1m" -> now.minusMonths(1);
+            case "3m" -> now.minusMonths(3);
+            case "1y" -> now.minusYears(1);
+            default -> throw new BusinessException(ErrorCode.INVALID_INPUT,"period="+period);
+        };
     }
 }
