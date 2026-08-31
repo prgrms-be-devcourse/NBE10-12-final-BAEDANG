@@ -47,12 +47,12 @@ services:
       #   Flyway 를 안 쓰므로 여기가 스키마 관리 지점입니다.
       #   !! 이미 볼륨이 있으면 실행되지 않습니다.
       #      스키마를 바꿨다면 반드시 `docker compose down -v` 후 재기동하세요.
-      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ../schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       # TimescaleDB 하이퍼테이블 지정 (daily_candle + 주봉 연속 집계).
       #   schema.sql 이 BEGIN...COMMIT 으로 감싸여 있어서 합칠 수 없습니다 —
       #   CREATE EXTENSION timescaledb 는 트랜잭션 안에서 실행되지 않습니다.
       #   순수 PostgreSQL 로 간다면 이 줄을 지우세요.
-      - ./timescale.sql:/docker-entrypoint-initdb.d/02-timescale.sql:ro
+      - ../timescale.sql:/docker-entrypoint-initdb.d/02-timescale.sql:ro
       # 테스트용 시드 데이터가 필요하면 주석을 푸세요.
       # - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
     healthcheck:
