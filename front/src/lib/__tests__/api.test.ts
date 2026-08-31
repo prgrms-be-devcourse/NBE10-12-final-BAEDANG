@@ -4,7 +4,7 @@
  * global.fetch를 vi.fn()으로 모킹합니다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { signUp, login, getAccountSummary, placeOrder, ApiError } from '../api';
+import { signUp, login, getAccountSummary, placeOrder, getExchangeRateLatest, ApiError } from '../api';
 
 // ─── fetch 모킹 헬퍼 ───────────────────────────────────────────────────────
 function mockFetch(status: number, body: unknown) {
@@ -55,6 +55,50 @@ describe('getAccountSummary — 성공', () => {
     mockFetch(200, summaryData);
     const summary = await getAccountSummary(1);
     expect(summary).toEqual(summaryData);
+  });
+});
+
+describe('getExchangeRateLatest — 성공', () => {
+  it('200 → ExchangeRateLatest 반환, 기본 파라미터(USD/KRW)로 요청', async () => {
+    const rateData = {
+      baseCurrency: 'USD',
+      quoteCurrency: 'KRW',
+      rate: '1400.000000',
+      changeAmount: '2.000000',
+      changeRate: '0.001431',
+      rateAt: '2026-08-26T15:00:00+09:00',
+    };
+    const fetchSpy = mockFetch(200, rateData);
+    const rate = await getExchangeRateLatest();
+    expect(rate).toEqual(rateData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/exchange-rates/latest?base=USD&quote=KRW'),
+      expect.anything()
+    );
+  });
+
+  it('base/quote 파라미터를 그대로 쿼리스트링에 반영', async () => {
+    const fetchSpy = mockFetch(200, {
+      baseCurrency: 'EUR', quoteCurrency: 'KRW', rate: '1500', changeAmount: '0', changeRate: '0',
+      rateAt: '2026-08-26T15:00:00+09:00',
+    });
+    await getExchangeRateLatest('EUR', 'KRW');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/exchange-rates/latest?base=EUR&quote=KRW'),
+      expect.anything()
+    );
+  });
+
+  it('소문자로 넘겨도 대문자로 정규화해서 쿼리스트링을 만든다 (캐시 키 분산 방지)', async () => {
+    const fetchSpy = mockFetch(200, {
+      baseCurrency: 'USD', quoteCurrency: 'KRW', rate: '1400', changeAmount: '0', changeRate: '0',
+      rateAt: '2026-08-26T15:00:00+09:00',
+    });
+    await getExchangeRateLatest('usd', 'krw');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/exchange-rates/latest?base=USD&quote=KRW'),
+      expect.anything()
+    );
   });
 });
 

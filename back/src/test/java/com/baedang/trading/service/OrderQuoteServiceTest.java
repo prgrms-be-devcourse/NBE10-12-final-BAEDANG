@@ -135,7 +135,11 @@ class OrderQuoteServiceTest {
         when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
         when(stock.getCurrency()).thenReturn("USD");
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(new QuoteSnapshot(
-                101L, new BigDecimal("241500"), "KRW", NOW.atOffset(ZoneOffset.UTC))));
+                101L,
+                new BigDecimal("241500"),
+                "KRW",
+                NOW.atOffset(ZoneOffset.UTC),
+                NOW.atOffset(ZoneOffset.UTC))));
 
         assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -208,8 +212,8 @@ class OrderQuoteServiceTest {
                 101L,
                 new BigDecimal("241500"),
                 "KRW",
-                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC)
-        );
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC),
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
 
         OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
@@ -259,7 +263,7 @@ class OrderQuoteServiceTest {
         when(stock.getIsLiquidation()).thenReturn(false);
 
         OffsetDateTime quoteAt = NOW.minusSeconds(quoteAgeSeconds).atOffset(ZoneOffset.UTC);
-        QuoteSnapshot quote = new QuoteSnapshot(101L, price, "KRW", quoteAt);
+        QuoteSnapshot quote = new QuoteSnapshot(101L, price, "KRW", quoteAt, quoteAt);
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
         when(marketSessionProvider.isOpen(MarketCountry.KR, NOW)).thenReturn(true);
     }
@@ -273,7 +277,11 @@ class OrderQuoteServiceTest {
         when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
         when(stock.getCurrency()).thenReturn("USD");
         QuoteSnapshot quote = new QuoteSnapshot(
-                101L, price, "USD", NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
+                101L,
+                price,
+                "USD",
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC),
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
     }
 }

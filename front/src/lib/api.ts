@@ -152,3 +152,31 @@ export function placeOrder(userId: number, input: PlaceOrderInput): Promise<Orde
     body: input,
   });
 }
+
+// ── 환율 ──────────────────────────────────────────────────────────────────────
+
+export type ExchangeRateLatest = {
+  baseCurrency: string;
+  quoteCurrency: string;
+  /** 화면 표시용 매매기준율(mid rate). 체결에 쓰는 스프레드 포함 환율과는 다른 값이다. */
+  rate: string;
+  /** 전일 자정(00:00 KST) 대비 등락액. */
+  changeAmount: string;
+  /** 전일 자정(00:00 KST) 대비 등락률 (0.0016 = +0.16%). */
+  changeRate: string;
+  rateAt: string;
+};
+
+/**
+ * `GET /api/exchange-rates/latest` — 랭킹 화면 환율 배너. base/quote 생략 시 기본값 USD/KRW.
+ *
+ * <p>대소문자는 백엔드(`ExchangeRateService`)가 정규화해줘서 어차피 안전하지만, 여기서도
+ * 대문자로 맞춰 보낸다 — `?base=usd`와 `?base=USD`가 서로 다른 캐시 키로 취급돼 캐시가
+ * 갈라지는 것을 막기 위해서다(oxcm07님 리뷰, PR #53).
+ */
+export function getExchangeRateLatest(base = "USD", quote = "KRW"): Promise<ExchangeRateLatest> {
+  return request<ExchangeRateLatest>(
+    `/api/exchange-rates/latest?base=${encodeURIComponent(base.toUpperCase())}&quote=${encodeURIComponent(quote.toUpperCase())}`,
+    { method: "GET" }
+  );
+}

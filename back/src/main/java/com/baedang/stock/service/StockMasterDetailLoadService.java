@@ -9,7 +9,6 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.standard.utils.Pacer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -25,7 +24,6 @@ import static com.baedang.stock.entity.ListingStatus.DELISTED;
 import static org.springframework.transaction.annotation.Propagation.NEVER;
 
 @Service
-@Transactional(readOnly = true)
 public class StockMasterDetailLoadService {
     private final SymbolInfoPort symbolInfoPort;
     private final StockRepository stockRepository;
@@ -43,15 +41,13 @@ public class StockMasterDetailLoadService {
 
     private static final Logger logger = LoggerFactory.getLogger(StockMasterDetailLoadService.class);
 
-    @Transactional(propagation = NEVER)
     public void loadAll() {
         Pacer pacer = Pacer.forTps(TPS);
 
         int pageNumber = 0;
         while (true) {
-            // 정렬 키가 PK 인 이유: 이 배치가 덮어쓰는 컬럼으로 정렬하면 갱신된 행이 페이지 사이를 넘나든다
             List<Stock> stocks = stockRepository
-                    .findAll(PageRequest.of(pageNumber, CHUNK_SIZE, Sort.by("stockId")))
+                    .findAllByOrderByStockIdAsc(PageRequest.of(pageNumber, CHUNK_SIZE))
                     .getContent();
             if (stocks.isEmpty()) break;
 
