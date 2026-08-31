@@ -76,4 +76,22 @@ describe('fetchExchangeRate — 예상 못한 실패', () => {
     expect(info.rate).toBe(DEFAULT_USD_KRW_RATE);
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
+
+  it('빈 문자열은 Number("")가 0을 반환해도 유효한 값으로 취급하지 않는다', async () => {
+    // Number("")는 0이라 Number.isNaN만으로는 못 걸러낸다 — 이 케이스를 잡는 게 이 테스트의 목적이다.
+    mockFetch(200, {
+      baseCurrency: 'USD',
+      quoteCurrency: 'KRW',
+      rate: '',
+      changeAmount: '2.000000',
+      changeRate: '0.001431',
+      rateAt: '2026-08-26T15:00:00+09:00',
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const info = await fetchExchangeRate();
+
+    expect(info.rate).toBe(DEFAULT_USD_KRW_RATE);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+  });
 });

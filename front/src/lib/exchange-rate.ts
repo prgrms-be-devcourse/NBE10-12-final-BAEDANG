@@ -34,14 +34,26 @@ const DEFAULT_INFO: Omit<ExchangeRateInfo, "updatedAt"> = {
   changeRate: DEFAULT_CHANGE_RATE,
 };
 
+/**
+ * 백엔드가 내려준 숫자 문자열을 안전하게 파싱한다. `Number("")`는 `0`을 반환해
+ * `Number.isNaN` 검사를 그냥 통과해버리므로(빈 문자열이 "유효한 0"으로 둔갑),
+ * 빈 문자열·문자열이 아닌 값을 먼저 걸러내고, `Number.isFinite`로 `Infinity`
+ * 같은 값도 함께 배제한다 (oxcm07님 리뷰, PR #53).
+ */
+function parseFiniteNumber(value: unknown): number {
+  if (typeof value !== "string" || value.trim() === "") return NaN;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
 export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
   try {
     const latest = await getExchangeRateLatest();
-    const rate = Number(latest.rate);
-    const changeAmount = Number(latest.changeAmount);
-    const changeRate = Number(latest.changeRate);
-    // 백엔드 응답 필드가 숫자로 파싱 안 되면(형식 오류 등) 조용히 NaN을 내보내는 대신
-    // 명시적으로 실패시켜 아래 catch의 기본값 대체 경로를 타게 한다.
+    const rate = parseFiniteNumber(latest.rate);
+    const changeAmount = parseFiniteNumber(latest.changeAmount);
+    const changeRate = parseFiniteNumber(latest.changeRate);
+    // 백엔드 응답 필드가 숫자로 파싱 안 되면(형식 오류·빈 문자열 등) 조용히 NaN을
+    // 내보내는 대신 명시적으로 실패시켜 아래 catch의 기본값 대체 경로를 타게 한다.
     if ([rate, changeAmount, changeRate].some((n) => Number.isNaN(n))) {
       throw new Error(`환율 응답 형식이 올바르지 않아요: ${JSON.stringify(latest)}`);
     }

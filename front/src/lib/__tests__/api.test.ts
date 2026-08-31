@@ -88,6 +88,18 @@ describe('getExchangeRateLatest — 성공', () => {
       expect.anything()
     );
   });
+
+  it('소문자로 넘겨도 대문자로 정규화해서 쿼리스트링을 만든다 (캐시 키 분산 방지)', async () => {
+    const fetchSpy = mockFetch(200, {
+      baseCurrency: 'USD', quoteCurrency: 'KRW', rate: '1400', changeAmount: '0', changeRate: '0',
+      rateAt: '2026-08-26T15:00:00+09:00',
+    });
+    await getExchangeRateLatest('usd', 'krw');
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/exchange-rates/latest?base=USD&quote=KRW'),
+      expect.anything()
+    );
+  });
 });
 
 describe('placeOrder — 성공 (accountId 포함)', () => {

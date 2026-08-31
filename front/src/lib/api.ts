@@ -167,10 +167,16 @@ export type ExchangeRateLatest = {
   rateAt: string;
 };
 
-/** `GET /api/exchange-rates/latest` — 랭킹 화면 환율 배너. base/quote 생략 시 기본값 USD/KRW. */
+/**
+ * `GET /api/exchange-rates/latest` — 랭킹 화면 환율 배너. base/quote 생략 시 기본값 USD/KRW.
+ *
+ * <p>대소문자는 백엔드(`ExchangeRateService`)가 정규화해줘서 어차피 안전하지만, 여기서도
+ * 대문자로 맞춰 보낸다 — `?base=usd`와 `?base=USD`가 서로 다른 캐시 키로 취급돼 캐시가
+ * 갈라지는 것을 막기 위해서다(oxcm07님 리뷰, PR #53).
+ */
 export function getExchangeRateLatest(base = "USD", quote = "KRW"): Promise<ExchangeRateLatest> {
   return request<ExchangeRateLatest>(
-    `/api/exchange-rates/latest?base=${encodeURIComponent(base)}&quote=${encodeURIComponent(quote)}`,
+    `/api/exchange-rates/latest?base=${encodeURIComponent(base.toUpperCase())}&quote=${encodeURIComponent(quote.toUpperCase())}`,
     { method: "GET" }
   );
 }
