@@ -1,10 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { HeroDots } from "@/components/HeroDots";
 import { TiltCard } from "@/components/TiltCard";
 import { Reveal } from "@/components/Reveal";
 import { useTheme } from "@/components/ThemeProvider";
+import { getMarketStatus, type MarketStatus } from "@/lib/api";
+
+const MARKET_LABEL: Record<string, string> = { KR: "국내장", US: "해외장" };
+
+function formatMarketTime(iso: string): string {
+  return new Date(iso).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
 
 const STEPS = [
   {
@@ -53,6 +61,21 @@ const COMPARE_ROWS = [
 
 export default function MainPage() {
   const { theme } = useTheme();
+  const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+
+  // 장식용 배지라 실패해도 조용히 숨긴다 — 메인 화면이 이 정보 없이도 완전하기 때문이다.
+  useEffect(() => {
+    let cancelled = false;
+    getMarketStatus()
+      .then((status) => {
+        if (!cancelled) setMarketStatus(status);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <div>
       {/* 히어로 */}
@@ -106,6 +129,24 @@ export default function MainPage() {
             <div className="mt-3.5 text-[14px]" style={{ color: "var(--heroSub)" }}>
               실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요
             </div>
+            {marketStatus && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {marketStatus.markets.map((m) => (
+                  <span
+                    key={m.marketCountry}
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+                    style={{ background: "var(--fill)", color: "var(--mut)" }}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{ background: m.open ? "var(--up)" : "var(--mut2)" }}
+                    />
+                    {MARKET_LABEL[m.marketCountry] ?? m.marketCountry}{" "}
+                    {m.open ? "개장중" : m.nextOpensAt ? `마감 · ${formatMarketTime(m.nextOpensAt)} 개장` : "마감"}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex flex-1 items-center justify-center">
             <HeroDots />

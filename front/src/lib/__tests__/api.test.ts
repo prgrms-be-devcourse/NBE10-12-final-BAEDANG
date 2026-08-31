@@ -17,6 +17,7 @@ import {
   getHoldings,
   getLedger,
   resetAccount,
+  getMarketStatus,
   ApiError,
 } from '../api';
 
@@ -262,6 +263,22 @@ describe('resetAccount — 성공', () => {
       expect.stringContaining('/api/accounts/me/reset'),
       expect.objectContaining({ body: JSON.stringify({ accountId: 10 }) })
     );
+  });
+});
+
+describe('getMarketStatus — 성공', () => {
+  it('200 → 시장 상태 반환, 파라미터 없이 요청', async () => {
+    const statusData = {
+      markets: [
+        { marketCountry: 'KR', open: true, opensAt: '2026-08-31T09:00:00+09:00', closesAt: '2026-08-31T15:30:00+09:00', nextOpensAt: null },
+        { marketCountry: 'US', open: false, opensAt: null, closesAt: null, nextOpensAt: '2026-08-31T22:30:00+09:00' },
+      ],
+      serverTime: '2026-08-31T12:07:14+09:00',
+    };
+    const fetchSpy = mockFetch(200, statusData);
+    const result = await getMarketStatus();
+    expect(result).toEqual(statusData);
+    expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('/api/market/status'), expect.anything());
   });
 });
 

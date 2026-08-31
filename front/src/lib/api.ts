@@ -366,6 +366,28 @@ export function resetAccount(userId: number, accountId: number): Promise<Account
   });
 }
 
+// ── 시장 운영 상태 ───────────────────────────────────────────────────────────
+
+export type MarketStatusItem = {
+  marketCountry: MarketCountry;
+  /** 지금 이 순간 정규장 운영 중인지. */
+  open: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  /** open이 false일 때만 값이 있다. */
+  nextOpensAt: string | null;
+};
+
+export type MarketStatus = {
+  markets: MarketStatusItem[];
+  serverTime: string;
+};
+
+/** `GET /api/market/status` — 국내/해외 시장 개장 여부·다음 개장 시각. 파라미터 없이 둘 다 내려온다. */
+export function getMarketStatus(): Promise<MarketStatus> {
+  return request<MarketStatus>("/api/market/status", { method: "GET" });
+}
+
 // ── 환율 ──────────────────────────────────────────────────────────────────────
 
 export type ExchangeRateLatest = {
