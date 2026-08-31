@@ -4,7 +4,21 @@
  * global.fetch를 vi.fn()으로 모킹합니다.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { signUp, login, getAccountSummary, placeOrder, getExchangeRateLatest, ApiError } from '../api';
+import {
+  signUp,
+  login,
+  getAccountSummary,
+  placeOrder,
+  getExchangeRateLatest,
+  getStockDetail,
+  searchStocks,
+  getRankings,
+  getCandles,
+  getHoldings,
+  getLedger,
+  resetAccount,
+  ApiError,
+} from '../api';
 
 // ─── fetch 모킹 헬퍼 ───────────────────────────────────────────────────────
 function mockFetch(status: number, body: unknown) {
@@ -131,6 +145,123 @@ describe('placeOrder — 성공 (accountId 포함)', () => {
       quantity: '10',
     });
     expect(response).toEqual(orderData);
+  });
+});
+
+describe('getStockDetail — 성공', () => {
+  it('200 → StockDetail 반환, marketCountry 쿼리스트링 포함', async () => {
+    const detailData = {
+      symbol: '005930', name: '삼성전자', englishName: 'SamsungElec', market: 'KOSPI', marketCountry: 'KR',
+      currency: 'KRW', isinCode: 'KR7005930003', category: 'INDIVIDUAL', leverageFactor: null, isDividend: false,
+      price: {
+        lastPrice: '241500', prevClose: '236050', changeAmount: '5450', changeRate: '0.0231',
+        upperLimit: '313500', lowerLimit: '169500', quoteAt: '2026-08-28T00:00:00Z', realtime: true,
+      },
+      info: { marketCap: '1441000000000000', sharesOutstanding: '5969782550', listDate: '1975-06-11' },
+      warnings: [],
+      tradable: true,
+      tradableReason: null,
+    };
+    const fetchSpy = mockFetch(200, detailData);
+    const detail = await getStockDetail('005930', 'KR');
+    expect(detail).toEqual(detailData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/stocks/005930?marketCountry=KR'),
+      expect.anything()
+    );
+  });
+});
+
+describe('searchStocks — 성공', () => {
+  it('200 → 검색 결과 반환', async () => {
+    const searchData = { items: [{ symbol: 'NVDA', name: '엔비디아', englishName: 'NVIDIA', market: 'NASDAQ', marketCountry: 'US', category: 'INDIVIDUAL' }] };
+    const fetchSpy = mockFetch(200, searchData);
+    const result = await searchStocks('엔비디아', 8);
+    expect(result).toEqual(searchData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/stocks/search?q=%EC%97%94%EB%B9%84%EB%94%94%EC%95%84&size=8'),
+      expect.anything()
+    );
+  });
+});
+
+describe('getRankings — 성공', () => {
+  it('200 → 랭킹 페이지 반환, cursor 없으면 쿼리스트링에서 생략', async () => {
+    const rankingData = { items: [], nextCursor: 'abc', hasNext: true };
+    const fetchSpy = mockFetch(200, rankingData);
+    const result = await getRankings('KR', 20);
+    expect(result).toEqual(rankingData);
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('/api/stocks/rankings?');
+    expect(calledUrl).toContain('market=KR');
+    expect(calledUrl).toContain('size=20');
+    expect(calledUrl).not.toContain('cursor');
+  });
+
+  it('cursor를 넘기면 쿼리스트링에 포함', async () => {
+    const fetchSpy = mockFetch(200, { items: [], nextCursor: null, hasNext: false });
+    await getRankings('US', 20, 'abc123');
+    expect(fetchSpy).toHaveBeenCalledWith(expect.stringContaining('cursor=abc123'), expect.anything());
+  });
+});
+
+describe('getCandles — 성공', () => {
+  it('200 → 캔들 데이터 반환, marketCountry/interval/range 쿼리스트링 포함', async () => {
+    const candleData = { symbol: '005930', interval: '1d', range: '1M', currency: 'KRW', items: [] };
+    const fetchSpy = mockFetch(200, candleData);
+    const result = await getCandles('005930', 'KR', '1d', '1M');
+    expect(result).toEqual(candleData);
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('/api/stocks/005930/candles?');
+    expect(calledUrl).toContain('marketCountry=KR');
+    expect(calledUrl).toContain('interval=1d');
+    expect(calledUrl).toContain('range=1M');
+  });
+});
+
+describe('getHoldings — 성공', () => {
+  it('200 → 보유 종목 목록 반환 및 X-User-Id 헤더 전송', async () => {
+    const holdingsData = { items: [], asOf: '2026-08-31T00:00:00Z' };
+    const fetchSpy = mockFetch(200, holdingsData);
+    const result = await getHoldings(1);
+    expect(result).toEqual(holdingsData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/accounts/me/holdings'),
+      expect.objectContaining({ headers: expect.objectContaining({ 'X-User-Id': '1' }) })
+    );
+  });
+});
+
+describe('getLedger — 성공', () => {
+  it('파라미터 없이 호출하면 쿼리스트링 없이 요청', async () => {
+    const fetchSpy = mockFetch(200, { items: [], nextCursor: null, hasNext: false });
+    await getLedger(1);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/accounts\/me\/ledger$/),
+      expect.anything()
+    );
+  });
+
+  it('cursor/size/entryType을 쿼리스트링에 반영', async () => {
+    const fetchSpy = mockFetch(200, { items: [], nextCursor: null, hasNext: false });
+    await getLedger(1, { cursor: 'xyz', size: 10, entryType: 'BUY' });
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('cursor=xyz');
+    expect(calledUrl).toContain('size=10');
+    expect(calledUrl).toContain('entryType=BUY');
+  });
+});
+
+describe('resetAccount — 성공', () => {
+  it('200 → 초기화된 계좌 정보 반환 및 accountId 바디 전송', async () => {
+    const resetData = { accountId: 11, roundNo: 2, initialCash: '50000000', cashBalance: '50000000' };
+    const fetchSpy = mockFetch(200, resetData);
+    const result = await resetAccount(1, 10);
+    expect(result).toEqual(resetData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/accounts/me/reset'),
+      expect.objectContaining({ body: JSON.stringify({ accountId: 10 }) })
+    );
   });
 });
 
