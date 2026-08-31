@@ -51,7 +51,7 @@ function toCandleQuery(candleUnit: "일봉" | "1분봉", period: "1개월" | "6�
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
-  const { rate: usdKrwRate } = useExchangeRate();
+  const { rate: usdKrwRate, updatedAt: exchangeRateUpdatedAt } = useExchangeRate();
   const { theme } = useTheme();
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -483,6 +483,12 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           </div>
 
           <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }}>
+            {isUsdStock && (
+              <div className="mb-2 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                적용 환율 {formatNumber(usdKrwRate)}원{" "}
+                ({exchangeRateUpdatedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} 기준)
+              </div>
+            )}
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>주문 금액</span>
               <b style={{ color: "var(--ink)" }}>{formatNumber(amount.grossAmount)}</b>
