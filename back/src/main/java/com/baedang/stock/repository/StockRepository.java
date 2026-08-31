@@ -2,6 +2,7 @@ package com.baedang.stock.repository;
 
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -67,4 +68,10 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             @Param("stockId") Long stockId,
             Pageable pageable
     );
+
+    List<Stock> findByMarketCountryAndIsRankedTrue(MarketCountry marketCountry);
+
+    List<Stock> findByMarketCountryAndSymbolIn(MarketCountry marketCountry, Collection<String> symbols);
+
+    Page<Stock> findAllByOrderByStockIdAsc(Pageable pageable);
 }
