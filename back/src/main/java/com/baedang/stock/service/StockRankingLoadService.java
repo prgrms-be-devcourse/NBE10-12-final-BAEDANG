@@ -39,17 +39,29 @@ public class StockRankingLoadService {
 
     private static final Logger logger = LoggerFactory.getLogger(StockRankingLoadService.class);
 
+    // 두 시장의 랭킹 적재 스케줄 시간이 다르므로 이 메서드는 테스트 용도로 사용한다.
     public void loadAll() {
+        for (MarketCountry marketCountry : MarketCountry.values()) {
+            load(marketCountry);
+        }
+    }
+
+    public void load(MarketCountry marketCountry) {
         Pacer pacer = Pacer.forTps(TPS);
 
-        for (MarketCountry marketCountry : MarketCountry.values()) {
-            RankingSnapshot snapshot = rankingPort.fetchRanking(marketCountry);
+        RankingSnapshot snapshot = rankingPort.fetchRanking(marketCountry);
 
-            boolean isHoliday = snapshot.entries().isEmpty();
-            if (!isHoliday) self.applyRanking(marketCountry, snapshot.entries());
-
-            pacer.pace();
+        // 보통 휴장일에 빈 배열이 온다. 예외가 있을 수 있음.
+        if (snapshot.entries().isEmpty()) {
+            logger.warn(
+                    "StockRankingLoadService(marketCountry={}): 랭킹 집계 결과가 비어 있어 직전 유니버스를 유지합니다.",
+                    marketCountry
+            );
+        } else {
+            self.applyRanking(marketCountry, snapshot.entries());
         }
+
+        pacer.pace();
     }
 
     @Transactional
