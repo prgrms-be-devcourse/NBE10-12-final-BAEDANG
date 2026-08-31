@@ -133,7 +133,7 @@ public class CandleQueryService {
 
             List<Candle> candles = marketDataPort.fetchCandles(
                     stock.getSymbol(), CandleInterval.ONE_MINUTE, count);
-            validateCurrency(stock, candles);
+            CandleCurrencyValidator.validate(stock, candles);
             persistenceService.upsert(stock.getStockId(), candles);
             fetchCache.markFetched(stock.getStockId(), clock.instant());
         } finally {
@@ -162,18 +162,6 @@ public class CandleQueryService {
                 .filter(candleAt -> !candleAt.isAfter(now))
                 .filter(candleAt -> candleAt.plus(MINUTE_FRESHNESS).isAfter(now))
                 .isPresent();
-    }
-
-    private void validateCurrency(Stock stock, List<Candle> candles) {
-        boolean mismatch = candles.stream().anyMatch(candle ->
-                candle.currency() == null
-                        || stock.getCurrency() == null
-                        || !stock.getCurrency().equalsIgnoreCase(candle.currency().trim()));
-        if (mismatch) {
-            throw new BusinessException(
-                    ErrorCode.QUOTE_CURRENCY_MISMATCH,
-                    "symbol=" + stock.getSymbol());
-        }
     }
 
     private String normalizeSymbol(String symbol) {
