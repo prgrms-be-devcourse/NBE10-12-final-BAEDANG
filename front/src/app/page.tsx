@@ -134,12 +134,15 @@ export default function MainPage() {
                 {marketStatus.markets.map((m) => (
                   <span
                     key={m.marketCountry}
-                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
-                    style={{ background: "var(--fill)", color: "var(--mut)" }}
+                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다 — 그 버튼처럼
+                    // 글자도 흰색이어야 다크 모드에서 대비가 살아난다(accent가 밝은
+                    // 블루라 var(--mut) 회색 글자는 잘 안 보인다).
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold text-white"
+                    style={{ background: "var(--accent)" }}
                   >
                     <span
                       className="h-1.5 w-1.5 rounded-full"
-                      style={{ background: m.open ? "var(--up)" : "var(--mut2)" }}
+                      style={{ background: m.open ? "var(--up)" : "rgba(255,255,255,.55)" }}
                     />
                     {MARKET_LABEL[m.marketCountry] ?? m.marketCountry}{" "}
                     {m.open ? "개장중" : m.nextOpensAt ? `마감 · ${formatMarketTime(m.nextOpensAt)} 개장` : "마감"}
