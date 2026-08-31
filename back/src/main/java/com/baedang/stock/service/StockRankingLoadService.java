@@ -7,10 +7,13 @@ import com.baedang.stock.port.RankingPort;
 import com.baedang.stock.port.RankingSnapshot;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.standard.utils.Pacer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -33,6 +36,8 @@ public class StockRankingLoadService {
     }
 
     private static final int TPS = 5;
+
+    private static final Logger logger = LoggerFactory.getLogger(StockRankingLoadService.class);
 
     public void loadAll() {
         Pacer pacer = Pacer.forTps(TPS);
@@ -72,9 +77,34 @@ public class StockRankingLoadService {
                         (left, right) -> left
                 ));
 
+        List<String> unknownSymbols = new ArrayList<>();
+
         for (RankingEntry entry : entries) {
-            Stock stock = stocksSymbolMap.get(normalizeSymbol(entry.symbol()));
+            String symbol = normalizeSymbol(entry.symbol());
+            Stock stock = stocksSymbolMap.get(symbol);
+
+            if (stock == null) {
+                unknownSymbols.add(symbol);
+                logger.warn(
+                        "StockRankingLoadService(marketCountry={}): stock 테이블에 없는 심볼, 랭킹 적재 생략 (symbol={}, rank={})",
+                        marketCountry,
+                        symbol,
+                        entry.rank()
+                );
+                continue;
+            }
+
             stock.applyRanking(entry.rank(), entry.tradingAmount());
+        }
+
+        if (!unknownSymbols.isEmpty()) {
+            logger.warn(
+                    "StockRankingLoadService(marketCountry={}): 랭킹 {}건 중 {}건이 stock 테이블에 없어 생략됨. (symbols={})",
+                    marketCountry,
+                    entries.size(),
+                    unknownSymbols.size(),
+                    unknownSymbols
+            );
         }
     }
 
