@@ -397,7 +397,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               </tr>
               <tr>
                 <td className="py-1" style={{ color: "var(--mut)" }}>시가총액</td>
-                <td className="py-1" style={{ color: "var(--ink)" }}>{formatKoreanAmount(detail.info.marketCap, "—")}</td>
+                <td className="py-1" style={{ color: "var(--ink)" }}>
+                  {formatKoreanAmount(detail.info.marketCap, "—")}
+                  {detail.currency === "USD" && detail.info.marketCap ? " 달러" : ""}
+                </td>
                 <td className="py-1" style={{ color: "var(--mut)" }}>상장주식수</td>
                 <td className="py-1" style={{ color: "var(--ink)" }}>{formatNumber(detail.info.sharesOutstanding, "—")}</td>
               </tr>
