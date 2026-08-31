@@ -1,24 +1,80 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useParams, useSearchParams } from "next/navigation";
 import { StockDetailClient } from "@/components/StockDetailClient";
-import { getStockDetail } from "@/lib/mock-data";
+import { getStockDetail, searchStocks, type MarketCountry, type StockDetail } from "@/lib/api";
 
-/**
- * 서버 컴포넌트에서 클라이언트 컴포넌트로 전환했습니다 (호영님 리뷰 반영).
- *
- * <p>이전에는 서버에서 `params`를 await해서 목데이터를 조회한 뒤 내려줬는데,
- * 이 프로젝트가 배포할 플랫폼(Cloudflare Pages 등)에 따라 SSR이 유료이거나
- * 아예 지원되지 않을 수 있습니다. 지금은 어차피 목데이터(로컬 배열 조회)라
- * 서버에서 계산할 이유가 없어서, `useParams()`로 클라이언트에서 바로 읽도록
- * 바꿨습니다 — 이제 이 앱에는 데이터에 의존하는 서버 컴포넌트가 없습니다.
- *
- * <p>실제 백엔드 API로 교체할 때는 이 안에서 `useEffect` + `fetch`로 데이터를
- * 가져오면 됩니다 (또는 React Query 등 클라이언트 데이터 페칭 라이브러리).
- */
-export default function StockDetailPage() {
+function isMarketCountry(value: string | null): value is MarketCountry {
+  return value === "KR" || value === "US";
+}
+
+function StockDetailPageInner() {
   const params = useParams<{ symbol: string }>();
+  const searchParams = useSearchParams();
   const rawSymbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
-  const detail = getStockDetail(decodeURIComponent(rawSymbol ?? ""));
+  const symbol = decodeURIComponent(rawSymbol ?? "");
+  const marketCountryParam = searchParams.get("marketCountry");
+
+  const [detail, setDetail] = useState<StockDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDetail(null);
+    setError(null);
+
+    async function load() {
+      try {
+        let marketCountry: MarketCountry | null = isMarketCountry(marketCountryParam) ? marketCountryParam : null;
+        if (!marketCountry) {
+          // 랭킹/검색 링크는 항상 marketCountry를 함께 넘기지만, 직접 주소를 입력하는 등
+          // 쿼리스트링 없이 들어온 경우엔 검색 API로 시장을 유추한다.
+          const found = (await searchStocks(symbol, 5)).items.find(
+            (item) => item.symbol.toUpperCase() === symbol.toUpperCase()
+          );
+          marketCountry = found?.marketCountry ?? null;
+        }
+        if (!marketCountry) {
+          if (!cancelled) setError("종목을 찾을 수 없어요.");
+          return;
+        }
+        const data = await getStockDetail(symbol, marketCountry);
+        if (!cancelled) setDetail(data);
+      } catch {
+        if (!cancelled) setError("종목 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
+      }
+    }
+
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol, marketCountryParam]);
+
+  if (error) {
+    return (
+      <div className="py-16 text-center text-[14.5px]" style={{ color: "var(--mut2)" }}>
+        {error}
+      </div>
+    );
+  }
+  if (!detail) {
+    return (
+      <div className="py-16 text-center text-[14.5px]" style={{ color: "var(--mut2)" }}>
+        불러오는 중…
+      </div>
+    );
+  }
   return <StockDetailClient detail={detail} />;
+}
+
+export default function StockDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <StockDetailPageInner />
+    </Suspense>
+  );
 }
