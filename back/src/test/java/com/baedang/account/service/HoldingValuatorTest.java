@@ -18,6 +18,9 @@ class HoldingValuatorTest {
     private static final OffsetDateTime ACQUIRED_AT =
             OffsetDateTime.of(2026, 8, 26, 3, 0, 0, 0, ZoneOffset.UTC);
 
+    private static final OffsetDateTime QUOTE_AT =
+            OffsetDateTime.of(2026, 8, 26, 3, 0, 0, 0, ZoneOffset.UTC);
+
     private final HoldingValuator valuator = new HoldingValuator();
 
     @Test
@@ -95,6 +98,6 @@ class HoldingValuatorTest {
     }
 
     private QuoteSnapshot quote(Long stockId, String lastPrice, String currency) {
-        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, OffsetDateTime.now(), OffsetDateTime.now());
+        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, QUOTE_AT, QUOTE_AT);
     }
 }
