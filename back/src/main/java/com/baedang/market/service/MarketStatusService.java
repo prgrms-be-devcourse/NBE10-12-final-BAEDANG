@@ -61,17 +61,16 @@ public class MarketStatusService {
 
     public MarketStatusResponse getStatus() {
         Instant now = clock.instant();
+        LocalDate today = LocalDate.ofInstant(now, KST);
         List<Market> markets = List.of(
-                statusOf(MarketCountry.KR, now),
-                statusOf(MarketCountry.US, now)
+                statusOf(MarketCountry.KR, now, today),
+                statusOf(MarketCountry.US, now, today)
         );
         OffsetDateTime serverTime = OffsetDateTime.ofInstant(now, KST_OFFSET);
         return new MarketStatusResponse(markets, serverTime);
     }
 
-    private Market statusOf(MarketCountry country, Instant now) {
-        LocalDate today = LocalDate.ofInstant(now, KST);
-
+    private Market statusOf(MarketCountry country, Instant now, LocalDate today) {
         MarketCalendarDay active = activeOpenDay(country, today, now);
         if (active != null) {
             return new Market(country, true, active.regularOpenAt(), active.regularCloseAt(), null);
@@ -86,12 +85,12 @@ public class MarketStatusService {
      * KR 은 자정을 넘기지 않으므로 오늘만 본다.
      */
     private MarketCalendarDay activeOpenDay(MarketCountry country, LocalDate today, Instant now) {
-        MarketCalendarDay todayDay = dayFor(country, today);
+        MarketCalendarDay todayDay = dayFor(country, today, today);
         if (isNowWithin(todayDay, now)) {
             return todayDay;
         }
         if (country == MarketCountry.US) {
-            MarketCalendarDay yesterday = dayFor(country, today.minusDays(1));
+            MarketCalendarDay yesterday = dayFor(country, today.minusDays(1), today);
             if (isNowWithin(yesterday, now)) {
                 return yesterday;
             }
@@ -105,7 +104,7 @@ public class MarketStatusService {
      */
     private OffsetDateTime scanNextOpen(MarketCountry country, LocalDate today, Instant now) {
         for (int i = 0; i <= MAX_SCAN_DAYS; i++) {
-            MarketCalendarDay day = dayFor(country, today.plusDays(i));
+            MarketCalendarDay day = dayFor(country, today.plusDays(i), today);
             if (day.isOpen()
                     && day.regularOpenAt() != null
                     && day.regularOpenAt().toInstant().isAfter(now)) {
@@ -128,13 +127,16 @@ public class MarketStatusService {
      * {@code (country, date)} 정규장 정보를 캐시에서 꺼내거나, 미스면 Port 로 한 번 fetch 해 저장한다.
      * 캐시 날짜(오늘 KST) 가 바뀌면 통째로 비워 하루 1회 fetch 를 보장한다.
      *
+     * <p>{@code today} 는 {@code getStatus()} 시작 시점에 한 번 캡처한 오늘(KST) 을 그대로 받는다.
+     * 내부에서 {@code clock.instant()} 를 다시 읽지 않으므로, 자정 경계에서 한 요청이 KR·US 를 처리하는
+     * 도중 날짜가 바뀌어 캐시가 중간에 비워지거나 KR/US 기준일이 어긋나는 일이 없다.
+     *
      * <p>⚠️ 콜드 캐시(그날 첫 요청, 또는 긴 연휴를 넘는 스캔)에서는 이 {@code synchronized} 가
      * Port I/O(=live Toss 호출) 를 문 안에서 붙들어, 한 요청이 N번의 순차 호출을 도는 동안
      * 동시 폴러가 뒤에서 대기한다. 하루 1회 캐시라 MVP 규모에선 수용 가능 — 부하가 커지면
      * 날짜별 락 분리나 Port 레벨 캐시 데코레이터로 옮긴다.
      */
-    private synchronized MarketCalendarDay dayFor(MarketCountry country, LocalDate date) {
-        LocalDate today = LocalDate.ofInstant(clock.instant(), KST);
+    private synchronized MarketCalendarDay dayFor(MarketCountry country, LocalDate date, LocalDate today) {
         if (!today.equals(cacheDate)) {
             cache.clear();
             cacheDate = today;
