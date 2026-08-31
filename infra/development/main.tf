@@ -188,9 +188,6 @@ locals {
   sudo systemctl enable docker
   sudo systemctl start docker
 
-  docker network create common
-  docker volume create pgdata
-
   echo "${var.github_access_token}" | docker login ghcr.io -u ${var.github_username} --password-stdin
 
   echo "BOOTSTRAP DONE"
