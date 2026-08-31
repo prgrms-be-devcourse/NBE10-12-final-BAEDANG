@@ -289,6 +289,13 @@ class AccountServiceTest {
     }
 
     private ExchangeRate rate(String rate, String midRate) {
-        return new ExchangeRate("USD", "KRW", new BigDecimal(rate), new BigDecimal(midRate), fresh());
+        OffsetDateTime rateAt = fresh();
+        return new ExchangeRate(
+                "USD",
+                "KRW",
+                new BigDecimal(rate),
+                new BigDecimal(midRate),
+                rateAt,
+                rateAt);
     }
 }

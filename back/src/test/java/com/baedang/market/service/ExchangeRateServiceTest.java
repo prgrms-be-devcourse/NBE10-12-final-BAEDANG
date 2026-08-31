@@ -34,6 +34,7 @@ class ExchangeRateServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-26T06:00:00Z");
     private static final OffsetDateTime TODAY_MIDNIGHT_KST =
             OffsetDateTime.parse("2026-08-26T00:00:00+09:00");
+    private static final OffsetDateTime COLLECTED_AT = OffsetDateTime.parse("2026-08-26T06:00:00Z");
 
     private ExchangeRateService service;
 
@@ -48,7 +49,7 @@ class ExchangeRateServiceTest {
         return new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), new BigDecimal("1400.000000"),
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"), COLLECTED_AT);
     }
 
     @Test
@@ -58,7 +59,7 @@ class ExchangeRateServiceTest {
         ExchangeRate reference = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1399.500000"), new BigDecimal("1398.000000"),
-                TODAY_MIDNIGHT_KST);
+                TODAY_MIDNIGHT_KST, COLLECTED_AT);
 
         when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latest));
@@ -116,7 +117,7 @@ class ExchangeRateServiceTest {
         ExchangeRate latestWithoutMidRate = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), null,
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"), COLLECTED_AT);
 
         when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latestWithoutMidRate));

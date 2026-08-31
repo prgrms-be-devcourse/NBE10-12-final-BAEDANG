@@ -49,13 +49,13 @@ public class ExchangeRate {
     }
 
     public ExchangeRate(String baseCurrency, String quoteCurrency, BigDecimal rate,
-                        BigDecimal midRate, OffsetDateTime rateAt) {
+                        BigDecimal midRate, OffsetDateTime rateAt, OffsetDateTime collectedAt) {
         this.baseCurrency = baseCurrency;
         this.quoteCurrency = quoteCurrency;
         this.rate = rate;
         this.midRate = midRate;
         this.rateAt = rateAt;
-        this.collectedAt = OffsetDateTime.now();
+        this.collectedAt = collectedAt;
     }
 
     public Long getExchangeRateId() { return exchangeRateId; }
