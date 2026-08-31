@@ -1,64 +1,131 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useTheme } from "@/components/ThemeProvider";
-import { D } from "@/lib/decimal";
 import {
-  AVAILABLE_CASH,
-  INITIAL_CASH,
-  MOCK_HOLDINGS,
-  MOCK_LEDGER,
-  type Holding,
-  type LedgerEntry,
-} from "@/lib/mock-data";
-import { formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
+  getAccountSummary,
+  getHoldings,
+  getLedger,
+  resetAccount,
+  type AccountSummary,
+  type HoldingItem,
+  type LedgerItem,
+} from "@/lib/api";
+import { INITIAL_CASH } from "@/lib/mock-data";
+import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
 
-/** 보유 수량 × 단가를 원화로 환산한다. 평가금액·평가손익처럼 정확해야 하는
- * 계산이라 순수 number 대신 decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17). */
-function holdingAmountKrw(quantity: number, unitPrice: number, currency: "KRW" | "USD", usdKrwRate: number) {
-  const amount = new D(quantity).times(unitPrice);
-  return currency === "USD" ? amount.times(usdKrwRate) : amount;
+/** 종목 통화 단가를 원화로 환산한다. avgBuyPrice는 매수 시점 환율(avgExchangeRate)로,
+ * lastPrice는 최신 환율로 환산하는 게 맞다 — HoldingsResponse의 설계 의도 그대로다. */
+function toKrw(nativeValue: string | null, currency: string, exchangeRate: string | number) {
+  const d = toDecimal(nativeValue);
+  if (!d) return null;
+  return currency === "USD" ? d.times(exchangeRate) : d;
 }
 
 export default function MyPage() {
+  const { isLoggedIn, user } = useAuth();
   const { rate } = useExchangeRate();
   const { theme } = useTheme();
   const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
-  const [holdings, setHoldings] = useState<Holding[]>(MOCK_HOLDINGS);
-  const [ledger, setLedger] = useState<LedgerEntry[]>(MOCK_LEDGER);
-  const [cash, setCash] = useState(AVAILABLE_CASH);
+  const [account, setAccount] = useState<AccountSummary | null>(null);
+  const [holdings, setHoldings] = useState<HoldingItem[]>([]);
+  const [ledger, setLedger] = useState<LedgerItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
-  const stockValue = useMemo(
-    () => holdings.reduce((sum, h) => sum.plus(holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate)), new D(0)),
-    [holdings, rate]
-  );
-  const costBasis = useMemo(
-    () => holdings.reduce((sum, h) => sum.plus(holdingAmountKrw(h.quantity, h.avgBuyPrice, h.currency, rate)), new D(0)),
-    [holdings, rate]
-  );
-  const pnl = stockValue.minus(costBasis);
-  const pnlRate = costBasis.greaterThan(0) ? pnl.dividedBy(costBasis).toNumber() : 0;
-  const totalAssets = new D(cash).plus(stockValue);
+  useEffect(() => {
+    if (!isLoggedIn || !user) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setLoadError(false);
+    Promise.all([getAccountSummary(user.userId), getHoldings(user.userId), getLedger(user.userId)])
+      .then(([acc, holdingsRes, ledgerRes]) => {
+        if (cancelled) return;
+        setAccount(acc);
+        setHoldings(holdingsRes.items);
+        setLedger(ledgerRes.items);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoggedIn, user]);
 
-  function handleReset() {
-    setResetModalOpen(false);
-    setHoldings([]);
-    setCash(INITIAL_CASH);
-    setLedger([
-      {
-        type: "초기지급",
-        memo: "모의 투자금 지급 · 2회차 (포트폴리오 초기화)",
-        amount: INITIAL_CASH,
-        balanceAfter: INITIAL_CASH,
-        occurredAt: new Date().toISOString().slice(0, 16).replace("T", " "),
-      },
-    ]);
+  async function handleReset() {
+    if (!user || !account || resetting) return;
+    setResetting(true);
+    setResetError(null);
+    try {
+      await resetAccount(user.userId, account.accountId);
+      const [freshAccount, freshHoldings, freshLedger] = await Promise.all([
+        getAccountSummary(user.userId),
+        getHoldings(user.userId),
+        getLedger(user.userId),
+      ]);
+      setAccount(freshAccount);
+      setHoldings(freshHoldings.items);
+      setLedger(freshLedger.items);
+      setResetModalOpen(false);
+    } catch {
+      setResetError("초기화에 실패했어요. 잠시 후 다시 시도해주세요.");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  if (!isLoggedIn || !user) {
+    return (
+      <Reveal delay={0} className="rounded-[20px] py-20 text-center" style={{ background: "var(--card)" }}>
+        <div className="mb-2 text-[17px] font-bold" style={{ color: "var(--ink)" }}>
+          로그인하고 내 계좌를 확인해보세요
+        </div>
+        <div className="mb-5 text-[14px]" style={{ color: "var(--mut2)" }}>
+          보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요.
+        </div>
+        <div className="flex justify-center gap-2.5">
+          <Link href="/login" className="rounded-xl px-5 py-2.5 text-[14px] font-bold" style={{ background: "var(--fill)", color: "var(--ink)" }}>
+            로그인
+          </Link>
+          <Link href="/signup" className="rounded-xl px-5 py-2.5 text-[14px] font-bold text-white" style={{ background: "var(--accent)" }}>
+            회원가입
+          </Link>
+        </div>
+      </Reveal>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-[20px] py-20 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+        불러오는 중…
+      </div>
+    );
+  }
+
+  if (loadError || !account) {
+    return (
+      <div className="rounded-[20px] py-20 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+        계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.
+      </div>
+    );
   }
 
   return (
@@ -66,23 +133,23 @@ export default function MyPage() {
       <Reveal delay={0}>
         <div className="mb-4.5 flex items-baseline gap-3">
           <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
-          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>12:36:59 기준</span>
+          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>{account.roundNo}회차</span>
         </div>
       </Reveal>
 
       <Reveal delay={0.1} className="mb-6 flex gap-4 max-md:flex-col">
-        <SummaryCard label="총 자산" value={formatNumber(totalAssets.round().toNumber())} />
-        <SummaryCard label="예수금" value={formatNumber(cash)} />
-        <SummaryCard label="주식 평가금액" value={formatNumber(stockValue.round().toNumber())} />
+        <SummaryCard label="총 자산" value={formatNumber(account.totalAsset)} />
+        <SummaryCard label="예수금" value={formatNumber(account.cashBalance)} />
+        <SummaryCard label="주식 평가금액" value={formatNumber(account.stockValue)} />
         <SummaryCard
           label="평가손익"
           value={
             <>
-              {formatSigned(pnl.round().toNumber())}{" "}
-              <span className="text-[15px]">({formatPercent(pnlRate)})</span>
+              {formatSigned(account.unrealizedPnl)}{" "}
+              <span className="text-[15px]">({formatPercent(account.unrealizedPnlRate)})</span>
             </>
           }
-          tone={pnl.greaterThanOrEqualTo(0) ? "up" : "down"}
+          tone={(toDecimal(account.unrealizedPnl)?.greaterThanOrEqualTo(0) ?? true) ? "up" : "down"}
         />
       </Reveal>
 
@@ -131,19 +198,10 @@ export default function MyPage() {
               </div>
               {holdings.map((h) => {
                 const isUsd = h.currency === "USD";
-                const value = holdingAmountKrw(h.quantity, h.lastPrice, h.currency, rate);
-                const cost = holdingAmountKrw(h.quantity, h.avgBuyPrice, h.currency, rate);
-                const hPnl = value.minus(cost);
-                const hRate = cost.greaterThan(0) ? hPnl.dividedBy(cost).toNumber() : 0;
-                const priceCell = (usdValue: number) => {
-                  const krw = isUsd ? new D(usdValue).times(rate) : new D(usdValue);
-                  return (
-                    <>
-                      {formatNumber(krw.round().toNumber())}
-                      {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(usdValue)}</div>}
-                    </>
-                  );
-                };
+                const avgBuyKrw = toKrw(h.avgBuyPrice, h.currency, h.avgExchangeRate);
+                const lastPriceKrw = toKrw(h.lastPrice, h.currency, rate);
+                const pnl = toDecimal(h.unrealizedPnl);
+                const isPnlUp = !pnl || pnl.greaterThanOrEqualTo(0);
                 return (
                   <div
                     key={h.symbol}
@@ -153,19 +211,31 @@ export default function MyPage() {
                     <span className="font-bold" style={{ color: "var(--ink)" }}>
                       {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
                     </span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{h.quantity}</span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.avgBuyPrice)}</span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceCell(h.lastPrice)}</span>
-                    <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(value.round().toNumber())}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(h.quantity)}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                      {formatNumber(avgBuyKrw)}
+                      {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.avgBuyPrice)}</div>}
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                      {h.lastPrice ? (
+                        <>
+                          {formatNumber(lastPriceKrw)}
+                          {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.lastPrice)}</div>}
+                        </>
+                      ) : (
+                        "-"
+                      )}
+                    </span>
+                    <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(h.evaluationAmount)}</span>
                     <span
                       className="text-right tabular-nums font-semibold"
-                      style={{ color: hPnl.greaterThanOrEqualTo(0) ? "var(--up)" : "var(--down)" }}
+                      style={{ color: isPnlUp ? "var(--up)" : "var(--down)" }}
                     >
-                      {formatSigned(hPnl.round().toNumber())} <span className="text-[11.5px]">({formatPercent(hRate)})</span>
+                      {formatSigned(h.unrealizedPnl)} <span className="text-[11.5px]">({formatPercent(h.unrealizedPnlRate)})</span>
                     </span>
                     <span className="text-right">
                       <Link
-                        href={`/stocks/${h.symbol}`}
+                        href={`/stocks/${h.symbol}?marketCountry=${isUsd ? "US" : "KR"}`}
                         className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
                         style={{ background: "var(--fill)", color: "var(--ink)" }}
                       >
@@ -181,6 +251,10 @@ export default function MyPage() {
             </div>
           </>
         )
+      ) : ledger.length === 0 ? (
+        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+          체결 내역이 없어요
+        </div>
       ) : (
         <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
           <div
@@ -198,30 +272,36 @@ export default function MyPage() {
             <span className="text-right">잔액</span>
             <span>발생시각</span>
           </div>
-          {ledger.map((entry, i) => (
-            <div
-              key={i}
-              className="grid items-center px-5 py-3 text-[15px]"
-              style={{
-                gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
-                columnGap: "20px",
-                borderBottom: "1px solid var(--line2)",
-              }}
-            >
-              <span>
-                <LedgerBadge type={entry.type} />
-              </span>
-              <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
-              <span
-                className="text-right tabular-nums font-semibold"
-                style={{ color: entry.amount >= 0 ? "var(--up)" : "var(--down)" }}
+          {ledger.map((entry) => {
+            const amount = toDecimal(entry.amount);
+            const isPositive = !amount || amount.greaterThanOrEqualTo(0);
+            return (
+              <div
+                key={entry.entryId}
+                className="grid items-center px-5 py-3 text-[15px]"
+                style={{
+                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                  columnGap: "20px",
+                  borderBottom: "1px solid var(--line2)",
+                }}
               >
-                {formatSigned(entry.amount)}
-              </span>
-              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-              <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{entry.occurredAt}</span>
-            </div>
-          ))}
+                <span>
+                  <LedgerBadge type={entry.entryType} />
+                </span>
+                <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                <span
+                  className="text-right tabular-nums font-semibold"
+                  style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
+                >
+                  {formatSigned(entry.amount)}
+                </span>
+                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
+                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                  {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
       </Reveal>
@@ -231,8 +311,8 @@ export default function MyPage() {
           <div>
             <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
             <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 <b>5,000만원</b>으로 되돌아가요. 되돌릴 수
-              없어요.
+              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
+              <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
             </div>
           </div>
           <button
@@ -249,7 +329,7 @@ export default function MyPage() {
         <div
           className="fixed inset-0 z-[150] flex items-center justify-center px-4"
           style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
-          onClick={() => setResetModalOpen(false)}
+          onClick={() => !resetting && setResetModalOpen(false)}
         >
           <div
             className="w-full max-w-[420px] rounded-[24px] px-7.5 pt-8 pb-6.5 text-center"
@@ -261,21 +341,28 @@ export default function MyPage() {
             </h3>
             <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
               보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
-              <b style={{ color: "var(--ink)" }}>5,000만원</b>으로 되돌아가요.
+              <b style={{ color: "var(--ink)" }}>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요.
               <br />
               되돌릴 수 없어요.
             </p>
+            {resetError && (
+              <p className="mb-3 text-[12.5px]" style={{ color: "var(--dangerText)" }}>
+                {resetError}
+              </p>
+            )}
             <button
-              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white"
+              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--dangerText)" }}
               onClick={handleReset}
+              disabled={resetting}
             >
-              초기화할게요
+              {resetting ? "초기화하는 중…" : "초기화할게요"}
             </button>
             <button
-              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold"
+              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               onClick={() => setResetModalOpen(false)}
+              disabled={resetting}
             >
               취소
             </button>
@@ -300,16 +387,17 @@ function SummaryCard({ label, value, tone }: { label: string; value: React.React
   );
 }
 
-function LedgerBadge({ type }: { type: LedgerEntry["type"] }) {
+function LedgerBadge({ type }: { type: LedgerItem["entryType"] }) {
   const style =
-    type === "매수"
+    type === "BUY"
       ? { background: "var(--downBg)", color: "var(--down)" }
-      : type === "매도"
+      : type === "SELL"
         ? { background: "var(--upBg)", color: "var(--up)" }
         : { background: "var(--accentSoft)", color: "var(--onAccentSoftText)" };
+  const label = type === "BUY" ? "매수" : type === "SELL" ? "매도" : "초기지급";
   return (
     <span className="w-fit rounded-md px-2.5 py-1 text-[12px] font-bold" style={style}>
-      {type}
+      {label}
     </span>
   );
 }
