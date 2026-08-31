@@ -2,7 +2,7 @@ name: Backend CD
 
 on:
   push:
-    branches: [develop, feat/root_infra]
+    branches: [develop]
     paths:
       - ".github/workflows/backend-cd.yml"
       - "back/src/**"
