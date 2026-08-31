@@ -134,15 +134,17 @@ export default function MainPage() {
                 {marketStatus.markets.map((m) => (
                   <span
                     key={m.marketCountry}
-                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다 — 그 버튼처럼
-                    // 글자도 흰색이어야 다크 모드에서 대비가 살아난다(accent가 밝은
-                    // 블루라 var(--mut) 회색 글자는 잘 안 보인다).
-                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold text-white"
-                    style={{ background: "var(--accent)" }}
+                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다. 라이트 모드는
+                    // accent가 짙은 네이비라 흰 글자가 맞고, 다크 모드는 accent가 밝은
+                    // 하늘색이라 요청대로 검정 글자가 대비가 더 좋다.
+                    className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
+                    style={{ background: "var(--accent)", color: theme === "dark" ? "#000000" : "#ffffff" }}
                   >
                     <span
                       className="h-1.5 w-1.5 rounded-full"
-                      style={{ background: m.open ? "var(--up)" : "rgba(255,255,255,.55)" }}
+                      style={{
+                        background: m.open ? "var(--up)" : theme === "dark" ? "rgba(0,0,0,.45)" : "rgba(255,255,255,.55)",
+                      }}
                     />
                     {MARKET_LABEL[m.marketCountry] ?? m.marketCountry}{" "}
                     {m.open ? "개장중" : m.nextOpensAt ? `마감 · ${formatMarketTime(m.nextOpensAt)} 개장` : "마감"}
