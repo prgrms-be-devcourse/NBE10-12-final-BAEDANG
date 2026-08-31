@@ -17,16 +17,17 @@ public class PrevCloseUpdateRepository {
     /**
      * 시장별 상위 종목의 전일 종가를 다음 순서로 일괄 갱신합니다.
      *
-     * <ol>
-     *     <li>ranked_stocks: 요청 시장의 is_ranked=true 종목을
-     *     MATERIALIZED CTE로 고정해 이후 조회와 갱신이 같은 대상 집합을 사용하게 합니다.</li>
-     *     <li>latest_closes: DISTINCT ON (stock_id)과 거래일 내림차순으로
-     *     종목별 가장 최근의 유효한 일봉 종가 한 건을 선택합니다.</li>
-     *     <li>updated: 스냅샷의 prev_close만 갱신합니다. 일봉이 없으면 장 마감 후
-     *     남아 있는 last_price를 사용하고, 스냅샷 자체가 없으면 새로 만들지 않습니다.</li>
-     *     <li>마지막 SELECT: 전체 대상·실제 갱신·폴백 사용 건수를 반환합니다. 서비스는 이를
-     *     이용해 스냅샷 누락으로 건너뛴 건수까지 계산하고 운영 로그에 남깁니다.</li>
-     * </ol>
+     * 1. ranked_stocks: 요청 시장의 is_ranked=true 종목을 MATERIALIZED CTE로 고정해
+     * 이후 조회와 갱신이 같은 대상 집합을 사용하게 합니다.
+     *
+     * 2. latest_closes: DISTINCT ON (stock_id)과 거래일 내림차순으로 종목별 가장 최근의
+     * 유효한 일봉 종가 한 건을 선택합니다.
+     *
+     * 3. updated: 스냅샷의 prev_close만 갱신합니다. 일봉이 없으면 장 마감 후 남아 있는
+     * last_price를 사용하고, 스냅샷 자체가 없으면 새로 만들지 않습니다.
+     *
+     * 4. 마지막 SELECT: 전체 대상·실제 갱신·폴백 사용 건수를 반환합니다. 서비스는 이를
+     * 이용해 스냅샷 누락으로 건너뛴 건수까지 계산하고 운영 로그에 남깁니다.
      *
      * <p>실시간 수집기가 관리하는 가격과 시각을 보호하기 위해 last_price,
      * quote_at, collected_at은 변경하지 않습니다.
