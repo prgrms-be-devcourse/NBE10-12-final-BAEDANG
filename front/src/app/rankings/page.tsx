@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
@@ -9,24 +9,36 @@ import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
-import { KR_RANKINGS, US_RANKINGS, SEARCHABLE_STOCKS, type MarketCountry, type RankingItem } from "@/lib/mock-data";
-import { CATEGORY_BADGE_STYLE } from "@/lib/category-badge";
+import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
+import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
 const PAGE_SIZE = 20;
-
-// 검색창 클릭 시(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
+// AGENTS.md: 랭킹은 선택한 시장별로 20개씩 5페이지, 총 100종목이 상한이다.
+const TOTAL_RANKED = 100;
+// 검색창을 열었을 때(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
 // 하드코딩된 예시 그대로다. 산업은 연결할 실제 화면이 없어 장식용으로만 둔다.
-const POPULAR_SYMBOLS = ["005930", "NVDA", "000660", "TSLA", "069500"];
+const POPULAR_STOCKS: { symbol: string; name: string; marketCountry: MarketCountry }[] = [
+  { symbol: "005930", name: "삼성전자", marketCountry: "KR" },
+  { symbol: "NVDA", name: "엔비디아", marketCountry: "US" },
+  { symbol: "000660", name: "SK하이닉스", marketCountry: "KR" },
+  { symbol: "TSLA", name: "테슬라", marketCountry: "US" },
+  { symbol: "069500", name: "KODEX 200", marketCountry: "KR" },
+];
 const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우주항공", "로봇"];
 
 export default function RankingsPage() {
   const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
-  const [loading, setLoading] = useState(false);
+  const [items, setItems] = useState<RankingItem[]>([]);
+  const [cursor, setCursor] = useState<string | undefined>(undefined);
+  const [hasNext, setHasNext] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [query, setQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<StockSearchItem[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   // 검색 팝업은 열기/닫기 애니메이션이 서로 달라(searchPanelOpen .22s / searchPanelClose .18s)
   // "지금 열려 있어야 하는가"(searchOpen)와 "지금 DOM에 있어야 하는가"(searchMounted)를
   // 분리해서 관리한다 — 닫힐 때도 닫힘 애니메이션이 끝날 때까지는 DOM에 남아 있어야 한다.
@@ -38,16 +50,57 @@ export default function RankingsPage() {
   // 좌표(x,y)는 커서를 따라다니게 하려고 mousemove마다 갱신한다.
   const [hover, setHover] = useState<{ item: RankingItem; krwPrice: number; krwChange: number; x: number; y: number } | null>(null);
 
-  const rankings = market === "KR" ? KR_RANKINGS : US_RANKINGS;
-  const shown = rankings.slice(0, visibleCount);
-  const hasNext = visibleCount < rankings.length;
+  // 탭(시장)이 바뀌면 첫 페이지부터 다시 불러온다.
+  useEffect(() => {
+    let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+    setLoadError(false);
+    getRankings(market, PAGE_SIZE)
+      .then((page) => {
+        if (cancelled) return;
+        setItems(page.items);
+        setCursor(page.nextCursor ?? undefined);
+        setHasNext(page.hasNext);
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [market]);
 
-  const searchResults = useMemo(() => {
-    if (query.trim().length < 2) return [];
-    const q = query.trim().toLowerCase();
-    return SEARCHABLE_STOCKS.filter(
-      (s) => s.name.toLowerCase().includes(q) || s.symbol.toLowerCase().includes(q)
-    ).slice(0, 8);
+  // 2자 이상 입력되면 실제 검색 API를 호출한다. 타이핑마다 바로 쏘지 않도록 살짝 디바운스한다.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSearchLoading(true);
+    const timer = setTimeout(() => {
+      searchStocks(q, 8)
+        .then((res) => {
+          if (!cancelled) setSearchResults(res.items);
+        })
+        .catch(() => {
+          if (!cancelled) setSearchResults([]);
+        })
+        .finally(() => {
+          if (!cancelled) setSearchLoading(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [query]);
 
   useEffect(() => {
@@ -77,17 +130,19 @@ export default function RankingsPage() {
 
   function switchMarket(next: string) {
     setMarket(next as MarketCountry);
-    setVisibleCount(PAGE_SIZE);
   }
 
   function loadMore() {
     if (loading || !hasNext) return;
     setLoading(true);
-    // 실제 API 응답 지연을 흉내내기 위한 목 딜레이. 실제 연동 시 fetch로 교체.
-    setTimeout(() => {
-      setVisibleCount((v) => Math.min(rankings.length, v + PAGE_SIZE));
-      setLoading(false);
-    }, 500);
+    getRankings(market, PAGE_SIZE, cursor)
+      .then((page) => {
+        setItems((prev) => [...prev, ...page.items]);
+        setCursor(page.nextCursor ?? undefined);
+        setHasNext(page.hasNext);
+      })
+      .catch(() => setLoadError(true))
+      .finally(() => setLoading(false));
   }
 
   function toggleWishlist(symbol: string) {
@@ -177,26 +232,22 @@ export default function RankingsPage() {
                   지금 인기 있는 종목
                 </div>
                 <div className="flex flex-col px-1.5 pb-2.5">
-                  {POPULAR_SYMBOLS.map((symbol, i) => {
-                    const s = SEARCHABLE_STOCKS.find((item) => item.symbol === symbol);
-                    if (!s) return null;
-                    return (
-                      <Link
-                        key={symbol}
-                        href={`/stocks/${symbol}`}
-                        className="flex items-center gap-2.5 rounded-[10px] px-3 py-2"
-                        onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                      >
-                        <span className="w-4 text-[13px] font-extrabold" style={{ color: "var(--accentText)" }}>
-                          {i + 1}
-                        </span>
-                        <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
-                          {s.name}
-                        </span>
-                      </Link>
-                    );
-                  })}
+                  {POPULAR_STOCKS.map((s, i) => (
+                    <Link
+                      key={s.symbol}
+                      href={`/stocks/${s.symbol}?marketCountry=${s.marketCountry}`}
+                      className="flex items-center gap-2.5 rounded-[10px] px-3 py-2"
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      <span className="w-4 text-[13px] font-extrabold" style={{ color: "var(--accentText)" }}>
+                        {i + 1}
+                      </span>
+                      <span className="text-[13.5px] font-semibold" style={{ color: "var(--ink)" }}>
+                        {s.name}
+                      </span>
+                    </Link>
+                  ))}
                 </div>
                 <div
                   className="px-4.5 pt-3.5 pb-2.5 text-[12.5px] font-bold"
@@ -217,26 +268,34 @@ export default function RankingsPage() {
                   ))}
                 </div>
               </>
+            ) : query.trim().length < 2 ? (
+              <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
+                2자 이상 입력해보세요
+              </div>
+            ) : searchLoading ? (
+              <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
+                검색 중…
+              </div>
             ) : searchResults.length > 0 ? (
               searchResults.map((s) => (
                 <Link
-                  key={`${s.market}-${s.symbol}`}
-                  href={`/stocks/${s.symbol}`}
+                  key={`${s.marketCountry}-${s.symbol}`}
+                  href={`/stocks/${s.symbol}?marketCountry=${s.marketCountry}`}
                   className="flex items-center gap-1.5 px-4 py-2.5"
                   style={{ borderBottom: "1px solid var(--line2)" }}
                 >
                   {s.name} <Tag>{s.symbol}</Tag> <Tag>{s.market}</Tag>{" "}
                   <span
                     className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[10.5px] font-medium"
-                    style={CATEGORY_BADGE_STYLE[s.category]}
+                    style={CATEGORY_BADGE_STYLE[categoryLabel(s.category)]}
                   >
-                    {s.category}
+                    {categoryLabel(s.category)}
                   </span>
                 </Link>
               ))
             ) : (
               <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
-                2자 이상 입력해보세요
+                검색 결과가 없어요
               </div>
             )}
           </div>
@@ -267,9 +326,6 @@ export default function RankingsPage() {
           최근 <b style={{ color: "var(--mut)" }}>1주 거래대금</b> 상위 100개 · 개별주 · 배당주 · ETF 모두
           포함 · 매주 월요일 갱신
         </span>
-        <span className="ml-auto text-[13px]" style={{ color: "var(--mut2)" }}>
-          12:36:59 기준 · 5초마다 갱신
-        </span>
       </div>
       </Reveal>
 
@@ -292,23 +348,34 @@ export default function RankingsPage() {
           <span className="text-right">거래대금</span>
         </div>
 
-        {shown.map((item) => {
-          const isUp = item.changeAmount >= 0;
+        {items.length === 0 && loading && (
+          <div className="px-5 py-10 text-center text-[13.5px]" style={{ color: "var(--mut2)" }}>
+            불러오는 중…
+          </div>
+        )}
+        {items.length === 0 && !loading && loadError && (
+          <div className="px-5 py-10 text-center text-[13.5px]" style={{ color: "var(--mut2)" }}>
+            랭킹 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.
+          </div>
+        )}
+
+        {items.map((item) => {
+          const changeD = new D(item.changeAmount);
+          const isUp = changeD.greaterThanOrEqualTo(0);
           const isUsd = item.currency === "USD";
           // 정책상 원화만 거래에 쓰이므로, 미국 종목은 원화 환산액을 우선 표시하고
           // 원래 달러 값은 보조 텍스트로 같이 보여준다. 부동소수점 오차를 피하려고
           // decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17).
           const krwPrice = (isUsd ? new D(item.lastPrice).times(rate) : new D(item.lastPrice)).round().toNumber();
-          const krwChange = (isUsd ? new D(item.changeAmount).times(rate) : new D(item.changeAmount))
-            .round()
-            .toNumber();
-          const badge = CATEGORY_BADGE_STYLE[item.category];
+          const krwChange = (isUsd ? changeD.times(rate) : changeD).round().toNumber();
+          const label = categoryLabel(item.category, item.isDividend);
+          const badge = CATEGORY_BADGE_STYLE[label];
           const liked = wishlist[item.symbol];
 
           return (
             <Link
               key={item.symbol}
-              href={`/stocks/${item.symbol}`}
+              href={`/stocks/${item.symbol}?marketCountry=${market}`}
               className="grid items-center px-5 py-3 text-[15px] transition-[background] duration-150"
               style={{ gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr", borderBottom: "1px solid var(--line2)" }}
               onMouseEnter={(e) => {
@@ -344,7 +411,7 @@ export default function RankingsPage() {
                 className="w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
                 style={badge}
               >
-                {item.category}
+                {label}
               </span>
               <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
                 {formatNumber(krwPrice)}
@@ -366,22 +433,24 @@ export default function RankingsPage() {
         })}
       </div>
 
-      <div className="mt-5 text-center">
-        {hasNext ? (
-          <button
-            onClick={loadMore}
-            disabled={loading}
-            className="rounded-full px-8 py-2.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-            style={{ background: "#ffffff", color: "var(--ink)" }}
-          >
-            {loading ? "불러오는 중…" : `더 보기 (${shown.length} / ${rankings.length})`}
-          </button>
-        ) : (
-          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>
-            모든 종목을 불러왔어요
-          </span>
-        )}
-      </div>
+      {items.length > 0 && (
+        <div className="mt-5 text-center">
+          {hasNext ? (
+            <button
+              onClick={loadMore}
+              disabled={loading}
+              className="rounded-full px-8 py-2.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ background: "#ffffff", color: "var(--ink)" }}
+            >
+              {loading ? "불러오는 중…" : `더 보기 (${items.length} / ${TOTAL_RANKED})`}
+            </button>
+          ) : (
+            <span className="text-[13px]" style={{ color: "var(--mut2)" }}>
+              모든 종목을 불러왔어요
+            </span>
+          )}
+        </div>
+      )}
       </Reveal>
 
       {/* Reveal은 등장 애니메이션에 transform을 쓰는데, transform이 걸린 조상 안에서는
@@ -389,7 +458,7 @@ export default function RankingsPage() {
           transform이 새 containing block을 만든다). 그래서 호버 카드는 반드시
           모든 Reveal 바깥, 최상위에 렌더링해야 실제 커서 좌표에 제대로 뜬다. */}
       {hover && (
-        <StockHoverPreview item={hover.item} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
+        <StockHoverPreview item={hover.item} marketCountry={market} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
       )}
     </div>
   );
