@@ -36,7 +36,7 @@ public class QuoteSnapshotPersistenceService {
     ) {
         Map<String, Stock> stockBySymbol = stocks.stream()
                 .collect(Collectors.toMap(
-                        Stock::getSymbol,
+                        stock -> normalizeSymbol(stock.getSymbol()),
                         Function.identity(),
                         (left, right) -> left
                 ));
@@ -54,7 +54,7 @@ public class QuoteSnapshotPersistenceService {
 
         int updatedCount = 0;
         for (PriceQuote quote : quotes) {
-            Stock stock = stockBySymbol.get(quote.symbol());
+            Stock stock = stockBySymbol.get(normalizeSymbol(quote.symbol()));
             if (stock == null) {
                 log.warn(
                         "요청하지 않은 종목의 현재가 응답을 건너뜁니다: symbol={}",
@@ -91,6 +91,12 @@ public class QuoteSnapshotPersistenceService {
             updatedCount++;
         }
         return updatedCount;
+    }
+
+    private static String normalizeSymbol(String symbol) {
+        return symbol == null
+                ? null
+                : symbol.trim().toUpperCase(Locale.ROOT);
     }
 
     private boolean isValidQuote(Stock stock, PriceQuote quote) {

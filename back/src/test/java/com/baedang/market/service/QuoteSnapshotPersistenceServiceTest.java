@@ -82,6 +82,22 @@ class QuoteSnapshotPersistenceServiceTest {
     }
 
     @Test
+    @DisplayName("시세 심볼이 소문자여도 종목과 매칭해 저장한다")
+    void 심볼_대소문자가_달라도_매칭한다() {
+        Stock stock = stock(1L, "AAPL", "USD");
+        OffsetDateTime quoteAt = OffsetDateTime.parse("2026-08-28T10:00:00Z");
+        PriceQuote quote = new PriceQuote("aapl", new BigDecimal("155.50"), quoteAt, "USD");
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of());
+
+        int count = persistenceService.saveOrUpdate(List.of(stock), List.of(quote), COLLECTED_AT);
+
+        assertThat(count).isEqualTo(1);
+        ArgumentCaptor<QuoteSnapshot> captor = ArgumentCaptor.forClass(QuoteSnapshot.class);
+        verify(quoteSnapshotRepository).save(captor.capture());
+        assertThat(captor.getValue().getStockId()).isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("체결 시각이 없으면 스냅샷을 저장하지 않는다")
     void 체결_시각이_없으면_건너뛴다() {
         Stock stock = stock(1L, "005930", "KRW");
