@@ -95,6 +95,6 @@ class HoldingValuatorTest {
     }
 
     private QuoteSnapshot quote(Long stockId, String lastPrice, String currency) {
-        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, OffsetDateTime.now());
+        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, OffsetDateTime.now(), OffsetDateTime.now());
     }
 }

@@ -61,20 +61,31 @@ public class QuoteSnapshot {
     protected QuoteSnapshot() {
     }
 
-    public QuoteSnapshot(Long stockId, BigDecimal lastPrice, String currency, OffsetDateTime quoteAt) {
+    public QuoteSnapshot(
+            Long stockId,
+            BigDecimal lastPrice,
+            String currency,
+            OffsetDateTime quoteAt,
+            OffsetDateTime collectedAt
+    ) {
         this.stockId = stockId;
         this.lastPrice = lastPrice;
         this.currency = currency;
         this.quoteAt = quoteAt;
-        this.collectedAt = OffsetDateTime.now();
+        this.collectedAt = collectedAt;
     }
 
     /** 5초 수집기가 호출합니다. */
-    public void updatePrice(BigDecimal lastPrice, String currency, OffsetDateTime quoteAt) {
+    public void updatePrice(
+            BigDecimal lastPrice,
+            String currency,
+            OffsetDateTime quoteAt,
+            OffsetDateTime collectedAt
+    ) {
         this.lastPrice = lastPrice;
         this.currency = currency;
         this.quoteAt = quoteAt;
-        this.collectedAt = OffsetDateTime.now();
+        this.collectedAt = collectedAt;
     }
 
     /** 장 시작 직전 배치가 호출합니다. */

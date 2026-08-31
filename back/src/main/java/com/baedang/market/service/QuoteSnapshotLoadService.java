@@ -14,6 +14,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -29,17 +32,20 @@ public class QuoteSnapshotLoadService {
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final MarketDataPort marketDataPort;
+    private final Clock clock;
     private final int universeSize;
 
     public QuoteSnapshotLoadService(
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
             MarketDataPort marketDataPort,
+            Clock clock,
             @Value("${trading.universe-size}") int universeSize
     ) {
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.marketDataPort = marketDataPort;
+        this.clock = clock;
         this.universeSize = universeSize;
     }
 
@@ -79,6 +85,7 @@ public class QuoteSnapshotLoadService {
             );
             return 0;
         }
+        OffsetDateTime collectedAt = clock.instant().atOffset(ZoneOffset.UTC);
 
         List<Long> stockIds = rankedStocks.stream()
                 .map(Stock::getStockId)
@@ -118,14 +125,16 @@ public class QuoteSnapshotLoadService {
                 snapshot.updatePrice(
                         quote.lastPrice(),
                         currency,
-                        quote.quoteAt()
+                        quote.quoteAt(),
+                        collectedAt
                 );
             } else {
                 QuoteSnapshot newSnapshot = new QuoteSnapshot(
                         stock.getStockId(),
                         quote.lastPrice(),
                         currency,
-                        quote.quoteAt()
+                        quote.quoteAt(),
+                        collectedAt
                 );
                 quoteSnapshotRepository.save(newSnapshot);
             }

@@ -18,7 +18,10 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -26,6 +29,9 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 public class QuoteSnapshotLoadServiceTest {
+    private static final Instant NOW = Instant.parse("2026-08-28T00:30:01Z");
+    private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
+
 
     @Mock
     private StockRepository stockRepository;
@@ -44,6 +50,7 @@ public class QuoteSnapshotLoadServiceTest {
                 stockRepository,
                 quoteSnapshotRepository,
                 marketDataPort,
+                CLOCK,
                 100
         );
     }
@@ -77,6 +84,7 @@ public class QuoteSnapshotLoadServiceTest {
         assertThat(saved.getLastPrice()).isEqualByComparingTo("70000");
         assertThat(saved.getQuoteAt()).isEqualTo(quoteAt);
         assertThat(saved.getCurrency()).isEqualTo("KRW");
+        assertThat(saved.getCollectedAt()).isEqualTo(NOW.atOffset(ZoneOffset.UTC));
     }
 
     @Test
@@ -93,7 +101,7 @@ public class QuoteSnapshotLoadServiceTest {
         )).thenReturn(List.of(stock));
 
         OffsetDateTime oldQuoteAt = OffsetDateTime.parse("2026-08-27T10:00:00Z");
-        QuoteSnapshot existing = new QuoteSnapshot(1L, new BigDecimal("150.00"), "USD", oldQuoteAt);
+        QuoteSnapshot existing = new QuoteSnapshot(1L, new BigDecimal("150.00"), "USD", oldQuoteAt, oldQuoteAt);
 
         OffsetDateTime newQuoteAt = OffsetDateTime.parse("2026-08-28T10:00:00Z");
         PriceQuote newQuote = new PriceQuote("AAPL", new BigDecimal("155.50"), newQuoteAt, "USD");
@@ -107,6 +115,7 @@ public class QuoteSnapshotLoadServiceTest {
         assertThat(existing.getLastPrice()).isEqualByComparingTo("155.50");
         assertThat(existing.getQuoteAt()).isEqualTo(newQuoteAt);
         assertThat(existing.getCurrency()).isEqualTo("USD");
+        assertThat(existing.getCollectedAt()).isEqualTo(NOW.atOffset(ZoneOffset.UTC));
         verify(quoteSnapshotRepository, never()).save(any());
     }
 
@@ -169,12 +178,7 @@ public class QuoteSnapshotLoadServiceTest {
 
         OffsetDateTime oldQuoteAt =
                 OffsetDateTime.parse("2026-08-28T09:00:00+09:00");
-        QuoteSnapshot existing = new QuoteSnapshot(
-                1L,
-                new BigDecimal("69000"),
-                "KRW",
-                oldQuoteAt
-        );
+        QuoteSnapshot existing = new QuoteSnapshot(1L, new BigDecimal("69000"), "KRW", oldQuoteAt, oldQuoteAt);
 
         PriceQuote mismatched = new PriceQuote(
                 "005930",

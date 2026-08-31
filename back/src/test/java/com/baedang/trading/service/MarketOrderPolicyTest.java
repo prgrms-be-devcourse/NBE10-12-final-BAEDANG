@@ -41,8 +41,8 @@ class MarketOrderPolicyTest {
     @CsvSource({"KR, KRW", "US, USD"})
     void 시장에_맞는_종목과_시세_통화면_유효하다(MarketCountry marketCountry, String currency) {
         Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
-        QuoteSnapshot quote = new QuoteSnapshot(
-                1L, BigDecimal.ONE, currency, OffsetDateTime.now());
+        OffsetDateTime now = OffsetDateTime.now();
+        QuoteSnapshot quote = new QuoteSnapshot(1L, BigDecimal.ONE, currency, now, now);
 
         assertThat(policy.hasValidCurrencyForMarket(stock, quote)).isTrue();
     }
@@ -54,8 +54,8 @@ class MarketOrderPolicyTest {
             String currency
     ) {
         Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
-        QuoteSnapshot quote = new QuoteSnapshot(
-                1L, BigDecimal.ONE, currency, OffsetDateTime.now());
+        OffsetDateTime now = OffsetDateTime.now();
+        QuoteSnapshot quote = new QuoteSnapshot(1L, BigDecimal.ONE, currency, now, now);
 
         assertThat(policy.hasValidCurrencyForMarket(stock, quote)).isFalse();
     }
