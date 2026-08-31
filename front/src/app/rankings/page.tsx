@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
@@ -14,8 +14,6 @@ import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
 const PAGE_SIZE = 20;
-// AGENTS.md: 랭킹은 선택한 시장별로 20개씩 5페이지, 총 100종목이 상한이다.
-const TOTAL_RANKED = 100;
 // 검색창을 열었을 때(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
 // 하드코딩된 예시 그대로다. 산업은 연결할 실제 화면이 없어 장식용으로만 둔다.
 const POPULAR_STOCKS: { symbol: string; name: string; marketCountry: MarketCountry }[] = [
@@ -46,6 +44,7 @@ export default function RankingsPage() {
   const [searchMounted, setSearchMounted] = useState(false);
   const [wishlist, setWishlist] = useState<Record<string, boolean>>({});
   const searchBoxRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLDivElement>(null);
   // 종목에 마우스를 올렸을 때 뜨는 간단 정보 + 일봉 미리보기 카드의 상태.
   // 좌표(x,y)는 커서를 따라다니게 하려고 mousemove마다 갱신한다.
   const [hover, setHover] = useState<{ item: RankingItem; krwPrice: number; krwChange: number; x: number; y: number } | null>(null);
@@ -132,7 +131,7 @@ export default function RankingsPage() {
     setMarket(next as MarketCountry);
   }
 
-  function loadMore() {
+  const loadMore = useCallback(() => {
     if (loading || !hasNext) return;
     setLoading(true);
     getRankings(market, PAGE_SIZE, cursor)
@@ -143,7 +142,22 @@ export default function RankingsPage() {
       })
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
-  }
+  }, [loading, hasNext, cursor, market]);
+
+  // 무한 스크롤 — 목록 맨 아래 sentinel이 뷰포트 300px 이내로 들어오면 다음 페이지를 미리 불러온다.
+  // hasNext/loading/cursor/market이 바뀔 때마다 loadMore의 참조가 바뀌므로 옵저버도 그때마다 새로 건다.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMore();
+      },
+      { rootMargin: "300px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [loadMore]);
 
   function toggleWishlist(symbol: string) {
     setWishlist((w) => ({ ...w, [symbol]: !w[symbol] }));
@@ -436,14 +450,10 @@ export default function RankingsPage() {
       {items.length > 0 && (
         <div className="mt-5 text-center">
           {hasNext ? (
-            <button
-              onClick={loadMore}
-              disabled={loading}
-              className="rounded-full px-8 py-2.5 text-[13px] font-semibold disabled:cursor-not-allowed disabled:opacity-50"
-              style={{ background: "#ffffff", color: "var(--ink)" }}
-            >
-              {loading ? "불러오는 중…" : `더 보기 (${items.length} / ${TOTAL_RANKED})`}
-            </button>
+            // 화면에 보이지 않는 sentinel — 스크롤로 이 지점에 가까워지면 다음 페이지를 불러온다.
+            <div ref={sentinelRef} className="py-2.5 text-[13px]" style={{ color: "var(--mut2)" }}>
+              {loading ? "불러오는 중…" : ""}
+            </div>
           ) : (
             <span className="text-[13px]" style={{ color: "var(--mut2)" }}>
               모든 종목을 불러왔어요
