@@ -15,7 +15,7 @@ import java.util.concurrent.Executor;
  * 장 마감 후 상위 종목 일봉 자동 수집 스케줄러.
  */
 @Component
-@ConditionalOnProperty(name = "toss.enabled", havingValue = "true")
+@ConditionalOnProperty(prefix = "toss", name = "enabled", havingValue = "true")
 public class DailyCandleCollectionScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(DailyCandleCollectionScheduler.class);
