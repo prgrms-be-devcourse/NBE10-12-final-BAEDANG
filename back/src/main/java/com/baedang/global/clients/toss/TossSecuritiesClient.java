@@ -21,7 +21,7 @@ import java.util.Map;
 @Component
 public class TossSecuritiesClient {
 
-    private static final Logger logger = LoggerFactory.getLogger(TossSecuritiesClient.class);
+    private static final Logger log = LoggerFactory.getLogger(TossSecuritiesClient.class);
 
     private final RestClient restClient;
     private final String clientId;
@@ -53,14 +53,14 @@ public class TossSecuritiesClient {
         } catch (HttpClientErrorException.Unauthorized exception) {
             return retryWithFreshToken(path, queryParams, responseType);
         } catch (RestClientException e) {
-            logger.error("`get({}, ...)` error:", path, e);
+            log.error("`get({}, ...)` error:", path, e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
     }
 
     private void validatePathOrThrow(String path) {
         if (!Whitelist.match(path)) {
-            logger.error("`{}` does not match white list.", path);
+            log.error("`{}` does not match white list.", path);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
     }
@@ -78,7 +78,7 @@ public class TossSecuritiesClient {
         try {
             return _get(path, queryParams, token, responseType);
         } catch (RestClientException e) {
-            logger.error("`retryWithFreshToken({}, ...)` error:", path, e);
+            log.error("`retryWithFreshToken({}, ...)` error:", path, e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
     }
@@ -105,12 +105,12 @@ public class TossSecuritiesClient {
                     .body(TokenResponse.class);
 
             if (response == null || response.accessToken == null) {
-                logger.error("`response` or `response.accessToken` is null.");
+                log.error("`response` or `response.accessToken` is null.");
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR);
             }
             return response.accessToken;
         } catch (RestClientException e) {
-            logger.error("`issueToken()` error:", e);
+            log.error("`issueToken()` error:", e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
     }
