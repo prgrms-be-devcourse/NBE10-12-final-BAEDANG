@@ -173,7 +173,12 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     usdKrwRate,
   });
 
-  const priceLabel = detail.currency === "USD" ? formatUsd(detail.price.lastPrice) : formatNumber(detail.price.lastPrice);
+  // 정책상 거래는 원화로만 이뤄지므로(rankings/my 화면과 동일한 원칙), 미국 종목도
+  // 원화 환산액을 먼저 크게 보여주고 원래 달러 값은 보조 텍스트로 뒤에 붙인다.
+  const isUsdStock = detail.currency === "USD";
+  const lastPriceKrw = isUsdStock ? toDecimal(detail.price.lastPrice)?.times(usdKrwRate) ?? null : toDecimal(detail.price.lastPrice);
+  const changeKrw = isUsdStock ? changeDecimal?.times(usdKrwRate) ?? null : changeDecimal;
+  const priceLabel = formatNumber(lastPriceKrw);
 
   let blockReason: string | null = null;
   if (!detail.tradable) {
@@ -289,12 +294,17 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               {categoryLabelValue}
             </span>
           </div>
-          <div className="mt-1.5 text-[30px] font-extrabold" style={{ color: "var(--ink)" }}>
-            {priceLabel}{" "}
+          <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="text-[30px] font-extrabold" style={{ color: "var(--ink)" }}>
+              {priceLabel}
+            </span>
+            {isUsdStock && (
+              <span className="text-[14px] font-semibold" style={{ color: "var(--mut2)" }}>
+                {formatUsd(detail.price.lastPrice)}
+              </span>
+            )}
             <span className="text-[16px] font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
-              {isUp ? "▲" : "▼"}{" "}
-              {detail.currency === "USD" ? formatUsd(detail.price.changeAmount) : formatSigned(detail.price.changeAmount)} (
-              {formatPercent(detail.price.changeRate)})
+              {isUp ? "▲" : "▼"} {formatSigned(changeKrw)} ({formatPercent(detail.price.changeRate)})
             </span>
           </div>
           <div className="mt-1 text-[12.5px]" style={{ color: "var(--mut2)" }}>
@@ -467,7 +477,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
           <div className="mb-3.5 flex justify-between text-[13.5px] font-bold" style={{ color: "var(--mut)" }}>
             <span>체결 예상 단가</span>
-            <span style={{ color: "var(--ink)" }}>{priceLabel} (현재가)</span>
+            <span style={{ color: "var(--ink)" }}>
+              {priceLabel}{isUsdStock ? ` (${formatUsd(detail.price.lastPrice)})` : ""} (현재가)
+            </span>
           </div>
 
           <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }}>
