@@ -15,6 +15,7 @@ import java.util.Optional;
 public class PrevCloseUpdateService {
 
     private static final Logger log = LoggerFactory.getLogger(PrevCloseUpdateService.class);
+    private static final int FALLBACK_WARNING_PERCENT = 50;
 
     private final PreviousTradingDayResolver previousTradingDayResolver;
     private final PrevCloseUpdateTransactionService transactionService;
@@ -39,6 +40,15 @@ public class PrevCloseUpdateService {
         }
 
         PrevCloseUpdateResult result = transactionService.update(marketCountry, expectedTradeDate);
+        if (isExcessiveFallback(result)) {
+            log.warn(
+                    "[prev-close] 폴백 비율 과다: market={} expectedTradeDate={} fallback={}/{}",
+                    marketCountry,
+                    expectedTradeDate.map(LocalDate::toString).orElse("CALENDAR_UNAVAILABLE"),
+                    result.fallbackCount(),
+                    result.targetCount()
+            );
+        }
         log.info(
                 "[prev-close] 갱신 완료: market={} expectedTradeDate={} target={} updated={} fallback={} skipped={}",
                 marketCountry,
@@ -49,5 +59,11 @@ public class PrevCloseUpdateService {
                 result.skippedCount()
         );
         return result;
+    }
+
+    private boolean isExcessiveFallback(PrevCloseUpdateResult result) {
+        return result.targetCount() > 0
+                && result.fallbackCount() * 100L
+                > result.targetCount() * FALLBACK_WARNING_PERCENT;
     }
 }
