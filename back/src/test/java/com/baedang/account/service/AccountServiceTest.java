@@ -273,7 +273,7 @@ class AccountServiceTest {
     }
 
     private QuoteSnapshot quote(Long stockId, String lastPrice, String currency, OffsetDateTime quoteAt) {
-        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, quoteAt);
+        return new QuoteSnapshot(stockId, new BigDecimal(lastPrice), currency, quoteAt, quoteAt);
     }
 
     /** 고정 시각(NOW) 기준 방금 수집된 시세 — realtime 판정이 true 가 되는 quote_at. */
