@@ -153,6 +153,241 @@ export function placeOrder(userId: number, input: PlaceOrderInput): Promise<Orde
   });
 }
 
+// ── 종목 ──────────────────────────────────────────────────────────────────────
+
+export type MarketCountry = "KR" | "US";
+export type StockCategory = "INDIVIDUAL" | "PREFERRED" | "ETF" | "ETN";
+
+export type StockDetail = {
+  symbol: string;
+  name: string;
+  englishName: string;
+  market: string;
+  marketCountry: MarketCountry;
+  currency: string;
+  isinCode: string;
+  category: StockCategory;
+  leverageFactor: string | null;
+  isDividend: boolean | null;
+  price: {
+    lastPrice: string;
+    prevClose: string;
+    changeAmount: string;
+    changeRate: string;
+    upperLimit: string | null;
+    lowerLimit: string | null;
+    quoteAt: string;
+    realtime: boolean;
+  };
+  info: {
+    marketCap: string;
+    sharesOutstanding: string;
+    listDate: string | null;
+  };
+  warnings: { type: string; label: string }[];
+  tradable: boolean;
+  tradableReason: string | null;
+};
+
+/** `GET /api/stocks/{symbol}` — 종목 상세. `marketCountry`는 필수(같은 심볼이 시장별로 존재할 수 있음). */
+export function getStockDetail(symbol: string, marketCountry: MarketCountry): Promise<StockDetail> {
+  return request<StockDetail>(
+    `/api/stocks/${encodeURIComponent(symbol)}?marketCountry=${encodeURIComponent(marketCountry)}`,
+    { method: "GET" }
+  );
+}
+
+export type StockSearchItem = {
+  symbol: string;
+  name: string;
+  englishName: string;
+  market: string;
+  marketCountry: MarketCountry;
+  category: StockCategory;
+};
+
+/** `GET /api/stocks/search` — 티커/종목명 검색. */
+export function searchStocks(query: string, size = 10): Promise<{ items: StockSearchItem[] }> {
+  return request<{ items: StockSearchItem[] }>(
+    `/api/stocks/search?q=${encodeURIComponent(query)}&size=${size}`,
+    { method: "GET" }
+  );
+}
+
+export type RankingItem = {
+  rank: number;
+  symbol: string;
+  name: string;
+  market: string;
+  category: StockCategory;
+  isDividend: boolean | null;
+  leverageFactor: string | null;
+  currency: string;
+  lastPrice: string;
+  prevClose: string;
+  changeAmount: string;
+  changeRate: string;
+  tradingAmount: string;
+  quoteAt: string;
+  realtime: boolean;
+};
+
+export type RankingPage = {
+  items: RankingItem[];
+  nextCursor: string | null;
+  hasNext: boolean;
+};
+
+/** `GET /api/stocks/rankings` — 거래대금 상위 100개, 20개씩 커서 페이지네이션. */
+export function getRankings(market: MarketCountry, size = 20, cursor?: string): Promise<RankingPage> {
+  const params = new URLSearchParams({ market, size: String(size) });
+  if (cursor) params.set("cursor", cursor);
+  return request<RankingPage>(`/api/stocks/rankings?${params.toString()}`, { method: "GET" });
+}
+
+export type CandleInterval = "1m" | "1d";
+export type CandleRange = "1D" | "1M" | "6M" | "1Y";
+
+export type Candle = {
+  at: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  volume: string;
+};
+
+export type CandleData = {
+  symbol: string;
+  interval: string;
+  range: string;
+  currency: string;
+  items: Candle[];
+};
+
+/**
+ * `GET /api/stocks/{symbol}/candles` — 캔들 차트. 백엔드가 유효한 조합만 허용한다
+ * (1m은 반드시 range=1D, 1d는 1M/6M/1Y — `CandleQueryPolicy` 참고).
+ */
+export function getCandles(
+  symbol: string,
+  marketCountry: MarketCountry,
+  interval: CandleInterval,
+  range: CandleRange
+): Promise<CandleData> {
+  const params = new URLSearchParams({ marketCountry, interval, range });
+  return request<CandleData>(`/api/stocks/${encodeURIComponent(symbol)}/candles?${params.toString()}`, {
+    method: "GET",
+  });
+}
+
+// ── 마이페이지(보유/원장/초기화) ────────────────────────────────────────────────
+
+export type HoldingItem = {
+  symbol: string;
+  name: string;
+  currency: string;
+  quantity: string;
+  avgBuyPrice: string;
+  avgExchangeRate: string;
+  /** 랭킹에서 빠진 보유 종목은 시세가 없어 null일 수 있다. */
+  lastPrice: string | null;
+  /** 원화로 환산까지 끝난 값(백엔드 계산) — avgBuyPrice/lastPrice와 달리 추가 환산이 필요 없다. */
+  evaluationAmount: string;
+  unrealizedPnl: string;
+  unrealizedPnlRate: string | null;
+  realtime: boolean;
+};
+
+export type Holdings = {
+  items: HoldingItem[];
+  asOf: string;
+};
+
+/** `GET /api/accounts/me/holdings` — 보유 종목 목록. */
+export function getHoldings(userId: number): Promise<Holdings> {
+  return request<Holdings>("/api/accounts/me/holdings", {
+    method: "GET",
+    headers: { "X-User-Id": String(userId) },
+  });
+}
+
+export type LedgerEntryType = "INITIAL_DEPOSIT" | "BUY" | "SELL";
+
+export type LedgerItem = {
+  entryId: number;
+  entryType: LedgerEntryType;
+  amount: string;
+  balanceAfter: string;
+  exchangeRate: string;
+  memo: string;
+  /** 초기금 지급(INITIAL_DEPOSIT)은 주문이 없어 orderId/symbol/name이 없다. */
+  orderId: number | null;
+  symbol: string | null;
+  name: string | null;
+  occurredAt: string;
+};
+
+export type LedgerPage = {
+  items: LedgerItem[];
+  nextCursor: string | null;
+  hasNext: boolean;
+};
+
+/** `GET /api/accounts/me/ledger` — 체결/원장 내역, entryId 기준 커서 페이지네이션(기본 20건). */
+export function getLedger(
+  userId: number,
+  params?: { cursor?: string; size?: number; entryType?: LedgerEntryType }
+): Promise<LedgerPage> {
+  const query = new URLSearchParams();
+  if (params?.cursor) query.set("cursor", params.cursor);
+  if (params?.size) query.set("size", String(params.size));
+  if (params?.entryType) query.set("entryType", params.entryType);
+  const qs = query.toString();
+  return request<LedgerPage>(`/api/accounts/me/ledger${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+    headers: { "X-User-Id": String(userId) },
+  });
+}
+
+export type AccountReset = {
+  accountId: number;
+  roundNo: number;
+  initialCash: string;
+  cashBalance: string;
+};
+
+/** `POST /api/accounts/me/reset` — 포트폴리오 초기화(새 회차 계좌 개설). */
+export function resetAccount(userId: number, accountId: number): Promise<AccountReset> {
+  return request<AccountReset>("/api/accounts/me/reset", {
+    method: "POST",
+    headers: { "X-User-Id": String(userId) },
+    body: { accountId },
+  });
+}
+
+// ── 시장 운영 상태 ───────────────────────────────────────────────────────────
+
+export type MarketStatusItem = {
+  marketCountry: MarketCountry;
+  /** 지금 이 순간 정규장 운영 중인지. */
+  open: boolean;
+  opensAt: string | null;
+  closesAt: string | null;
+  /** open이 false일 때만 값이 있다. */
+  nextOpensAt: string | null;
+};
+
+export type MarketStatus = {
+  markets: MarketStatusItem[];
+  serverTime: string;
+};
+
+/** `GET /api/market/status` — 국내/해외 시장 개장 여부·다음 개장 시각. 파라미터 없이 둘 다 내려온다. */
+export function getMarketStatus(): Promise<MarketStatus> {
+  return request<MarketStatus>("/api/market/status", { method: "GET" });
+}
+
 // ── 환율 ──────────────────────────────────────────────────────────────────────
 
 export type ExchangeRateLatest = {

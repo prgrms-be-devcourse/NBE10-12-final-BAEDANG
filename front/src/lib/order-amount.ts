@@ -22,7 +22,8 @@ export type OrderAmount = {
 export function calculateOrderAmount(params: {
   side: "매수" | "매도";
   quantity: number;
-  price: number;
+  /** 백엔드 응답은 금액을 문자열로 내려주므로(정밀도 보존) 문자열도 그대로 받는다. */
+  price: number | string;
   currency: "KRW" | "USD";
   usdKrwRate: number;
 }): OrderAmount {

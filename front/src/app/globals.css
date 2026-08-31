@@ -230,12 +230,19 @@ body {
   transition: background 0.2s, color 0.2s;
 }
 
-a {
-  color: var(--mut);
-  text-decoration: none;
-}
-a:hover {
-  color: var(--accentText);
+/* Tailwind 유틸리티는 @layer utilities 안에 있는데, 이 파일의 평범한 규칙은 레이어가
+   없어서(unlayered) 명세상 항상 레이어드 스타일을 이긴다 — 특정도(specificity)와
+   무관하게. a에 색을 직접 주면 text-white 같은 유틸리티 클래스가 아예 안 먹혀서
+   (마이페이지 회원가입 버튼에서 실제로 발견된 문제), 여기도 @layer base로 묶어
+   유틸리티가 정상적으로 덮어쓸 수 있게 한다. */
+@layer base {
+  a {
+    color: var(--mut);
+    text-decoration: none;
+  }
+  a:hover {
+    color: var(--accentText);
+  }
 }
 
 ::placeholder {
