@@ -90,7 +90,7 @@ GET /api/v1/candles?symbol=005930&interval=1d&count=200
      └ KR 15:40 / US 05:10 · 100 calls per market · ~20s
         ↓ store closePrice
 daily_candle.close_price          today's close finalized
-        ↓ copy right before the next session opens (KR 08:50 / US 22:00)
+        ↓ copy right before the next session opens (KR 08:50 KST / US 09:00 ET)
 quote_snapshot.prev_close
         ↓ together with last_price refreshed every 5s
 change rate = (last_price − prev_close) / prev_close
@@ -156,7 +156,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | 09:00 ~ 15:30 | 5s | KR top-100 current-price collection — **`/prices` 1 batch call, 1.3% of limit**. Trading opens only in these hours. |
 | 09:00 ~ 15:30 | 1m | KR top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group. |
 | **15:40 ~ 17:10** | 30m | KR daily-candle retries — starts 10 min after calendar close, including delayed-close days; skips stocks already stored for the date. |
-| **22:00** * | daily | US `prev_close` refresh — 30 min before regular open. 23:00 in DST. |
+| **09:00 ET** * | daily | US `prev_close` refresh — 30 min before regular open. 22:00 KST during DST, 23:00 KST during standard time. |
 | 22:30 ~ 05:00 * | 5s | US top-100 current-price collection — 1 batch call. 23:30 ~ 06:00 in standard time (winter). |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group. |
 | **US-local 16:10 ~ 17:10** * | 30m | US daily-candle retries — 05:10~06:10 KST in DST, 06:10~07:10 in standard time; skips stocks already stored for the date. |
