@@ -14,7 +14,7 @@ A tool to help users **understand** trading, not just execute it.
 ```bash
 cd back && ./gradlew test      # Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB + Testcontainers
 cd front && npm run dev        # Next.js 16.3
-cd infra && docker compose up -d              # local PostgreSQL/TimescaleDB + Redis
+cd infra/local && docker compose up -d        # local PostgreSQL/TimescaleDB + Redis
 ```
 
 ## Project Structure
@@ -22,7 +22,8 @@ cd infra && docker compose up -d              # local PostgreSQL/TimescaleDB + R
 ```text
 back/                                  # Spring Boot backend
 front/                                 # Next.js frontend (planned)
-infra/                                 # Local database infrastructure
+infra/local/                           # Local database infrastructure (Docker Compose)
+infra/development/                     # Dev-server AWS infrastructure (Terraform)
 docs/                                  # Design documents
 ```
 

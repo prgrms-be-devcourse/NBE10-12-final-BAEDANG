@@ -10,7 +10,7 @@
 ```bash
 cd back && ./gradlew test      # Java 21 · Spring Boot · PostgreSQL 18
 cd front && npm run dev        # Next.js 16.3
-cd infra && docker compose up -d              # 로컬 PG + Redis
+cd infra/local && docker compose up -d        # 로컬 PG + Redis
 ```
 
 ## 프로젝트 구조
@@ -18,7 +18,8 @@ cd infra && docker compose up -d              # 로컬 PG + Redis
 ```text
 back/                                  # Spring Boot 백엔드
 front/                                 # Next.js 프론트엔드 (예정)
-infra/                                 # 로컬 DB 인프라
+infra/local/                           # 로컬 DB 인프라 (Docker Compose)
+infra/development/                     # 개발 서버 AWS 인프라 (Terraform)
 docs/                                  # 설계 문서
 ```
 
