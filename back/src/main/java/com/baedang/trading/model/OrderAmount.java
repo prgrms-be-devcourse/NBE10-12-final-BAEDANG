@@ -6,6 +6,8 @@ import java.math.BigDecimal;
 public record OrderAmount(
         BigDecimal executedPrice,
         BigDecimal exchangeRate,
+        BigDecimal grossAmountUsd,
+        BigDecimal unroundedGrossAmountKrw,
         BigDecimal grossAmount,
         BigDecimal fee,
         BigDecimal tax,

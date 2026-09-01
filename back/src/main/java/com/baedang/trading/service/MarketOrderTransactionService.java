@@ -201,9 +201,11 @@ public class MarketOrderTransactionService {
             if (buyHolding == null) {
                 holdingRepository.save(Holding.firstBuy(
                         account.getAccountId(), stock.getStockId(), terms.quantity(),
-                        amount.executedPrice(), amount.exchangeRate(), orderedAt));
+                        amount.grossAmountUsd(), amount.unroundedGrossAmountKrw(), orderedAt));
             } else {
-                buyHolding.addBuy(terms.quantity(), amount.executedPrice(), amount.exchangeRate(), orderedAt);
+                buyHolding.addBuy(
+                        terms.quantity(), amount.grossAmountUsd(),
+                        amount.unroundedGrossAmountKrw(), orderedAt);
             }
         } else {
             holding.subtractSell(terms.quantity(), orderedAt);

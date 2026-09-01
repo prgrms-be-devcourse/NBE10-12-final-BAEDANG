@@ -48,7 +48,8 @@ public class OrderAmountCalculator {
     }
 
     private OrderAmount calculateKr(OrderSide side, BigDecimal priceKrw, BigDecimal quantity) {
-        BigDecimal grossAmountKrw = krw(priceKrw.multiply(quantity));
+        BigDecimal unroundedGrossAmountKrw = priceKrw.multiply(quantity);
+        BigDecimal grossAmountKrw = krw(unroundedGrossAmountKrw);
         BigDecimal tradingFeeKrw = krw(grossAmountKrw.multiply(feeRate));
         BigDecimal sellChargeKrw = side == OrderSide.SELL
                 ? krw(grossAmountKrw.multiply(krSellTaxRate))
@@ -58,6 +59,8 @@ public class OrderAmountCalculator {
         return new OrderAmount(
                 priceKrw,
                 BigDecimal.ONE,
+                BigDecimal.ZERO,
+                unroundedGrossAmountKrw,
                 grossAmountKrw,
                 tradingFeeKrw,
                 sellChargeKrw,
@@ -73,7 +76,8 @@ public class OrderAmountCalculator {
     ) {
         BigDecimal roundedPriceUsd = usd(priceUsd);
         BigDecimal grossAmountUsd = roundedPriceUsd.multiply(quantity);
-        BigDecimal grossAmountKrw = krw(roundedPriceUsd.multiply(quantity).multiply(exchangeRate));
+        BigDecimal unroundedGrossAmountKrw = grossAmountUsd.multiply(exchangeRate);
+        BigDecimal grossAmountKrw = krw(unroundedGrossAmountKrw);
         BigDecimal tradingFeeKrw = krw(grossAmountKrw.multiply(feeRate));
 
         BigDecimal secFeeUsd = BigDecimal.ZERO;
@@ -87,6 +91,8 @@ public class OrderAmountCalculator {
         return new OrderAmount(
                 roundedPriceUsd,
                 exchangeRate,
+                grossAmountUsd,
+                unroundedGrossAmountKrw,
                 grossAmountKrw,
                 tradingFeeKrw,
                 secFeeKrw,
