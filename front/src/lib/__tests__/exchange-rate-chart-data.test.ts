@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { isTimeVisible, toLinePoints } from "../exchange-rate-chart-data";
+import { TickMarkType, type UTCTimestamp } from "lightweight-charts";
+import { formatTickMark, isTimeVisible, toLinePoints } from "../exchange-rate-chart-data";
 import type { ExchangeRateHistoryItem } from "../api";
+
+/** 로컬 타임존에 상관없이 항상 같은 로컬 날짜/시각이 되도록 초 단위 타임스탬프를 만든다. */
+function localTime(year: number, month: number, day: number, hour = 0, minute = 0): UTCTimestamp {
+  return (new Date(year, month - 1, day, hour, minute, 0).getTime() / 1000) as UTCTimestamp;
+}
 
 function item(rateAt: string, rate: string): ExchangeRateHistoryItem {
   return { rateAt, rate };
@@ -82,5 +88,28 @@ describe("toLinePoints", () => {
 
     expect(points).toHaveLength(1);
     expect(points[0].value).toBe(1371);
+  });
+});
+
+describe("formatTickMark", () => {
+  it("연/월/일 눈금은 월이 바뀌는 지점이 아니어도 항상 'M월 d일' 형식으로 표기한다", () => {
+    const time = localTime(2026, 8, 31);
+
+    expect(formatTickMark(time, TickMarkType.DayOfMonth)).toBe("8월 31일");
+    expect(formatTickMark(time, TickMarkType.Month)).toBe("8월 31일");
+    expect(formatTickMark(time, TickMarkType.Year)).toBe("8월 31일");
+  });
+
+  it("월이 바뀌는 지점의 눈금도 날짜까지 함께 표기한다", () => {
+    const time = localTime(2026, 9, 1);
+
+    expect(formatTickMark(time, TickMarkType.Month)).toBe("9월 1일");
+  });
+
+  it("시:분 눈금은 시간만 HH:mm으로 표기한다", () => {
+    const time = localTime(2026, 9, 1, 8, 59);
+
+    expect(formatTickMark(time, TickMarkType.Time)).toBe("08:59");
+    expect(formatTickMark(time, TickMarkType.TimeWithSeconds)).toBe("08:59");
   });
 });

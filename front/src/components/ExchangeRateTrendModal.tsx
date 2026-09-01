@@ -6,7 +6,7 @@ import { PillTabs } from "./PillTabs";
 import { useTheme } from "./ThemeProvider";
 import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRatePeriod } from "@/lib/api";
 import { resolveCssColor } from "@/lib/chart-colors";
-import { isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
+import { formatTickMark, isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
 import { formatNumber } from "@/lib/format";
 
 const PERIOD_OPTIONS: { value: ExchangeRatePeriod; label: string }[] = [
@@ -69,7 +69,12 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
       layout: { background: { color: "transparent" }, textColor: resolveCssColor("--ink", "#071829") },
       grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
       rightPriceScale: { borderColor: line2 },
-      timeScale: { borderColor: line2, timeVisible: false, secondsVisible: false },
+      timeScale: {
+        borderColor: line2,
+        timeVisible: false,
+        secondsVisible: false,
+        tickMarkFormatter: formatTickMark,
+      },
     });
     const series = chart.addSeries(LineSeries, {
       color: resolveCssColor("--accent", "#0f3868"),

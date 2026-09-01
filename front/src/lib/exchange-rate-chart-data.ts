@@ -1,4 +1,4 @@
-import type { UTCTimestamp } from "lightweight-charts";
+import { TickMarkType, type Time, type UTCTimestamp } from "lightweight-charts";
 import type { ExchangeRateHistoryItem, ExchangeRatePeriod } from "./api";
 
 export type LinePoint = { time: UTCTimestamp; value: number };
@@ -53,4 +53,23 @@ export function toLinePoints(items: ExchangeRateHistoryItem[], period: ExchangeR
   return [...byBucket.entries()]
     .sort(([a], [b]) => a - b)
     .map(([time, { value }]) => ({ time, value }));
+}
+
+/**
+ * `lightweight-charts`의 기본 축 눈금 표기는 "31일"·"9월"처럼 날짜 눈금과 월 눈금을
+ * 따로 찍어서, 월이 바뀌는 지점이 아니면 몇 월인지 한눈에 알기 어렵다. 시:분 눈금을
+ * 제외한 모든 날짜 눈금(연/월/일)을 "8월 31일"처럼 월+일을 항상 함께 보여주도록
+ * 통일한다.
+ */
+export function formatTickMark(time: Time, tickMarkType: TickMarkType): string {
+  if (typeof time !== "number") return String(time);
+  const date = new Date(time * 1000);
+
+  if (tickMarkType === TickMarkType.Time || tickMarkType === TickMarkType.TimeWithSeconds) {
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+
+  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
