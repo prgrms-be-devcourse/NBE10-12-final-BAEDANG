@@ -55,6 +55,13 @@ export function formatPercent(rate: NumericValue, fallback = "-"): string {
   return `${sign}${d.times(100).toFixed(2)}%`;
 }
 
+/** 절댓값을 지정한 소수 자릿수까지 HALF_UP으로 반올림합니다. */
+export function formatAbsolute(value: NumericValue, decimalPlaces = 2, fallback = "-"): string {
+  const d = toDecimal(value);
+  if (!d) return fallback;
+  return d.abs().toFixed(decimalPlaces);
+}
+
 export function formatUsd(value: NumericValue, fallback = "-"): string {
   const d = toDecimal(value);
   if (!d) return fallback;

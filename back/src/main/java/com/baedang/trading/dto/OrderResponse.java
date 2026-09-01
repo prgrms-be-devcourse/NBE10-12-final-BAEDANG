@@ -4,7 +4,10 @@ import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.stock.entity.MarketCountry;
 import java.time.OffsetDateTime;
 
-import static com.baedang.trading.model.AmountFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
 public record OrderResponse(
         Long orderId,
@@ -32,16 +35,20 @@ public record OrderResponse(
                 receipt.marketCountry(),
                 receipt.side(),
                 plain(receipt.quantity()),
-                plain(receipt.executedPrice()),
-                plain(receipt.exchangeRate()),
-                plain(receipt.grossAmount()),
-                plain(receipt.fee()),
-                plain(receipt.tax()),
-                plain(receipt.netAmount()),
+                currency(receipt.executedPrice(), currencyOf(receipt.marketCountry())),
+                rate(receipt.exchangeRate()),
+                krw(receipt.grossAmount()),
+                krw(receipt.fee()),
+                krw(receipt.tax()),
+                krw(receipt.netAmount()),
                 receipt.quoteAt(),
                 receipt.orderedAt(),
-                new AccountSummary(plain(receipt.cashBalanceAfter()))
+                new AccountSummary(krw(receipt.cashBalanceAfter()))
         );
+    }
+
+    private static String currencyOf(MarketCountry marketCountry) {
+        return marketCountry == MarketCountry.KR ? "KRW" : "USD";
     }
 
     public record AccountSummary(String cashBalanceAfter) {

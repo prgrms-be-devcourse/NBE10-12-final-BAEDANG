@@ -1,6 +1,7 @@
 package com.baedang.account.dto;
 
 import com.baedang.account.support.HoldingValuation;
+import com.baedang.global.formatter.FinancialDecimalFormatter;
 import com.baedang.stock.entity.Stock;
 
 import java.math.BigDecimal;
@@ -8,12 +9,18 @@ import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.List;
 
+import static com.baedang.global.formatter.FinancialDecimalFormatter.averagePrice;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
+
 /**
  * 마이페이지 보유 종목 목록. {@code GET /accounts/me/holdings} 의 응답입니다.
  *
  * <p>평가금액 계열({@code evaluationAmount}·{@code unrealizedPnl})만 <b>백엔드가 원화로 계산</b>합니다.
  * 단가({@code avgBuyPrice}·{@code lastPrice})는 <b>종목 통화 그대로</b> 내려보내고,
  * 원화 표기는 프론트가 {@code avgExchangeRate}·최신 환율로 환산합니다.
+ * 이동평균인 {@code avgBuyPrice}는 통화 표시 단위로 미리 반올림하지 않고 저장 정밀도를 유지합니다.
  *
  * <p>금액은 전부 문자열입니다 — 프론트 number 의 배정밀도 오차를 피하려고 토스 API 처럼 문자열로 내립니다.
  * 값이 없는 필드({@code lastPrice}·{@code unrealizedPnlRate})는 null 이면 응답에서 빠집니다.
@@ -55,23 +62,14 @@ public record HoldingsResponse(
                     stock.getName(),
                     stock.getCurrency(),
                     plain(valuation.quantity()),
-                    plain(valuation.avgBuyPrice()),
-                    plain(valuation.avgExchangeRate()),
-                    plainOrNull(valuation.lastPrice()),
-                    plain(valuation.evalWon()),
-                    plain(pnlWon),
-                    plainOrNull(pnlRate),
+                    averagePrice(valuation.avgBuyPrice()),
+                    rate(valuation.avgExchangeRate()),
+                    FinancialDecimalFormatter.currency(valuation.lastPrice(), stock.getCurrency()),
+                    krw(valuation.evalWon()),
+                    krw(pnlWon),
+                    plain(pnlRate),
                     realtime
             );
         }
-    }
-
-    private static String plain(BigDecimal value) {
-        if (value.signum() == 0) return "0";
-        return value.stripTrailingZeros().toPlainString();
-    }
-
-    private static String plainOrNull(BigDecimal value) {
-        return value == null ? null : plain(value);
     }
 }
