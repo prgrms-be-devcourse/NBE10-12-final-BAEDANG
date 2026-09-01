@@ -3,8 +3,9 @@
  *
  * AGENTS.md · docs/erd.md 반올림 규칙:
  *   - 국내: gross(원 단위 HALF_UP) → fee(gross * 0.01% HALF_UP) → 매도세(gross * 0.2% HALF_UP)
- *   - 미국: USD 센트 반올림 → KRW 환산 → 원 단위 HALF_UP
- *   - SEC Fee: max(gross_usd * 0.0000206, $0.01) → KRW 환산 → 원 단위 HALF_UP
+ *   - 미국: 주당 USD 가격 센트 반올림 → 수량·환율 적용 → 원 단위 HALF_UP
+ *   - 미국 수수료: gross_krw * 0.0001 → 원 단위 HALF_UP
+ *   - SEC Fee: max(gross_usd * 0.0000206, $0.01) → 센트 반올림 → KRW 환산 → 원 단위 HALF_UP
  */
 import { describe, it, expect } from 'vitest';
 import { calculateOrderAmount } from '../order-amount';
@@ -66,14 +67,14 @@ describe('국내(KRW) 매도', () => {
 // 미국(USD) 매수
 // ─────────────────────────────────────────────
 describe('미국(USD) 매수', () => {
-  it('grossUsd 센트 반올림 -> KRW 환산 -> 원 단위 반올림 (2 * 182.456 = $364.912 -> $364.91 * 1,400 = 510,874원)', () => {
+  it('주당 가격을 센트 반올림한 뒤 수량과 환율을 적용한다 ($182.456 -> $182.46 * 2 * 1,400 = 510,888원)', () => {
     const r = calculateOrderAmount({ side: '매수', quantity: 2, price: 182.456, currency: 'USD', usdKrwRate: RATE });
-    expect(r.grossAmount).toBe(510_874);
+    expect(r.grossAmount).toBe(510_888);
   });
 
-  it('feeUsd 센트 반올림 후 KRW 환산 ($364.91 * 0.0001 = $0.036491 -> $0.04 * 1,400 = 56원)', () => {
+  it('수수료는 확정된 원화 거래대금을 기준으로 계산한다 (510,888 * 0.0001 = 51.0888 -> 51원)', () => {
     const r = calculateOrderAmount({ side: '매수', quantity: 2, price: 182.456, currency: 'USD', usdKrwRate: RATE });
-    expect(r.fee).toBe(56);
+    expect(r.fee).toBe(51);
   });
 
   it('매수 세금 = 0', () => {
@@ -83,10 +84,10 @@ describe('미국(USD) 매수', () => {
 
   it('netAmount(매수) = gross + fee (750 * 1,400 + fee)', () => {
     const r = calculateOrderAmount({ side: '매수', quantity: 3, price: 250, currency: 'USD', usdKrwRate: RATE });
-    // $750.00 * 1400 = 1,050,000원 / fee: $750 * 0.0001 = $0.08 * 1400 = 112원
+    // $750.00 * 1400 = 1,050,000원 / fee: 1,050,000원 * 0.0001 = 105원
     expect(r.grossAmount).toBe(1_050_000);
-    expect(r.fee).toBe(112);
-    expect(r.netAmount).toBe(1_050_112);
+    expect(r.fee).toBe(105);
+    expect(r.netAmount).toBe(1_050_105);
   });
 });
 
@@ -94,6 +95,21 @@ describe('미국(USD) 매수', () => {
 // 미국(USD) 매도 — SEC Fee
 // ─────────────────────────────────────────────
 describe('미국(USD) 매도 — SEC Fee', () => {
+  it('백엔드 기준 예시와 동일하게 원화 수수료와 SEC Fee를 계산한다', () => {
+    const r = calculateOrderAmount({
+      side: '매도',
+      quantity: 1,
+      price: '88.33',
+      currency: 'USD',
+      usdKrwRate: 1383.6,
+    });
+
+    expect(r.grossAmount).toBe(122_213);
+    expect(r.fee).toBe(12);
+    expect(r.tax).toBe(14);
+    expect(r.netAmount).toBe(122_187);
+  });
+
   it('SEC Fee = max(gross_usd * 0.0000206, 0.01) — 일반 케이스 ($20,000 * 0.0000206 = $0.412 -> $0.41 * 1,400 = 574원)', () => {
     const r = calculateOrderAmount({ side: '매도', quantity: 100, price: 200, currency: 'USD', usdKrwRate: RATE });
     expect(r.tax).toBe(574);
@@ -107,7 +123,7 @@ describe('미국(USD) 매도 — SEC Fee', () => {
   it('netAmount(매도) = gross - fee - tax (10 * $150 = $1,500 * 1,400 = 2,100,000원)', () => {
     const r = calculateOrderAmount({ side: '매도', quantity: 10, price: 150, currency: 'USD', usdKrwRate: RATE });
     // gross: $1500 * 1400 = 2,100,000원
-    // fee: $1500 * 0.0001 = $0.15 * 1400 = 210원
+    // fee: 2,100,000원 * 0.0001 = 210원
     // SEC Fee: max($1500 * 0.0000206, 0.01) = max($0.0309, 0.01) = $0.03 * 1400 = 42원
     // net: 2,100,000 - 210 - 42 = 2,099,748원
     expect(r.grossAmount).toBe(2_100_000);

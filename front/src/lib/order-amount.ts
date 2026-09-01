@@ -7,7 +7,7 @@ import { FEE_RATE, KR_TAX_RATE, US_TAX_MIN_USD, US_TAX_RATE } from "./mock-data"
  * 항상 백엔드가 다시 계산해서 확정합니다. 여기 값은 화면 미리보기 전용입니다.
  *
  * <p>국내: gross = qty * price, fee = round(gross * FEE_RATE), 매도세 = round(gross * KR_TAX_RATE)
- * 미국: USD 단위로 센트 반올림 후 KRW 환산, 최종 원 단위 HALF_UP (docs/erd.md 규칙)
+ * 미국: 주당 USD 가격을 센트 반올림한 뒤 수량·환율을 적용하고, 원화 거래대금에서 수수료 계산
  *
  * <p>전부 {@link D}(decimal.js)로 계산합니다 — 순수 `number` 곱셈은 이진 부동소수점
  * 오차가 생겨서 수수료·세금처럼 반올림 규칙이 정확해야 하는 금액 계산엔 부적합합니다.
@@ -44,16 +44,16 @@ export function calculateOrderAmount(params: {
     };
   }
 
-  // 미국 — USD로 먼저 센트 단위 반올림한 뒤 KRW로 환산, 최종 원 단위 반올림.
+  // 미국 — 백엔드와 동일하게 주당 가격을 센트로 먼저 확정한 뒤 수량과 환율을 적용한다.
   const rate = new D(usdKrwRate);
-  const grossUsd = qty.times(unitPrice).toDecimalPlaces(2);
+  const roundedUnitPrice = unitPrice.toDecimalPlaces(2);
+  const grossUsd = roundedUnitPrice.times(qty);
   const grossAmount = grossUsd.times(rate).toDecimalPlaces(0);
-  const feeUsd = grossUsd.times(FEE_RATE).toDecimalPlaces(2);
-  const fee = feeUsd.times(rate).toDecimalPlaces(0);
+  const fee = grossAmount.times(FEE_RATE).toDecimalPlaces(0);
 
   let tax = new D(0);
   if (side === "매도") {
-    const secFeeUsd = D.max(grossUsd.times(US_TAX_RATE).toDecimalPlaces(2), US_TAX_MIN_USD);
+    const secFeeUsd = D.max(grossUsd.times(US_TAX_RATE), US_TAX_MIN_USD).toDecimalPlaces(2);
     tax = secFeeUsd.times(rate).toDecimalPlaces(0);
   }
 
