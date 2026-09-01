@@ -8,7 +8,10 @@ import com.baedang.stock.entity.MarketCountry;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
-import static com.baedang.trading.model.AmountFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
 public record OrderQuoteResponse(
         String symbol,
@@ -42,17 +45,21 @@ public record OrderQuoteResponse(
                 marketCountry,
                 side,
                 plain(quantity),
-                plain(amount.executedPrice()),
-                plain(amount.exchangeRate()),
-                plain(amount.grossAmount()),
-                plain(amount.fee()),
-                plain(amount.tax()),
-                plain(amount.netAmount()),
-                plain(availableCash),
+                currency(amount.executedPrice(), currencyOf(marketCountry)),
+                rate(amount.exchangeRate()),
+                krw(amount.grossAmount()),
+                krw(amount.fee()),
+                krw(amount.tax()),
+                krw(amount.netAmount()),
+                krw(availableCash),
                 quoteAt,
                 reason == null,
                 reason == null ? null : reason.name()
         );
+    }
+
+    private static String currencyOf(MarketCountry marketCountry) {
+        return marketCountry == MarketCountry.KR ? "KRW" : "USD";
     }
 
 }

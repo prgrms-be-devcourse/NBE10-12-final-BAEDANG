@@ -28,12 +28,17 @@ class StockDetailServiceTest {
     private final StockRepository stockRepository = mock(StockRepository.class);
     private final QuoteSnapshotRepository quoteSnapshotRepository = mock(QuoteSnapshotRepository.class);
     private final QuoteRealtimePolicy quoteRealtimePolicy = mock(QuoteRealtimePolicy.class);
+    private final StockOnDemandQuoteService stockOnDemandQuoteService = mock(StockOnDemandQuoteService.class);
     private final StockDetailService service =
-            new StockDetailService(stockRepository, quoteSnapshotRepository, quoteRealtimePolicy);
+            new StockDetailService(stockRepository, quoteSnapshotRepository, quoteRealtimePolicy, stockOnDemandQuoteService);
     private Stock stock;
 
     @BeforeEach
     void setUp() {
+        // 온디맨드 갱신은 별도 StockOnDemandQuoteServiceTest에서 검증한다 — 여기서는
+        // "넘겨받은 시세를 그대로 돌려준다"로 고정해 기존 시나리오에 영향이 없게 한다.
+        when(stockOnDemandQuoteService.ensureQuote(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         stock = mock(Stock.class);
         when(stock.getStockId()).thenReturn(1L);
         when(stock.getSymbol()).thenReturn("ABC");
@@ -64,7 +69,7 @@ class StockDetailServiceTest {
 
         assertThat(result.price().lastPrice()).isEqualTo("120");
         assertThat(result.price().changeAmount()).isEqualTo("20");
-        assertThat(result.price().changeRate()).isEqualTo("0.200000");
+        assertThat(result.price().changeRate()).isEqualTo("0.2");
         assertThat(result.info().marketCap()).isEqualTo("120000");
         assertThat(result.tradable()).isTrue();
     }

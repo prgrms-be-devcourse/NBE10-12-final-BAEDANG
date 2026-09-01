@@ -100,10 +100,11 @@ class AccountServiceTest {
     void 국내와_미국_보유를_각각_원화로_평가해_합산한다() {
         givenAccount(1L, "50000000", "48240000", 1);
         Holding krHolding = Holding.firstBuy(1L, 101L,
-                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE,
+                new BigDecimal("6"), BigDecimal.ZERO, new BigDecimal("1368000"),
                 OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         Holding usHolding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"),
+                new BigDecimal("10"), new BigDecimal("883.40"),
+                new BigDecimal("1222272.24"),
                 OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of(krHolding, usHolding));
@@ -129,7 +130,8 @@ class AccountServiceTest {
     void 미국_보유가_있는데_환율이_없으면_매입환율로_환산하고_엔드포인트를_유지한다() {
         givenAccount(1L, "50000000", "10000000", 1);
         Holding usHolding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"),
+                new BigDecimal("10"), new BigDecimal("883.40"),
+                new BigDecimal("1222272.24"),
                 OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of(usHolding));
@@ -150,10 +152,11 @@ class AccountServiceTest {
     void 보유목록을_평가금액_내림차순으로_정렬하고_종목별_손익률을_계산한다() {
         givenActiveAccount(1L);
         Holding krHolding = Holding.firstBuy(1L, 101L,
-                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE,
+                new BigDecimal("6"), BigDecimal.ZERO, new BigDecimal("1368000"),
                 OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         Holding usHolding = Holding.firstBuy(1L, 202L,
-                new BigDecimal("10"), new BigDecimal("88.34"), new BigDecimal("1383.60"),
+                new BigDecimal("10"), new BigDecimal("883.40"),
+                new BigDecimal("1222272.24"),
                 OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         // 평가금액이 큰 국내(1,449,000)가 미국(1,260,000)보다 먼저 오도록, 일부러 미국을 앞에 넣는다.
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
@@ -191,7 +194,7 @@ class AccountServiceTest {
         assertThat(us.symbol()).isEqualTo("AAPL");
         assertThat(us.currency()).isEqualTo("USD");
         assertThat(us.avgExchangeRate()).isEqualTo("1383.6");
-        assertThat(us.lastPrice()).isEqualTo("90");
+        assertThat(us.lastPrice()).isEqualTo("90.00");
         // eval = 10 x 90 x 1400 = 1,260,000 · cost = 10 x 88.34 x 1383.60 = 1,222,272
         assertThat(us.evaluationAmount()).isEqualTo("1260000");
         assertThat(us.unrealizedPnl()).isEqualTo("37728");
@@ -203,7 +206,7 @@ class AccountServiceTest {
     void 시세가_신선도_임계값보다_오래되면_realtime_은_false_다() {
         givenActiveAccount(1L);
         Holding krHolding = Holding.firstBuy(1L, 101L,
-                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE,
+                new BigDecimal("6"), BigDecimal.ZERO, new BigDecimal("1368000"),
                 OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC));
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of(krHolding));
@@ -236,7 +239,7 @@ class AccountServiceTest {
     void 보유_종목의_종목마스터가_없으면_STOCK_NOT_FOUND_를_던진다() {
         givenActiveAccount(1L);
         Holding krHolding = Holding.firstBuy(1L, 101L,
-                new BigDecimal("6"), new BigDecimal("228000"), BigDecimal.ONE, fresh());
+                new BigDecimal("6"), BigDecimal.ZERO, new BigDecimal("1368000"), fresh());
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of(krHolding));
         when(quoteSnapshotRepository.findByStockIdIn(any()))

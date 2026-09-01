@@ -12,6 +12,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.client.RestClient;
 
+<<<<<<< HEAD
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -19,6 +20,16 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+=======
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+>>>>>>> origin/develop
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
@@ -221,6 +232,53 @@ class TossSecuritiesClientTest {
             assertThat(body.quoteCurrency()).isEqualTo("KRW");
             verify(1, postRequestedFor(urlEqualTo(TOKEN_PATH)));
             verify(2, getRequestedFor(urlPathEqualTo(EXCHANGE_RATE)));
+        }
+
+        /**
+         * 이전에는 {@code retryWithFreshToken()}이 조건 없이 {@code issueToken()}을
+         * 불렀다 — 콜드 스타트 직후 여러 스레드가 동시에 401을 만나면(예: 여러
+         * 스케줄러가 같은 순간 첫 호출을 하는 경우) 저마다 토큰을 재발급받아,
+         * 토큰 발급 자체가 몰려서 요청 한도를 소모했다. 지금은 재발급 직전에
+         * 토큰이 이미(다른 스레드에 의해) 바뀌었는지 확인해, 바뀌었으면 그 값을
+         * 재사용하고 실제 발급은 한 번만 일어난다.
+         *
+         * <p>토큰 발급 응답에 지연을 줘서, 여러 스레드가 동시에 {@code get()}을 부를 때
+         * 스레드들이 실제로 겹쳐서 락 앞에서 대기하도록 한다 — 지연이 없으면 순식간에
+         * 순서대로 끝나버려 경합 상황 자체가 거의 재현되지 않는다.
+         */
+        @Test
+        void 동시_요청에서도_토큰_재발급은_한_번만_일어난다() throws Exception {
+            stubFor(post(urlEqualTo(TOKEN_PATH))
+                    .willReturn(okJson(TOKEN_RESPONSE).withFixedDelay(200)));
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader("Authorization", notMatching("Bearer " + VALID_TOKEN))
+                    .willReturn(aResponse().withStatus(401)));
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader("Authorization", equalTo("Bearer " + VALID_TOKEN))
+                    .willReturn(okJson(RATE_BODY)));
+
+            int threadCount = 5;
+            ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+            CountDownLatch ready = new CountDownLatch(threadCount);
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<TestBody>> futures = new ArrayList<>();
+            for (int i = 0; i < threadCount; i++) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    return client.get(EXCHANGE_RATE, Map.of(), TestBody.class);
+                }));
+            }
+            ready.await();
+            start.countDown();
+
+            for (Future<TestBody> future : futures) {
+                TestBody body = future.get(5, TimeUnit.SECONDS);
+                assertThat(body.baseCurrency()).isEqualTo("USD");
+            }
+            pool.shutdown();
+
+            verify(1, postRequestedFor(urlEqualTo(TOKEN_PATH)));
         }
 
         @Test

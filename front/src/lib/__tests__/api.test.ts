@@ -10,6 +10,7 @@ import {
   getAccountSummary,
   placeOrder,
   getExchangeRateLatest,
+  getExchangeRateHistory,
   getStockDetail,
   searchStocks,
   getRankings,
@@ -112,6 +113,24 @@ describe('getExchangeRateLatest — 성공', () => {
     await getExchangeRateLatest('usd', 'krw');
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining('/api/exchange-rates/latest?base=USD&quote=KRW'),
+      expect.anything()
+    );
+  });
+});
+
+describe('getExchangeRateHistory — 성공', () => {
+  it('200 → 이력 목록 반환, period를 쿼리스트링에 반영', async () => {
+    const historyData = {
+      items: [
+        { rateAt: '2026-08-25T00:00:00+09:00', rate: '1395.20' },
+        { rateAt: '2026-08-26T00:00:00+09:00', rate: '1398.50' },
+      ],
+    };
+    const fetchSpy = mockFetch(200, historyData);
+    const result = await getExchangeRateHistory('1w');
+    expect(result).toEqual(historyData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/exchange-rates/history?period=1w'),
       expect.anything()
     );
   });

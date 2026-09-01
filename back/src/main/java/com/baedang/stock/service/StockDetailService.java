@@ -15,6 +15,9 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+
 @Service
 public class StockDetailService {
 
@@ -24,15 +27,18 @@ public class StockDetailService {
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final QuoteRealtimePolicy quoteRealtimePolicy;
+    private final StockOnDemandQuoteService stockOnDemandQuoteService;
 
     public StockDetailService(
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
-            QuoteRealtimePolicy quoteRealtimePolicy
+            QuoteRealtimePolicy quoteRealtimePolicy,
+            StockOnDemandQuoteService stockOnDemandQuoteService
     ) {
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.quoteRealtimePolicy = quoteRealtimePolicy;
+        this.stockOnDemandQuoteService = stockOnDemandQuoteService;
     }
 
     public StockDetailResponse getDetail(String symbol, String marketCountryValue) {
@@ -42,6 +48,9 @@ public class StockDetailService {
                         ErrorCode.STOCK_NOT_FOUND,
                         "symbol=" + symbol + ", marketCountry=" + marketCountry));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
+        // 랭킹 상위 100 밖 종목은 이 호출 안에서 온디맨드로 시세·일봉을 채운다(이슈 #75).
+        // 상위 100 종목은 이미 배치가 채워두므로 이 호출은 그대로 통과한다.
+        quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
 
         boolean realtime = Boolean.TRUE.equals(stock.getIsRanked())
                 && quoteRealtimePolicy.isRealtime(marketCountry, quote);
@@ -56,9 +65,9 @@ public class StockDetailService {
                 stock.getCurrency(),
                 stock.getIsinCode(),
                 stock.getStockCategory(),
-                number(stock.getLeverageFactor()),
+                plain(stock.getLeverageFactor()),
                 stock.getIsDividend(),
-                price(quote, realtime),
+                price(quote, realtime, stock.getCurrency()),
                 info(stock, quote),
                 Boolean.TRUE.equals(stock.getIsWarned()) ? List.of(INVESTMENT_WARNING) : List.of(),
                 tradability.tradable(),
@@ -79,7 +88,7 @@ public class StockDetailService {
         return new Tradability(true, null);
     }
 
-    private StockDetailResponse.Price price(QuoteSnapshot quote, boolean realtime) {
+    private StockDetailResponse.Price price(QuoteSnapshot quote, boolean realtime, String currencyCode) {
         if (quote == null) {
             return new StockDetailResponse.Price(null, null, null, null, null, null, null, false);
         }
@@ -87,12 +96,12 @@ public class StockDetailService {
                 ? null
                 : quote.getLastPrice().subtract(quote.getPrevClose());
         return new StockDetailResponse.Price(
-                number(quote.getLastPrice()),
-                number(quote.getPrevClose()),
-                number(changeAmount),
-                number(quote.changeRate()),
-                number(quote.getUpperLimit()),
-                number(quote.getLowerLimit()),
+                currency(quote.getLastPrice(), currencyCode),
+                currency(quote.getPrevClose(), currencyCode),
+                currency(changeAmount, currencyCode),
+                plain(quote.changeRate()),
+                currency(quote.getUpperLimit(), currencyCode),
+                currency(quote.getLowerLimit(), currencyCode),
                 quote.getQuoteAt(),
                 realtime
         );
@@ -103,8 +112,8 @@ public class StockDetailService {
                 ? null
                 : quote.getLastPrice().multiply(stock.getSharesOutstanding());
         return new StockDetailResponse.Info(
-                number(marketCap),
-                number(stock.getSharesOutstanding()),
+                currency(marketCap, stock.getCurrency()),
+                plain(stock.getSharesOutstanding()),
                 stock.getListDate()
         );
     }
@@ -118,10 +127,6 @@ public class StockDetailService {
         } catch (IllegalArgumentException exception) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry는 KR 또는 US여야 합니다");
         }
-    }
-
-    private String number(BigDecimal value) {
-        return value == null ? null : value.toPlainString();
     }
 
     private record Tradability(boolean tradable, String reason) {

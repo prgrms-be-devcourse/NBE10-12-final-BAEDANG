@@ -20,6 +20,10 @@ import java.util.stream.Collectors;
 
 @Service
 public class StockRankingLoadService {
+
+    private static final Logger log = LoggerFactory.getLogger(StockRankingLoadService.class);
+    private static final int TPS = 5;
+
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
     private final StockRankingLoadService self;
@@ -34,8 +38,11 @@ public class StockRankingLoadService {
         this.self = self;
     }
 
+<<<<<<< HEAD
     private static final Logger logger = LoggerFactory.getLogger(StockRankingLoadService.class);
 
+=======
+>>>>>>> origin/develop
     // 두 시장의 랭킹 적재 스케줄 시간이 다르므로 이 메서드는 테스트 용도로 사용한다.
     public void loadAll() {
         for (MarketCountry marketCountry : MarketCountry.values()) {
@@ -48,7 +55,7 @@ public class StockRankingLoadService {
 
         // 보통 휴장일에 빈 배열이 온다. 예외가 있을 수 있음.
         if (snapshot.entries().isEmpty()) {
-            logger.warn(
+            log.warn(
                     "StockRankingLoadService(marketCountry={}): 랭킹 집계 결과가 비어 있어 직전 유니버스를 유지합니다.",
                     marketCountry
             );
@@ -91,7 +98,7 @@ public class StockRankingLoadService {
 
             if (stock == null) {
                 unknownSymbols.add(symbol);
-                logger.warn(
+                log.warn(
                         "StockRankingLoadService(marketCountry={}): stock 테이블에 없는 심볼, 랭킹 적재 생략 (symbol={}, rank={})",
                         marketCountry,
                         symbol,
@@ -104,7 +111,7 @@ public class StockRankingLoadService {
         }
 
         if (!unknownSymbols.isEmpty()) {
-            logger.warn(
+            log.warn(
                     "StockRankingLoadService(marketCountry={}): 랭킹 {}건 중 {}건이 stock 테이블에 없어 생략됨. (symbols={})",
                     marketCountry,
                     entries.size(),

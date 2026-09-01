@@ -119,6 +119,8 @@ class MarketOrderIntegrationTest {
         assertThat(account.getCashBalance()).isEqualByComparingTo("29998");
         assertThat(account.getLockedCash()).isEqualByComparingTo("0");
         assertThat(holding.getQuantity()).isEqualByComparingTo("2");
+        assertThat(holding.getUsdPurchaseAmount()).isZero();
+        assertThat(holding.getKrwPurchaseAmount()).isEqualByComparingTo("20000");
         assertThat(response.account().cashBalanceAfter()).isEqualTo("29998");
         assertThat(ledgerEntryRepository.findFirstByOrderIdOrderByEntryIdAsc(
                 order.getOrderId()).orElseThrow().getAmount())
@@ -197,7 +199,8 @@ class MarketOrderIntegrationTest {
         Account account = activeAccount(fixture.userId());
         holdingRepository.save(Holding.firstBuy(
                 account.getAccountId(), fixture.stockId(), new BigDecimal("5"),
-                new BigDecimal("8000"), BigDecimal.ONE, OffsetDateTime.now(ZoneOffset.UTC)));
+                BigDecimal.ZERO, new BigDecimal("40000"),
+                OffsetDateTime.now(ZoneOffset.UTC)));
 
         OrderResponse response = marketOrderService.place(
                 fixture.userId(), request(fixture, "SELL", "2"));
@@ -208,6 +211,8 @@ class MarketOrderIntegrationTest {
         assertThat(updated.getCashBalance()).isEqualByComparingTo("29958");
         assertThat(holding.getQuantity()).isEqualByComparingTo("3");
         assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo("8000");
+        assertThat(holding.getUsdPurchaseAmount()).isZero();
+        assertThat(holding.getKrwPurchaseAmount()).isEqualByComparingTo("24000.0000");
         assertThat(response.netAmount()).isEqualTo("19958");
         assertThat(response.account().cashBalanceAfter()).isEqualTo("29958");
         LedgerEntry ledger = ledgerEntryRepository
@@ -262,9 +267,65 @@ class MarketOrderIntegrationTest {
         assertThat(holding.getQuantity()).isEqualByComparingTo("20");
         assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo("150.0000");
         assertThat(holding.getAvgExchangeRate()).isEqualByComparingTo("1366.666667");
+        assertThat(holding.getUsdPurchaseAmount()).isEqualByComparingTo("3000");
+        assertThat(holding.getKrwPurchaseAmount()).isEqualByComparingTo("4100000");
         assertThat(account.getCashBalance()).isEqualByComparingTo("5899590");
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(2);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(2);
+    }
+
+    @Test
+    void 미국종목을_열번_분할매수하면_반올림전_매수금액과_원장을_각각_정확히_보존한다() {
+        Fixture fixture = createUsFixture(new BigDecimal("10000000"), new BigDecimal("10.01"));
+        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(
+                new BigDecimal("1300"), new BigDecimal("1301"), new BigDecimal("1302"),
+                new BigDecimal("1303"), new BigDecimal("1304"), new BigDecimal("1305"),
+                new BigDecimal("1306"), new BigDecimal("1307"), new BigDecimal("1308"),
+                new BigDecimal("1309"));
+        BigDecimal expectedUsdPurchaseAmount = BigDecimal.ZERO;
+        BigDecimal expectedKrwPurchaseAmount = BigDecimal.ZERO;
+        BigDecimal expectedGrossAmountKrw = BigDecimal.ZERO;
+        BigDecimal expectedFee = BigDecimal.ZERO;
+
+        for (int i = 1; i <= 10; i++) {
+            BigDecimal price = new BigDecimal("10").add(new BigDecimal(i).movePointLeft(2));
+            BigDecimal rate = new BigDecimal(1299 + i);
+            QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
+            OffsetDateTime collectedAt = OffsetDateTime.now(ZoneOffset.UTC);
+            quote.updatePrice(price, quote.getCurrency(), collectedAt, collectedAt);
+            quoteSnapshotRepository.saveAndFlush(quote);
+
+            marketOrderService.place(fixture.userId(), request(fixture, "BUY", "1"));
+
+            BigDecimal unroundedGrossKrw = price.multiply(rate);
+            BigDecimal grossKrw = unroundedGrossKrw.setScale(
+                    0, java.math.RoundingMode.HALF_UP);
+            expectedUsdPurchaseAmount = expectedUsdPurchaseAmount.add(price);
+            expectedKrwPurchaseAmount = expectedKrwPurchaseAmount.add(unroundedGrossKrw);
+            expectedGrossAmountKrw = expectedGrossAmountKrw.add(grossKrw);
+            expectedFee = expectedFee.add(
+                    grossKrw.multiply(new BigDecimal("0.0001"))
+                            .setScale(0, java.math.RoundingMode.HALF_UP));
+        }
+
+        Holding holding = holdingRepository
+                .findByAccountIdAndStockId(fixture.accountId(), fixture.stockId()).orElseThrow();
+        BigDecimal ledgerDebit = jdbcTemplate.queryForObject("""
+                SELECT -SUM(amount)
+                FROM ledger_entry
+                WHERE account_id = ? AND entry_type = 'BUY'
+                """, BigDecimal.class, fixture.accountId());
+
+        assertThat(holding.getQuantity()).isEqualByComparingTo("10");
+        assertThat(holding.getUsdPurchaseAmount()).isEqualByComparingTo(expectedUsdPurchaseAmount);
+        assertThat(holding.getKrwPurchaseAmount()).isEqualByComparingTo(expectedKrwPurchaseAmount);
+        assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo(
+                expectedUsdPurchaseAmount.divide(new BigDecimal("10"), 4, java.math.RoundingMode.HALF_UP));
+        assertThat(holding.getAvgExchangeRate()).isEqualByComparingTo(
+                expectedKrwPurchaseAmount.divide(
+                        expectedUsdPurchaseAmount, 6, java.math.RoundingMode.HALF_UP));
+        assertThat(ledgerDebit)
+                .isEqualByComparingTo(expectedGrossAmountKrw.add(expectedFee));
     }
 
     @Test
@@ -274,8 +335,23 @@ class MarketOrderIntegrationTest {
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 INSERT INTO holding (
                     account_id, stock_id, quantity, locked_quantity,
-                    avg_buy_price, avg_exchange_rate
-                ) VALUES (?, ?, 1, 2, 10000, 1)
+                    avg_buy_price, avg_exchange_rate,
+                    usd_purchase_amount, krw_purchase_amount
+                ) VALUES (?, ?, 1, 2, 10000, 1, 0, 10000)
+                """, fixture.accountId(), fixture.stockId()))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void 운영_스키마는_수량이_0인_보유종목에_매수금액이_남는것을_거절한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+
+        assertThatThrownBy(() -> jdbcTemplate.update("""
+                INSERT INTO holding (
+                    account_id, stock_id, quantity, locked_quantity,
+                    avg_buy_price, avg_exchange_rate,
+                    usd_purchase_amount, krw_purchase_amount
+                ) VALUES (?, ?, 0, 0, 10000, 1, 0, 10000)
                 """, fixture.accountId(), fixture.stockId()))
                 .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
@@ -290,7 +366,8 @@ class MarketOrderIntegrationTest {
         OrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         Account account = activeAccount(fixture.userId());
-        assertThat(retried.orderId()).isEqualTo(first.orderId());
+        assertThat(retried).isEqualTo(first);
+        assertThat(retried.exchangeRate()).isEqualTo("1");
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(account.getCashBalance()).isEqualByComparingTo("39999");
@@ -496,7 +573,8 @@ class MarketOrderIntegrationTest {
         Account account = activeAccount(insufficient.userId());
         holdingRepository.save(Holding.firstBuy(
                 account.getAccountId(), insufficient.stockId(), BigDecimal.ONE,
-                new BigDecimal("10000"), BigDecimal.ONE, OffsetDateTime.now(ZoneOffset.UTC)));
+                BigDecimal.ZERO, new BigDecimal("10000"),
+                OffsetDateTime.now(ZoneOffset.UTC)));
         assertRejected(insufficient, request(insufficient, "SELL", "2"),
                 ErrorCode.INSUFFICIENT_QUANTITY);
     }
@@ -507,7 +585,8 @@ class MarketOrderIntegrationTest {
         Account account = activeAccount(fixture.userId());
         holdingRepository.save(Holding.firstBuy(
                 account.getAccountId(), fixture.stockId(), BigDecimal.ONE,
-                new BigDecimal("0.01"), new BigDecimal("1383.60"), OffsetDateTime.now(ZoneOffset.UTC)));
+                new BigDecimal("0.01"), new BigDecimal("13.836"),
+                OffsetDateTime.now(ZoneOffset.UTC)));
 
         assertRejected(fixture, request(fixture, "SELL", "1"),
                 ErrorCode.INVALID_SETTLEMENT_AMOUNT);
@@ -655,7 +734,7 @@ class MarketOrderIntegrationTest {
                         account.debitMarketBuy(new BigDecimal("10001"));
                         holdingRepository.save(Holding.firstBuy(
                                 fixture.accountId(), fixture.stockId(), BigDecimal.ONE,
-                                new BigDecimal("10000"), BigDecimal.ONE, orderedAt));
+                                BigDecimal.ZERO, new BigDecimal("10000"), orderedAt));
                         ledgerEntryRepository.save(LedgerEntry.buy(
                                 fixture.accountId(), order.getOrderId(), new BigDecimal("10001"),
                                 account.getCashBalance(), BigDecimal.ONE, "동시 멱등 테스트", orderedAt));

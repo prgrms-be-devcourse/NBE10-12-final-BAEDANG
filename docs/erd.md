@@ -265,11 +265,13 @@ A derived aggregate from the ledger. Theoretically reconstructable by replaying 
 | `holding_id` | BIGINT PK | surrogate key. Unique on `(account_id, stock_id)`. |
 | `account_id` | BIGINT FK | round account. Empty automatically after reset (new account). |
 | `stock_id` | BIGINT FK | held stock. |
-| `quantity` | NUMERIC(19,6) | held quantity. Decide keep-vs-delete at 0 — **keeping is recommended** (moving-average cost history continues on rebuy). |
+| `quantity` | NUMERIC(19,6) | held quantity. Zero-quantity rows are retained, but both purchase amounts are reset to zero so a rebuy starts a new average without inheriting the prior cost. |
 | `locked_quantity` | NUMERIC(19,6) | **quantity tied up by unfilled sell orders.** Exactly the same principle as deposit lock — holding 10 shares and placing three 5-share sell orders would sell 15.
   **Sellable quantity = `quantity − locked_quantity`.** `CHECK (locked_quantity <= quantity)` blocks over-locking. |
-| `avg_buy_price` | NUMERIC(19,4) | **moving-average cost** (stock currency). On buy: `(prev_qty×prev_price + new_qty×fill_price) ÷ total_qty`. **Not changed on sell** — it's the basis of unrealized P&L. |
-| `avg_exchange_rate` | NUMERIC(19,6) | **average FX at buy time.** 1 for KRW stocks. This is what lets you later separate "how much of the profit is price gain vs FX gain". Unrecoverable if omitted now. |
+| `avg_buy_price` | NUMERIC(19,4) | **fee-exclusive moving-average fill price.** KR derives it from `krw_purchase_amount ÷ quantity`; US from `usd_purchase_amount ÷ quantity`. Rounded averages are output values only and are never reused as the next buy's input. Partial sells leave it unchanged; a buy after a full sell recalculates it from the new purchase only. |
+| `avg_exchange_rate` | NUMERIC(19,6) | **weighted-average source USD/KRW rate for purchases.** US derives it from `krw_purchase_amount ÷ usd_purchase_amount`; KR is always 1. This keeps a single fill's original FX rate intact instead of reverse-calculating it from a whole-won rounded amount. Purchase fees are excluded so they do not distort the FX rate. |
+| `usd_purchase_amount` | NUMERIC(29,10) | Fee-exclusive USD purchase amount allocated to the remaining quantity. Zero for KR stocks. Added from each US fill's `executed_price × quantity`; reduced proportionally on a partial sell and reset to zero on a full sell. |
+| `krw_purchase_amount` | NUMERIC(38,16) | Fee-exclusive KRW purchase amount before final whole-won rounding. Used to derive KR average fill price, US average FX, and holding valuation. Reduced proportionally on a partial sell and reset to zero on a full sell. |
 | `updated_at` | TIMESTAMPTZ | last change time. |
 
 #### `daily_account_snapshot` — daily asset snapshot

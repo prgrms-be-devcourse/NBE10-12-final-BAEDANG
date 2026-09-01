@@ -43,6 +43,7 @@ public class CandleQueryService {
     private final MarketDataPort marketDataPort;
     private final MinuteCandlePersistenceService persistenceService;
     private final MinuteCandleFetchCache fetchCache;
+    private final StockOnDemandQuoteService stockOnDemandQuoteService;
     private final Clock clock;
     private final ReentrantLock[] refreshLocks = createRefreshLocks();
 
@@ -54,6 +55,7 @@ public class CandleQueryService {
             MarketDataPort marketDataPort,
             MinuteCandlePersistenceService persistenceService,
             MinuteCandleFetchCache fetchCache,
+            StockOnDemandQuoteService stockOnDemandQuoteService,
             Clock clock
     ) {
         this.candleQueryPolicy = candleQueryPolicy;
@@ -63,6 +65,7 @@ public class CandleQueryService {
         this.marketDataPort = marketDataPort;
         this.persistenceService = persistenceService;
         this.fetchCache = fetchCache;
+        this.stockOnDemandQuoteService = stockOnDemandQuoteService;
         this.clock = clock;
     }
 
@@ -102,11 +105,15 @@ public class CandleQueryService {
                         row.getHighPrice(),
                         row.getLowPrice(),
                         row.getClosePrice(),
-                        row.getVolume()))
+                        row.getVolume(),
+                        stock.getCurrency()))
                 .toList();
     }
 
     private List<CandleResponse.Item> dailyItems(Stock stock, int count) {
+        // 랭킹 밖 종목이 일봉을 한 번도 못 받아본 경우 여기서 백필한다(이슈 #75).
+        // 상세 화면을 거치지 않고 캔들만 바로 열어볼 수도 있어 독립적으로 필요하다.
+        stockOnDemandQuoteService.ensureDailyCandles(stock);
         List<DailyCandle> rows = new ArrayList<>(dailyCandleRepository
                 .findByStockIdOrderByTradeDateDesc(stock.getStockId(), PageRequest.of(0, count)));
         Collections.reverse(rows);
@@ -117,7 +124,8 @@ public class CandleQueryService {
                         row.getHighPrice(),
                         row.getLowPrice(),
                         row.getClosePrice(),
-                        row.getVolume()))
+                        row.getVolume(),
+                        stock.getCurrency()))
                 .toList();
     }
 

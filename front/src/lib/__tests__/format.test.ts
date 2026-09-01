@@ -4,6 +4,7 @@ import {
   formatKoreanAmount,
   formatSigned,
   formatPercent,
+  formatAbsolute,
   formatUsd,
 } from '../format';
 import { D } from '../decimal';
@@ -119,6 +120,17 @@ describe('formatPercent', () => {
 
   it('정확히 1% (0.01) → "+1.00%"', () => {
     expect(formatPercent(0.01)).toBe('+1.00%');
+  });
+});
+
+describe('formatAbsolute', () => {
+  it('절댓값을 소수점 둘째 자리에서 HALF_UP으로 표시', () => {
+    expect(formatAbsolute('1.005')).toBe('1.01');
+    expect(formatAbsolute('-1.005')).toBe('1.01');
+  });
+
+  it('비정상 입력 시 fallback 반환', () => {
+    expect(formatAbsolute(null)).toBe('-');
   });
 });
 

@@ -34,7 +34,7 @@ class ExchangeRateControllerTest {
     @DisplayName("base/quote 생략 시 기본값(USD/KRW)으로 조회한다")
     void t1_기본값_조회() throws Exception {
         ExchangeRateLatestResponse response = new ExchangeRateLatestResponse(
-                "USD", "KRW", "1400.000000", "2.000000", "0.001431",
+                "USD", "KRW", "1400", "2", "0.001431",
                 OffsetDateTime.parse("2026-08-26T15:00:00+09:00"));
         when(exchangeRateService.getLatest("USD", "KRW")).thenReturn(response);
 
@@ -42,8 +42,8 @@ class ExchangeRateControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.baseCurrency").value("USD"))
                 .andExpect(jsonPath("$.quoteCurrency").value("KRW"))
-                .andExpect(jsonPath("$.rate").value("1400.000000"))
-                .andExpect(jsonPath("$.changeAmount").value("2.000000"))
+                .andExpect(jsonPath("$.rate").value("1400"))
+                .andExpect(jsonPath("$.changeAmount").value("2"))
                 .andExpect(jsonPath("$.changeRate").value("0.001431"));
     }
 
@@ -78,7 +78,7 @@ class ExchangeRateControllerTest {
         ExchangeRateHistoryResponse response = new ExchangeRateHistoryResponse(
                 List.of(new ExchangeRateHistoryResponse.Item(
                         OffsetDateTime.parse(
-                                "2026-08-26T06:00:00Z"), "1398.500000"
+                                "2026-08-26T06:00:00Z"), "1398.5"
                 )));
 
         when(exchangeRateService.getHistory("1d")).thenReturn(response);
@@ -87,7 +87,7 @@ class ExchangeRateControllerTest {
                         .param("period", "1d"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items").isArray())
-                .andExpect(jsonPath("$.items[0].rate").value("1398.500000"));
+                .andExpect(jsonPath("$.items[0].rate").value("1398.5"));
     }
 
     @Test

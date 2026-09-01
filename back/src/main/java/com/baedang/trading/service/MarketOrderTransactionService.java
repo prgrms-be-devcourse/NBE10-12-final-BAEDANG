@@ -36,9 +36,11 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
-import static com.baedang.trading.model.AmountFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 
 /** 시장가 주문의 DB 변경을 하나의 트랜잭션으로 즉시 확정합니다. */
 @Service
@@ -159,7 +161,10 @@ public class MarketOrderTransactionService {
                     .orElse(null)
                 : null;
         BigDecimal availableQuantity = holding == null ? BigDecimal.ZERO : holding.availableQuantity();
-        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
+        // PostgreSQL TIMESTAMPTZ는 마이크로초까지만 보존합니다. 최초 응답의 나노초와
+        // DB 재조회 기반 멱등 응답이 달라지지 않도록 저장 전에 같은 정밀도로 맞춥니다.
+        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(
+                now.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
 
         ErrorCode rejection = marketOrderPolicy.determineRejection(
                 account,
@@ -196,9 +201,11 @@ public class MarketOrderTransactionService {
             if (buyHolding == null) {
                 holdingRepository.save(Holding.firstBuy(
                         account.getAccountId(), stock.getStockId(), terms.quantity(),
-                        amount.executedPrice(), amount.exchangeRate(), orderedAt));
+                        amount.grossAmountUsd(), amount.unroundedGrossAmountKrw(), orderedAt));
             } else {
-                buyHolding.addBuy(terms.quantity(), amount.executedPrice(), amount.exchangeRate(), orderedAt);
+                buyHolding.addBuy(
+                        terms.quantity(), amount.grossAmountUsd(),
+                        amount.unroundedGrossAmountKrw(), orderedAt);
             }
         } else {
             holding.subtractSell(terms.quantity(), orderedAt);
@@ -265,7 +272,7 @@ public class MarketOrderTransactionService {
 
     private String createMemo(Stock stock, TradeOrder order) {
         String memo = stock.getName() + " " + plain(order.getQuantity()) + "주 @ "
-                + plain(order.getExecutedPrice()) + " (수수료·세금 포함)";
+                + currency(order.getExecutedPrice(), stock.getCurrency()) + " (수수료·세금 포함)";
         return memo.length() <= MAX_MEMO_LENGTH ? memo : memo.substring(0, MAX_MEMO_LENGTH);
     }
 }
