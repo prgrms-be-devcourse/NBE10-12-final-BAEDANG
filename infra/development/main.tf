@@ -135,9 +135,65 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+data "aws_caller_identity" "current" {}
+resource "aws_iam_role_policy" "ssm_parameter_read" {
+  name = "${var.prefix}-ec2-role-1-policy-ssm_parameter_read"
+  role = aws_iam_role.ec2_role_1.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}",
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}/*",
+        ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+        }
+      },
+    ]
+  })
+}
+
 resource "aws_iam_instance_profile" "instance_profile_1" {
   name = "${var.prefix}-instance-profile-1"
   role = aws_iam_role.ec2_role_1.name
+}
+
+resource "aws_ssm_parameter" "github_username" {
+  name  = "/${var.prefix}/github_username"
+  type  = "SecureString"
+  value = var.github_username
+
+  tags = {
+    Name = "${var.prefix}-params-github_username"
+    Team = "${var.team_tag}"
+  }
+}
+
+resource "aws_ssm_parameter" "github_access_token" {
+  name  = "/${var.prefix}/github_access_token"
+  type  = "SecureString"
+  value = var.github_access_token
+
+  tags = {
+    Name = "${var.prefix}-params-github_access_token"
+    Team = "${var.team_tag}"
+  }
 }
 
 data "aws_ssm_parameter" "ubuntu_ami" {
@@ -197,7 +253,18 @@ locals {
   aws --version
   echo "=================================================="
 
-  echo "${var.github_access_token}" | docker login ghcr.io -u ${var.github_username} --password-stdin
+  echo "=============== 3. Login to GHCR ================"
+  sudo apt-get install jq
+
+  set +x
+  PARAMS_JSON=$(aws ssm get-parameters-by-path \
+  --path "/${var.prefix}" --recursive --with-decryption \
+  --region "${var.region}" --output json)
+  GH_USERNAME=$(echo "$PARAMS_JSON" | jq -r '.Parameters[] | select(.Name | endswith("/github_username")) | .Value')
+  GH_TOKEN=$(echo "$PARAMS_JSON" | jq -r '.Parameters[] | select(.Name | endswith("/github_access_token")) | .Value')
+  echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_USERNAME" --password-stdin
+  set -x
+  echo "=================================================="
 
   echo "BOOTSTRAP DONE"
   EOF
@@ -216,9 +283,14 @@ resource "aws_instance" "ec2_1" {
     volume_size = 16
   }
   user_data = <<-EOF
-    ${local.ec2_bootstrap}
-    hostnamectl set-hostname ec2-1
+  ${local.ec2_bootstrap}
+  hostnamectl set-hostname ec2-1
   EOF
+  depends_on = [
+    aws_ssm_parameter.github_username,
+    aws_ssm_parameter.github_access_token,
+    aws_iam_role_policy.ssm_parameter_read,
+  ]
 
   tags = {
     Name = "${var.prefix}-ec2-1"
