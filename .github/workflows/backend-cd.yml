@@ -2,7 +2,7 @@ name: Backend CD
 
 on:
   push:
-    branches: [develop, feat/global_financial_decimal_formatter]
+    branches: [develop]
     paths:
       - ".github/workflows/backend-cd.yml"
       - "back/src/**"
