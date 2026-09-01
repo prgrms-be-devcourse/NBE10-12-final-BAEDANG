@@ -7,7 +7,7 @@ import java.time.OffsetDateTime;
 
 import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
-import static com.baedang.global.formatter.FinancialDecimalFormatter.preserveScale;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
 /**
  * 마이페이지 상단 계좌 요약. {@code GET /accounts/me} 의 응답입니다.
@@ -46,7 +46,7 @@ public record AccountSummaryResponse(
                 krw(totalAsset),
                 krw(unrealizedPnl),
                 plain(unrealizedPnlRate),
-                preserveScale(exchangeRate),
+                rate(exchangeRate),
                 asOf
         );
     }

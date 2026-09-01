@@ -77,6 +77,8 @@ Successful responses return the data directly; collections carry a cursor alongs
 
 **Never send amounts as numbers.** JavaScript's `number` is binary floating point, so large amounts or fractional orders drift. It's the same reason Toss returns prices as strings. On the frontend, use Decimal.js or display the string as-is.
 
+FX rates and ratios are not rounded; only insignificant trailing zeros are removed. A `1.000000` value loaded from a `NUMERIC(19,6)` column is therefore returned as `"1"`, keeping the first response and a later DB-backed idempotent response textually identical. `avgBuyPrice` is not rounded early to the currency display unit and is returned with up to the moving-average storage precision of four decimal places. The frontend applies whole-won `HALF_UP` rounding only at the final display boundary.
+
 ### Cursor Pagination
 
 ```
@@ -205,7 +207,7 @@ FX banner on the rankings page
 {
   "baseCurrency": "USD",
   "quoteCurrency": "KRW",
-  "rate": "1398.50",
+  "rate": "1398.5",
   "changeRate": "0.0016",
   "rateAt": "2026-08-11T15:00:00+09:00"
 }
@@ -615,7 +617,7 @@ Account summary
   "totalAsset": "50412300",
   "unrealizedPnl": "137300",
   "unrealizedPnlRate": "0.0675",
-  "exchangeRate": "1398.50",
+  "exchangeRate": "1398.5",
   "asOf": "2026-08-11T12:36:59+09:00"
 }
 ```

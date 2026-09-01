@@ -7,7 +7,7 @@ import java.time.OffsetDateTime;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
-import static com.baedang.global.formatter.FinancialDecimalFormatter.preserveScale;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
 public record OrderResponse(
         Long orderId,
@@ -36,7 +36,7 @@ public record OrderResponse(
                 receipt.side(),
                 plain(receipt.quantity()),
                 currency(receipt.executedPrice(), currencyOf(receipt.marketCountry())),
-                preserveScale(receipt.exchangeRate()),
+                rate(receipt.exchangeRate()),
                 krw(receipt.grossAmount()),
                 krw(receipt.fee()),
                 krw(receipt.tax()),

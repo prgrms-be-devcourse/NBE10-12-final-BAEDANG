@@ -77,6 +77,8 @@ Authorization: Bearer {accessToken}
 
 **금액을 숫자로 내리지 마세요.** JavaScript 의 `number` 는 배정밀도 부동소수라 큰 금액이나 소수점 주문에서 오차가 생깁니다. 토스 API 가 가격을 문자열로 주는 것과 같은 이유입니다. 프론트에서는 **Decimal.js 를 쓰거나 문자열 그대로 표시**하세요.
 
+환율·비율은 계산값을 반올림하지 않고 불필요한 후행 0만 제거합니다. 따라서 DB의 `NUMERIC(19,6)`에서 읽은 `1.000000`도 API에서는 `"1"`이며, 최초 처리와 DB 재조회 응답의 문자열이 같습니다. `avgBuyPrice`는 통화 표시 단위로 미리 반올림하지 않고 이동평균의 저장 정밀도인 소수점 4자리까지 반환합니다. 원화 화면 표시는 프론트에서 마지막에 원 단위 `HALF_UP`으로 반올림합니다.
+
 ### 커서 페이지네이션
 
 ```
@@ -206,7 +208,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 {
   "baseCurrency": "USD",
   "quoteCurrency": "KRW",
-  "rate": "1398.50",
+  "rate": "1398.5",
   "changeRate": "0.0016",
   "rateAt": "2026-08-11T15:00:00+09:00"
 }
@@ -616,7 +618,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
   "totalAsset": "50412300",
   "unrealizedPnl": "137300",
   "unrealizedPnlRate": "0.0675",
-  "exchangeRate": "1398.50",
+  "exchangeRate": "1398.5",
   "asOf": "2026-08-11T12:36:59+09:00"
 }
 ```

@@ -22,12 +22,23 @@ class FinancialDecimalFormatterTest {
     }
 
     @Test
-    void preserveScale은_환율의_원본_소수자릿수를_유지한다() {
-        assertThat(FinancialDecimalFormatter.preserveScale(new BigDecimal("1383.600000")))
-                .isEqualTo("1383.600000");
-        assertThat(FinancialDecimalFormatter.preserveScale(new BigDecimal("1E+3")))
+    void rate는_환율을_반올림하지_않고_후행0을_제거한다() {
+        assertThat(FinancialDecimalFormatter.rate(new BigDecimal("1383.600000")))
+                .isEqualTo("1383.6");
+        assertThat(FinancialDecimalFormatter.rate(new BigDecimal("1.000000")))
+                .isEqualTo("1");
+        assertThat(FinancialDecimalFormatter.rate(new BigDecimal("1E+3")))
                 .isEqualTo("1000");
-        assertThat(FinancialDecimalFormatter.preserveScale(null)).isNull();
+        assertThat(FinancialDecimalFormatter.rate(null)).isNull();
+    }
+
+    @Test
+    void averagePrice는_평단가의_소수점4자리_정밀도를_유지한다() {
+        assertThat(FinancialDecimalFormatter.averagePrice(new BigDecimal("71166.6667")))
+                .isEqualTo("71166.6667");
+        assertThat(FinancialDecimalFormatter.averagePrice(new BigDecimal("88.3400")))
+                .isEqualTo("88.34");
+        assertThat(FinancialDecimalFormatter.averagePrice(null)).isNull();
     }
 
     @Test

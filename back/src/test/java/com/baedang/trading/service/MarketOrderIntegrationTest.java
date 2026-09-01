@@ -188,7 +188,7 @@ class MarketOrderIntegrationTest {
 
         TradeOrder order = tradeOrderRepository.findById(response.orderId()).orElseThrow();
         assertThat(order.getStockId()).isEqualTo(usFixture.stockId());
-        assertThat(response.exchangeRate()).isEqualTo("1383.60");
+        assertThat(response.exchangeRate()).isEqualTo("1383.6");
     }
 
     @Test
@@ -290,7 +290,8 @@ class MarketOrderIntegrationTest {
         OrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         Account account = activeAccount(fixture.userId());
-        assertThat(retried.orderId()).isEqualTo(first.orderId());
+        assertThat(retried).isEqualTo(first);
+        assertThat(retried.exchangeRate()).isEqualTo("1");
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(account.getCashBalance()).isEqualByComparingTo("39999");
@@ -399,7 +400,7 @@ class MarketOrderIntegrationTest {
                 fixture.userId(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "1");
 
         assertThat(response.executable()).isTrue();
-        assertThat(response.exchangeRate()).isEqualTo("1383.60");
+        assertThat(response.exchangeRate()).isEqualTo("1383.6");
     }
 
     @Test

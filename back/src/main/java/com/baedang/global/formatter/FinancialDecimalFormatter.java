@@ -26,9 +26,14 @@ public final class FinancialDecimalFormatter {
         return value.stripTrailingZeros().toPlainString();
     }
 
-    /** 환율처럼 입력값의 소수 자릿수를 보존해야 하는 값을 지수 표기 없이 표현합니다. */
-    public static String preserveScale(BigDecimal value) {
-        return value == null ? null : value.toPlainString();
+    /** 환율을 반올림하지 않고, DB 저장 전후에도 같은 문자열이 되도록 후행 0을 제거해 표현합니다. */
+    public static String rate(BigDecimal value) {
+        return plain(value);
+    }
+
+    /** 이동평균으로 계산된 평단가를 반올림하지 않고 최대 저장 정밀도까지 표현합니다. */
+    public static String averagePrice(BigDecimal value) {
+        return plain(value);
     }
 
     /** USD 금액을 센트 단위로 반올림하고 소수점 두 자리로 표현합니다. */

@@ -11,7 +11,7 @@ import java.time.OffsetDateTime;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
-import static com.baedang.global.formatter.FinancialDecimalFormatter.preserveScale;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
 public record OrderQuoteResponse(
         String symbol,
@@ -46,7 +46,7 @@ public record OrderQuoteResponse(
                 side,
                 plain(quantity),
                 currency(amount.executedPrice(), currencyOf(marketCountry)),
-                preserveScale(amount.exchangeRate()),
+                rate(amount.exchangeRate()),
                 krw(amount.grossAmount()),
                 krw(amount.fee()),
                 krw(amount.tax()),
