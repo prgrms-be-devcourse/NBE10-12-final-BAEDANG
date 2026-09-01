@@ -44,6 +44,7 @@ class CandleQueryServiceTest {
     @Mock MinuteCandleRepository minuteCandleRepository;
     @Mock MarketDataPort marketDataPort;
     @Mock MinuteCandlePersistenceService persistenceService;
+    @Mock StockOnDemandQuoteService stockOnDemandQuoteService;
     @Mock Stock stock;
 
     private CandleQueryService service;
@@ -58,6 +59,7 @@ class CandleQueryServiceTest {
                 marketDataPort,
                 persistenceService,
                 new MinuteCandleFetchCache(),
+                stockOnDemandQuoteService,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
                 .thenReturn(Optional.of(stock));
@@ -91,6 +93,9 @@ class CandleQueryServiceTest {
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyInt());
+        // 랭킹 밖 종목의 일봉 백필(이슈 #75)은 이 훅을 거쳐 이뤄진다 — 실제 채우는 로직
+        // 자체는 StockOnDemandQuoteServiceTest에서 검증한다.
+        verify(stockOnDemandQuoteService).ensureDailyCandles(stock);
     }
 
     @Test
