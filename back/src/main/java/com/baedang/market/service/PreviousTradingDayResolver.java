@@ -2,7 +2,6 @@ package com.baedang.market.service;
 
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
-import com.baedang.standard.utils.Pacer;
 import com.baedang.stock.entity.MarketCountry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +19,6 @@ public class PreviousTradingDayResolver {
 
     private static final Logger log = LoggerFactory.getLogger(PreviousTradingDayResolver.class);
     private static final int MAX_LOOKBACK_DAYS = 14;
-    private static final int MARKET_INFO_TPS = 3;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final ZoneId NY = ZoneId.of("America/New_York");
 
@@ -36,15 +34,10 @@ public class PreviousTradingDayResolver {
         LocalDate today = clock.instant()
                 .atZone(marketCountry == MarketCountry.US ? NY : KST)
                 .toLocalDate();
-        Pacer pacer = Pacer.forTps(MARKET_INFO_TPS);
-        boolean requestedCalendar = false;
 
         for (int daysAgo = 1; daysAgo <= MAX_LOOKBACK_DAYS; daysAgo++) {
             LocalDate candidate = today.minusDays(daysAgo);
             if (isWeekend(candidate)) continue;
-
-            if (requestedCalendar) pacer.pace();
-            requestedCalendar = true;
 
             MarketCalendarDay calendarDay;
             try {

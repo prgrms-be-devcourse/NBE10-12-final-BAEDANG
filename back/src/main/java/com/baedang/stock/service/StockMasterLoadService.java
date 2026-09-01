@@ -5,7 +5,6 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.StockUniverseEntry;
 import com.baedang.stock.port.SymbolInfoPort;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.standard.utils.Pacer;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -28,10 +27,7 @@ public class StockMasterLoadService {
         this.stockRepository = stockRepository;
     }
 
-    private static final int TPS = 1;
-
     public void loadAll() {
-        Pacer pacer = Pacer.forTps(TPS);
 
         for (Map.Entry<String, MarketCountry> entry : MarketCountry.marketsNameMap().entrySet()) {
             String market = entry.getKey();
@@ -83,7 +79,6 @@ public class StockMasterLoadService {
 
             if (!newStocks.isEmpty()) stockRepository.saveAll(newStocks);
 
-            pacer.pace();
         }
     }
 
