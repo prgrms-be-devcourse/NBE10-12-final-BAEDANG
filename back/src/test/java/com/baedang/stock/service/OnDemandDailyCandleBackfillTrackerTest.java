@@ -6,24 +6,25 @@ import java.time.LocalDate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class DailyCandleBackfillTrackerTest {
+class OnDemandDailyCandleBackfillTrackerTest {
 
-    private final DailyCandleBackfillTracker tracker = new DailyCandleBackfillTracker();
+    private final OnDemandDailyCandleBackfillTracker tracker =
+            new OnDemandDailyCandleBackfillTracker();
 
     @Test
-    void 성공한_백필을_종목별로_완료_처리한다() {
-        assertThat(tracker.isCompleted(1L)).isFalse();
+    void 성공한_최초_백필을_종목별로_완료_처리한다() {
+        assertThat(tracker.isInitialBackfillCompleted(1L)).isFalse();
 
-        tracker.markCompleted(1L);
+        tracker.markInitialBackfillCompleted(1L);
 
-        assertThat(tracker.isCompleted(1L)).isTrue();
-        assertThat(tracker.isCompleted(2L)).isFalse();
+        assertThat(tracker.isInitialBackfillCompleted(1L)).isTrue();
+        assertThat(tracker.isInitialBackfillCompleted(2L)).isFalse();
     }
 
     @Test
     void 같은_종목을_여러번_완료_처리해도_기록은_하나만_유지한다() {
-        tracker.markCompleted(1L);
-        tracker.markCompleted(1L);
+        tracker.markInitialBackfillCompleted(1L);
+        tracker.markInitialBackfillCompleted(1L);
 
         assertThat(tracker.entryCount()).isOne();
     }

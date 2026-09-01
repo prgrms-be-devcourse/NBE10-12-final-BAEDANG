@@ -69,7 +69,7 @@ public class StockOnDemandQuoteService {
     private final QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     private final DailyCandleRepository dailyCandleRepository;
     private final DailyCandlePersistenceService dailyCandlePersistenceService;
-    private final DailyCandleBackfillTracker dailyCandleBackfillTracker;
+    private final OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker;
     private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     private final Clock clock;
     private final ReentrantLock[] refreshLocks = createRefreshLocks();
@@ -80,7 +80,7 @@ public class StockOnDemandQuoteService {
             QuoteSnapshotPersistenceService quoteSnapshotPersistenceService,
             DailyCandleRepository dailyCandleRepository,
             DailyCandlePersistenceService dailyCandlePersistenceService,
-            DailyCandleBackfillTracker dailyCandleBackfillTracker,
+            OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker,
             LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
             Clock clock
     ) {
@@ -89,7 +89,7 @@ public class StockOnDemandQuoteService {
         this.quoteSnapshotPersistenceService = quoteSnapshotPersistenceService;
         this.dailyCandleRepository = dailyCandleRepository;
         this.dailyCandlePersistenceService = dailyCandlePersistenceService;
-        this.dailyCandleBackfillTracker = dailyCandleBackfillTracker;
+        this.onDemandDailyCandleBackfillTracker = onDemandDailyCandleBackfillTracker;
         this.latestCompletedTradingDayResolver = latestCompletedTradingDayResolver;
         this.clock = clock;
     }
@@ -122,20 +122,23 @@ public class StockOnDemandQuoteService {
      * 실제 Toss 호출과 저장은 한 번만 일어나게 하기 위해서다.
      */
     public void ensureDailyCandles(Stock stock) {
-        boolean historyCompleted = isHistoryBackfillCompleted(stock.getStockId());
-        boolean tradingDayResolved = historyCompleted;
-        Optional<LocalDate> expectedTradeDate = historyCompleted
+        boolean initialDailyCandleBackfillSatisfied =
+                isInitialDailyCandleBackfillSatisfied(stock.getStockId());
+        boolean tradingDayResolved = initialDailyCandleBackfillSatisfied;
+        Optional<LocalDate> expectedTradeDate = initialDailyCandleBackfillSatisfied
                 ? latestCompletedTradingDayResolver.resolve(stock.getMarketCountry())
                 : Optional.empty();
-        if (historyCompleted && isLatestRefreshSatisfied(stock.getStockId(), expectedTradeDate)) {
+        if (initialDailyCandleBackfillSatisfied
+                && isLatestRefreshSatisfied(stock.getStockId(), expectedTradeDate)) {
             return;
         }
 
         ReentrantLock lock = lockFor(stock.getStockId());
         lock.lock();
         try {
-            historyCompleted = isHistoryBackfillCompleted(stock.getStockId());
-            if (historyCompleted) {
+            initialDailyCandleBackfillSatisfied =
+                    isInitialDailyCandleBackfillSatisfied(stock.getStockId());
+            if (initialDailyCandleBackfillSatisfied) {
                 if (!tradingDayResolved) {
                     expectedTradeDate = latestCompletedTradingDayResolver.resolve(stock.getMarketCountry());
                 }
@@ -145,9 +148,9 @@ public class StockOnDemandQuoteService {
             List<Candle> candles = marketDataPort.fetchCandles(
                     stock.getSymbol(), CandleInterval.ONE_DAY, DAILY_CANDLE_BACKFILL_COUNT);
             dailyCandlePersistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
-            dailyCandleBackfillTracker.markCompleted(stock.getStockId());
+            onDemandDailyCandleBackfillTracker.markInitialBackfillCompleted(stock.getStockId());
             if (expectedTradeDate.isPresent()) {
-                dailyCandleBackfillTracker.markRefreshedThrough(
+                onDemandDailyCandleBackfillTracker.markRefreshedThrough(
                         stock.getStockId(), expectedTradeDate.get());
             }
         } catch (RuntimeException exception) {
@@ -157,9 +160,12 @@ public class StockOnDemandQuoteService {
         }
     }
 
-    private boolean isHistoryBackfillCompleted(Long stockId) {
-        return dailyCandleBackfillTracker.isCompleted(stockId)
-                || dailyCandleRepository.countByStockId(stockId) >= DAILY_CANDLE_BACKFILL_COUNT;
+    private boolean isInitialDailyCandleBackfillSatisfied(Long stockId) {
+        return onDemandDailyCandleBackfillTracker.isInitialBackfillCompleted(stockId)
+                || dailyCandleRepository.hasAtLeastCandles(
+                        stockId,
+                        DAILY_CANDLE_BACKFILL_COUNT
+                );
     }
 
     private boolean isLatestRefreshSatisfied(
@@ -167,7 +173,10 @@ public class StockOnDemandQuoteService {
             Optional<LocalDate> expectedTradeDate
     ) {
         if (expectedTradeDate.isEmpty()) return true;
-        if (dailyCandleBackfillTracker.wasRefreshedThrough(stockId, expectedTradeDate.get())) {
+        if (onDemandDailyCandleBackfillTracker.wasRefreshedThrough(
+                stockId,
+                expectedTradeDate.get()
+        )) {
             return true;
         }
         return dailyCandleRepository.findTopByStockIdOrderByTradeDateDesc(stockId)

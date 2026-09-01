@@ -108,7 +108,8 @@ class CandleQueryIntegrationTest {
         assertThat(oneMonth.items()).hasSize(22);
         assertThat(sixMonths.items()).hasSize(130);
         assertThat(oneYear.items()).hasSize(200);
-        assertThat(dailyCandleRepository.countByStockId(stock.getStockId())).isEqualTo(200);
+        assertThat(dailyCandleRepository.hasAtLeastCandles(stock.getStockId(), 200)).isTrue();
+        assertThat(dailyCandleRepository.hasAtLeastCandles(stock.getStockId(), 201)).isFalse();
         verify(marketDataPort, times(1)).fetchCandles(
                 stock.getSymbol(), CandleInterval.ONE_DAY, 200);
     }

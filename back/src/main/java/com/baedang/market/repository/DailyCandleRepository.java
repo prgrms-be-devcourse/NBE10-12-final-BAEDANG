@@ -1,6 +1,7 @@
 package com.baedang.market.repository;
 
 import com.baedang.market.entity.DailyCandle;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -15,7 +16,14 @@ public interface DailyCandleRepository extends JpaRepository<DailyCandle, DailyC
 
     List<DailyCandle> findByStockIdOrderByTradeDateDesc(Long stockId, Pageable pageable);
 
-    long countByStockId(Long stockId);
+    /** 전체 개수를 세지 않고 필요한 마지막 위치의 행 하나만 조회해 최소 이력 충족 여부를 확인한다. */
+    default boolean hasAtLeastCandles(Long stockId, int requiredCount) {
+        if (requiredCount <= 0) return true;
+        return !findByStockIdOrderByTradeDateDesc(
+                stockId,
+                PageRequest.of(requiredCount - 1, 1)
+        ).isEmpty();
+    }
 
     Optional<DailyCandle> findTopByStockIdOrderByTradeDateDesc(Long stockId);
 
