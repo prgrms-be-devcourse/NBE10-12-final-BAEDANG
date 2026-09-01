@@ -9,10 +9,9 @@ import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useTheme } from "@/components/ThemeProvider";
-import { D } from "@/lib/decimal";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
-import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
+import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
 
 const PAGE_SIZE = 20;
 // 검색창을 열었을 때(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
@@ -49,7 +48,7 @@ export default function RankingsPage() {
   const sentinelRef = useRef<HTMLDivElement>(null);
   // 종목에 마우스를 올렸을 때 뜨는 간단 정보 + 일봉 미리보기 카드의 상태.
   // 좌표(x,y)는 커서를 따라다니게 하려고 mousemove마다 갱신한다.
-  const [hover, setHover] = useState<{ item: RankingItem; krwPrice: number; krwChange: number; x: number; y: number } | null>(null);
+  const [hover, setHover] = useState<{ item: RankingItem; krwPrice: number | null; krwChange: number | null; x: number; y: number } | null>(null);
 
   // 탭(시장)이 바뀌면 첫 페이지부터 다시 불러온다.
   useEffect(() => {
@@ -381,14 +380,19 @@ export default function RankingsPage() {
         )}
 
         {items.map((item) => {
-          const changeD = new D(item.changeAmount);
-          const isUp = changeD.greaterThanOrEqualTo(0);
           const isUsd = item.currency === "USD";
           // 정책상 원화만 거래에 쓰이므로, 미국 종목은 원화 환산액을 우선 표시하고
           // 원래 달러 값은 보조 텍스트로 같이 보여준다. 부동소수점 오차를 피하려고
           // decimal.js(D)로 계산한다 (다훈님 리뷰, PR #17).
-          const krwPrice = (isUsd ? new D(item.lastPrice).times(rate) : new D(item.lastPrice)).round().toNumber();
-          const krwChange = (isUsd ? changeD.times(rate) : changeD).round().toNumber();
+          //
+          // lastPrice/changeAmount는 시세가 아직 수집되지 않았으면(장 마감 중 등)
+          // 응답에서 통째로 빠질 수 있다 — toKrw/toDecimal이 null을 돌려주면 그대로
+          // "표시할 값 없음"으로 다룬다(마이페이지 보유 종목과 같은 패턴).
+          const krwPriceDecimal = toKrw(item.lastPrice, item.currency, rate);
+          const krwChangeDecimal = isUsd ? toDecimal(item.changeAmount)?.times(rate) ?? null : toDecimal(item.changeAmount);
+          const krwPrice = krwPriceDecimal ? krwPriceDecimal.round().toNumber() : null;
+          const krwChange = krwChangeDecimal ? krwChangeDecimal.round().toNumber() : null;
+          const isUp = krwChange === null || krwChange >= 0;
           const label = categoryLabel(item.category, item.isDividend);
           const badge = CATEGORY_BADGE_STYLE[label];
           const liked = wishlist[item.symbol];
@@ -439,12 +443,18 @@ export default function RankingsPage() {
                 {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(item.lastPrice)}</div>}
               </span>
               <span className="flex justify-end">
-                <span
-                  className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
-                  style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
-                >
-                  {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
-                </span>
+                {krwChange === null ? (
+                  <span className="text-[12.5px]" style={{ color: "var(--mut2)" }}>
+                    시세 정보 없음
+                  </span>
+                ) : (
+                  <span
+                    className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
+                    style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
+                  >
+                    {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
+                  </span>
+                )}
               </span>
               <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
                 {formatKoreanAmount(item.tradingAmount)}

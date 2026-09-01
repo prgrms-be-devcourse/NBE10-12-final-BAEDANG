@@ -29,8 +29,8 @@ export function StockHoverPreview({
 }: {
   item: RankingItem;
   marketCountry: MarketCountry;
-  krwPrice: number;
-  krwChange: number;
+  krwPrice: number | null;
+  krwChange: number | null;
   x: number;
   y: number;
 }) {
@@ -67,7 +67,7 @@ export function StockHoverPreview({
     };
   }, [item.symbol, marketCountry]);
 
-  const isUp = krwChange >= 0;
+  const isUp = krwChange === null || krwChange >= 0;
   const badge = CATEGORY_BADGE_STYLE[categoryLabel(item.category, item.isDividend)];
   const isUsd = item.currency === "USD";
   const chartH = 56;
@@ -113,8 +113,11 @@ export function StockHoverPreview({
         {formatNumber(krwPrice)}
         {isUsd && <span className="ml-1 text-[11px] font-normal" style={{ color: "var(--mut2)" }}>{formatUsd(item.lastPrice)}</span>}
       </div>
-      <div className="text-[12.5px] font-semibold tabular-nums" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
-        {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
+      <div
+        className="text-[12.5px] font-semibold tabular-nums"
+        style={{ color: krwChange === null ? "var(--mut2)" : isUp ? "var(--up)" : "var(--down)" }}
+      >
+        {krwChange === null ? "시세 정보 없음" : `${isUp ? "▲" : "▼"} ${formatSigned(krwChange)} (${formatPercent(item.changeRate)})`}
       </div>
 
       <svg width="100%" height={chartH} viewBox={`0 0 100 ${chartH}`} preserveAspectRatio="none" className="mt-2.5">

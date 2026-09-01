@@ -18,6 +18,16 @@ export function toDecimal(value: NumericValue): Decimal | null {
   }
 }
 
+/**
+ * 종목 통화 단가를 원화로 환산합니다. `nativeValue`가 비어 있으면(시세 미수집 등) null을
+ * 돌려주고, 호출부는 이를 "표시할 값이 아직 없음"으로 다뤄야 합니다.
+ */
+export function toKrw(nativeValue: NumericValue, currency: string, exchangeRate: NumericValue): Decimal | null {
+  const d = toDecimal(nativeValue);
+  if (!d) return null;
+  return currency === "USD" ? d.times(exchangeRate ?? 1) : d;
+}
+
 export function formatNumber(value: NumericValue, fallback = "-"): string {
   const d = toDecimal(value);
   if (!d) return fallback;

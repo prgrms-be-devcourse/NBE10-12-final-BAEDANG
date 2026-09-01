@@ -6,6 +6,7 @@ import {
   formatPercent,
   formatAbsolute,
   formatUsd,
+  toKrw,
 } from '../format';
 import { D } from '../decimal';
 
@@ -150,6 +151,26 @@ describe('formatUsd', () => {
 
   it('0 → "$0.00"', () => {
     expect(formatUsd(0)).toBe('$0.00');
+  });
+});
+
+describe('toKrw', () => {
+  it('KRW 종목은 환율과 무관하게 그대로 반환', () => {
+    expect(toKrw('1000', 'KRW', 1370)?.toString()).toBe('1000');
+  });
+
+  it('USD 종목은 환율을 곱해서 반환', () => {
+    expect(toKrw('10', 'USD', 1370)?.toNumber()).toBe(13700);
+  });
+
+  it('원가가 없으면(시세 미수집 등) null 반환 — 렌더 크래시 방지', () => {
+    expect(toKrw(null, 'KRW', 1370)).toBeNull();
+    expect(toKrw(undefined, 'USD', 1370)).toBeNull();
+    expect(toKrw('', 'KRW', 1370)).toBeNull();
+  });
+
+  it('USD인데 환율이 없으면 1로 대체(원 단위 그대로) — 호출부가 항상 환율을 들고 있진 않을 수 있음', () => {
+    expect(toKrw('10', 'USD', null)?.toNumber()).toBe(10);
   });
 });
 
