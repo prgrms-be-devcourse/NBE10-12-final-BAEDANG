@@ -247,14 +247,14 @@ locals {
   echo "=================================================="
 
   echo "=============== 2. Install AWS CLI ==============="
-  sudo apt-get install unzip
+  sudo apt-get install -y unzip
 
   curl -fsSL https://awscli.amazonaws.com/v2/install.sh | sudo bash -s -- --system
   aws --version
   echo "=================================================="
 
   echo "=============== 3. Login to GHCR ================"
-  sudo apt-get install jq
+  sudo apt-get install -y jq
 
   set +x
   PARAMS_JSON=$(aws ssm get-parameters-by-path \
