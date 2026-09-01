@@ -290,7 +290,8 @@ class MarketOrderIntegrationTest {
         OrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         Account account = activeAccount(fixture.userId());
-        assertThat(retried.orderId()).isEqualTo(first.orderId());
+        assertThat(retried).isEqualTo(first);
+        assertThat(retried.exchangeRate()).isEqualTo("1");
         assertThat(tradeOrderRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(account.getAccountId())).isEqualTo(1);
         assertThat(account.getCashBalance()).isEqualByComparingTo("39999");

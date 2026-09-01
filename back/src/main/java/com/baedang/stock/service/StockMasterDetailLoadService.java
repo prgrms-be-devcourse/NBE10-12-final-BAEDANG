@@ -25,6 +25,11 @@ import static org.springframework.transaction.annotation.Propagation.NEVER;
 
 @Service
 public class StockMasterDetailLoadService {
+
+    private static final Logger log = LoggerFactory.getLogger(StockMasterDetailLoadService.class);
+    private static final int TPS = 5;
+    private static final int CHUNK_SIZE = 200;
+
     private final SymbolInfoPort symbolInfoPort;
     private final StockRepository stockRepository;
 
@@ -35,11 +40,6 @@ public class StockMasterDetailLoadService {
         this.symbolInfoPort = symbolInfoPort;
         this.stockRepository = stockRepository;
     }
-
-    private static final int TPS = 5;
-    private static final int CHUNK_SIZE = 200;
-
-    private static final Logger logger = LoggerFactory.getLogger(StockMasterDetailLoadService.class);
 
     public void loadAll() {
         Pacer pacer = Pacer.forTps(TPS);
@@ -66,7 +66,7 @@ public class StockMasterDetailLoadService {
 
                 // 응답에 없는 심볼(상장예정 등)은 1단계가 넣은 상태 그대로 둔다
                 if (stockFromPort == null) {
-                    logger.info("상세 응답 누락, 1단계 값 유지: {}", stock.getSymbol());
+                    log.info("상세 응답 누락, 1단계 값 유지: {}", stock.getSymbol());
                     continue;
                 }
 

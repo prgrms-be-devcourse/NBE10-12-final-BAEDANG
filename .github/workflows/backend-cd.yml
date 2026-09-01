@@ -34,23 +34,81 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: 태그 생성 (ex. v1.2.3)
         id: create_tag
-        uses: mathieudutour/github-tag-action@v6.2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git fetch --tags --unshallow 2>/dev/null || git fetch --tags 2>/dev/null || true
+
+          # 1. 저장소 최신 Base SemVer 조회
+          LATEST_TAG=$(git tag -l --sort=-v:refname "v*.*.*" | head -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            BASE_VERSION="0.1.0"
+          else
+            BASE_VERSION=$(echo "$LATEST_TAG" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          fi
+
+          # 2. 브랜치명 슬러그화 (/ 및 _ 를 - 로 변환)
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          BRANCH_SLUG=$(echo "$BRANCH_NAME" | tr '/_' '--')
+
+          # 3. develop 브랜치인 경우 커밋 타입(feat 등)에 따라 SemVer 증가
+          if [ "$BRANCH_NAME" = "develop" ]; then
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+            LAST_MSG=$(git log -1 --pretty=%B)
+            if echo "$LAST_MSG" | grep -qiE "feat(\(.*\))?:|Merge pull request.*feat/"; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+            else
+              PATCH=$((PATCH + 1))
+            fi
+            BASE_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          # 4. 해당 브랜치의 최신 프리릴리즈 번호(.0, .1 ...) 계산
+          LATEST_BRANCH_TAG=$(git tag -l "v*-${BRANCH_SLUG}.*" --sort=-v:refname | head -n 1)
+          if [ -n "$LATEST_BRANCH_TAG" ]; then
+            CURR_SUFFIX=$(echo "$LATEST_BRANCH_TAG" | sed -E 's/.*\.([0-9]+)$/\1/')
+            NEXT_SUFFIX=$((CURR_SUFFIX + 1))
+          else
+            NEXT_SUFFIX=0
+          fi
+
+          if [ "$BRANCH_NAME" = "main" ]; then
+            NEW_TAG="v${BASE_VERSION}"
+          else
+            NEW_TAG="v${BASE_VERSION}-${BRANCH_SLUG}.${NEXT_SUFFIX}"
+          fi
+
+          # 5. Git 태그 생성 및 원격 푸시
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+
+          # 6. 직전 태그 이후 커밋 로그로 체인지로그 생성
+          if [ -n "$LATEST_TAG" ]; then
+            CHANGELOG=$(git log "${LATEST_TAG}..HEAD" --oneline --no-merges || git log -1 --oneline)
+          else
+            CHANGELOG=$(git log -1 --oneline)
+          fi
+
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: 릴리즈 생성
-        uses: actions/create-release@v1
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ steps.create_tag.outputs.new_tag }}
-          release_name: Release ${{ steps.create_tag.outputs.new_tag }}
-          body: ${{ steps.create_tag.outputs.changelog }}
-          draft: false
-          prerelease: false
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.create_tag.outputs.new_tag }}" \
+            --title "Release ${{ steps.create_tag.outputs.new_tag }}" \
+            --notes "${{ steps.create_tag.outputs.changelog }}"
 
   buildAndPushDockerImage:
     name: 2. 도커 이미지 빌드 및 푸시
@@ -80,7 +138,7 @@ jobs:
           echo "OWNER_LC=${OWNER,,}" >> "${GITHUB_ENV}"
 
       - name: "이미지 빌드 및 푸시"
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ env.DOCKERFILE_DIR }}
           platforms: linux/arm64
@@ -98,7 +156,7 @@ jobs:
 
     steps:
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

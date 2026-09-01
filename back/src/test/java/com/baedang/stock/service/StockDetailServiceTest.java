@@ -69,7 +69,7 @@ class StockDetailServiceTest {
 
         assertThat(result.price().lastPrice()).isEqualTo("120");
         assertThat(result.price().changeAmount()).isEqualTo("20");
-        assertThat(result.price().changeRate()).isEqualTo("0.200000");
+        assertThat(result.price().changeRate()).isEqualTo("0.2");
         assertThat(result.info().marketCap()).isEqualTo("120000");
         assertThat(result.tradable()).isTrue();
     }

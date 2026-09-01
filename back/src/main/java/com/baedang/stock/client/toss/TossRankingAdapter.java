@@ -20,18 +20,19 @@ import java.util.Map;
 
 @Component
 public class TossRankingAdapter implements RankingPort {
+
+    private static final Logger log = LoggerFactory.getLogger(TossRankingAdapter.class);
+
     private final TossSecuritiesClient tossSecuritiesClient;
 
     public TossRankingAdapter(TossSecuritiesClient tossSecuritiesClient) {
         this.tossSecuritiesClient = tossSecuritiesClient;
     }
 
-    private static final Logger logger = LoggerFactory.getLogger(TossRankingAdapter.class);
-
     @Override
     public RankingSnapshot fetchRanking(MarketCountry market) {
         if (market == null) {
-            logger.error("TossRankingAdapter: market is null.");
+            log.error("TossRankingAdapter: market is null.");
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
         String marketName = market.name();
@@ -65,7 +66,7 @@ public class TossRankingAdapter implements RankingPort {
                     rankedAt
             );
 
-        logger.error(
+        log.error(
                 "TossRankingAdapter: Unexpected response ({}{}, {}{})",
                 "rankings.size()=", rankings.size(),
                 "rankedAt=", rankedAt
@@ -114,7 +115,7 @@ public class TossRankingAdapter implements RankingPort {
 
     private <T> T requireNonNullOrThrow(T value, String valueName, String marketName, String symbol) {
         if (value == null) {
-            logger.error(
+            log.error(
                     "TossRankingAdapter(market={}{}): {} is null.",
                     marketName,
                     symbol.isBlank() ? "" : ", symbol=" + symbol,
@@ -129,7 +130,7 @@ public class TossRankingAdapter implements RankingPort {
         try {
             return new BigDecimal(string);
         } catch (NumberFormatException exception) {
-            logger.error(
+            log.error(
                     "TossRankingAdapter(market={}{}): {} is not a number format.",
                     marketName,
                     symbol.isBlank() ? "" : ", symbol=" + symbol,
@@ -141,7 +142,7 @@ public class TossRankingAdapter implements RankingPort {
 
     private int validateRankOrThrow(int rank, String rankName, String marketName, String symbol) {
         if (rank < 1) {
-            logger.error(
+            log.error(
                     "TossRankingAdapter(market={}, symbol={}): {} < 1.",
                     marketName,
                     symbol,

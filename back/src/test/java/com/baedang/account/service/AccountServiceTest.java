@@ -191,7 +191,7 @@ class AccountServiceTest {
         assertThat(us.symbol()).isEqualTo("AAPL");
         assertThat(us.currency()).isEqualTo("USD");
         assertThat(us.avgExchangeRate()).isEqualTo("1383.6");
-        assertThat(us.lastPrice()).isEqualTo("90");
+        assertThat(us.lastPrice()).isEqualTo("90.00");
         // eval = 10 x 90 x 1400 = 1,260,000 · cost = 10 x 88.34 x 1383.60 = 1,222,272
         assertThat(us.evaluationAmount()).isEqualTo("1260000");
         assertThat(us.unrealizedPnl()).isEqualTo("37728");
