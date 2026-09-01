@@ -42,8 +42,7 @@ public class HoldingValuator {
         boolean foreign = isForeign(holding, quote);
         String currency = quote != null ? quote.getCurrency() : (foreign ? "USD" : KRW);
 
-        BigDecimal costRate = foreign ? holding.getAvgExchangeRate() : BigDecimal.ONE;
-        BigDecimal costWon = toWon(holding.getQuantity(), holding.getAvgBuyPrice(), costRate, foreign);
+        BigDecimal costWon = holding.getKrwPurchaseAmount().setScale(0, RoundingMode.HALF_UP);
 
         BigDecimal lastPrice = quote != null ? quote.getLastPrice() : null;
         BigDecimal evalWon;
@@ -82,13 +81,12 @@ public class HoldingValuator {
     }
 
     /**
-     * 외화 종목 여부. 시세가 있으면 통화로, 없으면 매입 환율이 1 이 아닌지로 판정합니다.
-     * (원화 종목은 avg_exchange_rate 가 항상 1)
+     * 외화 종목 여부. 시세가 있으면 통화로, 없으면 USD 매수금액 존재 여부로 판정합니다.
      */
     private boolean isForeign(Holding holding, QuoteSnapshot quote) {
         if (quote != null) {
             return !KRW.equalsIgnoreCase(quote.getCurrency());
         }
-        return holding.getAvgExchangeRate().compareTo(BigDecimal.ONE) != 0;
+        return holding.getUsdPurchaseAmount().signum() > 0;
     }
 }

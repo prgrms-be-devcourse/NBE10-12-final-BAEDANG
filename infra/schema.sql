@@ -792,11 +792,30 @@ CREATE TABLE holding (
     locked_quantity   NUMERIC(19,6) NOT NULL DEFAULT 0,
     avg_buy_price     NUMERIC(19,4) NOT NULL,   -- 이동평균 매입단가 (종목 통화)
     avg_exchange_rate NUMERIC(19,6) NOT NULL DEFAULT 1,  -- 매수 시점 평균 환율
+    -- 현재 잔여 수량에 귀속되는 수수료 제외 매수금액이다.
+    -- 미국 종목은 USD·KRW를 함께 누적하고, 국내 종목은 USD를 0으로 유지한다.
+    -- 반올림된 평균값을 다음 매수 계산에 재사용하지 않고 이 합계에서 다시 계산한다.
+    usd_purchase_amount NUMERIC(29,10) NOT NULL DEFAULT 0,
+    krw_purchase_amount NUMERIC(38,16) NOT NULL DEFAULT 0, -- 원 단위 반올림 전 금액 (평단가·평균환율 계산용)
     updated_at        TIMESTAMPTZ   NOT NULL DEFAULT now(),
     CONSTRAINT uq_holding UNIQUE (account_id, stock_id),
-    CONSTRAINT ck_locked_qty CHECK (locked_quantity >= 0 AND locked_quantity <= quantity)
+    CONSTRAINT ck_locked_qty CHECK (locked_quantity >= 0 AND locked_quantity <= quantity),
+    CONSTRAINT ck_holding_purchase_amount_nonnegative
+        CHECK (usd_purchase_amount >= 0
+            AND krw_purchase_amount >= 0),
+    CONSTRAINT ck_holding_quantity_purchase_amount
+        CHECK ((quantity = 0
+                AND usd_purchase_amount = 0
+                AND krw_purchase_amount = 0)
+            OR (quantity > 0
+                AND krw_purchase_amount > 0))
 );
 CREATE INDEX ix_holding_account ON holding (account_id);
+
+COMMENT ON COLUMN holding.usd_purchase_amount IS
+    '현재 잔여 수량의 수수료 제외 USD 매수금액. 국내 종목은 0';
+COMMENT ON COLUMN holding.krw_purchase_amount IS
+    '현재 잔여 수량의 원 단위 반올림 전·수수료 제외 원화 매수금액. 평단가·평균환율 계산 및 보유원가 산출에 사용';
 
 
 -- ────────────────────────────────────────────────────────────────────────────
