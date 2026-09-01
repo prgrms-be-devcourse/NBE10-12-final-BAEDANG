@@ -622,7 +622,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
   "asOf": "2026-08-11T12:36:59+09:00"
 }
 ```
-**1주차는 평가손익만 제공합니다.** 실현손익은 체결 내역이 쌓인 뒤 2주차에 분리합니다. `stockValue` 는 `holding × quote_snapshot.last_price` 로 계산하며, 해외 종목은 `exchangeRate` 로 원화 환산합니다.
+**1주차는 평가손익만 제공합니다.** 실현손익은 체결 내역이 쌓인 뒤 2주차에 분리합니다. `stockValue` 는 `holding × quote_snapshot.last_price` 로 계산하며, 해외 종목은 `exchangeRate` 로 원화 환산합니다. 종목별 평가손익의 취득원가는 수수료를 제외한 `holding.krw_purchase_amount`를 사용하며, 거래 수수료는 예수금에서 차감되므로 계좌 전체 수익에는 이미 반영됩니다.
 
 ### `GET /accounts/me/holdings` 🔒
 보유 종목

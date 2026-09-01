@@ -35,6 +35,8 @@ class OrderAmountCalculatorTest {
         );
 
         assertThat(result.grossAmount()).isEqualByComparingTo("2415000");
+        assertThat(result.grossAmountUsd()).isEqualByComparingTo("0");
+        assertThat(result.unroundedGrossAmountKrw()).isEqualByComparingTo("2415000");
         assertThat(result.fee()).isEqualByComparingTo("242");
         assertThat(result.tax()).isEqualByComparingTo("0");
         assertThat(result.netAmount()).isEqualByComparingTo("2415242");
@@ -67,6 +69,8 @@ class OrderAmountCalculatorTest {
         );
 
         assertThat(result.executedPrice()).isEqualByComparingTo("88.34");
+        assertThat(result.grossAmountUsd()).isEqualByComparingTo("883.40");
+        assertThat(result.unroundedGrossAmountKrw()).isEqualByComparingTo("1222272.24");
         assertThat(result.grossAmount()).isEqualByComparingTo("1222272");
         assertThat(result.fee()).isEqualByComparingTo("122");
         assertThat(result.tax()).isEqualByComparingTo("0");

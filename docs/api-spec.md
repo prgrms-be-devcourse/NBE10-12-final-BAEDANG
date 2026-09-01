@@ -621,7 +621,7 @@ Account summary
   "asOf": "2026-08-11T12:36:59+09:00"
 }
 ```
-**Week 1 offers unrealized P&L only.** Realized P&L splits out in week 2 once fills accumulate. `stockValue` = holding × `quote_snapshot.last_price`, FX-converted to KRW for foreign stocks.
+**Week 1 offers unrealized P&L only.** Realized P&L splits out in week 2 once fills accumulate. `stockValue` = holding × `quote_snapshot.last_price`, FX-converted to KRW for foreign stocks. The holding-level cost used for unrealized P&L is the fee-exclusive `holding.krw_purchase_amount`; transaction fees remain reflected in cash and therefore in total-account return.
 
 ### `GET /accounts/me/holdings` 🔒
 Holdings

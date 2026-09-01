@@ -262,10 +262,12 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | `holding_id` | BIGINT PK | 대리키. `(account_id, stock_id)` 유니크. |
 | `account_id` | BIGINT FK | 회차 계좌. 초기화하면 새 계좌라 보유 종목 자동 비움. |
 | `stock_id` | BIGINT FK | 보유 종목. |
-| `quantity` | NUMERIC(19,6) | 보유 수량. 0 이 되면 **남기는 쪽 권장**(재매수 시 평균단가 이력이 이어짐). |
+| `quantity` | NUMERIC(19,6) | 보유 수량. 수량 0인 행은 유지하지만 두 매수금액은 0으로 초기화하므로, 재매수하면 과거 원가를 승계하지 않고 새 평균을 계산합니다. |
 | `locked_quantity` | NUMERIC(19,6) | **미체결 매도 주문에 묶인 수량.** 예수금 동결과 정확히 같은 원리 — 10주를 갖고 **5주 매도 주문을 세 번 걸면 15주를 팔게** 되니까요. **매도 가능 수량 = `quantity − locked_quantity`**. `CHECK (locked_quantity <= quantity)` 로 과다 동결 방지. |
-| `avg_buy_price` | NUMERIC(19,4) | **이동평균 매입단가**(종목 통화). 매수 시 `(기존수량×기존단가 + 신규수량×체결가) ÷ 총수량`. 매도 시 **바꾸지 않음** — 평가손익의 기준. |
-| `avg_exchange_rate` | NUMERIC(19,6) | **매수 시점 평균 환율.** 원화 종목은 1. 이 값이 있어야 **"수익 중 얼마가 주가 상승이고 얼마가 환율 상승인지"** 나중에 분리 가능. 지금 안 넣으면 복구 불가. |
+| `avg_buy_price` | NUMERIC(19,4) | **수수료 제외 이동평균 체결단가.** 국내는 `krw_purchase_amount ÷ quantity`, 미국은 `usd_purchase_amount ÷ quantity`로 계산합니다. 반올림된 평균값은 응답값일 뿐 다음 매수 계산의 입력으로 재사용하지 않습니다. 부분 매도 시 유지하고, 전량 매도 후 재매수하면 새 매수금액만으로 다시 계산합니다. |
+| `avg_exchange_rate` | NUMERIC(19,6) | **원본 USD/KRW 환율의 매수금액 가중평균.** 미국은 `krw_purchase_amount ÷ usd_purchase_amount`, 국내는 항상 1입니다. 원 단위 반올림 금액에서 환율을 역산하지 않으므로 단일 매수에서는 받은 환율이 그대로 보존됩니다. 매수 수수료는 제외합니다. |
+| `usd_purchase_amount` | NUMERIC(29,10) | 현재 잔여 수량에 귀속되는 **수수료 제외 USD 매수금액**. 국내 종목은 0입니다. 미국 매수마다 `체결단가 × 수량`을 더하고, 부분 매도 시 비례 차감하며, 전량 매도 시 0으로 초기화합니다. |
+| `krw_purchase_amount` | NUMERIC(38,16) | 현재 잔여 수량에 귀속되는 **원 단위 반올림 전·수수료 제외 원화 매수금액**. 국내 평단가, 미국 평균환율 계산 및 보유 원가 평가에 사용합니다. 부분 매도 시 비례 차감하며, 전량 매도 시 0으로 초기화합니다. |
 | `updated_at` | TIMESTAMPTZ | 마지막 변동 시각. |
 
 #### `daily_account_snapshot` — 일별 자산 스냅샷
