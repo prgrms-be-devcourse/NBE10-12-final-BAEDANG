@@ -24,15 +24,18 @@ public class StockDetailService {
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final QuoteRealtimePolicy quoteRealtimePolicy;
+    private final StockOnDemandQuoteService stockOnDemandQuoteService;
 
     public StockDetailService(
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
-            QuoteRealtimePolicy quoteRealtimePolicy
+            QuoteRealtimePolicy quoteRealtimePolicy,
+            StockOnDemandQuoteService stockOnDemandQuoteService
     ) {
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.quoteRealtimePolicy = quoteRealtimePolicy;
+        this.stockOnDemandQuoteService = stockOnDemandQuoteService;
     }
 
     public StockDetailResponse getDetail(String symbol, String marketCountryValue) {
@@ -42,6 +45,9 @@ public class StockDetailService {
                         ErrorCode.STOCK_NOT_FOUND,
                         "symbol=" + symbol + ", marketCountry=" + marketCountry));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
+        // 랭킹 상위 100 밖 종목은 이 호출 안에서 온디맨드로 시세·일봉을 채운다(이슈 #75).
+        // 상위 100 종목은 이미 배치가 채워두므로 이 호출은 그대로 통과한다.
+        quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
 
         boolean realtime = Boolean.TRUE.equals(stock.getIsRanked())
                 && quoteRealtimePolicy.isRealtime(marketCountry, quote);
