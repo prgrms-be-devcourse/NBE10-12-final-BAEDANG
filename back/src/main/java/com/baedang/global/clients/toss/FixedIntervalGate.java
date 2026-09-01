@@ -4,15 +4,14 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.LongSupplier;
 
 /**
- * 한 API 그룹의 요청을 고정 간격으로 배출한다.
+ * 한 API 그룹의 permit을 고정 간격으로 반환한다.
  *
- * <p>다음 허가 시각 하나를 원자적으로 예약한다 — 여러 스레드가 동시에 들어와도
- * CAS 에 성공한 순서대로 서로 다른 시각을 받으므로 요청 시작 간격이 보장된다.
- * burst 는 허용하지 않는다.
+ * <p>동일 그룹의 스레드는 공정한 lock 안에서 순서대로 대기한다.
+ * permit 반환 시각을 기준으로 burst를 허용하지 않는다.
  */
 class FixedIntervalGate {
 
@@ -24,48 +23,83 @@ class FixedIntervalGate {
     private final long intervalNanos;
     private final LongSupplier nanoTimeSource;
     private final NanoSleeper sleeper;
-    private final AtomicLong nextPermitNanos = new AtomicLong(0);
+    private final ReentrantLock lock = new ReentrantLock(true);
+
+    private long nextPermitNanos;
 
     FixedIntervalGate(int tps) {
         this(tps, System::nanoTime, TimeUnit.NANOSECONDS::sleep);
     }
 
-    /**
-     * 테스트용 — 시각과 대기를 주입해 실제 sleep 없이 동작을 검증한다.
-     */
-    FixedIntervalGate(int tps, LongSupplier nanoTimeSource, NanoSleeper sleeper) {
-        if (tps <= 0) throw new BusinessException(ErrorCode.INTERNAL_ERROR, "TPS는 1 이상이어야 함: " + tps);
-        this.intervalNanos = (TimeUnit.SECONDS.toNanos(1) + tps - 1) / tps;
+    FixedIntervalGate(
+            int tps,
+            LongSupplier nanoTimeSource,
+            NanoSleeper sleeper
+    ) {
+        if (tps <= 0) {
+            throw new BusinessException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "TPS는 1 이상이어야 함: " + tps
+            );
+        }
+
+        this.intervalNanos =
+                (TimeUnit.SECONDS.toNanos(1) + tps - 1) / tps;
         this.nanoTimeSource = nanoTimeSource;
         this.sleeper = sleeper;
+        this.nextPermitNanos = nanoTimeSource.getAsLong();
     }
 
     void acquire() {
-        long permitAt = reserve();
-        long delayNanos = Math.max(0, permitAt - nanoTimeSource.getAsLong());
         try {
-            sleeper.sleep(delayNanos); // 0이면 즉시 반환 - 호출 생략하지 않음(테스트에서 획득 횟수로 사용)
-        } catch (InterruptedException e) {
+            lock.lockInterruptibly();
+        } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "Rate Limit 대기 중 인터럽트");
+            throw new BusinessException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "Rate Limit lock 대기 중 인터럽트"
+            );
+        }
+
+        try {
+            long now = nanoTimeSource.getAsLong();
+            long delayNanos = Math.max(0, nextPermitNanos - now);
+
+            sleeper.sleep(delayNanos);
+
+            // 실제 대기가 예상보다 길어진 경우 해당 시각부터 다음 간격을 계산한다.
+            long grantedAt = Math.max(
+                    nextPermitNanos,
+                    nanoTimeSource.getAsLong()
+            );
+            nextPermitNanos = grantedAt + intervalNanos;
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(
+                    ErrorCode.INTERNAL_ERROR,
+                    "Rate Limit 대기 중 인터럽트"
+            );
+        } finally {
+            lock.unlock();
         }
     }
 
     boolean tryAcquire() {
-        while (true) {
-            long now = nanoTimeSource.getAsLong();
-            long next = nextPermitNanos.get();
-            if (next > now) return false;
-            if (nextPermitNanos.compareAndSet(next, now + intervalNanos)) return true;
+        if (!lock.tryLock()) {
+            return false;
         }
-    }
 
-    private long reserve() {
-        while (true) {
+        try {
             long now = nanoTimeSource.getAsLong();
-            long next = nextPermitNanos.get();
-            long permitAt = Math.max(now, next);
-            if (nextPermitNanos.compareAndSet(next, permitAt + intervalNanos)) return permitAt;
+
+            if (nextPermitNanos > now) {
+                return false;
+            }
+
+            nextPermitNanos = now + intervalNanos;
+            return true;
+        } finally {
+            lock.unlock();
         }
     }
 }

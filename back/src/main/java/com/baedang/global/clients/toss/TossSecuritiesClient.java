@@ -53,10 +53,12 @@ public class TossSecuritiesClient {
     public <T> T get(String path, MultiValueMap<String, String> queryParams, Class<T> responseType) {
         TossApiGroup group = resolveGroupOrThrow(path);
 
+        String requestToken = token;
+
         try {
-            return request(path, queryParams, token, responseType, group);
+            return request(path, queryParams, requestToken, responseType, group);
         } catch (HttpClientErrorException.Unauthorized exception) {
-            return retryWithFreshToken(path, queryParams, responseType, group, token);
+            return retryWithFreshToken(path, queryParams, responseType, group, requestToken);
         } catch (HttpClientErrorException.TooManyRequests e) {
             logger.warn("Toss rate limited: group={} path={}", group, path);
             throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
@@ -98,8 +100,9 @@ public class TossSecuritiesClient {
             String failedToken
     ) {
         refreshTokenIfNeeded(failedToken);
+        String retryToken = token;
         try {
-            return request(path, queryParams, token, responseType, group);
+            return request(path, queryParams, retryToken, responseType, group);
         } catch (HttpClientErrorException.TooManyRequests e) {
             logger.warn("Toss rate limited: group={} path={}", group, path);
             throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
@@ -117,15 +120,6 @@ public class TossSecuritiesClient {
         }
     }
 
-    private BusinessException convertException(String path, TossApiGroup group, RestClientException e) {
-        if(e instanceof HttpClientErrorException.TooManyRequests) {
-            logger.warn("Toss rate limited: group={} path={}", group, path);
-            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
-        }
-        logger.error("Toss request failed: group={} path={}", group, path, e);
-        throw new BusinessException(ErrorCode.INTERNAL_ERROR);
-    }
-
     private record TokenResponse(
             @JsonProperty("access_token") String accessToken,
             @JsonProperty("token_type") String tokenType,
@@ -135,6 +129,7 @@ public class TossSecuritiesClient {
 
     private String issueToken() {
         rateLimiterRegistry.acquire(TossApiGroup.AUTH);
+
         try {
             MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
             form.add("grant_type", "client_credentials");
@@ -148,11 +143,14 @@ public class TossSecuritiesClient {
                     .retrieve()
                     .body(TokenResponse.class);
 
-            if (response == null || response.accessToken == null) {
+            if (response == null || response.accessToken() == null) {
                 logger.error("`response` or `response.accessToken` is null.");
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR);
             }
-            return response.accessToken;
+            return response.accessToken();
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            logger.warn("Toss rate limited: group={} path={}",TossApiGroup.AUTH, "/oauth2/token");
+            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
             logger.error("`issueToken()` error:", e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
