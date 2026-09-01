@@ -11,13 +11,14 @@ import org.springframework.stereotype.Component;
 @Component
 @ConditionalOnProperty(prefix = "toss", name = "enabled", havingValue = "true")
 public class StockRankingCollectionScheduler {
+
+    private static final Logger log = LoggerFactory.getLogger(StockRankingCollectionScheduler.class);
+
     private final StockRankingLoadService stockRankingLoadService;
 
     public StockRankingCollectionScheduler(StockRankingLoadService stockRankingLoadService) {
         this.stockRankingLoadService = stockRankingLoadService;
     }
-
-    private static final Logger log = LoggerFactory.getLogger(StockRankingCollectionScheduler.class);
 
     /** 국내 정규장 개장(09:00 KST) 1시간 전에 이번 주 유니버스를 갱신한다. */
     @Scheduled(cron = "0 0 8 * * MON", zone = "Asia/Seoul")

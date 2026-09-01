@@ -93,8 +93,8 @@ class ExchangeRateServiceTest {
         assertThat(response.baseCurrency()).isEqualTo("USD");
         assertThat(response.quoteCurrency()).isEqualTo("KRW");
         // rate는 화면 표시용 midRate여야 한다 — 체결용 rate(1401.5)가 아니라 1400이 나와야 정상.
-        assertThat(new BigDecimal(response.rate())).isEqualByComparingTo("1400.000000");
-        assertThat(new BigDecimal(response.changeAmount())).isEqualByComparingTo(expectedChangeAmount);
+        assertThat(response.rate()).isEqualTo("1400");
+        assertThat(response.changeAmount()).isEqualTo("2");
         assertThat(new BigDecimal(response.changeRate())).isEqualByComparingTo(expectedChangeRate);
     }
 
@@ -122,9 +122,9 @@ class ExchangeRateServiceTest {
 
         ExchangeRateLatestResponse response = service.getLatest("USD", "KRW");
 
-        assertThat(new BigDecimal(response.rate())).isEqualByComparingTo("1400.000000");
-        assertThat(new BigDecimal(response.changeAmount())).isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(new BigDecimal(response.changeRate())).isEqualByComparingTo(BigDecimal.ZERO);
+        assertThat(response.rate()).isEqualTo("1400");
+        assertThat(response.changeAmount()).isEqualTo("0");
+        assertThat(response.changeRate()).isEqualTo("0");
     }
 
     @Test
@@ -145,7 +145,7 @@ class ExchangeRateServiceTest {
         ExchangeRateLatestResponse response = service.getLatest("USD", "KRW");
 
         // NPE 없이, mid_rate 대신 rate(1401.5)로 대체돼야 한다.
-        assertThat(new BigDecimal(response.rate())).isEqualByComparingTo("1401.500000");
+        assertThat(response.rate()).isEqualTo("1401.5");
     }
 
     @Test
@@ -196,8 +196,8 @@ class ExchangeRateServiceTest {
         ExchangeRateHistoryResponse response = service.getHistory("1d");
 
         assertThat(response.items()).hasSize(2);
-        assertThat(response.items().get(0).rate()).isEqualTo("1398.000000");
-        assertThat(response.items().get(1).rate()).isEqualTo("1400.000000");
+        assertThat(response.items().get(0).rate()).isEqualTo("1398");
+        assertThat(response.items().get(1).rate()).isEqualTo("1400");
     }
 
     @Test
@@ -226,7 +226,7 @@ class ExchangeRateServiceTest {
 
         ExchangeRateHistoryResponse response = service.getHistory("1d");
 
-        assertThat(response.items().get(0).rate()).isEqualTo("1401.500000");
+        assertThat(response.items().get(0).rate()).isEqualTo("1401.5");
     }
 
     @ParameterizedTest

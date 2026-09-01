@@ -11,7 +11,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
-import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
+import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd } from "@/lib/format";
 
 const PAGE_SIZE = 20;
 // 검색창을 열었을 때(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
@@ -188,7 +188,7 @@ export default function RankingsPage() {
         </span>
         {!rateLoading && (
           <span className="font-semibold tabular-nums" style={{ color: "var(--up)" }}>
-            {changeAmount >= 0 ? "▲" : "▼"} {Math.abs(changeAmount).toFixed(2)} ({formatPercent(changeRate)})
+            {changeAmount >= 0 ? "▲" : "▼"} {formatAbsolute(changeAmount)} ({formatPercent(changeRate)})
           </span>
         )}
         <span style={{ color: "var(--mut2)" }}>
