@@ -757,20 +757,20 @@ Closing the old account, opening the new account, and inserting its initial-depo
 
 The frontend polls **our** API; our server calls Toss on the cadence below. **The two are fully decoupled — even 100 users leave Toss call volume unchanged.**
 
-| Time (KST) | Cadence | Task |
-|---|---|---|
-| Mon 07:00 | weekly | full stock-master refresh — `/stocks/all` + `/stocks` batches |
-| Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call |
-| Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open |
-| 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together |
-| 09:00 ~ 15:30 | 5s | KR top-100 current price — `/prices` 1 batch call (1.3% of limit) |
-| 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
-| 15:40 ~ 17:10 | 30m | KR daily-candle retries — after calendar close + 10m, excluding stocks already stored for the date |
+| Time (KST) | Cadence | Task                                                                                                        |
+|---|---|-------------------------------------------------------------------------------------------------------------|
+| Mon 07:00 | weekly | full stock-master refresh — `/stocks/all` + `/stocks` batches                                               |
+| Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call                                   |
+| Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open                                                  |
+| 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together                                                |
+| 09:00 ~ 15:30 | 5s | KR top-100 current price — `/prices` 1 batch call (1.3% of limit)                                           |
+| 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group     |
+| 15:40 ~ 17:10 | 30m | KR daily-candle retries — after calendar close + 10m, excluding stocks already stored for the date          |
 | 09:00 ET * | daily | US `prev_close` refresh — 30 min before regular open (22:00 KST during DST, 23:00 KST during standard time) |
-| 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter |
-| 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
-| US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks |
-| every hour on the hour | hourly | FX storage — 24 calls/day |
+| 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter                                            |
+| 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group      |
+| US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks       |
+| every hour on the hour | hourly | FX storage — 24 calls/day                                                                                   |
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
 \* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.
