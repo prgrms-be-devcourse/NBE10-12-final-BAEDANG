@@ -36,6 +36,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
 import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
@@ -160,7 +161,10 @@ public class MarketOrderTransactionService {
                     .orElse(null)
                 : null;
         BigDecimal availableQuantity = holding == null ? BigDecimal.ZERO : holding.availableQuantity();
-        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
+        // PostgreSQL TIMESTAMPTZ는 마이크로초까지만 보존합니다. 최초 응답의 나노초와
+        // DB 재조회 기반 멱등 응답이 달라지지 않도록 저장 전에 같은 정밀도로 맞춥니다.
+        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(
+                now.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
 
         ErrorCode rejection = marketOrderPolicy.determineRejection(
                 account,
