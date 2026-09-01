@@ -22,7 +22,6 @@ import java.util.stream.Collectors;
 public class StockRankingLoadService {
 
     private static final Logger log = LoggerFactory.getLogger(StockRankingLoadService.class);
-    private static final int TPS = 5;
 
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
@@ -38,11 +37,6 @@ public class StockRankingLoadService {
         this.self = self;
     }
 
-<<<<<<< HEAD
-    private static final Logger logger = LoggerFactory.getLogger(StockRankingLoadService.class);
-
-=======
->>>>>>> origin/develop
     // 두 시장의 랭킹 적재 스케줄 시간이 다르므로 이 메서드는 테스트 용도로 사용한다.
     public void loadAll() {
         for (MarketCountry marketCountry : MarketCountry.values()) {

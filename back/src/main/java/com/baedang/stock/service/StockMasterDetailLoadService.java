@@ -22,7 +22,6 @@ import static com.baedang.stock.entity.ListingStatus.DELISTED;
 public class StockMasterDetailLoadService {
 
     private static final Logger log = LoggerFactory.getLogger(StockMasterDetailLoadService.class);
-    private static final int TPS = 5;
     private static final int CHUNK_SIZE = 200;
 
     private final SymbolInfoPort symbolInfoPort;
@@ -36,13 +35,6 @@ public class StockMasterDetailLoadService {
         this.stockRepository = stockRepository;
     }
 
-<<<<<<< HEAD
-    private static final int CHUNK_SIZE = 200;
-
-    private static final Logger logger = LoggerFactory.getLogger(StockMasterDetailLoadService.class);
-
-=======
->>>>>>> origin/develop
     public void loadAll() {
         int pageNumber = 0;
         while (true) {

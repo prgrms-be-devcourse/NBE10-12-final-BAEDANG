@@ -28,15 +28,11 @@ public class TossSecuritiesClient {
     private final TossRateLimiterRegistry rateLimiterRegistry;
     private final String clientId;
     private final String clientSecret;
-<<<<<<< HEAD
-    private final Object tokenLock = new Object();
-=======
 
     // 여러 스케줄러(QuoteSnapshotScheduler, MinuteCandleCollectionScheduler 등)가
     // 이 클라이언트를 싱글톤으로 공유하며 서로 다른 스레드에서 동시에 get()을 부른다.
     // volatile이 없으면 한 스레드가 갱신한 토큰이 다른 스레드에 안 보일 수 있다(JMM
     // 가시성 문제) — 최악의 경우 만료된 토큰으로 계속 401을 받는다.
->>>>>>> origin/develop
     private volatile String token;
 
     public TossSecuritiesClient(
@@ -63,38 +59,23 @@ public class TossSecuritiesClient {
 
         String requestToken = token;
 
-        String currentToken = token;
         try {
-<<<<<<< HEAD
             return request(path, queryParams, requestToken, responseType, group);
         } catch (HttpClientErrorException.Unauthorized exception) {
-            return retryWithFreshToken(path, queryParams, responseType, group, requestToken);
+            return retryWithFreshToken(path, queryParams, requestToken, responseType, group);
         } catch (HttpClientErrorException.TooManyRequests e) {
-            logger.warn("Toss rate limited: group={} path={}", group, path);
+            log.warn("Toss rate limited: group={} path={}", group, path);
             throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
-            logger.warn("Toss request failed: group={} path={}", group, path, e);
-=======
-            return _get(path, queryParams, currentToken, responseType);
-        } catch (HttpClientErrorException.Unauthorized exception) {
-            return retryWithFreshToken(path, queryParams, currentToken, responseType);
-        } catch (RestClientException e) {
             log.error("`get({}, ...)` error:", path, e);
->>>>>>> origin/develop
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
     }
 
-<<<<<<< HEAD
     private TossApiGroup resolveGroupOrThrow(String path) {
         Whitelist endPoint = Whitelist.resolve(path);
         if (endPoint == null) {
-            logger.error("`{}` does not match white list.", path);
-=======
-    private void validatePathOrThrow(String path) {
-        if (!Whitelist.match(path)) {
             log.error("`{}` does not match white list.", path);
->>>>>>> origin/develop
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
         return endPoint.group();
@@ -116,40 +97,21 @@ public class TossSecuritiesClient {
     }
 
     private <T> T retryWithFreshToken(
-<<<<<<< HEAD
             String path,
             MultiValueMap<String, String> queryParams,
+            String staleToken,
             Class<T> responseType,
-            TossApiGroup group,
-            String failedToken
-    ) {
-        refreshTokenIfNeeded(failedToken);
-        String retryToken = token;
-        try {
-            return request(path, queryParams, retryToken, responseType, group);
-        } catch (HttpClientErrorException.TooManyRequests e) {
-            logger.warn("Toss rate limited: group={} path={}", group, path);
-            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
-        } catch (RestClientException e) {
-            logger.error("Toss retry failed: group={} path={}", group, path, e);
-=======
-            String path, MultiValueMap<String, String> queryParams, String staleToken, Class<T> responseType
+            TossApiGroup group
     ) {
         String freshToken = refreshTokenIfStillStale(staleToken);
         try {
-            return _get(path, queryParams, freshToken, responseType);
+            return request(path, queryParams, freshToken, responseType, group);
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            log.warn("Toss rate limited: group={} path={}", group, path);
+            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
             log.error("`retryWithFreshToken({}, ...)` error:", path, e);
->>>>>>> origin/develop
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
-        }
-    }
-    /** 동시에 여러 요청이 401 을 받아도 토큰 발급은 한 번만 수행한다. */
-    private void refreshTokenIfNeeded(String failedToken) {
-        if(!Objects.equals(token, failedToken)) return;
-        synchronized (tokenLock) {
-            if(!Objects.equals(token, failedToken)) return;
-            token = issueToken();
         }
     }
 
@@ -194,18 +156,13 @@ public class TossSecuritiesClient {
                     .retrieve()
                     .body(TokenResponse.class);
 
-<<<<<<< HEAD
-            if (response == null || response.accessToken() == null) {
-                logger.error("`response` or `response.accessToken` is null.");
-=======
             if (response == null || response.accessToken == null) {
                 log.error("`response` or `response.accessToken` is null.");
->>>>>>> origin/develop
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR);
             }
             return response.accessToken();
         } catch (HttpClientErrorException.TooManyRequests e) {
-            logger.warn("Toss rate limited: group={} path={}",TossApiGroup.AUTH, "/oauth2/token");
+            log.warn("Toss rate limited: group={} path={}",TossApiGroup.AUTH, "/oauth2/token");
             throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
             log.error("`issueToken()` error:", e);
