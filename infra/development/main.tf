@@ -166,6 +166,7 @@ locals {
   echo "BOOTSTRAP_ENV_APPLICATION_DOMAIN=${var.application_domain}" >> /etc/environment
   source /etc/environment
 
+  echo "================ 1. Set up Docker ================"
   sudo apt-get update
   sudo apt-get install -y ca-certificates curl
   sudo install -m 0755 -d /etc/apt/keyrings
@@ -187,6 +188,14 @@ locals {
 
   sudo systemctl enable docker
   sudo systemctl start docker
+  echo "=================================================="
+
+  echo "=============== 2. Install AWS CLI ==============="
+  sudo apt-get install unzip
+
+  curl -fsSL https://awscli.amazonaws.com/v2/install.sh | sudo bash -s -- --system
+  aws --version
+  echo "=================================================="
 
   echo "${var.github_access_token}" | docker login ghcr.io -u ${var.github_username} --password-stdin
 
