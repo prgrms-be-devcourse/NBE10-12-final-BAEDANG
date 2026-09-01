@@ -415,3 +415,25 @@ export function getExchangeRateLatest(base = "USD", quote = "KRW"): Promise<Exch
     { method: "GET" }
   );
 }
+
+export type ExchangeRatePeriod = "1d" | "1w" | "1m" | "3m" | "1y";
+
+export type ExchangeRateHistoryItem = {
+  rateAt: string;
+  rate: string;
+};
+
+export type ExchangeRateHistory = {
+  items: ExchangeRateHistoryItem[];
+};
+
+/**
+ * `GET /api/exchange-rates/history` — 환율 추이 그래프. USD/KRW 고정(백엔드가 MVP는
+ * 이 통화쌍만 다룬다 — `ExchangeRateService` 참고), `period`는 필수 파라미터다.
+ */
+export function getExchangeRateHistory(period: ExchangeRatePeriod): Promise<ExchangeRateHistory> {
+  return request<ExchangeRateHistory>(
+    `/api/exchange-rates/history?period=${encodeURIComponent(period)}`,
+    { method: "GET" }
+  );
+}

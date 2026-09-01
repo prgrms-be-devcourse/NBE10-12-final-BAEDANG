@@ -6,6 +6,7 @@ import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
+import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { D } from "@/lib/decimal";
@@ -43,6 +44,7 @@ export default function RankingsPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchMounted, setSearchMounted] = useState(false);
   const [wishlist, setWishlist] = useState<Record<string, boolean>>({});
+  const [rateChartOpen, setRateChartOpen] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   // 종목에 마우스를 올렸을 때 뜨는 간단 정보 + 일봉 미리보기 카드의 상태.
@@ -194,13 +196,14 @@ export default function RankingsPage() {
         <span style={{ color: "var(--mut2)" }}>
           {updatedAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 기준 · 1시간마다 갱신
         </span>
-        <span
-          className="ml-auto cursor-default font-semibold"
+        <button
+          type="button"
+          onClick={() => setRateChartOpen(true)}
+          className="ml-auto cursor-pointer font-semibold"
           style={{ color: "var(--accent)" }}
-          title="환율 추이 그래프는 2주차 MVP 예정입니다"
         >
           환율 추이 그래프 →
-        </span>
+        </button>
       </Reveal>
 
       {/* 검색 */}
@@ -474,6 +477,7 @@ export default function RankingsPage() {
       {hover && (
         <StockHoverPreview item={hover.item} marketCountry={market} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
       )}
+      {rateChartOpen && <ExchangeRateTrendModal onClose={() => setRateChartOpen(false)} />}
     </div>
   );
 }
