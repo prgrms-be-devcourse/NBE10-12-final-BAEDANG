@@ -48,11 +48,12 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
 
+  // 로딩/에러 상태 초기화는 기간을 바꾸는 시점(PillTabs onChange)에서 하고, 이 effect는
+  // 요청 자체만 담당한다 — effect 본문에서 곧장 setState를 부르면
+  // react-hooks/set-state-in-effect 린트가 걸려서 우회 주석이 필요했는데, 상태 초기화를
+  // 이벤트 핸들러로 옮기면 그 주석 없이도 깔끔하게 처리된다(제미나이 코드 리뷰 반영).
   useEffect(() => {
     let cancelled = false;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    setLoadError(false);
     getExchangeRateHistory(period)
       .then((res) => {
         if (!cancelled) setItems(res.items);
@@ -166,7 +167,11 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
           <PillTabs
             options={PERIOD_OPTIONS}
             value={period}
-            onChange={(v) => setPeriod(v as ExchangeRatePeriod)}
+            onChange={(v) => {
+              setLoading(true);
+              setLoadError(false);
+              setPeriod(v as ExchangeRatePeriod);
+            }}
             trackClassName="w-fit gap-0.5 rounded-full p-[3px]"
             trackStyle={{
               background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
