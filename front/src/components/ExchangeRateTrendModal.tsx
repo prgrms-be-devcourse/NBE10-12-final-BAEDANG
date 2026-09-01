@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createChart, LineSeries, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
+import { createChart, LineSeries, type IChartApi, type ISeriesApi } from "lightweight-charts";
 import { PillTabs } from "./PillTabs";
 import { useTheme } from "./ThemeProvider";
 import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRatePeriod } from "@/lib/api";
 import { resolveCssColor } from "@/lib/chart-colors";
+import { isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
 import { formatNumber } from "@/lib/format";
 
 const PERIOD_OPTIONS: { value: ExchangeRatePeriod; label: string }[] = [
@@ -15,20 +16,6 @@ const PERIOD_OPTIONS: { value: ExchangeRatePeriod; label: string }[] = [
   { value: "3m", label: "3개월" },
   { value: "1y", label: "1년" },
 ];
-
-/** `{rateAt, rate}[]` → lightweight-charts LineSeries가 요구하는 숫자 포맷. */
-function toLinePoints(items: ExchangeRateHistoryItem[]): { time: UTCTimestamp; value: number }[] {
-  const byTime = new Map<UTCTimestamp, number>();
-  for (const item of items) {
-    const time = Math.floor(new Date(item.rateAt).getTime() / 1000) as UTCTimestamp;
-    const value = Number(item.rate);
-    if (!Number.isFinite(time) || !Number.isFinite(value)) continue;
-    if (!byTime.has(time)) byTime.set(time, value);
-  }
-  return [...byTime.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([time, value]) => ({ time, value }));
-}
 
 /**
  * "환율 추이 그래프" 모달 (이슈 랭킹 화면 요청사항). `GET /api/exchange-rates/history`를
@@ -82,7 +69,7 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
       layout: { background: { color: "transparent" }, textColor: resolveCssColor("--ink", "#071829") },
       grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
       rightPriceScale: { borderColor: line2 },
-      timeScale: { borderColor: line2, timeVisible: true, secondsVisible: false },
+      timeScale: { borderColor: line2, timeVisible: false, secondsVisible: false },
     });
     const series = chart.addSeries(LineSeries, {
       color: resolveCssColor("--accent", "#0f3868"),
@@ -106,12 +93,15 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // 기간이 바뀌어 새 데이터가 오면 기존 인스턴스에 반영한다.
+  // 기간이 바뀌어 새 데이터가 오면 기존 인스턴스에 반영한다. 기간에 맞는 버킷 단위로
+  // 다운샘플링하고(`toLinePoints`), 축의 시:분 표시 여부도 기간에 맞춰 같이 조정한다 —
+  // 그렇지 않으면 "1개월"처럼 넓은 기간에서도 "08:59"류의 시각 단위 눈금이 찍힌다.
   useEffect(() => {
-    if (!seriesRef.current) return;
-    seriesRef.current.setData(toLinePoints(items));
-    chartRef.current?.timeScale().fitContent();
-  }, [items]);
+    if (!chartRef.current || !seriesRef.current) return;
+    chartRef.current.applyOptions({ timeScale: { timeVisible: isTimeVisible(period) } });
+    seriesRef.current.setData(toLinePoints(items, period));
+    chartRef.current.timeScale().fitContent();
+  }, [items, period]);
 
   // 라이트/다크 전환 시 색만 다시 입힌다.
   useEffect(() => {
