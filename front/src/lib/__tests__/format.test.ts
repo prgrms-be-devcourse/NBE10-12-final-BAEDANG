@@ -169,8 +169,11 @@ describe('toKrw', () => {
     expect(toKrw('', 'KRW', 1370)).toBeNull();
   });
 
-  it('USD인데 환율이 없으면 1로 대체(원 단위 그대로) — 호출부가 항상 환율을 들고 있진 않을 수 있음', () => {
-    expect(toKrw('10', 'USD', null)?.toNumber()).toBe(10);
+  it('USD인데 환율이 없거나 유효하지 않으면 null 반환 — $100가 100원으로 왜곡되는 것을 방지(제미나이 코드 리뷰, PR #93)', () => {
+    expect(toKrw('10', 'USD', null)).toBeNull();
+    expect(toKrw('10', 'USD', undefined)).toBeNull();
+    expect(toKrw('10', 'USD', 0)).toBeNull();
+    expect(toKrw('10', 'USD', -1370)).toBeNull();
   });
 });
 

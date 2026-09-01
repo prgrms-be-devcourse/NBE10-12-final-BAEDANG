@@ -21,11 +21,19 @@ export function toDecimal(value: NumericValue): Decimal | null {
 /**
  * 종목 통화 단가를 원화로 환산합니다. `nativeValue`가 비어 있으면(시세 미수집 등) null을
  * 돌려주고, 호출부는 이를 "표시할 값이 아직 없음"으로 다뤄야 합니다.
+ *
+ * <p>USD 종목인데 환율이 없거나 0 이하면 환산 자체가 불가능하므로 null을 돌려준다 —
+ * 예전에는 환율을 1로 대체했는데, $100가 100원으로 표시되는 것처럼 실제 금액을 크게
+ * 왜곡시킬 수 있어서(제미나이 코드 리뷰, PR #93) 이 경우도 "표시할 값 없음"으로 다룬다.
  */
 export function toKrw(nativeValue: NumericValue, currency: string, exchangeRate: NumericValue): Decimal | null {
   const d = toDecimal(nativeValue);
   if (!d) return null;
-  return currency === "USD" ? d.times(exchangeRate ?? 1) : d;
+  if (currency !== "USD") return d;
+
+  const rate = toDecimal(exchangeRate);
+  if (!rate || rate.lessThanOrEqualTo(0)) return null;
+  return d.times(rate);
 }
 
 export function formatNumber(value: NumericValue, fallback = "-"): string {
