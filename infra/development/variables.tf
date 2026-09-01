@@ -10,5 +10,10 @@ variable "region" {
 
 variable "team_tag" {
   description = "Team Tag"
-  default = "devcos-team04"
+  default     = "devcos-team04"
+}
+
+variable "bucket_name" {
+  description = "Bucket Name for Infra Assets"
+  default     = "baedang-bucket-1"
 }

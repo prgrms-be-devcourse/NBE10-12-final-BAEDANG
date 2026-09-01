@@ -266,6 +266,17 @@ locals {
   set -x
   echo "=================================================="
 
+  echo "=============== 4. Docker Compose ================"
+  mkdir /opt/${var.prefix}
+  cd /opt/${var.prefix}
+
+  aws s3 cp s3://${data.aws_s3_bucket.asset.id}/docker-compose.yml .
+  aws s3 cp s3://${data.aws_s3_bucket.asset.id}/schema.sql .
+  aws s3 cp s3://${data.aws_s3_bucket.asset.id}/timescale.sql .
+
+  docker compose up -d
+  echo "=================================================="
+
   echo "BOOTSTRAP DONE"
   EOF
 }
@@ -308,4 +319,8 @@ data "aws_eip" "eip_1" {
 resource "aws_eip_association" "ec2_1" {
   instance_id   = aws_instance.ec2_1.id
   allocation_id = data.aws_eip.eip_1.id
+}
+
+data "aws_s3_bucket" "asset" {
+  bucket = var.bucket_name
 }
