@@ -34,6 +34,26 @@ function isValidPoint(time: number, open: number, high: number, low: number, clo
   return [time, open, high, low, close].every((n) => Number.isFinite(n));
 }
 
+/**
+ * `lightweight-charts`는 데이터가 `time` 기준 엄격한 오름차순이어야 하고, 시각이
+ * 중복되면 "Value is not strictly increasing" 예외를 던지며 렌더링을 통째로
+ * 멈춘다. 백엔드가 오름차순·중복 없이 내려준다는 걸 이미 테스트로 확인해뒀지만,
+ * API 계약이 나중에 바뀌거나 응답이 뒤섞여 오는 경우까지 프론트에서 방어해야
+ * 화면이 죽지 않는다(제미나이 코드 리뷰, PR #82).
+ *
+ * <p>같은 시각이 중복되면 먼저 온 값을 우선한다 — 백엔드
+ * {@code TossMarketDataAdapter.fetchCandles}의 {@code putIfAbsent}와 같은 규칙이다.
+ */
+function sortAndDedupeByTime<T extends { time: UTCTimestamp }>(points: T[]): T[] {
+  const byTime = new Map<UTCTimestamp, T>();
+  for (const point of points) {
+    if (!byTime.has(point.time)) {
+      byTime.set(point.time, point);
+    }
+  }
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
 export function toCandlestickData(items: Candle[]): CandlestickPoint[] {
   const points: CandlestickPoint[] = [];
   for (const item of items) {
@@ -45,7 +65,7 @@ export function toCandlestickData(items: Candle[]): CandlestickPoint[] {
     if (!isValidPoint(time, open, high, low, close)) continue;
     points.push({ time, open, high, low, close });
   }
-  return points;
+  return sortAndDedupeByTime(points);
 }
 
 /**
@@ -63,5 +83,5 @@ export function toVolumeData(items: Candle[], upColor: string, downColor: string
     const color = Number.isFinite(open) && Number.isFinite(close) && close < open ? downColor : upColor;
     points.push({ time, value: Math.max(0, volume), color });
   }
-  return points;
+  return sortAndDedupeByTime(points);
 }

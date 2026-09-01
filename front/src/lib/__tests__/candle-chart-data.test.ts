@@ -59,6 +59,35 @@ describe("toCandlestickData", () => {
   it("빈 배열이면 빈 배열을 반환한다", () => {
     expect(toCandlestickData([])).toEqual([]);
   });
+
+  it("응답이 시간 역순으로 뒤섞여 와도 오름차순으로 정렬한다", () => {
+    // lightweight-charts는 오름차순이 아니면 렌더링을 통째로 멈춘다(제미나이 리뷰, PR #82).
+    const items = [
+      candle({ at: "2026-08-29T00:00:00+09:00", close: "110" }),
+      candle({ at: "2026-08-27T00:00:00+09:00", close: "100" }),
+      candle({ at: "2026-08-28T00:00:00+09:00", close: "105" }),
+    ];
+
+    const result = toCandlestickData(items);
+
+    expect(result.map((p) => p.close)).toEqual([100, 105, 110]);
+    expect(result[0].time).toBeLessThan(result[1].time);
+    expect(result[1].time).toBeLessThan(result[2].time);
+  });
+
+  it("같은 시각이 중복되면 먼저 온 값만 남긴다", () => {
+    const items = [
+      candle({ at: "2026-08-28T00:00:00+09:00", close: "100" }),
+      candle({ at: "2026-08-28T00:00:00+09:00", close: "999" }), // 같은 시각 — 무시돼야 함
+      candle({ at: "2026-08-29T00:00:00+09:00", close: "110" }),
+    ];
+
+    const result = toCandlestickData(items);
+
+    expect(result).toHaveLength(2);
+    expect(result[0].close).toBe(100);
+    expect(result[1].close).toBe(110);
+  });
 });
 
 describe("toVolumeData", () => {
@@ -93,5 +122,17 @@ describe("toVolumeData", () => {
     const result = toVolumeData([candle({ volume: "-10" })], "red", "blue");
 
     expect(result[0].value).toBe(0);
+  });
+
+  it("응답이 뒤섞여 와도 오름차순으로 정렬하고 중복 시각은 먼저 온 값만 남긴다", () => {
+    const items = [
+      candle({ at: "2026-08-29T00:00:00+09:00", volume: "300" }),
+      candle({ at: "2026-08-27T00:00:00+09:00", volume: "100" }),
+      candle({ at: "2026-08-27T00:00:00+09:00", volume: "999" }), // 중복 시각 — 무시돼야 함
+    ];
+
+    const result = toVolumeData(items, "red", "blue");
+
+    expect(result.map((p) => p.value)).toEqual([100, 300]);
   });
 });
