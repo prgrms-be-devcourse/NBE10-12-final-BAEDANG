@@ -24,6 +24,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 거래대금 랭킹 상위 100(={@code is_ranked=true}) 밖 종목의 시세·일봉을 온디맨드로 채운다.
@@ -58,6 +59,8 @@ public class StockOnDemandQuoteService {
     private static final int DAILY_CANDLE_BACKFILL_COUNT = 5;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final ZoneId NY = ZoneId.of("America/New_York");
+    /** {@code CandleQueryService.refreshMinuteCandlesIfNeeded}와 같은 개수·같은 이유. */
+    private static final int REFRESH_LOCK_STRIPES = 64;
 
     private final MarketDataPort marketDataPort;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
@@ -65,6 +68,7 @@ public class StockOnDemandQuoteService {
     private final DailyCandleRepository dailyCandleRepository;
     private final DailyCandlePersistenceService dailyCandlePersistenceService;
     private final Clock clock;
+    private final ReentrantLock[] refreshLocks = createRefreshLocks();
 
     public StockOnDemandQuoteService(
             MarketDataPort marketDataPort,
@@ -96,32 +100,73 @@ public class StockOnDemandQuoteService {
         if (!isStale(existing)) {
             return existing;
         }
-        return refreshQuote(stock);
+        return refreshQuoteIfStillStale(stock);
     }
 
     /**
      * 랭킹 밖 종목의 일봉이 완전히 비어 있으면 온디맨드로 백필한다. 상세 화면뿐 아니라
      * 캔들 조회({@code CandleQueryService})에서도 독립적으로 호출된다 — 상세를 거치지
      * 않고 캔들만 바로 열어볼 수도 있기 때문이다.
+     *
+     * <p>{@code CandleQueryService.refreshMinuteCandlesIfNeeded}와 같은 이중 확인(더블
+     * 체크) 락 패턴을 쓴다 — 같은 종목에 짧은 시간 안에 여러 요청이 몰려도(동시 사용자)
+     * 실제 Toss 호출과 저장은 한 번만 일어나게 하기 위해서다.
      */
     public void ensureDailyCandles(Stock stock) {
         if (Boolean.TRUE.equals(stock.getIsRanked())) {
             return;
         }
-        boolean hasAnyDailyCandle = !dailyCandleRepository
-                .findByStockIdOrderByTradeDateDesc(stock.getStockId(), PageRequest.of(0, 1))
-                .isEmpty();
-        if (hasAnyDailyCandle) {
+        if (hasAnyDailyCandle(stock)) {
             return;
         }
 
+        ReentrantLock lock = lockFor(stock.getStockId());
+        lock.lock();
         try {
+            if (hasAnyDailyCandle(stock)) return;
+
             List<Candle> candles = marketDataPort.fetchCandles(
                     stock.getSymbol(), CandleInterval.ONE_DAY, DAILY_CANDLE_BACKFILL_COUNT);
             dailyCandlePersistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
         } catch (RuntimeException exception) {
             log.warn("[on-demand] {} 일봉 백필 실패", stock.getSymbol(), exception);
+        } finally {
+            lock.unlock();
         }
+    }
+
+    private boolean hasAnyDailyCandle(Stock stock) {
+        return !dailyCandleRepository
+                .findByStockIdOrderByTradeDateDesc(stock.getStockId(), PageRequest.of(0, 1))
+                .isEmpty();
+    }
+
+    /** 락을 잡은 뒤 다시 한번 신선도를 확인한다 — 락 대기 중 다른 스레드가 이미 갱신했을 수 있다. */
+    private QuoteSnapshot refreshQuoteIfStillStale(Stock stock) {
+        ReentrantLock lock = lockFor(stock.getStockId());
+        lock.lock();
+        try {
+            QuoteSnapshot current = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
+            if (!isStale(current)) {
+                return current;
+            }
+            return refreshQuote(stock);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private ReentrantLock lockFor(Long stockId) {
+        int index = Long.hashCode(stockId) & (REFRESH_LOCK_STRIPES - 1);
+        return refreshLocks[index];
+    }
+
+    private static ReentrantLock[] createRefreshLocks() {
+        ReentrantLock[] locks = new ReentrantLock[REFRESH_LOCK_STRIPES];
+        for (int index = 0; index < locks.length; index++) {
+            locks[index] = new ReentrantLock();
+        }
+        return locks;
     }
 
     private boolean isStale(QuoteSnapshot quote) {
@@ -152,6 +197,10 @@ public class StockOnDemandQuoteService {
             BigDecimal prevClose = derivePrevClose(stock);
             if (prevClose != null) {
                 snapshot.updatePrevClose(prevClose);
+                // findById가 이미 끝난 읽기 전용 트랜잭션 밖이라 snapshot은 detached 상태다 —
+                // 여기서 명시적으로 save하지 않으면 변경이 이 응답에만 반영되고 DB에는
+                // 저장되지 않는다(제미나이 코드 리뷰, PR #80).
+                snapshot = quoteSnapshotRepository.save(snapshot);
             }
         }
         return snapshot;

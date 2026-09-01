@@ -25,15 +25,24 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -98,13 +107,20 @@ class StockOnDemandQuoteServiceTest {
 
         QuoteSnapshot refreshed = quote(LocalDate.of(2026, 8, 28));
         when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.of(refreshed));
-        // 처음(ensureDailyCandles의 존재 확인)엔 일봉이 하나도 없다가, 백필 이후
-        // prevClose를 계산할 때(derivePrevClose)는 방금 채운 일봉이 보여야 한다.
+        when(quoteSnapshotRepository.save(refreshed)).thenReturn(refreshed);
+        // 백필(존재 확인 → 락 안 재확인) 전까지는 일봉이 하나도 없다가, upsert가 호출된
+        // 뒤부터는(이중 확인 락 안에서도 한 번 더 조회한다) 방금 채운 일봉이 보여야 한다 —
+        // 언제 몇 번 조회하든 항상 최신 상태를 반영하도록 상태 기반(stateful)으로 stub한다.
+        AtomicBoolean backfilled = new AtomicBoolean(false);
+        DailyCandle backfilledCandle = new DailyCandle(10L, LocalDate.of(2026, 8, 28),
+                new BigDecimal("236050"), new BigDecimal("236050"),
+                new BigDecimal("236050"), new BigDecimal("236050"), new BigDecimal("1000"));
         when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(eq(10L), any()))
-                .thenReturn(List.of())
-                .thenReturn(List.of(new DailyCandle(10L, LocalDate.of(2026, 8, 28),
-                        new BigDecimal("236050"), new BigDecimal("236050"),
-                        new BigDecimal("236050"), new BigDecimal("236050"), new BigDecimal("1000"))));
+                .thenAnswer(invocation -> backfilled.get() ? List.of(backfilledCandle) : List.of());
+        doAnswer(invocation -> {
+            backfilled.set(true);
+            return null;
+        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), any());
 
         QuoteSnapshot result = service.ensureQuote(stock, null);
 
@@ -112,6 +128,10 @@ class StockOnDemandQuoteServiceTest {
         verify(quoteSnapshotPersistenceService).saveOrUpdate(eq(List.of(stock)), anyList(), any());
         assertThat(result).isSameAs(refreshed);
         verify(refreshed).updatePrevClose(new BigDecimal("236050"));
+        // findById가 반환하는 스냅샷은 그 시점의 읽기 전용 트랜잭션 밖에서는 detached
+        // 상태라, updatePrevClose만으로는 DB에 반영되지 않는다 — 명시적 save가 꼭 필요하다
+        // (제미나이 코드 리뷰, PR #80).
+        verify(quoteSnapshotRepository).save(refreshed);
     }
 
     @Test
@@ -159,6 +179,53 @@ class StockOnDemandQuoteServiceTest {
 
         verify(marketDataPort, never()).fetchCandles(any(), any(), anyInt());
         verifyNoInteractions(dailyCandlePersistenceService);
+    }
+
+    /**
+     * 제미나이 코드 리뷰(PR #80)가 지적한 동시 요청 경합을 재현한다. 토큰 발급 지연을
+     * 흉내낼 때(TossSecuritiesClientTest)와 같은 이유로 {@code fetchCandles}에 인위적인
+     * 지연을 줘서, 여러 스레드가 "아직 일봉이 없다"는 판단을 동시에 내리도록 만든다.
+     * 락이 없으면 이 판단이 겹쳐서 여러 스레드가 각자 Toss를 호출하게 된다.
+     */
+    @Test
+    void 동시_요청에서도_일봉_백필은_한_번만_일어난다() throws Exception {
+        when(stock.getIsRanked()).thenReturn(false);
+        AtomicBoolean backfilled = new AtomicBoolean(false);
+        DailyCandle stored = new DailyCandle(10L, LocalDate.of(2026, 8, 28),
+                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE);
+        when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(eq(10L), any()))
+                .thenAnswer(invocation -> backfilled.get() ? List.of(stored) : List.of());
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 5))
+                .thenAnswer(invocation -> {
+                    Thread.sleep(100); // 스레드들이 락 앞에서 실제로 겹치도록 지연시킨다.
+                    return List.of(candle(LocalDate.of(2026, 8, 28), "100"));
+                });
+        doAnswer(invocation -> {
+            backfilled.set(true);
+            return null;
+        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), any());
+
+        int threadCount = 5;
+        ExecutorService pool = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch ready = new CountDownLatch(threadCount);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<?>> futures = new ArrayList<>();
+        for (int i = 0; i < threadCount; i++) {
+            futures.add(pool.submit(() -> {
+                ready.countDown();
+                start.await();
+                service.ensureDailyCandles(stock);
+                return null;
+            }));
+        }
+        ready.await();
+        start.countDown();
+        for (Future<?> future : futures) {
+            future.get(5, TimeUnit.SECONDS);
+        }
+        pool.shutdown();
+
+        verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 5);
     }
 
     @Test
