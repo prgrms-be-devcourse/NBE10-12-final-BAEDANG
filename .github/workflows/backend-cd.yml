@@ -42,13 +42,12 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 릴리즈 생성
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.create_tag.outputs.new_tag }}
-          name: Release ${{ steps.create_tag.outputs.new_tag }}
-          body: ${{ steps.create_tag.outputs.changelog }}
-          draft: false
-          prerelease: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.create_tag.outputs.new_tag }}" \
+            --title "Release ${{ steps.create_tag.outputs.new_tag }}" \
+            --notes "${{ steps.create_tag.outputs.changelog }}"
 
   buildAndPushDockerImage:
     name: 2. 도커 이미지 빌드 및 푸시
