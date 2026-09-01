@@ -25,6 +25,8 @@ import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -214,6 +216,39 @@ public class TossMarketDataAdapterTest {
         assertThat(result)
                 .extracting(Candle::candleAt)
                 .doesNotHaveDuplicates();
+    }
+
+    @Test
+    @DisplayName("캔들 200개 요청은 첫 응답으로 충족되면 외부 호출 한 번으로 종료한다")
+    void fetchesTwoHundredCandlesWithSingleRequest() {
+        OffsetDateTime candleAt = OffsetDateTime.parse("2026-03-26T09:00:00+09:00");
+        List<TossCandleResponse.TossCandleItem> items = createMinuteItems(candleAt, 200);
+        TossCandleResponse response = new TossCandleResponse(
+                new TossCandleResponse.TossCandleResult(
+                        items,
+                        items.get(items.size() - 1).timestamp()
+                )
+        );
+        Map<String, String> query = Map.of(
+                "symbol", "005930",
+                "interval", "1d",
+                "count", "200",
+                "adjusted", "true"
+        );
+        when(tossSecuritiesClient.get(
+                eq("/api/v1/candles"),
+                eq(query),
+                eq(TossCandleResponse.class)
+        )).thenReturn(response);
+
+        List<Candle> result = tossMarketDataAdapter.fetchCandles(
+                "005930", CandleInterval.ONE_DAY, 200);
+
+        assertThat(result).hasSize(200);
+        verify(tossSecuritiesClient, times(1)).get(
+                eq("/api/v1/candles"),
+                eq(query),
+                eq(TossCandleResponse.class));
     }
 
     @Test

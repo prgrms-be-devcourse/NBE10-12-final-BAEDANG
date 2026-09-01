@@ -8,11 +8,16 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 public interface DailyCandleRepository extends JpaRepository<DailyCandle, DailyCandle.Pk> {
 
     List<DailyCandle> findByStockIdOrderByTradeDateDesc(Long stockId, Pageable pageable);
+
+    long countByStockId(Long stockId);
+
+    Optional<DailyCandle> findTopByStockIdOrderByTradeDateDesc(Long stockId);
 
     @Query("""
             SELECT candle.stockId

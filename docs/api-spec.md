@@ -422,7 +422,7 @@ Daily & minute chart
 ```
 
 For financial-data integrity, the MVP daily chart returns only finalized rows stored in `daily_candle`. A current price alone cannot supply today's open, high, and low, so the API does not fabricate today's OHLC. Display the current price separately from `GET /stocks/{symbol}`.
-**Our API has no 200-candle cap.** Toss's `count` ceiling of 200 applies only at collection time (200 daily ≈ 10 months, so a 1-year chart is fetched in two `before` calls). Once stored in `daily_candle`, serve all 250 candles directly.
+**Our API keeps a 250-candle response ceiling for 1Y, while the initial on-demand backfill makes one external call for the latest 200 candles.** Entering through either detail or any daily-chart range stores the same 200 rows, and later 1M·6M·1Y switches reuse the database. After backfill, the latest stored candle is compared with the latest finalized trading day derived from the market calendar (regular close plus 10 minutes); stale off-universe stocks refresh the latest 200 rows only when needed. A successful refresh for the same finalized trading day is not repeated during the same process. A stock with no stored history therefore returns at most 200 candles for 1Y; if scheduled or other stored history exists, the response can contain up to 250.
 
 | Error code | When |
 |---|---|
