@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
@@ -322,7 +323,7 @@ class TossSecuritiesClientTest {
         }
 
         @Test
-        @DisplayName("429는 재시도 없이 TOSS_API_RATE_LIMITED으로 변환")
+        @DisplayName("429는 재시도 없이 TOSS_RATE_LIMITED으로 변환")
         void rate_limited는_429로_변환() {
             stubFor(get(urlPathEqualTo(EXCHANGE_RATE)).willReturn(aResponse().withStatus(429)));
 
@@ -338,30 +339,90 @@ class TossSecuritiesClientTest {
         @Test
         @DisplayName("동시 401이어도 토큰 발급은 한 번")
         void 동시_401은_토큰을_한번만_발급() throws InterruptedException {
-            givenTokenIssued();
+            stubFor(post(urlEqualTo(TOKEN_PATH))
+                    .willReturn(okJson(TOKEN_RESPONSE)));
+
+            // 두 스레드가 모두 Bearer null로 요청한 뒤 401을 받도록 응답을 잠시 지연한다.
             stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
-                    .withHeader("Authorization", equalTo("Bearer "+VALID_TOKEN))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer null")
+                    )
+                    .willReturn(aResponse()
+                            .withStatus(401)
+                            .withFixedDelay(200)));
+
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer " + VALID_TOKEN)
+                    )
                     .willReturn(okJson(RATE_BODY)));
 
-            CountDownLatch start = new CountDownLatch(1);
-            CountDownLatch done = new CountDownLatch(2);
+            int threadCount = 2;
 
-            for(int i = 0; i < 2; i++){
-                Thread t = new Thread(() -> {
+            CountDownLatch ready = new CountDownLatch(threadCount);
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(threadCount);
+
+            List<Throwable> failures = new CopyOnWriteArrayList<>();
+
+            for (int index = 0; index < threadCount; index++) {
+                Thread thread = new Thread(() -> {
+                    ready.countDown();
+
                     try {
                         start.await();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
+                        client.get(EXCHANGE_RATE, Map.of(), TestBody.class);
+                    } catch (Throwable throwable) {
+                        failures.add(throwable);
+                    } finally {
+                        // client.get()이 성공하거나 예외를 던져도 반드시 감소한다.
+                        done.countDown();
                     }
-                    client.get(EXCHANGE_RATE, Map.of(), TestBody.class);
-                    done.countDown();
                 });
-                t.start();
-            }
-            start.countDown();
-            done.await();
 
+                thread.start();
+            }
+
+            // 두 스레드가 모두 시작 지점에 도착한 뒤 동시에 요청을 시작한다.
+            boolean allReady = ready.await(5, TimeUnit.SECONDS);
+            start.countDown();
+
+            assertThat(allReady).isTrue();
+            assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(failures).isEmpty();
+
+            // 최초 요청 2개가 모두 기존 null 토큰으로 전송되었는지 확인한다.
+            verify(2, getRequestedFor(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer null")
+                    ));
+
+            // 동시 401이어도 token POST는 한 번만 실행되어야 한다.
+            verify(1, postRequestedFor(urlEqualTo(TOKEN_PATH)));
+
+            // 두 요청 모두 새 토큰으로 한 번씩 재시도한다.
+            verify(2, getRequestedFor(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer " + VALID_TOKEN)
+                    ));
+        }
+
+        @Test
+        @DisplayName("토큰 발급 429도 TOSS_RATE_LIMITED로 변환")
+        void 토큰_발급_429를_rate_limited로_변환() {
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE)).willReturn(aResponse().withStatus(401)));
+            stubFor(post(urlPathEqualTo(TOKEN_PATH)).willReturn(aResponse().withStatus(429)));
+
+            assertThatThrownBy(() -> client.get(EXCHANGE_RATE, Map.of(), TestBody.class))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(TossSecuritiesClientTest::errorCodeOf)
+                    .isEqualTo(ErrorCode.TOSS_RATE_LIMITED);
             verify(1, postRequestedFor(urlPathEqualTo(TOKEN_PATH)));
         }
+
     }
 }

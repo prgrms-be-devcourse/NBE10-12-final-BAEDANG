@@ -35,31 +35,50 @@ class FixedIntervalGateTest {
     void t2() throws InterruptedException {
         AtomicLong now = new AtomicLong();
         List<Long> slept = new CopyOnWriteArrayList<>();
-        FixedIntervalGate gate = new FixedIntervalGate(5, now::get, slept::add);
+        FixedIntervalGate gate =
+                new FixedIntervalGate(5, now::get, slept::add);
 
         int threads = 10;
+
+        CountDownLatch ready = new CountDownLatch(threads);
         CountDownLatch start = new CountDownLatch(1);
         CountDownLatch done = new CountDownLatch(threads);
 
+        List<Throwable> failures = new CopyOnWriteArrayList<>();
+
         for (int i = 0; i < threads; i++) {
             Thread thread = new Thread(() -> {
+                ready.countDown();
+
                 try {
                     start.await();
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+                    gate.acquire();
+                } catch (Throwable throwable) {
+                    failures.add(throwable);
+                } finally {
+                    done.countDown();
                 }
-                gate.acquire();
-                done.countDown();
             });
+
             thread.start();
         }
-        start.countDown();
-        done.await();
 
-        List<Long> sorted = slept.stream().sorted().toList();
+        boolean allReady = ready.await(5, TimeUnit.SECONDS);
+        start.countDown();
+
+        assertThat(allReady).isTrue();
+        assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
+        assertThat(failures).isEmpty();
+
+        List<Long> sorted = slept.stream()
+                .sorted()
+                .toList();
+
         assertThat(sorted).hasSize(threads);
+
         for (int i = 1; i < sorted.size(); i++) {
-            assertThat(sorted.get(i) - sorted.get(i - 1)).isGreaterThanOrEqualTo(INTERVAL_5TPS);
+            assertThat(sorted.get(i) - sorted.get(i - 1))
+                    .isGreaterThanOrEqualTo(INTERVAL_5TPS);
         }
     }
 
