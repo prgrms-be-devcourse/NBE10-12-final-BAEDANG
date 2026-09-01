@@ -150,8 +150,8 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
           </div>
           <button
             onClick={onClose}
-            className="rounded-full px-3 py-1.5 text-[13px] font-semibold"
-            style={{ background: "var(--fill)", color: "var(--mut)" }}
+            className="rate-trend-close-btn cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors duration-150"
+            style={{ color: "var(--mut)" }}
             aria-label="닫기"
           >
             닫기
