@@ -211,7 +211,7 @@ public class StockOnDemandQuoteService {
     private boolean isStale(QuoteSnapshot quote) {
         if (quote == null) return true;
         LocalDate collectedDate = quote.getCollectedAt().atZoneSameInstant(KST).toLocalDate();
-        LocalDate today = OffsetDateTime.now(clock).atZoneSameInstant(KST).toLocalDate();
+        LocalDate today = clock.instant().atZone(KST).toLocalDate();
         return !collectedDate.equals(today);
     }
 
@@ -228,7 +228,7 @@ public class StockOnDemandQuoteService {
             return quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
         }
 
-        OffsetDateTime collectedAt = OffsetDateTime.now(clock).withOffsetSameInstant(ZoneOffset.UTC);
+        OffsetDateTime collectedAt = clock.instant().atOffset(ZoneOffset.UTC);
         quoteSnapshotPersistenceService.saveOrUpdate(List.of(stock), quotes, collectedAt);
 
         QuoteSnapshot snapshot = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
@@ -247,8 +247,8 @@ public class StockOnDemandQuoteService {
 
     /** 방금 채운(또는 이미 있던) 일봉 중, "오늘"(그 시장 기준) 이전의 가장 최신 종가를 고른다. */
     private BigDecimal derivePrevClose(Stock stock) {
-        LocalDate marketToday = OffsetDateTime.now(clock)
-                .atZoneSameInstant(marketZone(stock))
+        LocalDate marketToday = clock.instant()
+                .atZone(marketZone(stock))
                 .toLocalDate();
 
         return dailyCandleRepository
