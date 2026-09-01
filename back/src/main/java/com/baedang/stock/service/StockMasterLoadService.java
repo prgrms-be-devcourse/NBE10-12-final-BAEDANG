@@ -65,25 +65,23 @@ public class StockMasterLoadService {
                 );
             }
 
-            // 기존 종목은 재사용하고, 신규 종목만 Stock.create()로 생성한다.
-            List<Stock> stocks = uniqueStocks.entrySet()
+            // 기존 종목은 제외하고, 신규 종목만 생성하여 저장한다.
+            List<Stock> newStocks = uniqueStocks.entrySet()
                     .stream()
-                    .map(universeEntry -> existingStocks.computeIfAbsent(
+                    .filter(universeEntry -> !existingStocks.containsKey(universeEntry.getKey()))
+                    .map(universeEntry -> Stock.create(
                             universeEntry.getKey(),
-                            ignored -> Stock.create(
-                                    universeEntry.getKey(),
-                                    marketCountry,
-                                    market,
-                                    universeEntry.getValue().name(),
-                                    universeEntry.getValue().isinCode(),
-                                    marketCountryToCurrency(marketCountry),
-                                    universeEntry.getValue().securityType(),
-                                    universeEntry.getValue().isCommonShare()
-                            )
+                            marketCountry,
+                            market,
+                            universeEntry.getValue().name(),
+                            universeEntry.getValue().isinCode(),
+                            marketCountryToCurrency(marketCountry),
+                            universeEntry.getValue().securityType(),
+                            universeEntry.getValue().isCommonShare()
                     ))
                     .toList();
 
-            if (!stocks.isEmpty()) stockRepository.saveAll(stocks);
+            if (!newStocks.isEmpty()) stockRepository.saveAll(newStocks);
 
             pacer.pace();
         }

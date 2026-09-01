@@ -27,7 +27,7 @@ class StockMasterLoadServiceTest {
     private StockRepository stockRepository;
 
     @Test
-    @DisplayName("기존 심볼은 재사용하고 신규 심볼만 생성한다")
+    @DisplayName("기존 심볼은 저장하지 않고 신규 심볼만 저장한다")
     void t1() {
         Stock existingStock = Stock.create(
                 "005930",
@@ -72,13 +72,10 @@ class StockMasterLoadServiceTest {
                     List<Stock> savedStocks = new ArrayList<>();
                     stocks.forEach(savedStocks::add);
 
-                    return savedStocks.size() == 2
-                            && savedStocks.stream()
-                            .anyMatch(stock -> stock == existingStock)
+                    return savedStocks.size() == 1
                             && savedStocks.stream()
                             .anyMatch(stock -> "000001".equals(stock.getSymbol()));
                 })
         );
-
     }
 }
