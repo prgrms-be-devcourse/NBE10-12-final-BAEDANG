@@ -35,7 +35,7 @@ public record OrderResponse(
                 receipt.marketCountry(),
                 receipt.side(),
                 plain(receipt.quantity()),
-                currency(receipt.executedPrice(), currencyOf(receipt.marketCountry())),
+                currency(receipt.executedPrice(), receipt.marketCountry().defaultCurrency()),
                 rate(receipt.exchangeRate()),
                 krw(receipt.grossAmount()),
                 krw(receipt.fee()),
@@ -45,10 +45,6 @@ public record OrderResponse(
                 receipt.orderedAt(),
                 new AccountSummary(krw(receipt.cashBalanceAfter()))
         );
-    }
-
-    private static String currencyOf(MarketCountry marketCountry) {
-        return marketCountry == MarketCountry.KR ? "KRW" : "USD";
     }
 
     public record AccountSummary(String cashBalanceAfter) {

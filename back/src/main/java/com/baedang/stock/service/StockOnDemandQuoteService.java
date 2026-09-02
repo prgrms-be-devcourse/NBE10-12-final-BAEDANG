@@ -11,7 +11,6 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.DailyCandlePersistenceService;
 import com.baedang.market.service.LatestCompletedTradingDayResolver;
 import com.baedang.market.service.QuoteSnapshotPersistenceService;
-import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,7 +59,6 @@ public class StockOnDemandQuoteService {
     /** Toss 단일 호출 상한. 페이지네이션 없이 상세·차트가 공유할 최신 일봉을 확보한다. */
     private static final int DAILY_CANDLE_BACKFILL_COUNT = 200;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final ZoneId NY = ZoneId.of("America/New_York");
     /** {@code CandleQueryService.refreshMinuteCandlesIfNeeded}와 같은 개수·같은 이유. */
     private static final int REFRESH_LOCK_STRIPES = 64;
 
@@ -185,10 +183,6 @@ public class StockOnDemandQuoteService {
                 .isPresent();
     }
 
-    private ZoneId marketZone(Stock stock) {
-        return stock.getMarketCountry() == MarketCountry.US ? NY : KST;
-    }
-
     /** 락을 잡은 뒤 다시 한번 신선도를 확인한다 — 락 대기 중 다른 스레드가 이미 갱신했을 수 있다. */
     private QuoteSnapshot refreshQuoteIfStillStale(Stock stock) {
         ReentrantLock lock = lockFor(stock.getStockId());
@@ -257,7 +251,7 @@ public class StockOnDemandQuoteService {
     /** 방금 채운(또는 이미 있던) 일봉 중, "오늘"(그 시장 기준) 이전의 가장 최신 종가를 고른다. */
     private BigDecimal derivePrevClose(Stock stock) {
         LocalDate marketToday = clock.instant()
-                .atZone(marketZone(stock))
+                .atZone(stock.getMarketCountry().zoneId())
                 .toLocalDate();
 
         return dailyCandleRepository

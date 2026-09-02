@@ -34,7 +34,6 @@ public class DailyCandleCollectionService {
     /** 일별 정기 수집: 마감 봉 1개 */
     private static final int DAILY_CANDLE_COUNT = 1;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final ZoneId NY = ZoneId.of("America/New_York");
 
     private final MarketDataPort marketDataPort;
     private final StockRepository stockRepository;
@@ -128,7 +127,7 @@ public class DailyCandleCollectionService {
             return Optional.empty();
         }
         Instant now = clock.instant();
-        LocalDate tradeDate = now.atZone(marketCountry == MarketCountry.US ? NY : KST).toLocalDate();
+        LocalDate tradeDate = now.atZone(marketCountry.zoneId()).toLocalDate();
         MarketCalendarDay calendarDay;
         try {
             calendarDay = switch (marketCountry) {

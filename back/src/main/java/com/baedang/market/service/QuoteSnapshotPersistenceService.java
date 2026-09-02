@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotRepository;
@@ -11,7 +12,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -36,7 +36,7 @@ public class QuoteSnapshotPersistenceService {
     ) {
         Map<String, Stock> stockBySymbol = stocks.stream()
                 .collect(Collectors.toMap(
-                        stock -> normalizeSymbol(stock.getSymbol()),
+                        stock -> DomainNormalizer.symbol(stock.getSymbol()),
                         Function.identity(),
                         (left, right) -> left
                 ));
@@ -54,7 +54,7 @@ public class QuoteSnapshotPersistenceService {
 
         int updatedCount = 0;
         for (PriceQuote quote : quotes) {
-            Stock stock = stockBySymbol.get(normalizeSymbol(quote.symbol()));
+            Stock stock = stockBySymbol.get(DomainNormalizer.symbol(quote.symbol()));
             if (stock == null) {
                 log.warn(
                         "요청하지 않은 종목의 현재가 응답을 건너뜁니다: symbol={}",
@@ -66,9 +66,7 @@ public class QuoteSnapshotPersistenceService {
                 continue;
             }
 
-            String currency = quote.currency()
-                    .trim()
-                    .toUpperCase(Locale.ROOT);
+            String currency = DomainNormalizer.currency(quote.currency());
             QuoteSnapshot snapshot = existingSnapshots.get(stock.getStockId());
 
             if (snapshot != null) {
@@ -91,12 +89,6 @@ public class QuoteSnapshotPersistenceService {
             updatedCount++;
         }
         return updatedCount;
-    }
-
-    private static String normalizeSymbol(String symbol) {
-        return symbol == null
-                ? null
-                : symbol.trim().toUpperCase(Locale.ROOT);
     }
 
     private boolean isValidQuote(Stock stock, PriceQuote quote) {

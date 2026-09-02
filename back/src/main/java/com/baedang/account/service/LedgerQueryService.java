@@ -4,6 +4,7 @@ import com.baedang.account.dto.LedgerResponse;
 import com.baedang.account.support.LedgerCursor;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.EntryType;
@@ -19,7 +20,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
@@ -94,7 +94,7 @@ public class LedgerQueryService {
             return null;
         }
         try {
-            return EntryType.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+            return EntryType.valueOf(DomainNormalizer.upperCode(raw));
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "지원하지 않는 entryType: " + raw);
         }

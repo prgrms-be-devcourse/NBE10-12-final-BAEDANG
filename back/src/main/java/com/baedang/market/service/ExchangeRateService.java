@@ -2,6 +2,7 @@ package com.baedang.market.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.dto.ExchangeRateHistoryResponse;
 import com.baedang.market.dto.ExchangeRateLatestResponse;
 import com.baedang.market.entity.ExchangeRate;
@@ -15,7 +16,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
 import java.util.List;
-import java.util.Locale;
 
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
@@ -34,7 +34,6 @@ public class ExchangeRateService {
     private static final int CHANGE_RATE_SCALE = 6;
     private static final String DEFAULT_BASE_CURRENCY = "USD";
     private static final String DEFAULT_QUOTE_CURRENCY = "KRW";
-
 
     private final ExchangeRateRepository exchangeRateRepository;
     private final Clock clock;
@@ -59,8 +58,8 @@ public class ExchangeRateService {
      * 소문자로 들어와도 매치되도록 여기서 정규화한다.
      */
     public ExchangeRateLatestResponse getLatest(String baseCurrency, String quoteCurrency) {
-        String base = baseCurrency.toUpperCase();
-        String quote = quoteCurrency.toUpperCase();
+        String base = DomainNormalizer.currency(baseCurrency);
+        String quote = DomainNormalizer.currency(quoteCurrency);
 
         ExchangeRate latest = exchangeRateRepository
                 .findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc(base, quote)
@@ -120,7 +119,7 @@ public class ExchangeRateService {
     private OffsetDateTime periodStart(String period) {
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
 
-        String normalized = period == null ? "" : period.trim().toLowerCase(Locale.ROOT);
+        String normalized = period == null ? "" : DomainNormalizer.lowerCode(period);
 
         return switch (normalized){
             case "1d" -> now.minusDays(1);
