@@ -77,6 +77,12 @@ toss:
   client-secret: ${TOSS_CLIENT_SECRET:}
   enabled: ${TOSS_ENABLED:false}
 
+  # 일봉 시드 백필 관리자 트리거 활성화 플래그(기본 false).
+  #   true 일 때만 POST /internal/admin/seed/daily-candles 엔드포인트가 등록됩니다.
+  #   인증 도입 전이라 상시 노출을 피하려는 것으로, 운영자가 시딩이 필요한 구간에만 켜고 끕니다.
+  #   실데이터 적재에는 toss.enabled=true 도 함께 필요합니다.
+  seed-daily-candles: ${SEED_DAILY_CANDLES:false}
+
 # ── 거래 정책 ────────────────────────────────────────────────────────────────
 #   요율은 DB 에 저장하지 않습니다. 여기가 유일한 정의 지점이고,
 #   테이블에는 계산 결과값(trade_order.fee / trade_order.tax)만 들어갑니다.
