@@ -42,11 +42,11 @@ class DailyCandleSeedServiceTest {
     @Mock DailyCandlePersistenceService persistenceService;
     @Mock DailyCandleRepository dailyCandleRepository;
 
-    /** universeSize 는 넉넉히, TPS 는 페이싱 지연이 없도록 크게 잡아 테스트 속도를 높입니다. */
+    /** universeSize 는 넉넉히 잡습니다. 호출 페이싱은 TossSecuritiesClient 전역 RateLimiter 책임이라 여기서 다루지 않습니다. */
     private DailyCandleSeedService service() {
         return new DailyCandleSeedService(
                 marketDataPort, stockRepository, persistenceService,
-                dailyCandleRepository, 100, 1000);
+                dailyCandleRepository, 100);
     }
 
     @Test

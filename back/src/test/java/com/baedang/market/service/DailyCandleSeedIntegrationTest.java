@@ -52,7 +52,6 @@ import static org.mockito.Mockito.when;
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
         "toss.enabled=false",
-        "toss.seed-chart-tps=1000",
         "logging.level.org.hibernate.SQL=OFF"
 })
 class DailyCandleSeedIntegrationTest {
