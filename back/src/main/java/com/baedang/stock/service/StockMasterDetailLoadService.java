@@ -1,5 +1,6 @@
 package com.baedang.stock.service;
 
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.StockInfo;
@@ -11,7 +12,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -48,7 +48,7 @@ public class StockMasterDetailLoadService {
             // 응답은 요청보다 작을 수 있다. — 인덱스가 아니라 심볼로 짝짓는다.
             Map<String, StockInfo> stocksFromPortSymbolMap = stocksFromPort.stream()
                     .collect(Collectors.toMap(
-                            stockFromPort -> stockFromPort.symbol().trim().toUpperCase(Locale.ROOT),
+                            stockFromPort -> DomainNormalizer.symbol(stockFromPort.symbol()),
                             stockFromPort -> stockFromPort,
                             (left, right) -> left
                     ));

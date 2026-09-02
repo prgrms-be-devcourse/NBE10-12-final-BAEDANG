@@ -2,6 +2,7 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
@@ -20,7 +21,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
@@ -137,10 +137,7 @@ public class MarketOrderPolicy {
     public boolean hasValidCurrencyForMarket(Stock stock, QuoteSnapshot quote) {
         if (stock.getCurrency() == null || quote.getCurrency() == null) return false;
 
-        String expectedCurrency = switch (stock.getMarketCountry()) {
-            case KR -> "KRW";
-            case US -> "USD";
-        };
+        String expectedCurrency = stock.getMarketCountry().defaultCurrency();
         return expectedCurrency.equalsIgnoreCase(stock.getCurrency().trim())
                 && expectedCurrency.equalsIgnoreCase(quote.getCurrency().trim());
     }
@@ -173,7 +170,7 @@ public class MarketOrderPolicy {
     private OrderSide parseSide(String value) {
         if (value == null || value.isBlank()) throw missingField("side");
         try {
-            return OrderSide.valueOf(value.trim().toUpperCase(Locale.ROOT));
+            return OrderSide.valueOf(DomainNormalizer.upperCode(value));
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "side=" + value);
         }
@@ -181,11 +178,8 @@ public class MarketOrderPolicy {
 
     private MarketCountry parseMarketCountry(String value) {
         if (value == null || value.isBlank()) throw missingField("marketCountry");
-        try {
-            return MarketCountry.valueOf(value.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value);
-        }
+        return MarketCountry.parse(value)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value));
     }
 
     private BigDecimal parseQuantity(String value) {
@@ -212,7 +206,7 @@ public class MarketOrderPolicy {
 
     private String normalizeSymbol(String value) {
         if (value == null || value.isBlank()) throw missingField("symbol");
-        return value.trim().toUpperCase(Locale.ROOT);
+        return DomainNormalizer.symbol(value);
     }
 
     private BusinessException missingField(String field) {

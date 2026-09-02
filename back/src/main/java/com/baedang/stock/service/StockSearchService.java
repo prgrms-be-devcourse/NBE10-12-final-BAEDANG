@@ -2,6 +2,7 @@ package com.baedang.stock.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.stock.dto.StockSearchResponse;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -10,7 +11,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 
 @Service
@@ -87,7 +87,7 @@ public class StockSearchService {
     private String normalize(String value) {
         if (value == null) return "";
 
-        return value.replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return DomainNormalizer.searchKey(value);
     }
 
     private void validateSize(int size) {

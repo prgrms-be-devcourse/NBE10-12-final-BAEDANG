@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.repository.ExchangeRateRepository;
 import org.slf4j.Logger;
@@ -8,7 +9,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.Locale;
 
 @Service
 public class ExchangeRatePersistenceService {
@@ -30,8 +30,8 @@ public class ExchangeRatePersistenceService {
             return false;
         }
 
-        String baseCurrency = normalizeCurrency(quote.baseCurrency());
-        String quoteCurrency = normalizeCurrency(quote.quoteCurrency());
+        String baseCurrency = DomainNormalizer.currency(quote.baseCurrency());
+        String quoteCurrency = DomainNormalizer.currency(quote.quoteCurrency());
 
         int inserted = exchangeRateRepository.insertIgnoreDuplicate(
                 baseCurrency,
@@ -63,9 +63,4 @@ public class ExchangeRatePersistenceService {
                 && (quote.midRate() == null || quote.midRate().signum() > 0)
                 && quote.validFrom() != null;
     }
-
-    private String normalizeCurrency(String currency) {
-        return currency.trim().toUpperCase(Locale.ROOT);
-    }
-
 }

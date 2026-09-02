@@ -1,5 +1,6 @@
 package com.baedang.stock.service;
 
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.StockUniverseEntry;
@@ -9,7 +10,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -37,7 +37,7 @@ public class StockMasterLoadService {
 
             Map<String, StockUniverseEntry> uniqueStocks = stocksFromPort.stream()
                     .collect(Collectors.toMap(
-                            stock -> normalizeSymbol(stock.symbol()),
+                            stock -> DomainNormalizer.symbol(stock.symbol()),
                             Function.identity(),
                             (left, right) -> left,
                             LinkedHashMap::new
@@ -52,7 +52,7 @@ public class StockMasterLoadService {
                         stockRepository
                                 .findByMarketCountryAndSymbolIn(marketCountry, symbols)
                                 .stream().collect(Collectors.toMap(
-                                        stock -> normalizeSymbol(
+                                        stock -> DomainNormalizer.symbol(
                                                 stock.getSymbol()
                                         ),
                                         Function.identity(),
@@ -71,7 +71,7 @@ public class StockMasterLoadService {
                             market,
                             universeEntry.getValue().name(),
                             universeEntry.getValue().isinCode(),
-                            marketCountryToCurrency(marketCountry),
+                            marketCountry.defaultCurrency(),
                             universeEntry.getValue().securityType(),
                             universeEntry.getValue().isCommonShare()
                     ))
@@ -80,16 +80,5 @@ public class StockMasterLoadService {
             if (!newStocks.isEmpty()) stockRepository.saveAll(newStocks);
 
         }
-    }
-
-    private String normalizeSymbol(String symbol) {
-        return symbol.trim().toUpperCase(Locale.ROOT);
-    }
-
-    private String marketCountryToCurrency(MarketCountry marketCountry) {
-        return switch (marketCountry) {
-            case KR -> "KRW";
-            case US -> "USD";
-        };
     }
 }
