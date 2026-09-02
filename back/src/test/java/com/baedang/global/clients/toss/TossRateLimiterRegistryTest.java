@@ -34,6 +34,8 @@ class TossRateLimiterRegistryTest {
         }
 
         TossRateLimiterRegistry registry = new TossRateLimiterRegistry(gates);
+        registry.acquire(TossApiGroup.STOCK);
+        registry.acquire(TossApiGroup.STOCK);
 
         registry.acquire(TossApiGroup.RANKING);
         registry.acquire(TossApiGroup.RANKING);
