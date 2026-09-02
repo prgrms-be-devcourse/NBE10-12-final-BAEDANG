@@ -21,13 +21,13 @@ import static org.mockito.Mockito.when;
 @ExtendWith(OutputCaptureExtension.class)
 class PrevCloseUpdateServiceTest {
 
-    private PreviousTradingDayResolver resolver;
+    private LatestCompletedTradingDayResolver resolver;
     private PrevCloseUpdateTransactionService transactionService;
     private PrevCloseUpdateService service;
 
     @BeforeEach
     void setUp() {
-        resolver = mock(PreviousTradingDayResolver.class);
+        resolver = mock(LatestCompletedTradingDayResolver.class);
         transactionService = mock(PrevCloseUpdateTransactionService.class);
         service = new PrevCloseUpdateService(resolver, transactionService);
     }

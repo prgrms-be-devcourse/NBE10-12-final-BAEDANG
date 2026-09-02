@@ -10,7 +10,8 @@ import java.time.LocalDate;
  * {@code TossMarketCalendarAdapter}({@code toss.enabled=true}일 때만 등록)가 담당합니다.
  *
  * <p>Service 계층은 이 포트만 주입받으면 되고, Toss 호출 방식을 전혀 알 필요가
- * 없습니다.
+ * 없습니다. 실제 사용처에는 동일 시장·날짜 요청을 공유하는 캐싱 데코레이터가
+ * 주입되고, 이 데코레이터가 Toss 원본 어댑터에 위임합니다.
  */
 public interface MarketCalendarPort {
 

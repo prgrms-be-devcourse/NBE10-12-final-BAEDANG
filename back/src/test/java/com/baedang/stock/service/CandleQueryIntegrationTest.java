@@ -7,6 +7,7 @@ import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
+import com.baedang.market.service.LatestCompletedTradingDayResolver;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -26,12 +27,17 @@ import java.math.BigDecimal;
 import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @Testcontainers
@@ -51,6 +57,7 @@ class CandleQueryIntegrationTest {
                     "/docker-entrypoint-initdb.d/01-schema.sql");
 
     @MockitoBean MarketDataPort marketDataPort;
+    @MockitoBean LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort
     // 의존을 목(mock)으로 채워 넣어야 컨텍스트가 뜬다(다른 서비스가 직접 주입받는다).
     @MockitoBean MarketCalendarPort marketCalendarPort;
@@ -74,6 +81,41 @@ class CandleQueryIntegrationTest {
 
         assertThat(response.items()).extracting(item -> item.close())
                 .containsExactly("100", "110", "120");
+    }
+
+    @Test
+    void 최초_일봉_차트가_200개를_한번만_백필하고_기간_변경은_DB를_재사용한다() {
+        Stock stock = saveStock(MarketCountry.US, "USD");
+        LocalDate latestDate = LocalDate.of(2026, 8, 28);
+        List<Candle> fetched = IntStream.range(0, 200)
+                .mapToObj(index -> dailyCandle(latestDate.minusDays(index), "100", "USD"))
+                .toList();
+        AtomicBoolean externalCallInTransaction = new AtomicBoolean(true);
+        when(marketDataPort.fetchCandles(
+                stock.getSymbol(), CandleInterval.ONE_DAY, 200))
+                .thenAnswer(invocation -> {
+                    externalCallInTransaction.set(
+                            TransactionSynchronizationManager.isActualTransactionActive());
+                    return fetched;
+                });
+        when(latestCompletedTradingDayResolver.resolve(MarketCountry.US))
+                .thenReturn(Optional.of(latestDate));
+
+        var oneMonth = candleQueryService.getCandles(
+                stock.getSymbol(), "US", "1d", "1M");
+        var sixMonths = candleQueryService.getCandles(
+                stock.getSymbol(), "US", "1d", "6M");
+        var oneYear = candleQueryService.getCandles(
+                stock.getSymbol(), "US", "1d", "1Y");
+
+        assertThat(externalCallInTransaction).isFalse();
+        assertThat(oneMonth.items()).hasSize(22);
+        assertThat(sixMonths.items()).hasSize(130);
+        assertThat(oneYear.items()).hasSize(200);
+        assertThat(dailyCandleRepository.hasAtLeastCandles(stock.getStockId(), 200)).isTrue();
+        assertThat(dailyCandleRepository.hasAtLeastCandles(stock.getStockId(), 201)).isFalse();
+        verify(marketDataPort, times(1)).fetchCandles(
+                stock.getSymbol(), CandleInterval.ONE_DAY, 200);
     }
 
     @Test
@@ -118,5 +160,9 @@ class CandleQueryIntegrationTest {
     private Candle candle(OffsetDateTime at, String close, String currency) {
         BigDecimal price = new BigDecimal(close);
         return new Candle(at, price, price, price, price, new BigDecimal("1000"), currency);
+    }
+
+    private Candle dailyCandle(LocalDate date, String close, String currency) {
+        return candle(date.atStartOfDay(ZoneId.of("Asia/Seoul")).toOffsetDateTime(), close, currency);
     }
 }

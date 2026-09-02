@@ -9,6 +9,7 @@ import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.DailyCandlePersistenceService;
+import com.baedang.market.service.LatestCompletedTradingDayResolver;
 import com.baedang.market.service.QuoteSnapshotPersistenceService;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -24,14 +25,15 @@ import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 거래대금 랭킹 상위 100(={@code is_ranked=true}) 밖 종목의 시세·일봉을 온디맨드로 채운다.
+ * 종목 상세 조회에 필요한 시세와 일봉을 온디맨드로 채운다.
  *
- * <p>상위 100종목은 {@code QuoteSnapshotScheduler}(5초)·{@code DailyCandleCollectionScheduler}
- * (장 마감 후)가 이미 최신으로 유지하므로, 이 서비스는 <b>{@code is_ranked=false}인
- * 종목에 대해서만</b> 동작한다 — 상위 100종목에는 항상 무조건 그대로 통과(no-op)한다.
+ * <p>상위 100종목의 시세는 {@code QuoteSnapshotScheduler}(5초)가 유지하므로 온디맨드로
+ * 갱신하지 않는다. 일봉 차트는 랭킹 여부와 관계없이 저장 이력이 부족할 수 있으므로,
+ * 상세 또는 차트 최초 요청에서 최신 200개를 한 번 백필한다.
  *
  * <p>{@code infra/schema.sql}에 문서화된 "그 외 전 종목" 정책을 그대로 구현한다: 상세
  * 화면을 여는 순간 시세·일봉을 함께 채워 UPSERT하고, 8,500종목을 매일 도는 배치는
@@ -40,9 +42,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * <ul>
  *   <li><b>시세({@code quote_snapshot})</b>는 하루에 한 번(그 종목을 그날 처음 조회할 때만)
  *   갱신한다 — 화면에 보이는 "현재가"라 하루 이상 묵히면 눈에 띄게 틀려 보인다.</li>
- *   <li><b>일봉({@code daily_candle})</b>은 완전히 비어 있을 때만 백필한다 — 이미 값이
- *   있으면(며칠 지났더라도) 다시 부르지 않는다. 차트 모양은 며칠 지나도 거의 안 바뀌고,
- *   보는 사람도 거의 없어서 매번 다시 부를 값어치가 없다.</li>
+ *   <li><b>일봉({@code daily_candle})</b>은 과거 200개 백필이 끝나지 않았거나 DB 최신
+ *   거래일이 시장의 최신 확정 거래일보다 오래됐을 때 최신 200개를 요청한다. 차트 기간을
+ *   바꿔도 같은 DB 데이터와 완료 기록을 재사용하므로 추가 외부 호출이 발생하지 않는다.</li>
  * </ul>
  *
  * <p>Toss 호출이 실패해도(네트워크 오류, 상장폐지 등으로 심볼이 없는 경우 등) 예외를
@@ -55,8 +57,8 @@ public class StockOnDemandQuoteService {
 
     private static final Logger log = LoggerFactory.getLogger(StockOnDemandQuoteService.class);
 
-    /** prev_close를 구할 수 있을 만큼(주말·공휴일이 껴도) 여유 있게 받아온다. */
-    private static final int DAILY_CANDLE_BACKFILL_COUNT = 5;
+    /** Toss 단일 호출 상한. 페이지네이션 없이 상세·차트가 공유할 최신 일봉을 확보한다. */
+    private static final int DAILY_CANDLE_BACKFILL_COUNT = 200;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final ZoneId NY = ZoneId.of("America/New_York");
     /** {@code CandleQueryService.refreshMinuteCandlesIfNeeded}와 같은 개수·같은 이유. */
@@ -67,6 +69,8 @@ public class StockOnDemandQuoteService {
     private final QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     private final DailyCandleRepository dailyCandleRepository;
     private final DailyCandlePersistenceService dailyCandlePersistenceService;
+    private final OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker;
+    private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     private final Clock clock;
     private final ReentrantLock[] refreshLocks = createRefreshLocks();
 
@@ -76,6 +80,8 @@ public class StockOnDemandQuoteService {
             QuoteSnapshotPersistenceService quoteSnapshotPersistenceService,
             DailyCandleRepository dailyCandleRepository,
             DailyCandlePersistenceService dailyCandlePersistenceService,
+            OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker,
+            LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
             Clock clock
     ) {
         this.marketDataPort = marketDataPort;
@@ -83,6 +89,8 @@ public class StockOnDemandQuoteService {
         this.quoteSnapshotPersistenceService = quoteSnapshotPersistenceService;
         this.dailyCandleRepository = dailyCandleRepository;
         this.dailyCandlePersistenceService = dailyCandlePersistenceService;
+        this.onDemandDailyCandleBackfillTracker = onDemandDailyCandleBackfillTracker;
+        this.latestCompletedTradingDayResolver = latestCompletedTradingDayResolver;
         this.clock = clock;
     }
 
@@ -93,10 +101,10 @@ public class StockOnDemandQuoteService {
      * @param existing 현재 DB에 있는 시세 스냅샷 (없으면 {@code null})
      */
     public QuoteSnapshot ensureQuote(Stock stock, QuoteSnapshot existing) {
+        ensureDailyCandles(stock);
         if (Boolean.TRUE.equals(stock.getIsRanked())) {
             return existing;
         }
-        ensureDailyCandles(stock);
         if (!isStale(existing)) {
             return existing;
         }
@@ -104,30 +112,47 @@ public class StockOnDemandQuoteService {
     }
 
     /**
-     * 랭킹 밖 종목의 일봉이 완전히 비어 있으면 온디맨드로 백필한다. 상세 화면뿐 아니라
-     * 캔들 조회({@code CandleQueryService})에서도 독립적으로 호출된다 — 상세를 거치지
-     * 않고 캔들만 바로 열어볼 수도 있기 때문이다.
+     * 과거 이력이 부족하거나 최신 확정 거래일의 일봉이 없으면 최신 200개를 한 번
+     * 온디맨드로 조회한다. 상세 화면과 캔들 조회({@code CandleQueryService})가 같은 데이터를
+     * 공유하므로 어떤 경로로 먼저 진입하거나 차트 기간을 바꾸더라도 최신 상태에서는
+     * 추가 호출 없이 DB에서 응답한다.
      *
      * <p>{@code CandleQueryService.refreshMinuteCandlesIfNeeded}와 같은 이중 확인(더블
      * 체크) 락 패턴을 쓴다 — 같은 종목에 짧은 시간 안에 여러 요청이 몰려도(동시 사용자)
      * 실제 Toss 호출과 저장은 한 번만 일어나게 하기 위해서다.
      */
     public void ensureDailyCandles(Stock stock) {
-        if (Boolean.TRUE.equals(stock.getIsRanked())) {
-            return;
-        }
-        if (hasAnyDailyCandle(stock)) {
+        boolean initialDailyCandleBackfillSatisfied =
+                isInitialDailyCandleBackfillSatisfied(stock.getStockId());
+        boolean tradingDayResolved = initialDailyCandleBackfillSatisfied;
+        Optional<LocalDate> expectedTradeDate = initialDailyCandleBackfillSatisfied
+                ? latestCompletedTradingDayResolver.resolve(stock.getMarketCountry())
+                : Optional.empty();
+        if (initialDailyCandleBackfillSatisfied
+                && isLatestRefreshSatisfied(stock.getStockId(), expectedTradeDate)) {
             return;
         }
 
         ReentrantLock lock = lockFor(stock.getStockId());
         lock.lock();
         try {
-            if (hasAnyDailyCandle(stock)) return;
+            initialDailyCandleBackfillSatisfied =
+                    isInitialDailyCandleBackfillSatisfied(stock.getStockId());
+            if (initialDailyCandleBackfillSatisfied) {
+                if (!tradingDayResolved) {
+                    expectedTradeDate = latestCompletedTradingDayResolver.resolve(stock.getMarketCountry());
+                }
+                if (isLatestRefreshSatisfied(stock.getStockId(), expectedTradeDate)) return;
+            }
 
             List<Candle> candles = marketDataPort.fetchCandles(
                     stock.getSymbol(), CandleInterval.ONE_DAY, DAILY_CANDLE_BACKFILL_COUNT);
             dailyCandlePersistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
+            onDemandDailyCandleBackfillTracker.markInitialBackfillCompleted(stock.getStockId());
+            if (expectedTradeDate.isPresent()) {
+                onDemandDailyCandleBackfillTracker.markRefreshedThrough(
+                        stock.getStockId(), expectedTradeDate.get());
+            }
         } catch (RuntimeException exception) {
             log.warn("[on-demand] {} 일봉 백필 실패", stock.getSymbol(), exception);
         } finally {
@@ -135,10 +160,33 @@ public class StockOnDemandQuoteService {
         }
     }
 
-    private boolean hasAnyDailyCandle(Stock stock) {
-        return !dailyCandleRepository
-                .findByStockIdOrderByTradeDateDesc(stock.getStockId(), PageRequest.of(0, 1))
-                .isEmpty();
+    private boolean isInitialDailyCandleBackfillSatisfied(Long stockId) {
+        return onDemandDailyCandleBackfillTracker.isInitialBackfillCompleted(stockId)
+                || dailyCandleRepository.hasAtLeastCandles(
+                        stockId,
+                        DAILY_CANDLE_BACKFILL_COUNT
+                );
+    }
+
+    private boolean isLatestRefreshSatisfied(
+            Long stockId,
+            Optional<LocalDate> expectedTradeDate
+    ) {
+        if (expectedTradeDate.isEmpty()) return true;
+        if (onDemandDailyCandleBackfillTracker.wasRefreshedThrough(
+                stockId,
+                expectedTradeDate.get()
+        )) {
+            return true;
+        }
+        return dailyCandleRepository.findTopByStockIdOrderByTradeDateDesc(stockId)
+                .map(DailyCandle::getTradeDate)
+                .filter(latest -> !latest.isBefore(expectedTradeDate.get()))
+                .isPresent();
+    }
+
+    private ZoneId marketZone(Stock stock) {
+        return stock.getMarketCountry() == MarketCountry.US ? NY : KST;
     }
 
     /** 락을 잡은 뒤 다시 한번 신선도를 확인한다 — 락 대기 중 다른 스레드가 이미 갱신했을 수 있다. */
@@ -172,7 +220,7 @@ public class StockOnDemandQuoteService {
     private boolean isStale(QuoteSnapshot quote) {
         if (quote == null) return true;
         LocalDate collectedDate = quote.getCollectedAt().atZoneSameInstant(KST).toLocalDate();
-        LocalDate today = OffsetDateTime.now(clock).atZoneSameInstant(KST).toLocalDate();
+        LocalDate today = clock.instant().atZone(KST).toLocalDate();
         return !collectedDate.equals(today);
     }
 
@@ -189,7 +237,7 @@ public class StockOnDemandQuoteService {
             return quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
         }
 
-        OffsetDateTime collectedAt = OffsetDateTime.now(clock).withOffsetSameInstant(ZoneOffset.UTC);
+        OffsetDateTime collectedAt = clock.instant().atOffset(ZoneOffset.UTC);
         quoteSnapshotPersistenceService.saveOrUpdate(List.of(stock), quotes, collectedAt);
 
         QuoteSnapshot snapshot = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
@@ -208,8 +256,9 @@ public class StockOnDemandQuoteService {
 
     /** 방금 채운(또는 이미 있던) 일봉 중, "오늘"(그 시장 기준) 이전의 가장 최신 종가를 고른다. */
     private BigDecimal derivePrevClose(Stock stock) {
-        ZoneId marketZone = stock.getMarketCountry() == MarketCountry.US ? NY : KST;
-        LocalDate marketToday = OffsetDateTime.now(clock).atZoneSameInstant(marketZone).toLocalDate();
+        LocalDate marketToday = clock.instant()
+                .atZone(marketZone(stock))
+                .toLocalDate();
 
         return dailyCandleRepository
                 .findByStockIdOrderByTradeDateDesc(stock.getStockId(), PageRequest.of(0, DAILY_CANDLE_BACKFILL_COUNT))

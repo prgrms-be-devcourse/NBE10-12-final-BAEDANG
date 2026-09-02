@@ -48,8 +48,8 @@ public class StockDetailService {
                         ErrorCode.STOCK_NOT_FOUND,
                         "symbol=" + symbol + ", marketCountry=" + marketCountry));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
-        // 랭킹 상위 100 밖 종목은 이 호출 안에서 온디맨드로 시세·일봉을 채운다(이슈 #75).
-        // 상위 100 종목은 이미 배치가 채워두므로 이 호출은 그대로 통과한다.
+        // 일봉은 랭킹 여부와 관계없이 부족하면 온디맨드 백필한다. 시세는 상위 100 밖
+        // 종목만 갱신하고, 상위 100은 스케줄러가 채운 기존 값을 그대로 사용한다.
         quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
 
         boolean realtime = Boolean.TRUE.equals(stock.getIsRanked())
