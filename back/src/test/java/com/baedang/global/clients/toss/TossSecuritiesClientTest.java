@@ -13,13 +13,16 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.web.client.RestClient;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
@@ -61,6 +64,7 @@ class TossSecuritiesClientTest {
 
     private WireMockServer wireMockServer;
     private TossSecuritiesClient client;
+    private Map<TossApiGroup, List<Long>> sleptByGroup;
 
     record TestBody(String baseCurrency, String quoteCurrency) {
     }
@@ -71,8 +75,19 @@ class TossSecuritiesClientTest {
         wireMockServer.start();
         configureFor("localhost", wireMockServer.port());
 
+        AtomicLong now = new AtomicLong();
+        sleptByGroup = new EnumMap<>(TossApiGroup.class);
+        Map<TossApiGroup, FixedIntervalGate> gates = new EnumMap<>(TossApiGroup.class);
+        for (TossApiGroup group : TossApiGroup.values()) {
+            List<Long> records = new CopyOnWriteArrayList<>();
+            sleptByGroup.put(group, records);
+            gates.put(group, new FixedIntervalGate(group.tps(), now::get, records::add));
+        }
+        TossRateLimiterRegistry registry = new TossRateLimiterRegistry(gates);
+
         client = new TossSecuritiesClient(
                 RestClient.builder(),
+                registry,
                 "http://localhost:" + wireMockServer.port(),
                 "test-id",
                 "test-secret"
@@ -145,7 +160,7 @@ class TossSecuritiesClientTest {
 
         @ParameterizedTest(name = "{0}")
         @ValueSource(strings = {
-                "/api/v1/stocks/all",
+                "/api/v1/unknown",
                 "/api/v1/price-limits"
         })
         void 미등록_경로는_차단된다(String path) {
@@ -324,5 +339,141 @@ class TossSecuritiesClientTest {
                     .extracting(TossSecuritiesClientTest::errorCodeOf)
                     .isEqualTo(ErrorCode.INTERNAL_ERROR);
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Rate Limit — permit 획득 횟수와 429 변환
+    // ═══════════════════════════════════════════════════════════════════════
+    @Nested
+    @DisplayName("Rate Limit")
+    class RateLimit {
+
+        @Test
+        @DisplayName("정상 요청은 endpoint 그룹 permit 1회만 획득")
+        void 정상_요청은_endpoint_permit_한번() {
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE)).willReturn(okJson(RATE_BODY)));
+
+            client.get(EXCHANGE_RATE, Map.of(), TestBody.class);
+
+            assertThat(sleptByGroup.get(TossApiGroup.MARKET_INFO)).hasSize(1);
+            assertThat(sleptByGroup.get(TossApiGroup.AUTH)).isEmpty();
+        }
+
+        @Test
+        @DisplayName("401 재시도는 endpoint 2회와 AUTH 1회 permit을 획득")
+        void 재시도는_endpoint와_auth_permit을_획득(){
+            givenTokenIssued();
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader("Authorization",equalTo("Bearer "+VALID_TOKEN))
+                    .willReturn(okJson(RATE_BODY)));
+
+            client.get(EXCHANGE_RATE, Map.of(), TestBody.class);
+
+            assertThat(sleptByGroup.get(TossApiGroup.MARKET_INFO)).hasSize(2);
+            assertThat(sleptByGroup.get(TossApiGroup.AUTH)).hasSize(1);
+        }
+
+        @Test
+        @DisplayName("429는 재시도 없이 TOSS_RATE_LIMITED으로 변환")
+        void rate_limited는_429로_변환() {
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE)).willReturn(aResponse().withStatus(429)));
+
+            assertThatThrownBy(() -> client.get(EXCHANGE_RATE, Map.of(), TestBody.class))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(TossSecuritiesClientTest::errorCodeOf)
+                    .isEqualTo(ErrorCode.TOSS_RATE_LIMITED);
+
+            verify(0, postRequestedFor(urlEqualTo(TOKEN_PATH)));
+            verify(1, getRequestedFor(urlPathEqualTo(EXCHANGE_RATE)));
+        }
+
+        @Test
+        @DisplayName("동시 401이어도 토큰 발급은 한 번")
+        void 동시_401은_토큰을_한번만_발급() throws InterruptedException {
+            stubFor(post(urlEqualTo(TOKEN_PATH))
+                    .willReturn(okJson(TOKEN_RESPONSE)));
+
+            // 두 스레드가 모두 Bearer null로 요청한 뒤 401을 받도록 응답을 잠시 지연한다.
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer null")
+                    )
+                    .willReturn(aResponse()
+                            .withStatus(401)
+                            .withFixedDelay(200)));
+
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer " + VALID_TOKEN)
+                    )
+                    .willReturn(okJson(RATE_BODY)));
+
+            int threadCount = 2;
+
+            CountDownLatch ready = new CountDownLatch(threadCount);
+            CountDownLatch start = new CountDownLatch(1);
+            CountDownLatch done = new CountDownLatch(threadCount);
+
+            List<Throwable> failures = new CopyOnWriteArrayList<>();
+
+            for (int index = 0; index < threadCount; index++) {
+                Thread thread = new Thread(() -> {
+                    ready.countDown();
+
+                    try {
+                        start.await();
+                        client.get(EXCHANGE_RATE, Map.of(), TestBody.class);
+                    } catch (Throwable throwable) {
+                        failures.add(throwable);
+                    } finally {
+                        // client.get()이 성공하거나 예외를 던져도 반드시 감소한다.
+                        done.countDown();
+                    }
+                });
+
+                thread.start();
+            }
+
+            // 두 스레드가 모두 시작 지점에 도착한 뒤 동시에 요청을 시작한다.
+            boolean allReady = ready.await(5, TimeUnit.SECONDS);
+            start.countDown();
+
+            assertThat(allReady).isTrue();
+            assertThat(done.await(5, TimeUnit.SECONDS)).isTrue();
+            assertThat(failures).isEmpty();
+
+            // 최초 요청 2개가 모두 기존 null 토큰으로 전송되었는지 확인한다.
+            verify(2, getRequestedFor(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer null")
+                    ));
+
+            // 동시 401이어도 token POST는 한 번만 실행되어야 한다.
+            verify(1, postRequestedFor(urlEqualTo(TOKEN_PATH)));
+
+            // 두 요청 모두 새 토큰으로 한 번씩 재시도한다.
+            verify(2, getRequestedFor(urlPathEqualTo(EXCHANGE_RATE))
+                    .withHeader(
+                            "Authorization",
+                            equalTo("Bearer " + VALID_TOKEN)
+                    ));
+        }
+
+        @Test
+        @DisplayName("토큰 발급 429도 TOSS_RATE_LIMITED로 변환")
+        void 토큰_발급_429를_rate_limited로_변환() {
+            stubFor(get(urlPathEqualTo(EXCHANGE_RATE)).willReturn(aResponse().withStatus(401)));
+            stubFor(post(urlPathEqualTo(TOKEN_PATH)).willReturn(aResponse().withStatus(429)));
+
+            assertThatThrownBy(() -> client.get(EXCHANGE_RATE, Map.of(), TestBody.class))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(TossSecuritiesClientTest::errorCodeOf)
+                    .isEqualTo(ErrorCode.TOSS_RATE_LIMITED);
+            verify(1, postRequestedFor(urlPathEqualTo(TOKEN_PATH)));
+        }
+
     }
 }
