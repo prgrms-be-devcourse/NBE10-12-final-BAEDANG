@@ -1,5 +1,6 @@
 package com.baedang.market.client.toss;
 
+import com.baedang.global.clients.toss.TossRateLimiterRegistry;
 import com.baedang.global.clients.toss.TossSecuritiesClient;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
@@ -42,7 +43,7 @@ class TossMarketCalendarAdapterTest {
         configureFor("localhost", wireMockServer.port());
         stubFor(post(urlEqualTo("/oauth2/token")).willReturn(okJson(TOKEN_RESPONSE)));
 
-        TossSecuritiesClient client = new TossSecuritiesClient(RestClient.builder(), "http://localhost:" + wireMockServer.port(), "test-id", "test-secret");
+        TossSecuritiesClient client = new TossSecuritiesClient(RestClient.builder(), new TossRateLimiterRegistry(),"http://localhost:" + wireMockServer.port(), "test-id", "test-secret");
         adapter = new TossMarketCalendarAdapter(client);
     }
 

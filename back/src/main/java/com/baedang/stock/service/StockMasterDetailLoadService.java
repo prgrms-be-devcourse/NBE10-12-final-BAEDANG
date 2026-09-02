@@ -1,18 +1,14 @@
 package com.baedang.stock.service;
 
-import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.StockInfo;
 import com.baedang.stock.port.SymbolInfoPort;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.standard.utils.Pacer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Locale;
@@ -21,13 +17,11 @@ import java.util.stream.Collectors;
 
 import static com.baedang.stock.entity.ListingStatus.ACTIVE;
 import static com.baedang.stock.entity.ListingStatus.DELISTED;
-import static org.springframework.transaction.annotation.Propagation.NEVER;
 
 @Service
 public class StockMasterDetailLoadService {
 
     private static final Logger log = LoggerFactory.getLogger(StockMasterDetailLoadService.class);
-    private static final int TPS = 5;
     private static final int CHUNK_SIZE = 200;
 
     private final SymbolInfoPort symbolInfoPort;
@@ -42,8 +36,6 @@ public class StockMasterDetailLoadService {
     }
 
     public void loadAll() {
-        Pacer pacer = Pacer.forTps(TPS);
-
         int pageNumber = 0;
         while (true) {
             List<Stock> stocks = stockRepository
@@ -95,7 +87,6 @@ public class StockMasterDetailLoadService {
 
             stockRepository.saveAll(stocks);
 
-            pacer.pace();
             pageNumber++;
         }
     }

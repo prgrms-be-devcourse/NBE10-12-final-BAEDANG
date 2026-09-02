@@ -6,7 +6,6 @@ import com.baedang.stock.port.RankingEntry;
 import com.baedang.stock.port.RankingPort;
 import com.baedang.stock.port.RankingSnapshot;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.standard.utils.Pacer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
@@ -23,7 +22,6 @@ import java.util.stream.Collectors;
 public class StockRankingLoadService {
 
     private static final Logger log = LoggerFactory.getLogger(StockRankingLoadService.class);
-    private static final int TPS = 5;
 
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
@@ -47,8 +45,6 @@ public class StockRankingLoadService {
     }
 
     public void load(MarketCountry marketCountry) {
-        Pacer pacer = Pacer.forTps(TPS);
-
         RankingSnapshot snapshot = rankingPort.fetchRanking(marketCountry);
 
         // 보통 휴장일에 빈 배열이 온다. 예외가 있을 수 있음.
@@ -61,7 +57,6 @@ public class StockRankingLoadService {
             self.applyRanking(marketCountry, snapshot.entries());
         }
 
-        pacer.pace();
     }
 
     @Transactional
