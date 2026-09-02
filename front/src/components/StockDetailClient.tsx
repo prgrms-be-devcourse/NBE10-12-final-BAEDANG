@@ -77,7 +77,7 @@ const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
   {
     target: '[data-tour="order-summary"]',
     title: "예상 체결 내역",
-    description: "수수료와 세금까지 반영한 실제 차감·입금 예상 금액이에요.\n매수엔 세금이 없고, 매도할 때만 세금이 붙어요.",
+    description: "수수료와 세금까지 반영한\n실제 차감·입금 예상 금액이에요.\n매수엔 세금이 없고, 매도할 때만 세금이 붙어요.",
   },
   {
     target: '[data-tour="submit"]',
