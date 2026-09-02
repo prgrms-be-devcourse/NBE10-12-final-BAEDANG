@@ -3,9 +3,8 @@ package com.baedang.account.service;
 import com.baedang.account.dto.AccountResetResponse;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
-import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.repository.HoldingRepository;
-import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.trading.service.InitialDepositLedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -26,20 +25,20 @@ public class AccountResetService {
 
     private final AccountRepository accountRepository;
     private final HoldingRepository holdingRepository;
-    private final LedgerEntryRepository ledgerEntryRepository;
+    private final InitialDepositLedgerService initialDepositLedgerService;
     private final BigDecimal initialCash;
     private final Clock clock;
 
     public AccountResetService(
             AccountRepository accountRepository,
             HoldingRepository holdingRepository,
-            LedgerEntryRepository ledgerEntryRepository,
+            InitialDepositLedgerService initialDepositLedgerService,
             @Value("${trading.initial-cash}") BigDecimal initialCash,
             Clock clock
     ) {
         this.accountRepository = accountRepository;
         this.holdingRepository = holdingRepository;
-        this.ledgerEntryRepository = ledgerEntryRepository;
+        this.initialDepositLedgerService = initialDepositLedgerService;
         this.initialCash = initialCash;
         this.clock = clock;
     }
@@ -70,11 +69,11 @@ public class AccountResetService {
                 initialCash,
                 resetAt));
 
-        ledgerEntryRepository.save(LedgerEntry.initialDeposit(
+        initialDepositLedgerService.recordInitialDeposit(
                 newAccount.getAccountId(),
-                initialCash,
-                "모의투자금 지급 · " + newAccount.getRoundNo() + "회차",
-                resetAt));
+                newAccount.getInitialCash(),
+                newAccount.getRoundNo(),
+                newAccount.getOpenedAt());
 
         return AccountResetResponse.fromReset(newAccount);
     }

@@ -6,6 +6,7 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.trading.service.InitialDepositLedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -50,7 +51,7 @@ class AccountResetServiceTest {
         service = new AccountResetService(
                 accountRepository,
                 holdingRepository,
-                ledgerEntryRepository,
+                new InitialDepositLedgerService(ledgerEntryRepository),
                 INITIAL_CASH,
                 Clock.fixed(RESET_INSTANT, ZoneOffset.UTC));
     }
@@ -63,6 +64,7 @@ class AccountResetServiceTest {
         when(saved.getAccountId()).thenReturn(2L);
         when(saved.getRoundNo()).thenReturn(2);
         when(saved.getInitialCash()).thenReturn(INITIAL_CASH);
+        when(saved.getOpenedAt()).thenReturn(RESET_INSTANT.atOffset(ZoneOffset.UTC));
         when(accountRepository.findByAccountIdAndUserIdForUpdate(1L, 7L))
                 .thenReturn(Optional.of(current));
         when(accountRepository.saveAndFlush(any(Account.class))).thenReturn(saved);
