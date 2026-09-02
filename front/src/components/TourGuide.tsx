@@ -8,6 +8,8 @@ export type TourStep = {
   title: string;
   /** 줄바꿈이 필요하면 "\n"을 넣는다(`white-space: pre-line`으로 그대로 반영된다). */
   description: string;
+  /** 설명 문구 정렬. 기본은 왼쪽 정렬이고, 필요한 단계에서만 가운데 정렬로 넘긴다. */
+  descriptionAlign?: "left" | "center";
 };
 
 /**
@@ -148,7 +150,10 @@ export function TourGuide({
         <div className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>
           {step.title}
         </div>
-        <p className="mb-4 text-[13.5px] leading-relaxed" style={{ color: "var(--body)", whiteSpace: "pre-line" }}>
+        <p
+          className="mb-4 text-[13.5px] leading-relaxed"
+          style={{ color: "var(--body)", whiteSpace: "pre-line", textAlign: step.descriptionAlign ?? "left" }}
+        >
           {step.description}
         </p>
         <div className="flex items-center justify-between">
