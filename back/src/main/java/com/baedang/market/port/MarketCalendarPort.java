@@ -7,11 +7,11 @@ import java.time.LocalDate;
  *
  * <p>이 인터페이스는 <b>우리 서비스가 무엇을 필요로 하는지</b>만 선언합니다 — Toss 의
  * 엔드포인트 이름, 파라미터, 응답 구조는 전혀 몰라야 합니다. 실제 호출은
- * {@code TossMarketCalendarAdapter} 가 담당하고, Toss 없이 개발/테스트할 때는
- * {@code FakeMarketCalendarPort} 가 이 자리를 대신합니다.
+ * {@code TossMarketCalendarAdapter}({@code toss.enabled=true}일 때만 등록)가 담당합니다.
  *
- * <p>Service 계층은 이 포트만 주입받으면 되고, 지금 Toss 를 쓰는지 Fake 를 쓰는지
- * 전혀 알 필요가 없습니다 (Spring 이 {@code toss.enabled} 설정에 따라 알아서 골라줍니다).
+ * <p>Service 계층은 이 포트만 주입받으면 되고, Toss 호출 방식을 전혀 알 필요가
+ * 없습니다. 실제 사용처에는 동일 시장·날짜 요청을 공유하는 캐싱 데코레이터가
+ * 주입되고, 이 데코레이터가 Toss 원본 어댑터에 위임합니다.
  */
 public interface MarketCalendarPort {
 

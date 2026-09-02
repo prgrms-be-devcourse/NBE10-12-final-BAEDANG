@@ -26,8 +26,7 @@ public class OrderQuoteService {
 
     private final OrderQuoteQueryService queryService;
 
-    // 시장 데이터 담당 구현과 연결되는 포트입니다. 거래 모듈에서는 구현하지 않습니다.
-    // 상대 구현체가 Spring Bean으로 병합되기 전 IDE 자동 주입 경고가 발생할 수 있습니다.
+    // 시장 데이터 모듈이 구현하는 포트입니다. 거래 모듈에서는 구현하지 않습니다.
     private final MarketSessionProvider marketSessionProvider;
     private final ExecutionExchangeRateProvider exchangeRateProvider;
     private final OrderAmountCalculator amountCalculator;

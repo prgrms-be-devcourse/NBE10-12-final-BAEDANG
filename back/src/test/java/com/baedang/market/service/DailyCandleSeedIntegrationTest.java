@@ -2,6 +2,7 @@ package com.baedang.market.service;
 
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
+import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.service.DailyCandleSeedService.SeedResult;
@@ -65,6 +66,10 @@ class DailyCandleSeedIntegrationTest {
                     "/docker-entrypoint-initdb.d/01-schema.sql");
 
     @MockitoBean MarketDataPort marketDataPort;
+
+    // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort(정기 수집
+    // 서비스가 요구)를 목으로 채워 full-context 로딩이 실패하지 않도록 한다.
+    @MockitoBean MarketCalendarPort marketCalendarPort;
 
     @Autowired DailyCandleSeedService seedService;
     @Autowired DailyCandleRepository dailyCandleRepository;
