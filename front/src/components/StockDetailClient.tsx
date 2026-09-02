@@ -250,9 +250,18 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     blockReason = "주문가능금액이 부족해요";
   }
 
-  // 매수/매도 필박스 색 — 매도는 var(--down) 고정, 매수는 라이트/다크에서 색조가 다르다
-  // (design_handoff README: 매수 = 라이트 var(--up) / 다크 oklch(56% 0.17 20)).
-  const txPillColor = side === "매도" ? "var(--down)" : theme === "dark" ? "oklch(56% 0.17 20)" : "var(--up)";
+  // 매수/매도 필박스 색 — 예전에는 --up/--down 토큰을 그대로 썼는데, 그 토큰을
+  // 차트용으로 더 선명하게 조정한 뒤(globals.css) 이 버튼만은 예전 색이 더 낫다는
+  // 피드백을 받아 여기서만 원래 값을 그대로 고정한다(차트·랭킹 등락 배지 등
+  // --up/--down을 공유하는 나머지 화면은 그대로 새 색을 쓴다).
+  const txPillColor =
+    side === "매도"
+      ? theme === "dark"
+        ? "oklch(70% 0.13 232)"
+        : "oklch(56% 0.16 236)"
+      : theme === "dark"
+        ? "oklch(56% 0.17 20)"
+        : "oklch(58% 0.2 25)";
 
   async function handleSubmit() {
     if (blockReason || submitting) return;
