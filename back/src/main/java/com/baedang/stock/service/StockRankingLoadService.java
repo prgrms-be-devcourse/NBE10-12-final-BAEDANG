@@ -166,7 +166,7 @@ public class StockRankingLoadService {
     ) {
         if (targets.isEmpty()) return;
 
-        Map<Long, QuoteSnapshot> qouteSnapshotStockIdMap = quoteSnapshotRepository
+        Map<Long, QuoteSnapshot> quoteSnapshotStockIdMap = quoteSnapshotRepository
                 .findByStockIdIn(targets.keySet())
                 .stream()
                 .collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity()));
@@ -178,7 +178,7 @@ public class StockRankingLoadService {
         for (Map.Entry<Long, RankingEntry> target : targets.entrySet()) {
             Long stockId = target.getKey();
             RankingEntry entry = target.getValue();
-            QuoteSnapshot quoteSnapshot = qouteSnapshotStockIdMap.get(stockId);
+            QuoteSnapshot quoteSnapshot = quoteSnapshotStockIdMap.get(stockId);
 
             if (quoteSnapshot == null) {
                 if (!canCreate(entry)) {
