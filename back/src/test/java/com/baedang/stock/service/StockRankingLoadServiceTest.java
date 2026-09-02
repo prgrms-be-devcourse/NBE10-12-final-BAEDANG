@@ -21,6 +21,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
@@ -272,10 +273,87 @@ class StockRankingLoadServiceTest {
             assertThat(저장된_스냅샷().getQuoteAt()).isNotNull();
         }
 
+        @Test
+        void 일부가_유효하지_않아도_나머지는_저장한다() {
+            직전_유니버스(MarketCountry.KR);
+            심볼_조회(종목("005930", 1L), 종목("000660", 2L), 종목("035720", 3L));
+            스냅샷_조회();
+
+            service.applyRanking(
+                    MarketCountry.KR,
+                    List.of(
+                            엔트리(1, "005930"),
+                            엔트리(2, "000660", null, new BigDecimal("69000")),  // 현재가 없음
+                            엔트리(3, "035720")),
+                    RANKED_AT);
+
+            // 한 건이 걸러져도 나머지 두 건은 그대로 저장돼야 한다.
+            assertThat(저장된_스냅샷들())
+                    .extracting(QuoteSnapshot::getStockId)
+                    .containsExactly(1L, 3L);
+        }
+
+        @Test
+        void 스냅샷이_있는_종목과_없는_종목이_섞여도_각각_처리한다() {
+            직전_유니버스(MarketCountry.KR);
+            심볼_조회(종목("005930", 1L), 종목("000660", 2L));
+            QuoteSnapshot 기존 = 스냅샷(1L, new BigDecimal("71000"));
+            스냅샷_조회(기존);
+
+            service.applyRanking(
+                    MarketCountry.KR,
+                    List.of(엔트리(1, "005930"), 엔트리(2, "000660")),
+                    RANKED_AT);
+
+            assertThat(기존.getPrevClose()).isEqualByComparingTo("69000");
+            assertThat(저장된_스냅샷들())
+                    .extracting(QuoteSnapshot::getStockId)
+                    .containsExactly(2L);
+        }
+
+        @Test
+        void 미국_종목은_USD_스냅샷으로_생성한다() {
+            Stock 애플 = Stock.create(
+                    "AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true);
+            ReflectionTestUtils.setField(애플, "stockId", 1L);
+            직전_유니버스(MarketCountry.US);
+            심볼_조회(애플);
+            스냅샷_조회();
+
+            service.applyRanking(
+                    MarketCountry.US,
+                    List.of(달러_엔트리(1, "AAPL")),
+                    RANKED_AT);
+
+            assertThat(저장된_스냅샷().getCurrency()).isEqualTo("USD");
+            assertThat(저장된_스냅샷().getPrevClose()).isEqualByComparingTo("128.45");
+        }
+
+        @Test
+        void 이번에_탈락한_종목의_스냅샷은_건드리지_않는다() {
+            Stock 탈락 = 종목("005930", 1L);
+            탈락.applyRanking(1, new BigDecimal("1000000000"));
+            직전_유니버스(MarketCountry.KR, 탈락);
+            심볼_조회(종목("000660", 2L));
+            스냅샷_조회();
+
+            service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "000660")), RANKED_AT);
+
+            assertThat(탈락.getIsRanked()).isFalse();
+            // 탈락 종목(1L)은 조회 대상에도 들어가지 않는다.
+            assertThat(저장된_스냅샷().getStockId()).isEqualTo(2L);
+        }
+
         private QuoteSnapshot 저장된_스냅샷() {
             ArgumentCaptor<QuoteSnapshot> captor = ArgumentCaptor.forClass(QuoteSnapshot.class);
             verify(quoteSnapshotRepository).save(captor.capture());
             return captor.getValue();
+        }
+
+        private List<QuoteSnapshot> 저장된_스냅샷들() {
+            ArgumentCaptor<QuoteSnapshot> captor = ArgumentCaptor.forClass(QuoteSnapshot.class);
+            verify(quoteSnapshotRepository, atLeastOnce()).save(captor.capture());
+            return captor.getAllValues();
         }
     }
 
@@ -315,6 +393,17 @@ class StockRankingLoadServiceTest {
 
     private RankingEntry 엔트리(int rank, String symbol) {
         return 엔트리(rank, symbol, new BigDecimal("70000000000"));
+    }
+
+    private RankingEntry 달러_엔트리(int rank, String symbol) {
+        return new RankingEntry(
+                rank, symbol, "USD",
+                new BigDecimal("130.00"),
+                new BigDecimal("128.45"),
+                new BigDecimal("0.0121"),
+                new BigDecimal("1000000"),
+                new BigDecimal("70000000000")
+        );
     }
 
     private RankingEntry 엔트리(
