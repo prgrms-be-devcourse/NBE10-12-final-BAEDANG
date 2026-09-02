@@ -50,7 +50,7 @@ const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="chart"]',
     title: "캔들 차트 읽는 법",
     description:
-      "빨간 캔들은 시작가보다 오른 날, 파란 캔들은 내린 날이에요.\n위아래로 튀어나온 얇은 선(꼬리)은 그날의 최고가·최저가를 보여줘요.",
+      "빨간 캔들은 시작가보다 오른 날,\n파란 캔들은 내린 날이에요.\n위아래로 튀어나온 얇은 선(꼬리)은\n그날의 최고가·최저가를 보여줘요.",
   },
   {
     target: '[data-tour="candle-toggle"]',
