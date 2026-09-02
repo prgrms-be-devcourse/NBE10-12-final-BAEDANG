@@ -136,8 +136,11 @@ trading:
 #   회원가입·로그인 API 는 동작하지만 토큰을 발급하지 않습니다.
 #   2주차에 JWT 를 붙이면 이 블록을 지우세요.
 auth:
-  enabled: ${AUTH_ENABLED:false}
-  dev-fixed-user-id: ${DEV_FIXED_USER_ID:1}
+  jwt:
+    issuer: baedang
+    secret: ${JWT_SECRET}
+    access-ttl: ${JWT_ACCESS_TTL:15m}
+    refresh-ttl: ${JWT_REFRESH_TTL:7d}
 
 logging:
   level:
