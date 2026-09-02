@@ -4,7 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { PillTabs } from "./PillTabs";
-import { CandlestickChart } from "./CandlestickChart";
+import { CandleChartSection } from "./CandleChartSection";
+import { ChartExpandModal } from "./ChartExpandModal";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
 import { useTheme } from "./ThemeProvider";
@@ -60,6 +61,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
   const [candleItems, setCandleItems] = useState<Candle[]>([]);
   const [candleLoading, setCandleLoading] = useState(true);
+  const [chartExpanded, setChartExpanded] = useState(false);
   const [side, setSide] = useState<"매수" | "매도">("매수");
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
@@ -308,61 +310,34 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           </div>
         </div>
 
-        {/* 세그먼트 토글 */}
-        <div className="my-4.5 flex flex-wrap items-center gap-2.5">
-          <PillTabs
-            options={[
-              { value: "일봉", label: "일봉" },
-              { value: "1분봉", label: "1분봉" },
-            ]}
-            value={candleUnit}
-            onChange={(v) => setCandleUnit(v as "일봉" | "1분봉")}
-            trackClassName="w-fit rounded-full p-[3px]"
-            trackStyle={{
-              background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-              border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
-            }}
-            buttonClassName="rounded-full px-4 py-1.5 text-[13.5px] font-bold"
-            inactiveTextStyle={{ color: "var(--mut)" }}
-          />
-          {candleUnit === "일봉" && (
-            <PillTabs
-              options={[
-                { value: "1개월", label: "1개월" },
-                { value: "6개월", label: "6개월" },
-                { value: "1년", label: "1년" },
-              ]}
-              value={period}
-              onChange={(v) => setPeriod(v as "1개월" | "6개월" | "1년")}
-              trackClassName="w-fit rounded-full p-[3px]"
-              trackStyle={{
-                background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-                border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
-              }}
-              buttonClassName="rounded-full px-3.5 py-1.5 text-[13px] font-bold"
-              inactiveTextStyle={{ color: "var(--mut)" }}
-            />
-          )}
-          <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
-            {candleUnit === "일봉"
-              ? `일봉 · ${period}${lastCandleAt ? ` · ${new Date(lastCandleAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} 종가까지` : ""}`
-              : `1분봉 · 최근 ${candleItems.length}봉`}
-          </span>
-        </div>
+        <CandleChartSection
+          candleUnit={candleUnit}
+          onCandleUnitChange={setCandleUnit}
+          period={period}
+          onPeriodChange={setPeriod}
+          candleItems={candleItems}
+          candleLoading={candleLoading}
+          theme={theme}
+          lastCandleAt={lastCandleAt}
+          onExpand={() => setChartExpanded(true)}
+        />
 
-        <div className="mb-4 overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
-          {candleLoading ? (
-            <div className="flex h-[260px] items-center justify-center">
-              <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트를 불러오는 중…</span>
-            </div>
-          ) : candleItems.length >= 2 ? (
-            <CandlestickChart items={candleItems} theme={theme} />
-          ) : (
-            <div className="flex h-[260px] items-center justify-center">
-              <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트 데이터가 아직 없어요</span>
-            </div>
-          )}
-        </div>
+        {chartExpanded && (
+          <ChartExpandModal
+            name={detail.name}
+            symbol={detail.symbol}
+            market={detail.market}
+            candleUnit={candleUnit}
+            onCandleUnitChange={setCandleUnit}
+            period={period}
+            onPeriodChange={setPeriod}
+            candleItems={candleItems}
+            candleLoading={candleLoading}
+            theme={theme}
+            lastCandleAt={lastCandleAt}
+            onClose={() => setChartExpanded(false)}
+          />
+        )}
 
         <div className="mb-3.5 rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
           <h4 className="mb-2.5 text-[16px] font-bold" style={{ color: "var(--ink)" }}>
