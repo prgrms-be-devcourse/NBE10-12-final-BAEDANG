@@ -48,4 +48,5 @@ The existing Java package is `com.baedang`. Do not rename it.
 - Endpoints & response shapes → `docs/api-spec.md`
 - Tables, columns, batch schedule → `docs/erd.md`
 - Screens & polling intervals → `docs/wireframe.md`
+- Shared configuration, utilities, domain services & frontend modules → `docs/shared-components.md` (check roles, injection/invocation methods, and caveats before duplicating shared functionality)
 - Branch/commit/issue/PR conventions → `docs/conventions.md` (MUST follow when creating branches, commits, issues, or PRs)

@@ -31,6 +31,7 @@
 | `docs/erd.html`       | 테이블 12개 · 컬럼 사전 · 배치 일정 |
 | `docs/wireframe.html` | 화면 6개                            |
 | `docs/api-spec.html`  | 엔드포인트 17개                     |
+| [공용 구성요소 사용 가이드](docs/shared-components.ko.md) | 전역 설정·공용 유틸리티·도메인 서비스·프론트 모듈 |
 
 ---
 

@@ -60,6 +60,15 @@ server:
   port: 8080
   servlet:
     context-path: /
+  tomcat:
+    mbeanregistry:
+      enabled: true
+
+# ── CORS 허용 오리진 ─────────────────────────────────────────────────────────
+#   프론트(Next.js)가 다른 오리진에서 백엔드를 호출하므로 필요합니다. 배포 환경이
+#   늘어나면 코드를 고치지 말고 .env 의 CORS_ALLOWED_ORIGINS 에 콤마로 추가하세요.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
 
 # ── 토스증권 Open API ────────────────────────────────────────────────────────
 #   개발용 대역(Fake) 구현체가 없으므로 키가 비어 있으면(기본값) 백엔드가 기동하지
@@ -70,6 +79,19 @@ toss:
   client-id: ${TOSS_CLIENT_ID:}
   client-secret: ${TOSS_CLIENT_SECRET:}
   enabled: ${TOSS_ENABLED:false}
+
+  # 일봉 시드 백필 관리자 트리거 활성화 플래그(기본 false).
+  #   true 일 때만 POST /internal/admin/seed/daily-candles 엔드포인트가 등록됩니다.
+  #   인증 도입 전이라 상시 노출을 피하려는 것으로, 운영자가 시딩이 필요한 구간에만 켜고 끕니다.
+  #   실데이터 적재에는 toss.enabled=true 도 함께 필요합니다.
+  seed-daily-candles: ${TOSS_SEED_DAILY_CANDLES:${SEED_DAILY_CANDLES:false}}
+
+  # 기동 시 1회 수동 적재 트리거(기본 false). StockMasterLoadRunner 가 읽습니다.
+  #   주간 스케줄(월 07:00/08:00/21:00 KST)을 기다리지 않고 초기 데이터를 채울 때만 켜세요.
+  #   랭킹은 스케줄과 달리 KR/US 를 한 번에 적재합니다.
+  load-stock-master: ${TOSS_LOAD_STOCK_MASTER:false}
+  load-stock-master-detail: ${TOSS_LOAD_STOCK_MASTER_DETAIL:false}
+  load-stock-ranking: ${TOSS_LOAD_STOCK_RANKING:false}
 
 # ── 거래 정책 ────────────────────────────────────────────────────────────────
 #   요율은 DB 에 저장하지 않습니다. 여기가 유일한 정의 지점이고,
@@ -126,3 +148,17 @@ logging:
     org.hibernate.SQL: DEBUG
     # 바인딩 파라미터까지 보고 싶을 때만 켜세요. 로그가 매우 길어집니다.
     # org.hibernate.orm.jdbc.bind: TRACE
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never

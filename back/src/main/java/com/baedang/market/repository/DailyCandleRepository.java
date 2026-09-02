@@ -37,4 +37,18 @@ public interface DailyCandleRepository extends JpaRepository<DailyCandle, DailyC
             @Param("tradeDate") LocalDate tradeDate,
             @Param("stockIds") List<Long> stockIds
     );
+
+    /**
+     * 주어진 종목 중 <b>일봉 이력이 하나라도 있는</b> 종목 ID 집합.
+     *
+     * <p>시드 백필의 효율 가드용입니다. 정기 수집의 {@link #findStoredStockIds}가
+     * 특정 거래일 기준인 것과 달리, 여기서는 "아무 날짜라도 봉이 있는가"를 봅니다.
+     * 여기 포함되지 않은 종목만 200일치를 새로 수집합니다.
+     */
+    @Query("""
+            SELECT DISTINCT candle.stockId
+            FROM DailyCandle candle
+            WHERE candle.stockId IN :stockIds
+            """)
+    Set<Long> findStockIdsWithAnyCandle(@Param("stockIds") List<Long> stockIds);
 }

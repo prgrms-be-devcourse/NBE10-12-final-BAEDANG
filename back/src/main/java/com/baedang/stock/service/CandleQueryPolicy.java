@@ -2,13 +2,12 @@ package com.baedang.stock.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.model.CandleQuery;
 import com.baedang.stock.model.CandleQueryInterval;
 import com.baedang.stock.model.CandleRange;
 import org.springframework.stereotype.Component;
-
-import java.util.Locale;
 
 @Component
 public class CandleQueryPolicy {
@@ -22,11 +21,8 @@ public class CandleQueryPolicy {
         if (value == null || value.isBlank()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry가 비어 있음");
         }
-        try {
-            return MarketCountry.valueOf(value.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value);
-        }
+        return MarketCountry.parse(value)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value));
     }
 
     public CandleQuery parse(String interval, String range) {
@@ -50,7 +46,7 @@ public class CandleQueryPolicy {
 
     private CandleQueryInterval parseInterval(String value) {
         if (value == null) throw invalidCombination(null, null);
-        return switch (value.trim().toLowerCase(Locale.ROOT)) {
+        return switch (DomainNormalizer.lowerCode(value)) {
             case "1m" -> CandleQueryInterval.ONE_MINUTE;
             case "1d" -> CandleQueryInterval.ONE_DAY;
             default -> throw invalidCombination(value, null);
@@ -59,7 +55,7 @@ public class CandleQueryPolicy {
 
     private CandleRange parseRange(String value) {
         if (value == null) throw invalidCombination(null, null);
-        return switch (value.trim().toUpperCase(Locale.ROOT)) {
+        return switch (DomainNormalizer.upperCode(value)) {
             case "1D" -> CandleRange.ONE_DAY;
             case "1M" -> CandleRange.ONE_MONTH;
             case "6M" -> CandleRange.SIX_MONTHS;

@@ -2,6 +2,7 @@ package com.baedang.stock.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
@@ -26,7 +27,6 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.locks.ReentrantLock;
 
 @Service
@@ -176,6 +176,6 @@ public class CandleQueryService {
         if (symbol == null || symbol.isBlank()) {
             throw new BusinessException(ErrorCode.STOCK_NOT_FOUND);
         }
-        return symbol.trim().toUpperCase(Locale.ROOT);
+        return DomainNormalizer.symbol(symbol);
     }
 }

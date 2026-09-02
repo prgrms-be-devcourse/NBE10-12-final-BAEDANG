@@ -153,19 +153,9 @@ public class RankingService {
     }
 
     private MarketCountry parseMarket(String market) {
-        if (market == null || market.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "market는 KR 또는 US여야 합니다");
-        }
-        String normalized = market.trim().toUpperCase(Locale.ROOT);
-
-        return switch (normalized) {
-            case "KR" -> MarketCountry.KR;
-            case "US" -> MarketCountry.US;
-            default -> throw new BusinessException(
-                    ErrorCode.INVALID_INPUT,
-                    "market는 KR 또는 US여야 합니다"
-            );
-        };
+        return MarketCountry.parse(market)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INVALID_INPUT, "market는 KR 또는 US여야 합니다"));
     }
 
     private void validateSize(int size) {

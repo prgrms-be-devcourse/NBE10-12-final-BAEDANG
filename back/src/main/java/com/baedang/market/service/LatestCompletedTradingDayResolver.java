@@ -12,7 +12,6 @@ import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.Optional;
 
 /** 현재 시점에 캔들이 확정됐어야 하는 가장 최근 거래일을 시장 캘린더로 찾습니다. */
@@ -22,8 +21,6 @@ public class LatestCompletedTradingDayResolver {
     private static final Logger log = LoggerFactory.getLogger(LatestCompletedTradingDayResolver.class);
     private static final int MAX_LOOKBACK_DAYS = 14;
     private static final Duration FINALIZATION_DELAY = Duration.ofMinutes(10);
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-    private static final ZoneId NY = ZoneId.of("America/New_York");
 
     private final MarketCalendarPort marketCalendarPort;
     private final Clock clock;
@@ -35,7 +32,7 @@ public class LatestCompletedTradingDayResolver {
 
     public Optional<LocalDate> resolve(MarketCountry marketCountry) {
         Instant now = clock.instant();
-        LocalDate today = now.atZone(marketCountry == MarketCountry.US ? NY : KST).toLocalDate();
+        LocalDate today = now.atZone(marketCountry.zoneId()).toLocalDate();
 
         if (!isWeekend(today)) {
             Optional<MarketCalendarDay> todayCalendar = fetchValidated(marketCountry, today);
