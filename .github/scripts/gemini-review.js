@@ -16,10 +16,14 @@ const baseRef   = process.env.BASE_REF || process.env.GITHUB_BASE_REF || 'develo
 const repo      = process.env.REPO;
 const ghToken   = process.env.GITHUB_TOKEN;
 
-const TAG                   = '<!-- GEMINI_AI_REVIEW -->';
-const NOTICE_QUOTA          = `\n\n> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
-const NOTICE_SERVER_OVERLOAD = `\n\n> ※ 안내: Google AI 서버의 일시적인 과부하(503/Timeout)로 인해 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
-const NOTICE_EMPTY          = `\n\n> ※ 안내: Gemini API로부터 유효한 응답을 받지 못하여 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
+const TAG                           = '<!-- GEMINI_AI_REVIEW -->';
+const NOTICE_QUOTA_APPEND           = `\n\n> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
+const NOTICE_SERVER_OVERLOAD_APPEND = `\n\n> ※ 안내: Google AI 서버의 일시적인 과부하(503/Timeout)로 인해 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
+const NOTICE_EMPTY_APPEND          = `\n\n> ※ 안내: Gemini API로부터 유효한 응답을 받지 못하여 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
+
+const NOTICE_QUOTA_STANDALONE           = `현재 Google Gemini API의 요청 할당량(Quota/Rate Limit)이 초과되어 코드 리뷰 생성이 일시 지연되었습니다.`;
+const NOTICE_SERVER_OVERLOAD_STANDALONE = `Google AI 서버의 일시적인 과부하 또는 응답 지연(Timeout)으로 인해 코드 리뷰 생성을 완료하지 못했습니다.`;
+const NOTICE_EMPTY_STANDALONE          = `Gemini API로부터 유효한 코드 리뷰 응답을 수신하지 못했습니다.`;
 
 const MAX_DIFF_LEN = 60_000;
 const REQUEST_TIMEOUT_MS = 120_000;
@@ -160,17 +164,35 @@ function upsertComment(body) {
   }
 }
 
-/** Gracefully handles non-fatal API issues (quota, temporary overload) by preserving existing review. */
-function handleGracefulNotice(reason, noticeText) {
-  console.warn(`[WARN] ${reason}. Preserving existing review with notice.`);
+/** Gracefully handles non-fatal API issues (quota, temporary overload) by preserving existing review or posting a notice. */
+function handleGracefulNotice(reason, appendText, standaloneText) {
+  console.warn(`[WARN] ${reason}.`);
   const existing = getExistingComment();
-  if (existing && !existing.body.includes('건너뛰어졌습니다')) {
+
+  if (existing) {
+    // 1. 기존 리뷰가 있는 경우: 기존 리뷰 본문은 100% 보존하고 맨 아래에 안내 문구만 추가
+    if (!existing.body.includes('건너뛰어졌습니다') && !existing.body.includes('일시 지연')) {
+      try {
+        upsertComment(existing.body + appendText);
+      } catch (e) {
+        console.error('Failed to append notice to comment:', e.message);
+      }
+    }
+  } else {
+    // 2. 최초 리뷰인데 실패한 경우: 원인을 명시하는 단독 안내 카드 댓글 등록
     try {
-      upsertComment(existing.body + noticeText);
+      const commentBody =
+        `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n` +
+        `> ⚠️ **Gemini 코드 리뷰 일시 지연 안내**\n>\n` +
+        `> ${standaloneText}\n\n` +
+        `---\n` +
+        `*새로운 커밋을 푸시하거나 워크플로우를 재실행하면 코드 리뷰가 다시 시도됩니다.*`;
+      upsertComment(commentBody);
     } catch (e) {
-      console.error('Failed to append notice to comment:', e.message);
+      console.error('Failed to post initial notice comment:', e.message);
     }
   }
+
   process.exit(0);
 }
 
@@ -254,7 +276,7 @@ async function run() {
           const json = JSON.parse(body);
           const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
           if (!reviewText || !reviewText.trim()) {
-            handleGracefulNotice('Empty review text returned', NOTICE_EMPTY);
+            handleGracefulNotice('Empty review text returned', NOTICE_EMPTY_APPEND, NOTICE_EMPTY_STANDALONE);
             return;
           }
 
@@ -269,7 +291,7 @@ async function run() {
 
         // 2. Quota exceeded (429) -> Graceful skip with quota notice
         if (statusCode === 429) {
-          handleGracefulNotice('Gemini API quota exceeded (429)', NOTICE_QUOTA);
+          handleGracefulNotice('Gemini API quota exceeded (429)', NOTICE_QUOTA_APPEND, NOTICE_QUOTA_STANDALONE);
           return;
         }
 
@@ -310,7 +332,11 @@ async function run() {
   }
 
   // If all models and retries exhausted -> Graceful skip with server overload notice
-  handleGracefulNotice(`All models exhausted (${lastError?.message || 'Server Overload'})`, NOTICE_SERVER_OVERLOAD);
+  handleGracefulNotice(
+    `All models exhausted (${lastError?.message || 'Server Overload'})`,
+    NOTICE_SERVER_OVERLOAD_APPEND,
+    NOTICE_SERVER_OVERLOAD_STANDALONE
+  );
 }
 
 run();

@@ -1,13 +1,13 @@
-# 공용 헬퍼 및 도메인 지원 기능 사용 가이드
+# 공용 구성요소 사용 가이드
 
-[English](helpers.md) | 한국어
+[English](shared-components.md) | 한국어
 
-> 동기화 규칙: 공개 메서드·예제·정책을 변경할 때 `helpers.md`와 `helpers.ko.md`를 함께 갱신합니다.
+> 동기화 규칙: 공개 메서드·예제·정책을 변경할 때 `shared-components.md`와 `shared-components.ko.md`를 함께 갱신합니다.
 
-현재 소스 코드에서 재사용할 수 있는 헬퍼의 색인입니다. 새 기능을 작성하기 전에 같은 역할의 구현이 있는지 확인하세요.
-전역 정적 유틸리티와 도메인 전용 계산기·정책 빈을 구분하며, 개별 서비스의 `private` 메서드나 엔티티 getter·팩토리를 모두 나열하지는 않습니다.
+여러 곳에서 재사용하는 전역 설정, 공용 유틸리티·계산기, 도메인 공용 서비스·정책, 프론트 모듈의 색인입니다. 새 기능을 작성하기 전에 같은 역할의 구현이 있는지 확인하세요.
+공용이라는 말은 모두 순수 헬퍼라는 뜻이 아닙니다. 각 항목의 역할·호출/주입 방법·부수 효과를 구분하고, 개별 서비스의 private 메서드와 단순 getter는 나열하지 않습니다.
 
-이 문서는 기존 동작을 설명합니다. API 계약은 [API 명세](api-spec.ko.md), 저장 정책은 [ERD](erd.ko.md)를 함께 확인하고, 헬퍼의 공개 메서드나 정책을 바꿀 때 이 문서도 갱신하세요.
+이 문서는 기존 동작을 설명합니다. API 계약은 [API 명세](api-spec.ko.md), 저장 정책은 [ERD](erd.ko.md)를 함께 확인하고, 공용 구성요소의 공개 메서드나 정책을 바꿀 때 이 문서도 갱신하세요.
 
 ## 1. 빠른 선택
 
@@ -23,7 +23,31 @@
 | 차트 조합·거래일·실시간 시세 판정 | 해당 도메인의 Policy / Resolver | Spring 빈 주입 |
 | 프론트 금액 계산·표시 | `D`, `format.ts`, `order-amount.ts` | 모듈 import |
 
-## 2. 문자열 정규화 — DomainNormalizer
+## 2. 전역 설정과 공통 인프라
+
+`global` 패키지는 여러 도메인이 사용하는 공통 기반입니다. 모든 파일이 정적 헬퍼인 것은 아닙니다. 설정 클래스는 보통 직접 호출하지 않고 등록된 빈을 주입받거나 프레임워크의 자동 적용을 이용합니다.
+
+### 설정·공통 엔티티
+
+| 소스 | 역할·사용 방법 | 주의사항 |
+| --- | --- | --- |
+| [TimeConfig](../back/src/main/java/com/baedang/global/config/TimeConfig.java) | UTC `Clock` 빈 제공. 생성자로 `Clock`을 주입받아 `clock.instant()` 사용 | 테스트에서는 고정 Clock으로 교체. 현지 날짜와 UTC 시각의 변환 예시는 시장 정보 절 참고 |
+| [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | `PasswordEncoder` 빈 주입 후 `encode(raw)`, `matches(raw, encoded)` 사용 | 현재 BCrypt 사용. 직접 해시 함수를 만들거나 인코더를 반복 생성하지 않음 |
+| [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | JPA Auditing과 `auditingDateTimeProvider` 자동 적용 | 현재 제공자는 `OffsetDateTime.now(ZoneOffset.UTC)`를 직접 사용하므로 주입 Clock을 고정해도 감사 시각은 고정되지 않음 |
+| [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | 상속으로 `createdAt`, `updatedAt` 자동 기록 | 실제 테이블에 `created_at`, `updated_at` 두 컬럼이 있는 경우만 상속. 계좌의 `openedAt`·원장의 `occurredAt`을 대체하지 않음 |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 스케줄링 활성화 및 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 일봉 전용 실행기: 스레드 1개, 큐 10개, 종료 대기 최대 30초. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
+| [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | `/api/**`에 자동 적용. 허용 출처는 `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS`로 설정 | 직접 호출할 필요 없음. CORS 허용은 인증·인가를 대신하지 않음 |
+
+### 오류 처리·외부 통신
+
+| 소스 | 역할·사용 방법 | 주의사항 |
+| --- | --- | --- |
+| [BusinessException](../back/src/main/java/com/baedang/global/error/BusinessException.java), [ErrorCode](../back/src/main/java/com/baedang/global/error/ErrorCode.java) | 업무 오류를 `throw new BusinessException(ErrorCode.…)`로 전달. 필요하면 detail 또는 data 지정 | detail은 개발자 진단용, data는 클라이언트 분기용. 기존 오류 코드·재시도 계약을 유지 |
+| [GlobalExceptionHandler](../back/src/main/java/com/baedang/global/error/GlobalExceptionHandler.java), [ErrorResponse](../back/src/main/java/com/baedang/global/error/ErrorResponse.java) | 전역 예외 처리기가 오류를 HTTP 응답으로 자동 변환 | 컨트롤러마다 같은 try/catch·오류 응답 생성을 복제하지 않음 |
+| [TossSecuritiesClient](../back/src/main/java/com/baedang/global/clients/toss/TossSecuritiesClient.java) | Toss 어댑터에서 빈을 주입받아 `get(path, queryParams, responseType)` 호출 | 업무 서비스는 기존 Port를 사용. 허용 경로 검증과 전역 RateLimiter를 우회하지 않으며 실제 주문 API는 절대 호출하지 않음 |
+| [TossRateLimiterRegistry](../back/src/main/java/com/baedang/global/clients/toss/TossRateLimiterRegistry.java), [TossApiGroup](../back/src/main/java/com/baedang/global/clients/toss/TossApiGroup.java), [Whitelist](../back/src/main/java/com/baedang/global/clients/toss/Whitelist.java) | 그룹별 공유 호출 제한과 경로 매핑. 레지스트리는 `acquire(group)`, `tryAcquire(group)` 제공 | 일반 요청은 Toss 클라이언트가 이미 제한을 적용하므로 상위 서비스에서 같은 요청에 permit을 이중 획득하지 않음. 호출 제한은 같은 애플리케이션 인스턴스 안에서 공유 |
+
+## 3. 문자열 정규화 — DomainNormalizer
 
 소스: [DomainNormalizer.java](../back/src/main/java/com/baedang/global/normalizer/DomainNormalizer.java)
 
@@ -54,7 +78,7 @@ String currency = DomainNormalizer.currency(rawCurrency);
 // 필요한 필수값·허용값 검증은 해당 서비스의 기존 규칙에 맞게 수행합니다.
 ```
 
-## 3. 응답 숫자 포맷 — FinancialDecimalFormatter
+## 4. 응답 숫자 포맷 — FinancialDecimalFormatter
 
 소스: [FinancialDecimalFormatter.java](../back/src/main/java/com/baedang/global/formatter/FinancialDecimalFormatter.java)
 
@@ -86,7 +110,7 @@ String cashText = krw(cashBalance);
 String priceText = currency(lastPrice, stock.getCurrency());
 ```
 
-## 4. 시장 정보 — MarketCountry
+## 5. 시장 정보 — MarketCountry
 
 소스: [MarketCountry.java](../back/src/main/java/com/baedang/stock/entity/MarketCountry.java)
 
@@ -121,7 +145,7 @@ LocalDate marketDate = now.atZone(country.zoneId()).toLocalDate();
 - `zoneId()`를 일봉 KST 저장·차트 KST 표현·환율 KST 기준일·KST 기반 캐시 날짜에 무조건 적용하지 않습니다. 현지 날짜와 고정 KST 날짜는 서로 다른 정책입니다.
 - 시간대만으로 개장·폐장·휴장 여부를 추정하지 않습니다. 장 운영 정보는 기존 캘린더 / 세션 Port를 사용합니다.
 
-## 5. 수익률과 주문 금액 계산
+## 6. 수익률과 주문 금액 계산
 
 ### ReturnRateCalculator — 계좌 손익률
 
@@ -155,12 +179,13 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - 결과에는 원화 반올림 전 거래대금도 있습니다. 원가 계산용 값과 정산 금액을 혼용하지 않습니다.
 - 이 클래스 내부의 `krw()` / `usd()`는 BigDecimal 계산용 private 메서드입니다. 같은 이름의 문자열 Formatter로 대체하지 않습니다.
 
-## 6. 도메인 전용 지원 기능
+## 7. 도메인 공용 기능
 
-전역 헬퍼처럼 모든 기능에 적용하지 말고 아래 도메인 계약 안에서 재사용하세요. Spring 빈은 직접 생성하지 않고 주입받습니다.
+여러 유스케이스에서 쓰더라도 아래 기능은 각 도메인의 계약에 속합니다. 계산기·파서는 입력을 처리하지만, 원장 서비스는 DB에 저장하고 세션 정책·거래일 리졸버는 외부 조회를 수행할 수 있습니다. Spring 빈은 생성자로 주입받고 필요한 트랜잭션과 잠금은 호출 유스케이스에서 관리합니다.
 
 | 소스 | 공개 기능 | 범위·주의점 |
 | --- | --- | --- |
+| [InitialDepositLedgerService](../back/src/main/java/com/baedang/trading/service/InitialDepositLedgerService.java) | `recordInitialDeposit(accountId, initialCash, roundNo, occurredAt)` | 가입·초기화 직후 초기 지급 원장을 한 번 저장. MANDATORY로 기존 트랜잭션에 참여하며 예수금을 다시 증가시키지 않음. 양수 ID·금액, 1 이상 회차와 계좌 개설 시각을 전달; 중복 요청 처리는 호출부 책임. 과거 원장 보정용이 아님 |
 | [HoldingValuator](../back/src/main/java/com/baedang/account/service/HoldingValuator.java) | `valuate(holdings, quoteByStockId, usdKrwRate)` | 계좌·보유 목록의 원화 평가. 종목별 반올림 후 합산하는 기존 정책을 재사용 |
 | [LedgerCursor](../back/src/main/java/com/baedang/account/support/LedgerCursor.java) | 정적 `encode(entryId)`, `decode(cursor)` | 원장 전용 Base64URL 커서. 디코딩 오류는 `INVALID_CURSOR`. 랭킹 커서와 형식이 다름 |
 | [StockCategory](../back/src/main/java/com/baedang/stock/entity/StockCategory.java) | 정적 `from(securityType, isCommonShare)` | ETF / ETN 우선, 보통주 여부가 false면 PREFERRED, 나머지 INDIVIDUAL |
@@ -174,7 +199,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 스트라이프 락은 아직 공용 헬퍼가 아닙니다. `CandleQueryService`와 `StockOnDemandQuoteService`의 별도 락 구현은 유지하며, 하나의 전역 락으로 공유하지 않습니다.
 
-## 7. 프론트엔드 헬퍼
+## 8. 프론트 공용 모듈
 
 ### 금액 계산·표시
 
@@ -205,6 +230,8 @@ const displayRate = formatPercent("0.125"); // "+12.50%"
 
 ### API·차트·화면 지원
 
+API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 순수 헬퍼가 아닙니다. 차트·표시 변환과 구분하여 재사용하세요. CSS 색 변환은 브라우저 DOM/Canvas에 의존합니다.
+
 | 모듈 | export | 용도·주의점 |
 | --- | --- | --- |
 | [api.ts](../front/src/lib/api.ts) | `ApiError`, `getRankings`, `getCandles`, `placeOrder` 등 API별 함수 | API 호출과 code/message/data 처리 재사용. 내부 `request()`는 private |
@@ -215,7 +242,7 @@ const displayRate = formatPercent("0.125"); // "+12.50%"
 | [chart-colors.ts](../front/src/lib/chart-colors.ts) | `resolveCssColor(name, fallback)` | CSS 변수를 차트용 색상으로 변환. DOM이 없는 환경에서는 fallback |
 | [category-badge.ts](../front/src/lib/category-badge.ts) | `categoryLabel`, `CATEGORY_BADGE_STYLE` | 배당 여부·종목 유형을 화면 배지로 변환. 백엔드 종목 분류 변경 기능이 아님 |
 
-## 8. 적용·변경 시 체크리스트
+## 9. 적용·변경 시 체크리스트
 
 - 중복 코드가 보여도 계산 정밀도, null 처리, 오류 코드, 시간대 정책이 같은지 먼저 확인합니다.
 - 검증·정규화·계산·표시를 구분합니다. Formatter로 계산하거나 Normalizer로 검증을 대신하지 않습니다.
