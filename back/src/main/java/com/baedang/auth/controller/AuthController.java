@@ -5,7 +5,6 @@ import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
-import com.baedang.auth.dto.UserResponse;
 import com.baedang.auth.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -47,15 +46,4 @@ public class AuthController {
         return ResponseEntity.ok().build();
     }
 
-    /**
-     * 내 정보. 1주차에는 헤더에서 userId 를 그대로 받습니다.
-     *
-     * <p>2주차에는 이 파라미터가 사라지고 토큰에서 꺼내게 됩니다.
-     * 그때 컨트롤러 시그니처가 바뀌므로, 서비스 계층은 지금부터
-     * {@code Long userId} 만 받도록 해뒀습니다 — 서비스는 안 고쳐도 됩니다.
-     */
-    @GetMapping("/me")
-    public ResponseEntity<UserResponse> me(@RequestHeader("X-User-Id") Long userId) {
-        return ResponseEntity.ok(authService.getMe(userId));
-    }
 }

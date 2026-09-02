@@ -5,7 +5,6 @@ import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
-import com.baedang.auth.dto.UserResponse;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
@@ -171,10 +170,4 @@ public class AuthService {
         return new AccessTokenResponse(jwtTokenProvider.createAccessToken(userId));
     }
 
-    @Transactional(readOnly = true)
-    public UserResponse getMe(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND, "userId=" + userId));
-        return UserResponse.from(user);
-    }
 }
