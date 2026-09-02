@@ -429,7 +429,7 @@ For financial-data integrity, the MVP daily chart returns only finalized rows st
 | `INVALID_INTERVAL_RANGE` | disallowed interval × range combination |
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
 
-**MVP scope is `1d` and `1m` only.** Supported combinations are `1m+1D` and `1d+1M/6M/1Y`; all others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 5 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
+**MVP scope is `1d` and `1m` only.** Supported combinations are `1m+1D` and `1d+1M/6M/1Y`; all others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 20 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
 
 **Minute candles: scheduled for the ranked universe + on-demand cache elsewhere**
 ```
@@ -443,7 +443,7 @@ is there data within 60s in minute_candle?
              return from the DB
 ```
 **Off-hours or foreign-market stocks behave the same.** Calling `/candles` on a closed market returns the last session's candles as-is — opening NVDA in the Korean daytime shows the prior close + the last US session's minute chart. The frontend just flips the "실시간/종가" label from `realtime`; the chart itself needs no branching. An empty chart reads as "broken screen" — **always separate "not tradable" from "not viewable"**.
-The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 5 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination and 5m/10m aggregation.
+The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 20 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination and 5m/10m aggregation.
 **200 candles per call.** KR regular session 09:00~15:30 = 330 minutes, so a full day needs `before` × 2. With the week-1 chart as "last 200 minutes", 1 call suffices — keep 1 call as the default and use 2 only when "view all" is pressed.
 **Needs measurement** — whether `before` is inclusive, and whether the closing-auction (15:30) candle exists. Without a 15:30 candle it's 329, not 330. Overlapping boundary candles are filtered by `ON CONFLICT DO NOTHING` on `(stock_id, candle_at)`.
 
@@ -759,20 +759,20 @@ Closing the old account, opening the new account, and inserting its initial-depo
 
 The frontend polls **our** API; our server calls Toss on the cadence below. **The two are fully decoupled — even 100 users leave Toss call volume unchanged.**
 
-| Time (KST) | Cadence | Task |
-|---|---|---|
-| Mon 07:00 | weekly | full stock-master refresh — `/stocks/all` + `/stocks` batches |
-| Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call |
-| Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open |
-| 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together |
-| 09:00 ~ 15:30 | 5s | KR top-100 current price — `/prices` 1 batch call (1.3% of limit) |
-| 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
-| 15:40 ~ 17:10 | 30m | KR daily-candle retries — after calendar close + 10m, excluding stocks already stored for the date |
+| Time (KST) | Cadence | Task                                                                                                        |
+|---|---|-------------------------------------------------------------------------------------------------------------|
+| Mon 07:00 | weekly | full stock-master refresh — `/stocks/all` + `/stocks` batches                                               |
+| Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call                                   |
+| Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open                                                  |
+| 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together                                                |
+| 09:00 ~ 15:30 | 5s | KR top-100 current price — `/prices` 1 batch call (1.3% of limit)                                           |
+| 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group     |
+| 15:40 ~ 17:10 | 30m | KR daily-candle retries — after calendar close + 10m, excluding stocks already stored for the date          |
 | 09:00 ET * | daily | US `prev_close` refresh — 30 min before regular open (22:00 KST during DST, 23:00 KST during standard time) |
-| 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter |
-| 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 5 TPS group |
-| US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks |
-| every hour on the hour | hourly | FX storage — 24 calls/day |
+| 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter                                            |
+| 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group      |
+| US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks       |
+| every hour on the hour | hourly | FX storage — 24 calls/day                                                                                   |
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
 \* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.

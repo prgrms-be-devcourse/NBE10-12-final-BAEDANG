@@ -243,6 +243,14 @@ body {
   a:hover {
     color: var(--accentText);
   }
+
+  /* 환율 추이 그래프 모달의 닫기 버튼 호버 효과. */
+  .rate-trend-close-btn {
+    background: var(--fill);
+  }
+  .rate-trend-close-btn:hover {
+    background: var(--line);
+  }
 }
 
 ::placeholder {

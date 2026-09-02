@@ -25,6 +25,7 @@ public class TossSecuritiesClient {
     private static final Logger log = LoggerFactory.getLogger(TossSecuritiesClient.class);
 
     private final RestClient restClient;
+    private final TossRateLimiterRegistry rateLimiterRegistry;
     private final String clientId;
     private final String clientSecret;
 
@@ -36,11 +37,13 @@ public class TossSecuritiesClient {
 
     public TossSecuritiesClient(
             RestClient.Builder builder,
+            TossRateLimiterRegistry rateLimiterRegistry,
             @Value("${toss.base-url}") String baseUrl,
             @Value("${toss.client-id}") String clientId,
             @Value("${toss.client-secret}") String clientSecret
     ) {
         this.restClient = builder.baseUrl(baseUrl).build();
+        this.rateLimiterRegistry = rateLimiterRegistry;
         this.clientId = clientId;
         this.clientSecret = clientSecret;
     }
@@ -52,40 +55,60 @@ public class TossSecuritiesClient {
     }
 
     public <T> T get(String path, MultiValueMap<String, String> queryParams, Class<T> responseType) {
-        validatePathOrThrow(path);
+        TossApiGroup group = resolveGroupOrThrow(path);
 
-        String currentToken = token;
+        String requestToken = token;
+
         try {
-            return _get(path, queryParams, currentToken, responseType);
+            return request(path, queryParams, requestToken, responseType, group);
         } catch (HttpClientErrorException.Unauthorized exception) {
-            return retryWithFreshToken(path, queryParams, currentToken, responseType);
+            return retryWithFreshToken(path, queryParams, requestToken, responseType, group);
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            log.warn("Toss rate limited: group={} path={}", group, path);
+            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
             log.error("`get({}, ...)` error:", path, e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
     }
 
-    private void validatePathOrThrow(String path) {
-        if (!Whitelist.match(path)) {
+    private TossApiGroup resolveGroupOrThrow(String path) {
+        Whitelist endPoint = Whitelist.resolve(path);
+        if (endPoint == null) {
             log.error("`{}` does not match white list.", path);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
+        return endPoint.group();
     }
-
-    private <T> T _get(String path, MultiValueMap<String, String> queryParams, String token, Class<T> responseType) {
+    /** 실제 HTTP 전송 직전에 permit 을 획득한다 — 재시도도 이 경로를 다시 지난다. */
+    private <T> T request(
+            String path,
+            MultiValueMap<String, String> queryParams,
+            String requestToken,
+            Class<T> responseType,
+            TossApiGroup group
+    ) {
+        rateLimiterRegistry.acquire(group);
         return restClient.get()
                 .uri(uriBuilder -> uriBuilder.path(path).queryParams(queryParams).build())
-                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .header(HttpHeaders.AUTHORIZATION,"Bearer " + requestToken)
                 .retrieve()
                 .body(responseType);
     }
 
     private <T> T retryWithFreshToken(
-            String path, MultiValueMap<String, String> queryParams, String staleToken, Class<T> responseType
+            String path,
+            MultiValueMap<String, String> queryParams,
+            String staleToken,
+            Class<T> responseType,
+            TossApiGroup group
     ) {
         String freshToken = refreshTokenIfStillStale(staleToken);
         try {
-            return _get(path, queryParams, freshToken, responseType);
+            return request(path, queryParams, freshToken, responseType, group);
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            log.warn("Toss rate limited: group={} path={}", group, path);
+            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
             log.error("`retryWithFreshToken({}, ...)` error:", path, e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
@@ -118,6 +141,8 @@ public class TossSecuritiesClient {
     }
 
     private String issueToken() {
+        rateLimiterRegistry.acquire(TossApiGroup.AUTH);
+
         try {
             MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
             form.add("grant_type", "client_credentials");
@@ -135,7 +160,10 @@ public class TossSecuritiesClient {
                 log.error("`response` or `response.accessToken` is null.");
                 throw new BusinessException(ErrorCode.INTERNAL_ERROR);
             }
-            return response.accessToken;
+            return response.accessToken();
+        } catch (HttpClientErrorException.TooManyRequests e) {
+            log.warn("Toss rate limited: group={} path={}",TossApiGroup.AUTH, "/oauth2/token");
+            throw new BusinessException(ErrorCode.TOSS_RATE_LIMITED);
         } catch (RestClientException e) {
             log.error("`issueToken()` error:", e);
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
