@@ -269,6 +269,14 @@ body {
   .chart-expand-btn:hover {
     background: var(--pillTrackBgHover);
   }
+
+  /* 차트 확대보기 모달의 닫기 버튼 호버 효과. */
+  .chart-expand-modal-close-btn {
+    background: var(--fill);
+  }
+  .chart-expand-modal-close-btn:hover {
+    background: var(--line);
+  }
 }
 
 ::placeholder {
