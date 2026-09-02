@@ -3,6 +3,7 @@ package com.baedang.stock.service;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
+import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
@@ -50,6 +51,9 @@ class CandleQueryIntegrationTest {
                     "/docker-entrypoint-initdb.d/01-schema.sql");
 
     @MockitoBean MarketDataPort marketDataPort;
+    // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort
+    // 의존을 목(mock)으로 채워 넣어야 컨텍스트가 뜬다(다른 서비스가 직접 주입받는다).
+    @MockitoBean MarketCalendarPort marketCalendarPort;
 
     @Autowired CandleQueryService candleQueryService;
     @Autowired MinuteCandlePersistenceService persistenceService;

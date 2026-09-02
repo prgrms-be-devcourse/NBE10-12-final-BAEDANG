@@ -22,9 +22,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * 모양이 다릅니다. 이 클래스가 그 변환을 담당합니다 — 거래 모듈은 저장 방식이나 캘린더
  * 응답 구조를 전혀 몰라도 됩니다.
  *
- * <p>세션 판단 로직 자체는 {@code MarketCalendarPort} 구현체(Toss 응답 또는
- * {@code FakeMarketCalendarPort})가 돌려주는 {@code regularOpenAt}/{@code regularCloseAt}을
- * 그대로 신뢰합니다 — DST 계산은 여기서 하지 않습니다 (AGENTS.md 규칙).
+ * <p>세션 판단 로직 자체는 {@code MarketCalendarPort} 구현체(Toss 응답)가 돌려주는
+ * {@code regularOpenAt}/{@code regularCloseAt}을 그대로 신뢰합니다 — DST 계산은
+ * 여기서 하지 않습니다 (AGENTS.md 규칙).
  */
 @Component
 public class MarketSessionProviderBridge implements MarketSessionProvider {
