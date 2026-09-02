@@ -44,10 +44,10 @@
   --highlightText: #ffffff;
   --highlightSoft: #e4e6ea;
   --onHighlightSoftText: #202632;
-  --up: oklch(58% 0.2 25);
-  --down: oklch(56% 0.16 236);
-  --upBg: oklch(95% 0.03 25);
-  --downBg: oklch(95% 0.025 236);
+  --up: oklch(60% 0.23 27);
+  --down: oklch(58% 0.21 254);
+  --upBg: oklch(95% 0.04 27);
+  --downBg: oklch(95% 0.035 254);
   --heartActive: oklch(64% 0.14 25);
   --purpleText: #7b5aa8;
   --purpleBg: #f7f2fb;
@@ -66,6 +66,9 @@
   --headerLogo: #0f3868;
   --headerLoginText: #0f3868;
   --headerNavInactive: rgba(15, 56, 104, 0.75);
+  --pillTrackBg: rgba(15, 56, 104, 0.06);
+  --pillTrackBorder: rgba(15, 56, 104, 0.12);
+  --pillTrackBgHover: rgba(15, 56, 104, 0.1);
 }
 
 :root[data-theme="dark"] {
@@ -103,10 +106,10 @@
   --highlightText: #1c1c1c;
   --highlightSoft: #333333;
   --onHighlightSoftText: #dcdcdc;
-  --up: oklch(70% 0.17 24);
-  --down: oklch(70% 0.13 232);
-  --upBg: oklch(30% 0.05 24);
-  --downBg: oklch(30% 0.04 232);
+  --up: oklch(66% 0.2 28);
+  --down: oklch(66% 0.19 255);
+  --upBg: oklch(30% 0.08 28);
+  --downBg: oklch(30% 0.075 255);
   --heartActive: oklch(70% 0.17 24);
   --purpleText: #c6b3e0;
   --purpleBg: #332e3a;
@@ -125,6 +128,9 @@
   --headerLogo: #ffffff;
   --headerLoginText: rgba(255, 255, 255, 0.75);
   --headerNavInactive: rgba(255, 255, 255, 0.75);
+  --pillTrackBg: rgba(255, 255, 255, 0.03);
+  --pillTrackBorder: rgba(255, 255, 255, 0.06);
+  --pillTrackBgHover: rgba(255, 255, 255, 0.07);
 }
 
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
@@ -162,10 +168,10 @@
     --highlightText: #1c1c1c;
     --highlightSoft: #333333;
     --onHighlightSoftText: #dcdcdc;
-    --up: oklch(70% 0.17 24);
-    --down: oklch(70% 0.13 232);
-    --upBg: oklch(30% 0.05 24);
-    --downBg: oklch(30% 0.04 232);
+    --up: oklch(66% 0.2 28);
+    --down: oklch(66% 0.19 255);
+    --upBg: oklch(30% 0.08 28);
+    --downBg: oklch(30% 0.075 255);
     --heartActive: oklch(70% 0.17 24);
     --purpleText: #c6b3e0;
     --purpleBg: #332e3a;
@@ -184,6 +190,9 @@
     --headerLogo: #ffffff;
     --headerLoginText: rgba(255, 255, 255, 0.75);
     --headerNavInactive: rgba(255, 255, 255, 0.75);
+    --pillTrackBg: rgba(255, 255, 255, 0.03);
+    --pillTrackBorder: rgba(255, 255, 255, 0.06);
+    --pillTrackBgHover: rgba(255, 255, 255, 0.07);
   }
 }
 
@@ -250,6 +259,44 @@ body {
   }
   .rate-trend-close-btn:hover {
     background: var(--line);
+  }
+
+  /* 종목 상세 "차트 크게보기" 버튼 호버 효과. */
+  .chart-expand-btn {
+    background: var(--pillTrackBg);
+    border: 1px solid var(--pillTrackBorder);
+  }
+  .chart-expand-btn:hover {
+    background: var(--pillTrackBgHover);
+  }
+
+  /* 차트 확대보기 모달의 닫기 버튼 호버 효과. */
+  .chart-expand-modal-close-btn {
+    background: var(--fill);
+  }
+  .chart-expand-modal-close-btn:hover {
+    background: var(--line);
+  }
+
+  /* 종목 상세 첫 사용자 안내 투어(TourGuide) 버튼들. */
+  .tour-skip-btn {
+    color: var(--mut2);
+  }
+  .tour-skip-btn:hover {
+    color: var(--ink);
+  }
+  .tour-prev-btn {
+    background: var(--fill);
+    color: var(--mut);
+  }
+  .tour-prev-btn:hover {
+    background: var(--line);
+  }
+  .tour-replay-btn {
+    color: var(--mut2);
+  }
+  .tour-replay-btn:hover {
+    color: var(--accentText);
   }
 }
 
