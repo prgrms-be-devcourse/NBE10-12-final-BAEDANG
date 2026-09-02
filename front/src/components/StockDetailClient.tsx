@@ -56,7 +56,7 @@ const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="candle-toggle"]',
     title: "기간 바꿔보기",
     description:
-      "일봉은 하루 단위, 1분봉은 1분 단위로 가격 흐름을 보여줘요.\n1개월·6개월·1년 버튼으로 더 긴 흐름도 볼 수 있어요.\n눌러서 바꿔볼까요?",
+      "일봉은 하루 단위, 1분봉은 1분 단위로\n가격 흐름을 보여줘요.\n1개월·6개월·1년 버튼으로 더 긴 흐름도 볼 수 있어요.\n눌러서 바꿔볼까요?",
   },
   {
     target: '[data-tour="chart-expand"]',
