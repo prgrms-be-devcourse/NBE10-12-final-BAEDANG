@@ -25,7 +25,13 @@ dependencies {
 
     implementation 'org.springframework.security:spring-security-crypto' // ── 비밀번호 해시
 
+    // Spring Boot Actuator
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+    // Prometheus
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
 
     runtimeOnly 'org.postgresql:postgresql'
 

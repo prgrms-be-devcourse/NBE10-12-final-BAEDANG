@@ -63,12 +63,12 @@ services:
     restart: unless-stopped
 
   # 선택 — DB 를 GUI 로 보고 싶을 때. 필요 없으면 지우세요.
-  # 접속: http://localhost:8081  (user@example.com / admin)
+  # 접속: http://localhost:8082  (user@example.com / admin)
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: trading-pgadmin
     ports:
-      - "8081:80"
+      - "8082:80"
     environment:
       PGADMIN_DEFAULT_EMAIL: user@example.com
       PGADMIN_DEFAULT_PASSWORD: admin
