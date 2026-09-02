@@ -1,8 +1,9 @@
 package com.baedang.global.formatter;
 
+import com.baedang.global.normalizer.DomainNormalizer;
+
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.util.Locale;
 
 /**
  * 금융 API 응답의 BigDecimal 값을 문자열로 변환합니다.
@@ -54,7 +55,7 @@ public final class FinancialDecimalFormatter {
         if (currency == null || currency.isBlank()) {
             throw new IllegalArgumentException("currency must not be blank");
         }
-        return switch (currency.trim().toUpperCase(Locale.ROOT)) {
+        return switch (DomainNormalizer.currency(currency)) {
             case "KRW" -> krw(value);
             case "USD" -> usd(value);
             default -> throw new IllegalArgumentException("Unsupported currency: " + currency);

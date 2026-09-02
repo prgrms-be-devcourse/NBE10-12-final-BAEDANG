@@ -45,7 +45,7 @@ public record OrderQuoteResponse(
                 marketCountry,
                 side,
                 plain(quantity),
-                currency(amount.executedPrice(), currencyOf(marketCountry)),
+                currency(amount.executedPrice(), marketCountry.defaultCurrency()),
                 rate(amount.exchangeRate()),
                 krw(amount.grossAmount()),
                 krw(amount.fee()),
@@ -57,9 +57,4 @@ public record OrderQuoteResponse(
                 reason == null ? null : reason.name()
         );
     }
-
-    private static String currencyOf(MarketCountry marketCountry) {
-        return marketCountry == MarketCountry.KR ? "KRW" : "USD";
-    }
-
 }

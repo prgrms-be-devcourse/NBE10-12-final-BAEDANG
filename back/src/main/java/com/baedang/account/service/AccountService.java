@@ -3,6 +3,7 @@ package com.baedang.account.service;
 import com.baedang.account.dto.AccountSummaryResponse;
 import com.baedang.account.dto.HoldingsResponse;
 import com.baedang.account.support.HoldingValuation;
+import com.baedang.account.support.ReturnRateCalculator;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.ExchangeRate;
@@ -20,7 +21,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -90,9 +90,7 @@ public class AccountService {
         BigDecimal costBasis = sum(valued.valuations(), HoldingValuation::costWon);
         BigDecimal unrealizedPnl = stockValue.subtract(costBasis);
         BigDecimal totalAsset = account.getCashBalance().add(stockValue);
-        BigDecimal pnlRate = costBasis.signum() > 0
-                ? unrealizedPnl.divide(costBasis, 4, RoundingMode.HALF_UP)
-                : null;
+        BigDecimal pnlRate = ReturnRateCalculator.calculate(unrealizedPnl, costBasis);
 
         OffsetDateTime asOf = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         return AccountSummaryResponse.of(

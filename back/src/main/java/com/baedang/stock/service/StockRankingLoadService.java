@@ -1,5 +1,6 @@
 package com.baedang.stock.service;
 
+import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -22,7 +23,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -111,7 +111,7 @@ public class StockRankingLoadService {
         Map<String, Stock> stocksSymbolMap = stockRepository
                 .findByMarketCountryAndSymbolIn(
                         marketCountry,
-                        entries.stream().map(entry -> normalizeSymbol(entry.symbol())).toList()
+                        entries.stream().map(entry -> DomainNormalizer.symbol(entry.symbol())).toList()
                 )
                 .stream()
                 .collect(Collectors.toMap(
@@ -124,7 +124,7 @@ public class StockRankingLoadService {
         Map<Long, RankingEntry> targets = new LinkedHashMap<>();
 
         for (RankingEntry entry : entries) {
-            String symbol = normalizeSymbol(entry.symbol());
+            String symbol = DomainNormalizer.symbol(entry.symbol());
             Stock stock = stocksSymbolMap.get(symbol);
 
             if (stock == null) {
@@ -189,7 +189,7 @@ public class StockRankingLoadService {
                 quoteSnapshot = quoteSnapshotRepository.save(new QuoteSnapshot(
                         stockId,
                         entry.lastPrice(),
-                        normalizeCurrency(entry.currency()),
+                        DomainNormalizer.currency(entry.currency()),
                         quoteAt,
                         collectedAt
                 ));
@@ -266,13 +266,5 @@ public class StockRankingLoadService {
 
     private boolean isUsablePrevClose(BigDecimal basePrice) {
         return basePrice != null && basePrice.signum() > 0;
-    }
-
-    private String normalizeCurrency(String currency) {
-        return currency.trim().toUpperCase(Locale.ROOT);
-    }
-
-    private String normalizeSymbol(String symbol) {
-        return symbol.trim().toUpperCase(Locale.ROOT);
     }
 }

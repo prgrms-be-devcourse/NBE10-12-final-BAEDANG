@@ -1,11 +1,11 @@
 package com.baedang.stock.entity;
 
 import com.baedang.global.entity.BaseEntity;
+import com.baedang.global.normalizer.DomainNormalizer;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.util.Locale;
 
 /**
  * 종목 마스터. 매주 월요일 07:00 배치가 전 종목(약 8,500개)을 갱신합니다.
@@ -120,7 +120,7 @@ public class Stock extends BaseEntity {
             String securityType,
             Boolean isCommonShare
     ) {
-        this.symbol = symbol.trim().toUpperCase(Locale.ROOT);
+        this.symbol = DomainNormalizer.symbol(symbol);
         this.marketCountry = marketCountry;
         this.market = market;
         this.name = name;

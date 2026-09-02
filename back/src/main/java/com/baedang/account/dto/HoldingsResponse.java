@@ -1,11 +1,11 @@
 package com.baedang.account.dto;
 
 import com.baedang.account.support.HoldingValuation;
+import com.baedang.account.support.ReturnRateCalculator;
 import com.baedang.global.formatter.FinancialDecimalFormatter;
 import com.baedang.stock.entity.Stock;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.List;
 
@@ -53,9 +53,7 @@ public record HoldingsResponse(
         public static Item of(HoldingValuation valuation, Stock stock, boolean realtime) {
             BigDecimal costWon = valuation.costWon();
             BigDecimal pnlWon = valuation.pnlWon();
-            BigDecimal pnlRate = costWon.signum() > 0
-                    ? pnlWon.divide(costWon, 4, RoundingMode.HALF_UP)
-                    : null;
+            BigDecimal pnlRate = ReturnRateCalculator.calculate(pnlWon, costWon);
 
             return new Item(
                     stock.getSymbol(),

@@ -31,6 +31,7 @@
 | `docs/erd.html`       | 테이블 12개 · 컬럼 사전 · 배치 일정 |
 | `docs/wireframe.html` | 화면 6개                            |
 | `docs/api-spec.html`  | 엔드포인트 17개                     |
+| [공용 헬퍼 사용 가이드](docs/helpers.md) | 정규화·숫자 포맷·시장 정보·계산기·프론트 헬퍼 |
 
 ---
 

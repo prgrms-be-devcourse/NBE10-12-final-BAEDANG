@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Locale;
 
 import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
@@ -119,14 +118,9 @@ public class StockDetailService {
     }
 
     private MarketCountry parseMarketCountry(String value) {
-        if (value == null || value.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry는 KR 또는 US여야 합니다");
-        }
-        try {
-            return MarketCountry.valueOf(value.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry는 KR 또는 US여야 합니다");
-        }
+        return MarketCountry.parse(value)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INVALID_INPUT, "marketCountry는 KR 또는 US여야 합니다"));
     }
 
     private record Tradability(boolean tradable, String reason) {
