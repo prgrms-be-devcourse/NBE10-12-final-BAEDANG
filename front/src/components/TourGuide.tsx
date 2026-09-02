@@ -6,6 +6,7 @@ export type TourStep = {
   /** 안내할 요소를 찾는 CSS 선택자. `data-tour="..."` 속성을 붙인 요소를 가리킨다. */
   target: string;
   title: string;
+  /** 줄바꿈이 필요하면 "\n"을 넣는다(`white-space: pre-line`으로 그대로 반영된다). */
   description: string;
 };
 
@@ -14,10 +15,10 @@ export type TourStep = {
  * 설명하는 범용 온보딩 투어 엔진.
  *
  * <p>스포트라이트 자체는 `pointer-events: none`이라 실제 버튼은 그대로 클릭할 수
- * 있다 — 그 클릭을 document 캡처 단계에서 감지해서 다음 단계로 자동으로 넘어간다
- * ("버튼을 누르면 다음 안내가 나타난다"는 체험형 흐름). 툴팁의 "다음"/"이전"
- * 버튼으로도 동일하게 이동할 수 있어, 클릭으로 진행하기 애매한 설명 전용 단계도
- * 자연스럽게 넘어간다.
+ * 있다 — 매수/매도 선택, 일봉/1분봉 전환처럼 안내 중인 요소를 실제로 눌러보며
+ * 체험할 수 있다. 다만 다음 단계로의 이동은 그 클릭과 무관하게 오직 툴팁의
+ * "다음" 버튼을 눌러야만 일어난다 — 사용자가 버튼을 눌러보며 결과를 충분히
+ * 확인할 시간을 갖도록, 클릭했다고 안내가 곧장 다음으로 넘어가버리지 않는다.
  *
  * <p>모달(회원가입, 차트 확대보기)보다 항상 아래에 깔리도록 z-index를 낮게
  * 잡는다 — 투어 도중 모달이 뜨면 모달이 정상적으로 위를 덮어야 하기 때문이다.
@@ -74,24 +75,6 @@ export function TourGuide({
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [active, stepIndex, steps]);
-
-  // 스포트라이트가 뚫어놓은 실제 버튼을 사용자가 진짜로 클릭하면 다음 단계로 넘어간다.
-  useEffect(() => {
-    if (!active) return;
-    const step = steps[stepIndex];
-    if (!step) return;
-
-    function handleClick(e: MouseEvent) {
-      const el = document.querySelector(step!.target);
-      if (el && e.target instanceof Node && el.contains(e.target)) {
-        goNext();
-      }
-    }
-
-    document.addEventListener("click", handleClick, true);
-    return () => document.removeEventListener("click", handleClick, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, stepIndex, steps]);
 
   function finish() {
@@ -165,7 +148,7 @@ export function TourGuide({
         <div className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>
           {step.title}
         </div>
-        <p className="mb-4 text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>
+        <p className="mb-4 text-[13.5px] leading-relaxed" style={{ color: "var(--body)", whiteSpace: "pre-line" }}>
           {step.description}
         </p>
         <div className="flex items-center justify-between">

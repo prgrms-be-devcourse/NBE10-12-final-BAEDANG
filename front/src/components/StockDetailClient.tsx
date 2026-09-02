@@ -66,12 +66,12 @@ const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
   {
     target: '[data-tour="side-toggle"]',
     title: "매수 · 매도 선택",
-    description: "이 종목을 살지(매수) 팔지(매도) 고르는 곳이에요. 지금은 매수가 선택되어 있어요 — 한번 눌러서 바꿔보세요.",
+    description: "이 종목을 살지(매수) 팔지(매도) 고르는 곳이에요. 지금은 매수가 선택되어 있어요. 한번 눌러서 바꿔보세요.",
   },
   {
     target: '[data-tour="quantity"]',
     title: "주문 수량 입력",
-    description: "몇 주를 사고팔지 정수로 입력해요. 클릭해서 원하는 수량을 넣어보세요.",
+    description: "몇 주를 사고팔지 정수로 입력해요.\n클릭해서 원하는 수량을 넣어보세요.",
   },
   {
     target: '[data-tour="order-summary"]',
