@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,11 +42,16 @@ class StockRankingLoadServiceTest {
     private final QuoteSnapshotRepository quoteSnapshotRepository =
             mock(QuoteSnapshotRepository.class);
 
-    private final StockRankingLoadService service = new StockRankingLoadService(
-            rankingPort, stockRepository, quoteSnapshotRepository, self);
-
     private static final OffsetDateTime RANKED_AT =
             OffsetDateTime.parse("2026-09-07T08:00:00+09:00");
+
+    /** collected_at 을 고정해 검증할 수 있도록 TimeConfig 의 Clock 을 대체한다. */
+    private static final OffsetDateTime NOW =
+            OffsetDateTime.parse("2026-09-07T08:00:05Z");
+    private final Clock clock = Clock.fixed(NOW.toInstant(), ZoneOffset.UTC);
+
+    private final StockRankingLoadService service = new StockRankingLoadService(
+            rankingPort, stockRepository, quoteSnapshotRepository, clock, self);
 
     @Nested
     class Load {
@@ -168,6 +175,9 @@ class StockRankingLoadServiceTest {
             assertThat(생성.getPrevClose()).isEqualByComparingTo("69000");
             assertThat(생성.getCurrency()).isEqualTo("KRW");
             assertThat(생성.getQuoteAt()).isEqualTo(RANKED_AT);
+            // 시스템 기본 타임존이 아니라 주입된 Clock 의 UTC 시각을 쓴다.
+            assertThat(생성.getCollectedAt()).isEqualTo(NOW);
+            assertThat(생성.getCollectedAt().getOffset()).isEqualTo(ZoneOffset.UTC);
             // (70000 - 69000) / 69000
             assertThat(생성.changeRate()).isEqualByComparingTo("0.014493");
         }
@@ -270,7 +280,7 @@ class StockRankingLoadServiceTest {
 
             service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "005930")), null);
 
-            assertThat(저장된_스냅샷().getQuoteAt()).isNotNull();
+            assertThat(저장된_스냅샷().getQuoteAt()).isEqualTo(NOW);
         }
 
         @Test

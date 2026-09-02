@@ -15,7 +15,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -35,17 +37,20 @@ public class StockRankingLoadService {
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
+    private final Clock clock;
     private final StockRankingLoadService self;
 
     public StockRankingLoadService(
             RankingPort rankingPort,
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
+            Clock clock,
             @Lazy StockRankingLoadService self
     ) {
         this.rankingPort = rankingPort;
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
+        this.clock = clock;
         this.self = self;
     }
 
@@ -77,7 +82,7 @@ public class StockRankingLoadService {
             List<RankingEntry> entries,
             OffsetDateTime rankedAt
     ) {
-        OffsetDateTime collectedAt = OffsetDateTime.now();
+        OffsetDateTime collectedAt = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         OffsetDateTime quoteAt = rankedAt == null ? collectedAt : rankedAt;
 
         Set<Long> previouslyRanked = clearRanking(marketCountry);

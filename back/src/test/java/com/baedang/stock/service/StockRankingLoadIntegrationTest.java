@@ -7,12 +7,14 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.RankingEntry;
 import com.baedang.stock.repository.StockRepository;
 import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -21,12 +23,14 @@ import org.testcontainers.utility.MountableFile;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
 
 /**
  * 단위 테스트는 리포지토리가 모두 목이라 <b>SQL 이 실제로 나갔는지</b>를 보지 못한다.
@@ -47,6 +51,10 @@ class StockRankingLoadIntegrationTest {
 
     private static final OffsetDateTime RANKED_AT =
             OffsetDateTime.of(2026, 9, 7, 8, 0, 0, 0, ZoneOffset.ofHours(9));
+    private static final OffsetDateTime NOW =
+            OffsetDateTime.parse("2026-09-07T08:00:05Z");
+
+
 
     @Container
     @ServiceConnection
@@ -62,6 +70,14 @@ class StockRankingLoadIntegrationTest {
     @Autowired EntityManager entityManager;
     @Autowired JdbcTemplate jdbcTemplate;
 
+    /** collected_at 을 고정해 검증할 수 있도록 TimeConfig 의 Clock 을 대체한다. */
+    @MockitoBean Clock clock;
+
+    @BeforeEach
+    void setUpClock() {
+        when(clock.instant()).thenReturn(NOW.toInstant());
+    }
+
     @Test
     void 스냅샷이_없던_신규_편입_종목은_INSERT_된다() {
         Stock 신규 = saveStock(MarketCountry.KR, false);
@@ -72,6 +88,8 @@ class StockRankingLoadIntegrationTest {
         assertThat(lastPrice(신규)).isEqualByComparingTo("70000");
         assertThat(prevClose(신규)).isEqualByComparingTo("69000");
         assertThat(currency(신규)).isEqualTo("KRW");
+        // 주입된 Clock 기준 UTC 로 저장된다 (시스템 기본 타임존이 아니다).
+        assertThat(collectedAt(신규).toInstant()).isEqualTo(NOW.toInstant());
         assertThat(stockRepository.findById(신규.getStockId()).orElseThrow().getIsRanked()).isTrue();
     }
 
@@ -175,6 +193,10 @@ class StockRankingLoadIntegrationTest {
 
     private BigDecimal lastPrice(Stock stock) {
         return column(stock, "last_price", BigDecimal.class);
+    }
+
+    private OffsetDateTime collectedAt(Stock stock) {
+        return column(stock, "collected_at", OffsetDateTime.class);
     }
 
     private String currency(Stock stock) {
