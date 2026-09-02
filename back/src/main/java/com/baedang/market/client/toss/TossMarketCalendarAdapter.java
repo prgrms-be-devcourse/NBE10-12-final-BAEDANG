@@ -11,6 +11,7 @@ import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.stock.entity.MarketCountry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -28,6 +29,7 @@ import java.util.Map;
  * 각자 자기 DTO를 파싱합니다.
  */
 @Component
+@Qualifier("marketCalendarDelegate")
 @ConditionalOnProperty(prefix = "toss", name = "enabled", havingValue = "true")
 public class TossMarketCalendarAdapter implements MarketCalendarPort {
 
