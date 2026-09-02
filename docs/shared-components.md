@@ -1,13 +1,13 @@
-# Shared Helpers and Domain Support Guide
+# Shared Components Guide
 
-English | [한국어](helpers.ko.md)
+English | [한국어](shared-components.ko.md)
 
-> Synchronization rule: update both `helpers.md` and `helpers.ko.md` whenever public methods, examples, or policies change.
+> Synchronization rule: update both `shared-components.md` and `shared-components.ko.md` whenever public methods, examples, or policies change.
 
-This is an index of reusable helpers in the current source code. Before implementing a new feature, check whether an existing helper already covers the task.
-It distinguishes global static utilities from domain-specific calculators and policy beans; it does not list every service-private method or entity getter/factory.
+This is an index of global configuration, shared utilities and calculators, domain-shared services and policies, and frontend modules reused across the project. Check existing components before implementing a new feature.
+Shared does not mean purely functional. Distinguish each component's role, invocation or injection method, and side effects; private service methods and trivial getters are not enumerated.
 
-This document describes existing behavior. Also consult the [API specification](api-spec.md) for API contracts and the [ERD](erd.md) for storage policies. Update this guide when a helper's public methods or policies change.
+This document describes existing behavior. Also consult the [API specification](api-spec.md) for API contracts and the [ERD](erd.md) for storage policies. Update this guide when a shared component's public methods or policies change.
 
 ## 1. Quick Selection
 
@@ -23,7 +23,31 @@ This document describes existing behavior. Also consult the [API specification](
 | Validate chart combinations, resolve trading days, or classify realtime quotes | Domain Policy / Resolver | Inject a Spring bean |
 | Calculate and display frontend amounts | `D`, `format.ts`, `order-amount.ts` | Import modules |
 
-## 2. String Normalization — DomainNormalizer
+## 2. Global Configuration and Infrastructure
+
+The `global` package provides foundations shared across domains; not every file is a static helper. Normally, inject the beans registered by configuration classes or rely on automatic framework integration rather than calling configuration methods directly.
+
+### Configuration and Shared Entities
+
+| Source | Role / usage | Caveat |
+| --- | --- | --- |
+| [TimeConfig](../back/src/main/java/com/baedang/global/config/TimeConfig.java) | Provides a UTC `Clock` bean. Inject `Clock` through the constructor and use `clock.instant()` | Replace it with a fixed Clock in tests. See the market information section for local-date and UTC conversion examples |
+| [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | Inject `PasswordEncoder`; call `encode(raw)` and `matches(raw, encoded)` | Currently uses BCrypt. Do not implement separate hashing or repeatedly construct encoders |
+| [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | Automatically enables JPA Auditing and `auditingDateTimeProvider` | The current provider directly uses `OffsetDateTime.now(ZoneOffset.UTC)`; fixing the injected Clock does not fix auditing timestamps |
+| [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | Inherit to populate `createdAt` and `updatedAt` automatically | Only for tables with both `created_at` and `updated_at`. Does not replace account `openedAt` or ledger `occurredAt` |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | Enables scheduling and provides `dailyCandleTaskExecutor`. Inject that executor with `@Qualifier("dailyCandleTaskExecutor")` | Dedicated to daily candles: one thread, queue capacity 10, up to 30 seconds for shutdown. Do not indiscriminately share it with other async tasks; each scheduler owns its activation conditions |
+| [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | Automatically applies to `/api/**`; configure origins via `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS` | No direct invocation needed. CORS does not replace authentication or authorization |
+
+### Error Handling and External Communication
+
+| Source | Role / usage | Caveat |
+| --- | --- | --- |
+| [BusinessException](../back/src/main/java/com/baedang/global/error/BusinessException.java), [ErrorCode](../back/src/main/java/com/baedang/global/error/ErrorCode.java) | Signal business errors with `throw new BusinessException(ErrorCode.…)`; optionally supply detail or data | Detail is for developer diagnostics; data is for client decisions. Preserve existing error-code and retry contracts |
+| [GlobalExceptionHandler](../back/src/main/java/com/baedang/global/error/GlobalExceptionHandler.java), [ErrorResponse](../back/src/main/java/com/baedang/global/error/ErrorResponse.java) | Automatically converts exceptions to HTTP error responses | Do not duplicate the same try/catch and response construction in each controller |
+| [TossSecuritiesClient](../back/src/main/java/com/baedang/global/clients/toss/TossSecuritiesClient.java) | Inject into Toss adapters and call `get(path, queryParams, responseType)` | Business services use existing Ports. Do not bypass allowed-path validation or the global RateLimiter; never call real-money order APIs |
+| [TossRateLimiterRegistry](../back/src/main/java/com/baedang/global/clients/toss/TossRateLimiterRegistry.java), [TossApiGroup](../back/src/main/java/com/baedang/global/clients/toss/TossApiGroup.java), [Whitelist](../back/src/main/java/com/baedang/global/clients/toss/Whitelist.java) | Shared per-group request limits and path mapping; the registry exposes `acquire(group)` and `tryAcquire(group)` | The Toss client already applies limits to ordinary calls, so do not acquire another permit for the same request in an upstream service. Limits are shared within an application instance |
+
+## 3. String Normalization — DomainNormalizer
 
 Source: [DomainNormalizer.java](../back/src/main/java/com/baedang/global/normalizer/DomainNormalizer.java)
 
@@ -54,7 +78,7 @@ String currency = DomainNormalizer.currency(rawCurrency);
 // Apply required-field and allowed-value checks according to the service's existing rules.
 ```
 
-## 3. Response Number Formatting — FinancialDecimalFormatter
+## 4. Response Number Formatting — FinancialDecimalFormatter
 
 Source: [FinancialDecimalFormatter.java](../back/src/main/java/com/baedang/global/formatter/FinancialDecimalFormatter.java)
 
@@ -86,7 +110,7 @@ String cashText = krw(cashBalance);
 String priceText = currency(lastPrice, stock.getCurrency());
 ```
 
-## 4. Market Information — MarketCountry
+## 5. Market Information — MarketCountry
 
 Source: [MarketCountry.java](../back/src/main/java/com/baedang/stock/entity/MarketCountry.java)
 
@@ -121,7 +145,7 @@ LocalDate marketDate = now.atZone(country.zoneId()).toLocalDate();
 - Do not blindly replace KST daily-candle storage, KST chart timestamps, KST exchange-rate reference dates, or KST cache dates with `zoneId()`. Market-local dates and fixed-KST dates serve different policies.
 - Do not infer opening, closing, or holidays from the time zone alone. Use the existing calendar / session Ports for market sessions.
 
-## 5. Return Ratios and Order Amounts
+## 6. Return Ratios and Order Amounts
 
 ### ReturnRateCalculator — Account Return Ratios
 
@@ -155,12 +179,13 @@ Inject this Spring bean so it uses the configured fee and tax rates. The order p
 - The result also contains the KRW gross amount before rounding. Do not confuse cost-basis calculation values with settlement amounts.
 - The private `krw()` / `usd()` methods in this class return BigDecimal for calculations. Do not replace them with the identically named string Formatter methods.
 
-## 6. Domain-Specific Support
+## 7. Domain-Shared Components
 
-Reuse these within their domain contracts rather than applying them universally as global helpers. Inject Spring beans instead of constructing them directly.
+Even when reused across use cases, these components retain domain-specific contracts. Calculators and parsers process inputs; the ledger service writes to the database, while session policies and trading-day resolvers may perform external lookups. Inject Spring beans through constructors; the calling use case manages the required transactions and locks.
 
 | Source | Public functionality | Scope / caveat |
 | --- | --- | --- |
+| [InitialDepositLedgerService](../back/src/main/java/com/baedang/trading/service/InitialDepositLedgerService.java) | `recordInitialDeposit(accountId, initialCash, roundNo, occurredAt)` | Persist one initial-deposit entry immediately after signup/reset account creation. MANDATORY joins the existing transaction without increasing cash again. Supply positive ID/amount, round ≥ 1, and the account opening time; the caller handles duplicate requests. Not for historical ledger repairs |
 | [HoldingValuator](../back/src/main/java/com/baedang/account/service/HoldingValuator.java) | `valuate(holdings, quoteByStockId, usdKrwRate)` | KRW valuation for account summaries and holdings lists; reuse the existing round-per-stock-before-summing policy |
 | [LedgerCursor](../back/src/main/java/com/baedang/account/support/LedgerCursor.java) | Static `encode(entryId)`, `decode(cursor)` | Ledger-only Base64URL cursor; decoding errors produce `INVALID_CURSOR`. Different format from ranking cursors |
 | [StockCategory](../back/src/main/java/com/baedang/stock/entity/StockCategory.java) | Static `from(securityType, isCommonShare)` | ETF / ETN take precedence; false common-share flag yields PREFERRED, otherwise INDIVIDUAL |
@@ -174,7 +199,7 @@ For calendar-dependent logic, inject the existing [MarketCalendarPort](../back/s
 
 Striped locks are not yet a shared helper. Keep the separate implementations in `CandleQueryService` and `StockOnDemandQuoteService`; do not share one global lock.
 
-## 7. Frontend Helpers
+## 8. Frontend Shared Modules
 
 ### Amount Calculation and Display
 
@@ -205,6 +230,8 @@ Where possible, pass numeric API strings directly to Decimal. Some current bound
 
 ### API, Chart, and UI Support
 
+API and exchange-rate lookup modules are HTTP clients, not pure helpers. Reuse them separately from chart/display transformations. CSS color conversion depends on the browser DOM/Canvas.
+
 | Module | Export | Purpose / caveat |
 | --- | --- | --- |
 | [api.ts](../front/src/lib/api.ts) | `ApiError`, endpoint functions such as `getRankings`, `getCandles`, `placeOrder` | Reuse API calls and code/message/data handling; internal `request()` is private |
@@ -215,7 +242,7 @@ Where possible, pass numeric API strings directly to Decimal. Some current bound
 | [chart-colors.ts](../front/src/lib/chart-colors.ts) | `resolveCssColor(name, fallback)` | Convert CSS variables to chart colors; returns fallback when no DOM is available |
 | [category-badge.ts](../front/src/lib/category-badge.ts) | `categoryLabel`, `CATEGORY_BADGE_STYLE` | Map dividend status and stock types to UI badges; does not change backend stock classification |
 
-## 8. Adoption and Change Checklist
+## 9. Adoption and Change Checklist
 
 - Before consolidating similar code, check calculation precision, null handling, error codes, and time-zone policies.
 - Keep validation, normalization, calculation, and display separate. Do not calculate through a Formatter or substitute a Normalizer for validation.
