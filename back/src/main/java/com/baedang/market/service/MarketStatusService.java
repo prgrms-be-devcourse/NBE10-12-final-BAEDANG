@@ -19,7 +19,7 @@ import java.util.Map;
 
 /**
  * {@code GET /api/market/status} 서비스. KR·US 정규장의 <b>지금 개장 여부</b>와
- * <b>다음 개장 시각</b>을 계산한다. 데이터는 {@link MarketCalendarPort}(Toss/Fake) 에서 오며,
+ * <b>다음 개장 시각</b>을 계산한다. 데이터는 {@link MarketCalendarPort}(Toss) 에서 오며,
  * 폴링마다 live Toss 를 때리지 않도록 {@code (country, tradeDate)} 키 메모리 캐시로 하루 1회만 fetch 한다.
  *
  * <h2>핵심: open-NOW ≠ open-DAY</h2>

@@ -11,6 +11,7 @@ import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.stock.entity.MarketCountry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
@@ -21,14 +22,14 @@ import java.util.Map;
  * {@link MarketCalendarPort} 의 Toss 구현체.
  *
  * <p>{@code toss.enabled=true} 일 때만 빈으로 등록됩니다. 기본값({@code false}) 에서는
- * {@code FakeMarketCalendarPort} 가 대신 등록되므로, Toss 키가 없는 팀원도 앱을 정상
- * 구동할 수 있습니다.
+ * 이 포트를 등록하는 구현체가 없으므로, Toss 키를 채운 팀원만 앱을 구동할 수 있습니다.
  *
  * <p><b>KR/US 파싱 로직을 공유하지 않습니다.</b> 응답 구조 자체가 달라서
  * ({@code TossKrMarketCalendarResponse}/{@code TossUsMarketCalendarResponse} 참고)
  * 각자 자기 DTO를 파싱합니다.
  */
 @Component
+@Qualifier("marketCalendarDelegate")
 @ConditionalOnProperty(prefix = "toss", name = "enabled", havingValue = "true")
 public class TossMarketCalendarAdapter implements MarketCalendarPort {
 

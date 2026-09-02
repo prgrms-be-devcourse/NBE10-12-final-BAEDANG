@@ -21,7 +21,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link MarketSessionProviderBridge}의 (country, date)별 캐싱 동작 검증.
+ * {@link CachingMarketCalendarPort}를 공유하는 {@link MarketSessionProviderBridge}의
+ * (country, date)별 조회 동작 검증.
  *
  * <p>이 캐시가 없으면 {@code currentSession()} 호출마다 {@link MarketCalendarPort}를
  * 그대로 다시 부르는데, 실제로 랭킹 화면에서 이게 반복 호출되어 Toss 요청 한도(429)를
@@ -45,7 +46,7 @@ class MarketSessionProviderBridgeTest {
 
     @BeforeEach
     void setUp() {
-        bridge = new MarketSessionProviderBridge(marketCalendarPort);
+        bridge = new MarketSessionProviderBridge(new CachingMarketCalendarPort(marketCalendarPort));
     }
 
     @Test

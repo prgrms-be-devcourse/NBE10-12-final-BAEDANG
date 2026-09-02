@@ -61,9 +61,16 @@ server:
   servlet:
     context-path: /
 
+# ── CORS 허용 오리진 ─────────────────────────────────────────────────────────
+#   프론트(Next.js)가 다른 오리진에서 백엔드를 호출하므로 필요합니다. 배포 환경이
+#   늘어나면 코드를 고치지 말고 .env 의 CORS_ALLOWED_ORIGINS 에 콤마로 추가하세요.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
 # ── 토스증권 Open API ────────────────────────────────────────────────────────
-#   키가 비어 있으면 수집기를 끄고 Fake 어댑터로 돕니다.
-#   수집기 담당자만 .env 를 채우면 나머지 팀원은 키 없이도 앱이 뜹니다.
+#   개발용 대역(Fake) 구현체가 없으므로 키가 비어 있으면(기본값) 백엔드가 기동하지
+#   않습니다. .env 에 TOSS_CLIENT_ID/TOSS_CLIENT_SECRET/TOSS_ENABLED=true 를 채워
+#   실제 Toss API로 개발하세요.
 toss:
   base-url: https://openapi.tossinvest.com
   client-id: ${TOSS_CLIENT_ID:}

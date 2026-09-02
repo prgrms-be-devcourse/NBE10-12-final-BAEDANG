@@ -17,21 +17,21 @@ public class PrevCloseUpdateService {
     private static final Logger log = LoggerFactory.getLogger(PrevCloseUpdateService.class);
     private static final int FALLBACK_WARNING_PERCENT = 50;
 
-    private final PreviousTradingDayResolver previousTradingDayResolver;
+    private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     private final PrevCloseUpdateTransactionService transactionService;
 
     public PrevCloseUpdateService(
-            PreviousTradingDayResolver previousTradingDayResolver,
+            LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
             PrevCloseUpdateTransactionService transactionService
     ) {
-        this.previousTradingDayResolver = previousTradingDayResolver;
+        this.latestCompletedTradingDayResolver = latestCompletedTradingDayResolver;
         this.transactionService = transactionService;
     }
 
     public PrevCloseUpdateResult update(MarketCountry marketCountry) {
         Objects.requireNonNull(marketCountry, "marketCountry must not be null");
 
-        Optional<LocalDate> expectedTradeDate = previousTradingDayResolver.resolve(marketCountry);
+        Optional<LocalDate> expectedTradeDate = latestCompletedTradingDayResolver.resolve(marketCountry);
         if (expectedTradeDate.isEmpty()) {
             log.warn(
                     "[prev-close] 직전 거래일 확인 불가, last_price 전체 폴백: market={}",
