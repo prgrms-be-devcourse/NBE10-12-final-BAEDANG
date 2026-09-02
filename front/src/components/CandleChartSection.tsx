@@ -84,8 +84,7 @@ export function CandleChartSection({
           <button
             type="button"
             onClick={onExpand}
-            className="flex cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-[12.5px] font-bold transition-colors duration-150"
-            style={trackStyle}
+            className="chart-expand-btn flex cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-[12.5px] font-bold transition-colors duration-150"
             aria-label="차트 크게보기"
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">

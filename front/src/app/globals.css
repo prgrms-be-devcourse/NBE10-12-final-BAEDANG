@@ -66,6 +66,9 @@
   --headerLogo: #0f3868;
   --headerLoginText: #0f3868;
   --headerNavInactive: rgba(15, 56, 104, 0.75);
+  --pillTrackBg: rgba(15, 56, 104, 0.06);
+  --pillTrackBorder: rgba(15, 56, 104, 0.12);
+  --pillTrackBgHover: rgba(15, 56, 104, 0.1);
 }
 
 :root[data-theme="dark"] {
@@ -125,6 +128,9 @@
   --headerLogo: #ffffff;
   --headerLoginText: rgba(255, 255, 255, 0.75);
   --headerNavInactive: rgba(255, 255, 255, 0.75);
+  --pillTrackBg: rgba(255, 255, 255, 0.03);
+  --pillTrackBorder: rgba(255, 255, 255, 0.06);
+  --pillTrackBgHover: rgba(255, 255, 255, 0.07);
 }
 
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
@@ -184,6 +190,9 @@
     --headerLogo: #ffffff;
     --headerLoginText: rgba(255, 255, 255, 0.75);
     --headerNavInactive: rgba(255, 255, 255, 0.75);
+    --pillTrackBg: rgba(255, 255, 255, 0.03);
+    --pillTrackBorder: rgba(255, 255, 255, 0.06);
+    --pillTrackBgHover: rgba(255, 255, 255, 0.07);
   }
 }
 
@@ -250,6 +259,15 @@ body {
   }
   .rate-trend-close-btn:hover {
     background: var(--line);
+  }
+
+  /* 종목 상세 "차트 크게보기" 버튼 호버 효과. */
+  .chart-expand-btn {
+    background: var(--pillTrackBg);
+    border: 1px solid var(--pillTrackBorder);
+  }
+  .chart-expand-btn:hover {
+    background: var(--pillTrackBgHover);
   }
 }
 
