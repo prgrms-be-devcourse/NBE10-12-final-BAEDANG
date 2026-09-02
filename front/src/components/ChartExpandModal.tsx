@@ -57,7 +57,7 @@ export function ChartExpandModal({
           </h3>
           <button
             onClick={onClose}
-            className="chart-expand-modal-close-btn shrink-0 rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors duration-150"
+            className="chart-expand-modal-close-btn shrink-0 cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors duration-150"
             style={{ color: "var(--mut)" }}
             aria-label="닫기"
           >
