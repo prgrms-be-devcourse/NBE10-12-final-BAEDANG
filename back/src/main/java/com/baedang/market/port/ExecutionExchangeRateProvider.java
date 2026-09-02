@@ -5,11 +5,10 @@ import java.math.BigDecimal;
 /**
  * 시장 데이터 모듈이 거래 모듈에 제공하는 현재 USD/KRW 체결 환율 계약입니다.
  *
- * <p>TODO(시장 데이터 담당): Toss 현재 환율을 1분 TTL로 캐싱하는 구현체를
- * {@code @Component} 또는 {@code @Service} Bean으로 등록해야 합니다.
- * 차트 이력용 {@code exchange_rate} 테이블의 시간 단위 최신 행을 체결 환율의
- * 폴백으로 사용하면 안 됩니다. 구현체가 병합되기 전에는
- * {@code OrderQuoteService}의 자동 주입 경고가 정상입니다.
+ * <p>구현체는 Toss 현재 환율을 1분 TTL로 캐싱해야 합니다 — 매 호출마다 Toss를
+ * 부르면 체결 환율 조회가 몰릴 때 rate limit을 소모합니다. 차트 이력용
+ * {@code exchange_rate} 테이블의 시간 단위 최신 행을 체결 환율의 폴백으로
+ * 쓰지 마세요 — 최대 1시간까지 뒤처진 값일 수 있습니다.
  */
 public interface ExecutionExchangeRateProvider {
 
