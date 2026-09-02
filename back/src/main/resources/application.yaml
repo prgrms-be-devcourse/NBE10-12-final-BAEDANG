@@ -62,8 +62,9 @@ server:
     context-path: /
 
 # ── 토스증권 Open API ────────────────────────────────────────────────────────
-#   키가 비어 있으면 수집기를 끄고 Fake 어댑터로 돕니다.
-#   수집기 담당자만 .env 를 채우면 나머지 팀원은 키 없이도 앱이 뜹니다.
+#   개발용 대역(Fake) 구현체가 없으므로 키가 비어 있으면(기본값) 백엔드가 기동하지
+#   않습니다. .env 에 TOSS_CLIENT_ID/TOSS_CLIENT_SECRET/TOSS_ENABLED=true 를 채워
+#   실제 Toss API로 개발하세요.
 toss:
   base-url: https://openapi.tossinvest.com
   client-id: ${TOSS_CLIENT_ID:}

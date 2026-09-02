@@ -3,6 +3,7 @@ package com.baedang.market.service;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.model.PrevCloseUpdateResult;
+import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -14,6 +15,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -49,6 +51,10 @@ class PrevCloseUpdateIntegrationTest {
                     MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
                             .toAbsolutePath().normalize()),
                     "/docker-entrypoint-initdb.d/01-schema.sql");
+
+    // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort
+    // 의존을 목(mock)으로 채워 넣어야 컨텍스트가 뜬다(다른 서비스가 직접 주입받는다).
+    @MockitoBean MarketCalendarPort marketCalendarPort;
 
     @Autowired PrevCloseUpdateTransactionService transactionService;
     @Autowired StockRepository stockRepository;
