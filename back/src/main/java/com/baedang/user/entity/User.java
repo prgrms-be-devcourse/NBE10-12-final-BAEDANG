@@ -71,6 +71,13 @@ public class User extends BaseEntity {
         this.nickname = nickname;
     }
 
+    public void changePasswordHash(String passwordHash) {
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new IllegalArgumentException("비밀번호 hash는 필수입니다");
+        }
+        this.passwordHash = passwordHash;
+    }
+
     /** 탈퇴는 삭제가 아니라 상태 전환입니다. 원장이 이 회원을 참조하고 있습니다. */
     public void withdraw() {
         this.status = UserStatus.WITHDRAWN;
