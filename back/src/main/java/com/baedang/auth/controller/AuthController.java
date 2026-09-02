@@ -1,5 +1,6 @@
 package com.baedang.auth.controller;
 
+import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.dto.UserResponse;
@@ -31,12 +32,12 @@ public class AuthController {
 
     /** 201 Created. 가입과 동시에 1회차 계좌가 만들어집니다. */
     @PostMapping("/signup")
-    public ResponseEntity<UserResponse> signUp(@Valid @RequestBody SignUpRequest request) {
+    public ResponseEntity<AuthResponse> signUp(@Valid @RequestBody SignUpRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.signUp(request));
     }
 
     @PostMapping("/login")
-    public ResponseEntity<UserResponse> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }
 
