@@ -61,7 +61,7 @@ const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
   {
     target: '[data-tour="chart-expand"]',
     title: "차트 크게 보기",
-    description: "이 버튼을 누르면 차트를 더 크고 자세하게 볼 수 있어요.\n한번 눌러보세요.",
+    description: "이 버튼을 누르면 차트를 더 크고\n자세하게 볼 수 있어요.\n한번 눌러보세요.",
   },
   {
     target: '[data-tour="side-toggle"]',
