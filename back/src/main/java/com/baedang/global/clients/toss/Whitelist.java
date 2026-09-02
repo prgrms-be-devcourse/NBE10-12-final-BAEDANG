@@ -16,11 +16,11 @@ public enum Whitelist {
 
     // ── Stock Info ──────────────────────────────────────────────────────────
     STOCKS("/api/v1/stocks", TossApiGroup.STOCK),
-    STOCKS_ALL("/api/v1/stocks/all", TossApiGroup.STOCK),
     STOCK_WARNINGS("/api/v1/stocks/{symbol}/warnings", TossApiGroup.STOCK),
+    STOCKS_ALL("/api/v1/stocks/all", TossApiGroup.STOCK_ALL),
 
     // ── Ranking ─────────────────────────────────────────────────────────────
-    RANKINGS("/api/v1/rankings", TossApiGroup.STOCK);
+    RANKINGS("/api/v1/rankings", TossApiGroup.RANKING);
 
     private static final AntPathMatcher pathMatcher = new AntPathMatcher();
 

@@ -16,9 +16,9 @@ class WhitelistTest {
             "/api/v1/prices, MARKET_DATA",
             "/api/v1/candles, MARKET_DATA_CHART",
             "/api/v1/stocks, STOCK",
-            "/api/v1/stocks/all, STOCK",
+            "/api/v1/stocks/all, STOCK_ALL",
             "/api/v1/stocks/005930/warnings, STOCK",
-            "/api/v1/rankings, STOCK"
+            "/api/v1/rankings, RANKING"
     })
     @DisplayName("허용 경로는 올바른 API 그룹으로 분류된다")
     void t1(String path, TossApiGroup group) {

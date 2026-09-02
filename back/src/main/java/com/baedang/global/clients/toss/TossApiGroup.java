@@ -9,7 +9,9 @@ public enum TossApiGroup {
     MARKET_INFO(3),
     MARKET_DATA(15),
     MARKET_DATA_CHART(20),
-    STOCK(5);
+    STOCK(5),
+    STOCK_ALL(1),
+    RANKING(5);
 
     private final int tps;
 
