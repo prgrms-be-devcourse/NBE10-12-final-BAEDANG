@@ -470,9 +470,17 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <button
               type="button"
               onClick={() => setTourActive(true)}
-              className="tour-replay-btn cursor-pointer text-[12px] font-bold"
+              className="tour-replay-btn flex cursor-pointer items-center gap-1 text-[12px] font-bold"
             >
-              ❔ 화면 가이드
+              {/* 이모지(❔)는 폰트가 자체 색을 입혀서 라이트 모드에서 흐리게 보였다 —
+                  currentColor를 쓰는 SVG로 바꿔서 버튼 글자색(라이트/다크 각각의
+                  --mut2/hover 색)을 그대로 따라가게 한다. */}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              화면 가이드
             </button>
           </div>
           <div className="mb-3.5 text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
