@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { PillTabs } from "./PillTabs";
+import { CandlestickChart } from "./CandlestickChart";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
 import { useTheme } from "./ThemeProvider";
@@ -155,14 +156,6 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const availableQuantity = holding ? Number(holding.quantity) : 0;
   const availableCash = account ? Number(account.cashBalance) : INITIAL_CASH;
 
-  const closes = useMemo(() => candleItems.map((c) => Number(c.close)), [candleItems]);
-  const polyline = useMemo(() => {
-    if (closes.length < 2) return "";
-    const min = Math.min(...closes);
-    const max = Math.max(...closes);
-    const range = max - min || 1;
-    return closes.map((v, i) => `${(i / (closes.length - 1)) * 600},${145 - ((v - min) / range) * 145}`).join(" ");
-  }, [closes]);
   const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
   const amount = calculateOrderAmount({
@@ -353,19 +346,21 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
             {candleUnit === "일봉"
               ? `일봉 · ${period}${lastCandleAt ? ` · ${new Date(lastCandleAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} 종가까지` : ""}`
-              : `1분봉 · 최근 ${closes.length}봉`}
+              : `1분봉 · 최근 ${candleItems.length}봉`}
           </span>
         </div>
 
-        <div className="mb-4 flex h-[200px] items-center justify-center rounded-[20px]" style={{ background: "var(--card)" }}>
+        <div className="mb-4 overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
           {candleLoading ? (
-            <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트를 불러오는 중…</span>
-          ) : closes.length >= 2 ? (
-            <svg width="94%" height="145" viewBox="0 0 600 145" preserveAspectRatio="none">
-              <polyline points={polyline} fill="none" stroke="var(--mut)" strokeWidth={2} />
-            </svg>
+            <div className="flex h-[260px] items-center justify-center">
+              <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트를 불러오는 중…</span>
+            </div>
+          ) : candleItems.length >= 2 ? (
+            <CandlestickChart items={candleItems} theme={theme} />
           ) : (
-            <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트 데이터가 아직 없어요</span>
+            <div className="flex h-[260px] items-center justify-center">
+              <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트 데이터가 아직 없어요</span>
+            </div>
           )}
         </div>
 

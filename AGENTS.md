@@ -38,7 +38,7 @@ The existing Java package is `com.baedang`. Do not rename it.
 - Buying power = `cash_balance − locked_cash`; sellable qty = `quantity − locked_quantity`. Lock `net_amount` (incl. fee & tax), never `gross_amount`.
 - Fee/tax: KR sell tax is 0.2%; US sell charge is SEC Fee `0.0000206` with a `$0.01` minimum. Configure rates in `.env`; round US amounts to cents before KRW conversion and final whole-won `HALF_UP` rounding.
 - Rankings provide 100 items per selected market in five pages of 20; use the opaque cursor for each next page.
-- Top-100 minute candles are collected every minute in sequential 20-stock groups under the separate `MARKET_DATA_CHART` 5 TPS group. Other/off-hours charts use on-demand caching.
+- Top-100 minute candles are collected every minute in sequential 20-stock groups under the separate `MARKET_DATA_CHART` 20 TPS group. Other/off-hours charts use on-demand caching.
 - Portfolio reset is NOT a delete — close the account with `CLOSED` and open a new one with `round_no + 1`.
 - Never hardcode US regular-session hours — derive from the `/market-calendar` cache (DST shifts 1 hour).
 - Errors use a single `BusinessException` + error-code table; return both the code and a user-facing message.

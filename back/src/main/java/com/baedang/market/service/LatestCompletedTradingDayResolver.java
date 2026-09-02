@@ -2,7 +2,6 @@ package com.baedang.market.service;
 
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
-import com.baedang.standard.utils.Pacer;
 import com.baedang.stock.entity.MarketCountry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +21,6 @@ public class LatestCompletedTradingDayResolver {
 
     private static final Logger log = LoggerFactory.getLogger(LatestCompletedTradingDayResolver.class);
     private static final int MAX_LOOKBACK_DAYS = 14;
-    private static final int MARKET_INFO_TPS = 3;
     private static final Duration FINALIZATION_DELAY = Duration.ofMinutes(10);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final ZoneId NY = ZoneId.of("America/New_York");
@@ -38,10 +36,9 @@ public class LatestCompletedTradingDayResolver {
     public Optional<LocalDate> resolve(MarketCountry marketCountry) {
         Instant now = clock.instant();
         LocalDate today = now.atZone(marketCountry == MarketCountry.US ? NY : KST).toLocalDate();
-        RequestContext requests = new RequestContext();
 
         if (!isWeekend(today)) {
-            Optional<MarketCalendarDay> todayCalendar = fetchValidated(marketCountry, today, requests);
+            Optional<MarketCalendarDay> todayCalendar = fetchValidated(marketCountry, today);
             if (todayCalendar.isEmpty()) return Optional.empty();
             if (isFinalized(todayCalendar.get(), now)) return Optional.of(today);
         }
@@ -50,7 +47,7 @@ public class LatestCompletedTradingDayResolver {
             LocalDate candidate = today.minusDays(daysAgo);
             if (isWeekend(candidate)) continue;
 
-            Optional<MarketCalendarDay> calendar = fetchValidated(marketCountry, candidate, requests);
+            Optional<MarketCalendarDay> calendar = fetchValidated(marketCountry, candidate);
             if (calendar.isEmpty()) return Optional.empty();
             if (calendar.get().isOpen()) return Optional.of(candidate);
         }
@@ -65,10 +62,8 @@ public class LatestCompletedTradingDayResolver {
 
     private Optional<MarketCalendarDay> fetchValidated(
             MarketCountry marketCountry,
-            LocalDate date,
-            RequestContext requests
+            LocalDate date
     ) {
-        requests.paceIfNeeded();
         MarketCalendarDay calendarDay;
         try {
             calendarDay = fetch(marketCountry, date);
@@ -119,15 +114,5 @@ public class LatestCompletedTradingDayResolver {
     private boolean isWeekend(LocalDate date) {
         return date.getDayOfWeek() == DayOfWeek.SATURDAY
                 || date.getDayOfWeek() == DayOfWeek.SUNDAY;
-    }
-
-    private static final class RequestContext {
-        private final Pacer pacer = Pacer.forTps(MARKET_INFO_TPS);
-        private boolean requested;
-
-        private void paceIfNeeded() {
-            if (requested) pacer.pace();
-            requested = true;
-        }
     }
 }

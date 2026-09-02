@@ -7,7 +7,6 @@ import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.standard.utils.Pacer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,8 +31,6 @@ public class MinuteCandleCollectionService {
 
     private static final Logger log = LoggerFactory.getLogger(MinuteCandleCollectionService.class);
 
-    /** MARKET_DATA_CHART 그룹 TPS — Toss 쪽 rate limit 기준 (docs/erd.md). */
-    private static final int CANDLE_TPS = 5;
     /** 매분 최신 캔들 1개면 충분하지만, 스케줄 틱이 한 번 밀려도(배포·재시작 등)
      * 따라잡을 수 있게 여유를 둔다. */
     private static final int FETCH_COUNT = 2;
@@ -90,7 +87,6 @@ public class MinuteCandleCollectionService {
             return;
         }
 
-        Pacer pacer = Pacer.forTps(CANDLE_TPS);
         int failureCount = 0;
         for (Stock stock : stocks) {
             try {
@@ -100,8 +96,6 @@ public class MinuteCandleCollectionService {
                 // 계속 수집해야 한다 — 온디맨드 단건 조회와 다르게 이건 배치다.
                 failureCount++;
                 log.warn("[{}] {} 1분봉 수집 실패", marketCountry, stock.getSymbol(), exception);
-            } finally {
-                pacer.pace();
             }
         }
         // 전량 실패는 종목 한둘의 문제가 아니라 Toss 인증·네트워크 등 어댑터 자체의

@@ -6,7 +6,6 @@ import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.repository.DailyCandleRepository;
-import com.baedang.standard.utils.Pacer;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -32,8 +31,6 @@ public class DailyCandleCollectionService {
 
     private static final Logger log = LoggerFactory.getLogger(DailyCandleCollectionService.class);
 
-    /** MARKET_DATA_CHART 일봉 호출 한도 */
-    private static final int CHART_TPS = 20;
     /** 일별 정기 수집: 마감 봉 1개 */
     private static final int DAILY_CANDLE_COUNT = 1;
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
@@ -94,7 +91,6 @@ public class DailyCandleCollectionService {
 
         log.info("[daily-candle] 수집 시작: market={} tradeDate={} targets={}/{}",
                 marketCountry, context.expectedTradeDate(), targets.size(), stocks.size());
-        Pacer pacer = Pacer.forTps(CHART_TPS);
         int successCount = 0;
 
         for (Stock stock : targets) {
@@ -116,8 +112,6 @@ public class DailyCandleCollectionService {
             } catch (Exception e) {
                 log.warn("[daily-candle] 수집 실패: market={} symbol={} reason={}",
                         marketCountry, stock.getSymbol(), e.getMessage());
-            } finally {
-                pacer.pace();
             }
         }
 

@@ -125,14 +125,62 @@ resource "aws_iam_role" "ec2_role_1" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "s3_full_access" {
-  role       = aws_iam_role.ec2_role_1.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-}
-
 resource "aws_iam_role_policy_attachment" "ec2_ssm" {
   role       = aws_iam_role.ec2_role_1.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+resource "aws_iam_role_policy" "s3_asset_read" {
+  name = "${var.prefix}-ec2-role-1-policy-s3_asset_read"
+  role = aws_iam_role.ec2_role_1.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = ["s3:GetObject"]
+        Resource = [
+          for key in local.s3_asset_keys :
+          "${data.aws_s3_bucket.asset.arn}/${key}"
+        ]
+      },
+    ]
+  })
+}
+
+data "aws_caller_identity" "current" {}
+resource "aws_iam_role_policy" "ssm_parameter_read" {
+  name = "${var.prefix}-ec2-role-1-policy-ssm_parameter_read"
+  role = aws_iam_role.ec2_role_1.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:GetParameter",
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath",
+        ]
+        Resource = [
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}",
+          "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/${var.prefix}/*",
+        ]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["kms:Decrypt"]
+        Resource = "*"
+        Condition = {
+          StringEquals = {
+            "kms:ViaService" = "ssm.${var.region}.amazonaws.com"
+          }
+        }
+      },
+    ]
+  })
 }
 
 resource "aws_iam_instance_profile" "instance_profile_1" {
@@ -140,11 +188,39 @@ resource "aws_iam_instance_profile" "instance_profile_1" {
   role = aws_iam_role.ec2_role_1.name
 }
 
+resource "aws_ssm_parameter" "github_username" {
+  name  = "/${var.prefix}/github_username"
+  type  = "SecureString"
+  value = var.github_username
+
+  tags = {
+    Name = "${var.prefix}-params-github_username"
+    Team = "${var.team_tag}"
+  }
+}
+
+resource "aws_ssm_parameter" "github_access_token" {
+  name  = "/${var.prefix}/github_access_token"
+  type  = "SecureString"
+  value = var.github_access_token
+
+  tags = {
+    Name = "${var.prefix}-params-github_access_token"
+    Team = "${var.team_tag}"
+  }
+}
+
 data "aws_ssm_parameter" "ubuntu_ami" {
   name = "/aws/service/canonical/ubuntu/server/26.04/stable/current/arm64/hvm/ebs-gp3/ami-id"
 }
 
 locals {
+  s3_asset_keys = [
+    "docker-compose.yml",
+    "schema.sql",
+    "timescale.sql",
+  ]
+
   ec2_bootstrap = <<-EOF
   #!/bin/bash
   set -euxo pipefail
@@ -166,6 +242,7 @@ locals {
   echo "BOOTSTRAP_ENV_APPLICATION_DOMAIN=${var.application_domain}" >> /etc/environment
   source /etc/environment
 
+  echo "================ 1. Set up Docker ================"
   sudo apt-get update
   sudo apt-get install -y ca-certificates curl
   sudo install -m 0755 -d /etc/apt/keyrings
@@ -187,8 +264,38 @@ locals {
 
   sudo systemctl enable docker
   sudo systemctl start docker
+  echo "=================================================="
 
-  echo "${var.github_access_token}" | docker login ghcr.io -u ${var.github_username} --password-stdin
+  echo "=============== 2. Install AWS CLI ==============="
+  sudo apt-get install -y unzip
+
+  curl -fsSL https://awscli.amazonaws.com/v2/install.sh | sudo bash -s -- --system
+  aws --version
+  echo "=================================================="
+
+  echo "=============== 3. Login to GHCR ================"
+  sudo apt-get install -y jq
+
+  set +x
+  PARAMS_JSON=$(aws ssm get-parameters-by-path \
+  --path "/${var.prefix}" --recursive --with-decryption \
+  --region "${var.region}" --output json)
+  GH_USERNAME=$(echo "$PARAMS_JSON" | jq -r '.Parameters[] | select(.Name | endswith("/github_username")) | .Value')
+  GH_TOKEN=$(echo "$PARAMS_JSON" | jq -r '.Parameters[] | select(.Name | endswith("/github_access_token")) | .Value')
+  echo "$GH_TOKEN" | docker login ghcr.io -u "$GH_USERNAME" --password-stdin
+  set -x
+  echo "=================================================="
+
+  echo "=============== 4. Docker Compose ================"
+  mkdir /opt/${var.prefix}
+  cd /opt/${var.prefix}
+
+  for KEY in ${join(" ", local.s3_asset_keys)}; do
+    aws s3 cp "s3://${data.aws_s3_bucket.asset.id}/$KEY" .
+  done
+
+  docker compose up -d
+  echo "=================================================="
 
   echo "BOOTSTRAP DONE"
   EOF
@@ -207,9 +314,15 @@ resource "aws_instance" "ec2_1" {
     volume_size = 16
   }
   user_data = <<-EOF
-    ${local.ec2_bootstrap}
-    hostnamectl set-hostname ec2-1
+  ${local.ec2_bootstrap}
+  hostnamectl set-hostname ec2-1
   EOF
+  depends_on = [
+    aws_iam_role_policy.s3_asset_read,
+    aws_ssm_parameter.github_username,
+    aws_ssm_parameter.github_access_token,
+    aws_iam_role_policy.ssm_parameter_read,
+  ]
 
   tags = {
     Name = "${var.prefix}-ec2-1"
@@ -227,4 +340,8 @@ data "aws_eip" "eip_1" {
 resource "aws_eip_association" "ec2_1" {
   instance_id   = aws_instance.ec2_1.id
   allocation_id = data.aws_eip.eip_1.id
+}
+
+data "aws_s3_bucket" "asset" {
+  bucket = var.bucket_name
 }
