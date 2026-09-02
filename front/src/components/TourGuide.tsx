@@ -48,8 +48,10 @@ export function TourGuide({
     }
   }, [active]);
 
-  // 대상 요소의 위치를 계속 추적한다 — 창 크기 변경·스크롤은 물론, 캔들 차트
-  // 로딩 완료처럼 다른 원인으로 생기는 레이아웃 변화도 짧은 간격의 폴링으로 잡는다.
+  // 대상 요소의 위치를 계속 추적한다 — 창 크기 변경·스크롤은 리스너로, 캔들
+  // 차트 로딩 완료처럼 다른 원인으로 생기는 레이아웃 변화는 document.body를
+  // 관찰하는 ResizeObserver로 잡는다(짧은 간격의 폴링 대신 실제 레이아웃
+  // 변화 이벤트에만 반응해 불필요한 getBoundingClientRect 호출을 줄인다).
   useEffect(() => {
     if (!active) return;
     const step = steps[stepIndex];
@@ -69,11 +71,12 @@ export function TourGuide({
     }
 
     update();
-    const id = window.setInterval(update, 300);
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(update) : null;
+    resizeObserver?.observe(document.body);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
-      window.clearInterval(id);
+      resizeObserver?.disconnect();
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };

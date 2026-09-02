@@ -8,6 +8,18 @@ export type CandleUnit = "일봉" | "1분봉";
 export type CandlePeriod = "1개월" | "6개월" | "1년";
 
 /**
+ * `lastCandleAt`은 백엔드가 ISO 8601 문자열로 내려준다고 가정하지만, 형식이
+ * 어긋나거나 빈 문자열이 오면 `new Date(...)`가 Invalid Date를 만들어
+ * `toLocaleDateString`이 "Invalid Date" 같은 값을 그대로 보여줄 수 있다.
+ * 파싱에 실패하면 null을 돌려줘서 호출부가 그 부분을 통째로 생략하게 한다.
+ */
+function formatLastCandleDate(iso: string): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
+}
+
+/**
  * 종목 상세의 캔들차트 영역(일봉/1분봉 + 기간 토글 + 차트)을 따로 뺀 컴포넌트.
  *
  * <p>기본 화면(`StockDetailClient`)과 확대보기 모달(`ChartExpandModal`)이 완전히 같은
@@ -48,6 +60,7 @@ export function CandleChartSection({
     background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
     border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
   };
+  const lastCandleDateLabel = lastCandleAt ? formatLastCandleDate(lastCandleAt) : null;
 
   return (
     <>
@@ -81,7 +94,7 @@ export function CandleChartSection({
         )}
         <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
           {candleUnit === "일봉"
-            ? `일봉 · ${period}${lastCandleAt ? ` · ${new Date(lastCandleAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} 종가까지` : ""}`
+            ? `일봉 · ${period}${lastCandleDateLabel ? ` · ${lastCandleDateLabel} 종가까지` : ""}`
             : `1분봉 · 최근 ${candleItems.length}봉`}
         </span>
         {onExpand && (
