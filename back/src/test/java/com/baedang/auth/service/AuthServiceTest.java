@@ -163,4 +163,58 @@ class AuthServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.ACCOUNT_NOT_FOUND);
     }
+
+    @Test
+    @DisplayName("회원가입 원장저장이 실패시 예외 알리고 token 발급하지 않음")
+    void t6() {
+        SignUpRequest request = new SignUpRequest(
+                "test@example.com",
+                "Password123!",
+                "테스터"
+        );
+        OffsetDateTime openedAt = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
+
+        when(userRepository.existsByEmail("test@example.com"))
+                .thenReturn(false);
+        when(userRepository.existsByNickname("테스터"))
+                .thenReturn(false);
+
+        User savedUser = User.create(
+                "test@example.com",
+                "hashed-password",
+                "테스터"
+        );
+        ReflectionTestUtils.setField(savedUser, "userId", 1L);
+
+        when(userRepository.saveAndFlush(any(User.class)))
+                .thenReturn(savedUser);
+
+        Account savedAccount = Account.open(
+                1L,
+                1,
+                initialCash,
+                openedAt
+        );
+        ReflectionTestUtils.setField(savedAccount, "accountId", 10L);
+
+        when(accountRepository.save(any(Account.class)))
+                .thenReturn(savedAccount);
+
+        RuntimeException ledgerFailure = new RuntimeException("ledger failure");
+
+        doThrow(ledgerFailure)
+                .when(initialDepositLedgerService)
+                .recordInitialDeposit(
+                        10L,
+                        initialCash,
+                        1,
+                        openedAt
+                );
+
+        assertThatThrownBy(() -> authService.signUp(request))
+                .isSameAs(ledgerFailure);
+
+        verify(jwtTokenProvider, never()).createAccessToken(any());
+        verify(jwtTokenProvider, never()).createRefreshToken(any());
+    }
 }
