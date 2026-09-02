@@ -7,31 +7,41 @@ import com.baedang.account.dto.LedgerResponse;
 import com.baedang.account.service.AccountResetService;
 import com.baedang.account.service.AccountService;
 import com.baedang.account.service.LedgerQueryService;
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(AccountController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class AccountControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean AccountService accountService;
     @MockitoBean AccountResetService accountResetService;
     @MockitoBean LedgerQueryService ledgerQueryService;
+    @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
     void 포트폴리오를_초기화하면_새_회차와_원화_금액을_문자열로_응답한다() throws Exception {
@@ -39,7 +49,7 @@ class AccountControllerTest {
                 .thenReturn(new AccountResetResponse(2L, 2, "50000000", "50000000"));
 
         mockMvc.perform(post("/api/accounts/me/reset")
-                        .header("X-User-Id", "7")
+                        .with(authenticatedUser(7L))
                         .contentType("application/json")
                         .content("{\"accountId\":1}"))
                 .andExpect(status().isOk())
@@ -50,21 +60,18 @@ class AccountControllerTest {
     }
 
     @Test
-    void 초기화도_헤더가_없으면_설정된_시드_사용자를_사용한다() throws Exception {
-        when(accountResetService.reset(1L, 10L))
-                .thenReturn(new AccountResetResponse(11L, 2, "50000000", "50000000"));
-
+    void 인증_없이_초기화하면_401을_응답한다() throws Exception {
         mockMvc.perform(post("/api/accounts/me/reset")
                         .contentType("application/json")
                         .content("{\"accountId\":10}"))
-                .andExpect(status().isOk());
-
-        verify(accountResetService).reset(1L, 10L);
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
     void 초기화_요청에_계좌_ID가_없으면_400을_응답한다() throws Exception {
         mockMvc.perform(post("/api/accounts/me/reset")
+                        .with(authenticatedUser(7L))
                         .contentType("application/json")
                         .content("{}"))
                 .andExpect(status().isBadRequest())
@@ -76,7 +83,7 @@ class AccountControllerTest {
     void 계좌_요약을_조회하면_원화_금액을_문자열로_응답한다() throws Exception {
         when(accountService.getSummary(7L)).thenReturn(sampleSummary());
 
-        mockMvc.perform(get("/api/accounts/me").header("X-User-Id", "7"))
+        mockMvc.perform(get("/api/accounts/me").with(authenticatedUser(7L)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.accountId").value(1))
                 .andExpect(jsonPath("$.roundNo").value(1))
@@ -89,13 +96,10 @@ class AccountControllerTest {
     }
 
     @Test
-    void 헤더가_없으면_설정된_시드_사용자로_조회한다() throws Exception {
-        when(accountService.getSummary(1L)).thenReturn(sampleSummary());
-
+    void 인증_없이_계좌를_조회하면_401을_응답한다() throws Exception {
         mockMvc.perform(get("/api/accounts/me"))
-                .andExpect(status().isOk());
-
-        verify(accountService).getSummary(1L);
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
@@ -103,7 +107,7 @@ class AccountControllerTest {
         when(accountService.getSummary(1L))
                 .thenThrow(new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
 
-        mockMvc.perform(get("/api/accounts/me"))
+        mockMvc.perform(get("/api/accounts/me").with(authenticatedUser(1L)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_FOUND"))
                 .andExpect(jsonPath("$.message").value("계좌 정보를 찾을 수 없어요"));
@@ -113,7 +117,7 @@ class AccountControllerTest {
     void 보유_목록을_조회하면_종목별_평가정보를_문자열로_응답한다() throws Exception {
         when(accountService.getHoldings(7L)).thenReturn(sampleHoldings());
 
-        mockMvc.perform(get("/api/accounts/me/holdings").header("X-User-Id", "7"))
+        mockMvc.perform(get("/api/accounts/me/holdings").with(authenticatedUser(7L)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].symbol").value("005930"))
                 .andExpect(jsonPath("$.items[0].name").value("삼성전자"))
@@ -128,20 +132,17 @@ class AccountControllerTest {
     }
 
     @Test
-    void 보유_목록도_헤더가_없으면_설정된_시드_사용자로_조회한다() throws Exception {
-        when(accountService.getHoldings(1L)).thenReturn(sampleHoldings());
-
+    void 인증_없이_보유목록을_조회하면_401을_응답한다() throws Exception {
         mockMvc.perform(get("/api/accounts/me/holdings"))
-                .andExpect(status().isOk());
-
-        verify(accountService).getHoldings(1L);
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
     void 체결_내역을_조회하면_커서와_항목을_응답한다() throws Exception {
         when(ledgerQueryService.getLedger(7L, null, null, null)).thenReturn(sampleLedger());
 
-        mockMvc.perform(get("/api/accounts/me/ledger").header("X-User-Id", "7"))
+        mockMvc.perform(get("/api/accounts/me/ledger").with(authenticatedUser(7L)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].entryId").value(3041))
                 .andExpect(jsonPath("$.items[0].entryType").value("BUY"))
@@ -157,12 +158,30 @@ class AccountControllerTest {
         when(ledgerQueryService.getLedger(1L, "eyJlbnRyeUlkIjozMDQwfQ", 10, "BUY")).thenReturn(sampleLedger());
 
         mockMvc.perform(get("/api/accounts/me/ledger")
+                        .with(authenticatedUser(1L))
                         .param("cursor", "eyJlbnRyeUlkIjozMDQwfQ")
                         .param("size", "10")
                         .param("entryType", "BUY"))
                 .andExpect(status().isOk());
 
         verify(ledgerQueryService).getLedger(1L, "eyJlbnRyeUlkIjozMDQwfQ", 10, "BUY");
+    }
+
+    @Test
+    void 위조된_사용자_헤더보다_인증_principal을_신뢰한다() throws Exception {
+        when(accountService.getSummary(7L)).thenReturn(sampleSummary());
+
+        mockMvc.perform(get("/api/accounts/me")
+                        .header("X-User-Id", "999")
+                        .with(authenticatedUser(7L)))
+                .andExpect(status().isOk());
+
+        verify(accountService).getSummary(7L);
+    }
+
+    private static RequestPostProcessor authenticatedUser(long userId) {
+        return authentication(new UsernamePasswordAuthenticationToken(
+                userId, null, List.of()));
     }
 
     private LedgerResponse sampleLedger() {
