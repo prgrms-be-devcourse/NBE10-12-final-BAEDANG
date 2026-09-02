@@ -1,7 +1,9 @@
 package com.baedang.auth.service;
 
 import com.baedang.auth.dto.AuthResponse;
+import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.global.error.BusinessException;
@@ -13,6 +15,8 @@ import com.baedang.user.entity.User;
 import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -216,5 +220,81 @@ class AuthServiceTest {
 
         verify(jwtTokenProvider, never()).createAccessToken(any());
         verify(jwtTokenProvider, never()).createRefreshToken(any());
+    }
+
+    @Test
+    @DisplayName("유효한 refresh token과 ACTIVE 회원이면 새 access token만 발급")
+    void t7() {
+        User user = User.create(
+                "test@example.com",
+                "encoded-password",
+                "테스터"
+        );
+        ReflectionTestUtils.setField(user, "userId", 7L);
+
+        when(jwtTokenProvider.parseRefreshToken("refresh-token"))
+                .thenReturn(7L);
+        when(userRepository.findByUserIdAndStatus(7L, UserStatus.ACTIVE))
+                .thenReturn(Optional.of(user));
+        when(jwtTokenProvider.createAccessToken(7L))
+                .thenReturn("new-access");
+
+        AccessTokenResponse response =
+                authService.refresh(new RefreshTokenRequest("refresh-token"));
+
+        assertThat(response)
+                .isEqualTo(new AccessTokenResponse("new-access"));
+
+        verify(jwtTokenProvider, never()).createRefreshToken(anyLong());
+
+    }
+
+    @Test
+    @DisplayName("만료된 refresh token은 TOKEN_EXPIRED")
+    void t8() {
+        when(jwtTokenProvider.parseRefreshToken("expired-refresh"))
+                .thenThrow(mock(ExpiredJwtException.class));
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshTokenRequest("expired-refresh"))
+        )
+                .isInstanceOf(BusinessException.class)
+                .matches(exception ->
+                        ((BusinessException) exception).getErrorCode()
+                                == ErrorCode.TOKEN_EXPIRED);
+    }
+
+    @Test
+    @DisplayName("access token을 refresh API에 사용하면 INVALID_TOKEN")
+    void t9() {
+        when(jwtTokenProvider.parseRefreshToken("access-token"))
+                .thenThrow(new JwtException("token_type mismatch"));
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshTokenRequest("access-token"))
+        )
+                .isInstanceOf(BusinessException.class)
+                .matches(exception ->
+                        ((BusinessException) exception).getErrorCode()
+                                == ErrorCode.INVALID_TOKEN);
+    }
+
+    @Test
+    @DisplayName("ACTIVE 회원이 아니면 refresh token을 거절")
+    void t10() {
+        when(jwtTokenProvider.parseRefreshToken("refresh-token"))
+                .thenReturn(7L);
+        when(userRepository.findByUserIdAndStatus(7L, UserStatus.ACTIVE))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                authService.refresh(new RefreshTokenRequest("refresh-token"))
+        )
+                .isInstanceOf(BusinessException.class)
+                .matches(exception ->
+                        ((BusinessException) exception).getErrorCode()
+                                == ErrorCode.INVALID_TOKEN);
+
+        verify(jwtTokenProvider, never()).createAccessToken(anyLong());
     }
 }

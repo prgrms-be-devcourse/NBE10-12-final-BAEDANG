@@ -1,25 +1,19 @@
 package com.baedang.auth.controller;
 
+import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.dto.UserResponse;
 import com.baedang.auth.service.AuthService;
 import jakarta.validation.Valid;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-/**
- * 회원가입 · 로그인.
- *
- * <p><b>1주차 범위</b> — 비밀번호 해시 저장과 검증까지만 합니다.
- * 토큰도 세션도 발급하지 않습니다.
- *
- * <p>이후 요청은 {@code X-User-Id} 헤더로 사용자를 식별합니다.
- * <b>개발용이라 배포하면 안 됩니다</b> — 헤더를 바꾸면 남의 계좌가 열립니다.
- * 2주차에 JWT 로 교체하면서 이 헤더를 없애세요.
- */
+/** 회원가입, 로그인, 토큰 재발급 및 stateless 로그아웃 API. */
 @RestController
 @RequestMapping("/api/auth")
 public class AuthController {
@@ -39,6 +33,18 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<AccessTokenResponse> refresh(
+            @Valid @RequestBody RefreshTokenRequest request
+    ) {
+        return ResponseEntity.ok(authService.refresh(request));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(@AuthenticationPrincipal Long userId) {
+        return ResponseEntity.ok().build();
     }
 
     /**

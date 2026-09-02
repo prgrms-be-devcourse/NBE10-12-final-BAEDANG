@@ -1,7 +1,9 @@
 package com.baedang.auth.service;
 
 import com.baedang.auth.dto.AuthResponse;
+import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.dto.UserResponse;
 import com.baedang.auth.security.JwtTokenProvider;
@@ -15,6 +17,8 @@ import com.baedang.user.entity.User;
 import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -148,6 +152,23 @@ public class AuthService {
 
         log.info("로그인 성공 userId={}", user.getUserId());
         return AuthResponse.from(user, account, accessToken, refreshToken);
+    }
+
+    @Transactional(readOnly = true)
+    public AccessTokenResponse refresh(RefreshTokenRequest request) {
+        Long userId;
+        try {
+            userId = jwtTokenProvider.parseRefreshToken(request.refreshToken());
+        } catch (ExpiredJwtException exception) {
+            throw new BusinessException(ErrorCode.TOKEN_EXPIRED);
+        } catch (JwtException | IllegalArgumentException exception) {
+            throw new BusinessException(ErrorCode.INVALID_TOKEN);
+        }
+
+        userRepository.findByUserIdAndStatus(userId, UserStatus.ACTIVE)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_TOKEN));
+
+        return new AccessTokenResponse(jwtTokenProvider.createAccessToken(userId));
     }
 
     @Transactional(readOnly = true)
