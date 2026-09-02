@@ -37,6 +37,9 @@ public enum ErrorCode {
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않아요"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원 정보를 찾을 수 없어요"),
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요해요"),
+    TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "로그인이 만료됐어요. 다시 로그인해주세요"),
+    INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "인증 정보가 올바르지 않아요"),
+    INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않아요"),
 
     // ── 종목 ────────────────────────────────────────────────────────────────
     STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 종목이에요"),
