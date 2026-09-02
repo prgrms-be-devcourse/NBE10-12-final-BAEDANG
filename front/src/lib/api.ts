@@ -223,12 +223,14 @@ export type RankingItem = {
   isDividend: boolean | null;
   leverageFactor: string | null;
   currency: string;
-  lastPrice: string;
-  prevClose: string;
-  changeAmount: string;
-  changeRate: string;
+  // 시세가 아직 수집되지 않았으면(장 마감 중 등) 이 필드들은 응답에서 통째로
+  // 빠진다 — 백엔드가 non_null 직렬화를 쓰기 때문. 항상 있다고 가정하지 말 것.
+  lastPrice?: string;
+  prevClose?: string;
+  changeAmount?: string;
+  changeRate?: string;
+  quoteAt?: string;
   tradingAmount: string;
-  quoteAt: string;
   realtime: boolean;
 };
 

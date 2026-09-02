@@ -18,15 +18,10 @@ import {
   type LedgerItem,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
-import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
+import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
 
-/** 종목 통화 단가를 원화로 환산한다. avgBuyPrice는 매수 시점 환율(avgExchangeRate)로,
- * lastPrice는 최신 환율로 환산하는 게 맞다 — HoldingsResponse의 설계 의도 그대로다. */
-function toKrw(nativeValue: string | null, currency: string, exchangeRate: string | number) {
-  const d = toDecimal(nativeValue);
-  if (!d) return null;
-  return currency === "USD" ? d.times(exchangeRate) : d;
-}
+// toKrw는 @/lib/format 공용 함수를 쓴다. avgBuyPrice는 매수 시점 환율(avgExchangeRate)로,
+// lastPrice는 최신 환율(rate)로 환산하는 게 맞다 — HoldingsResponse의 설계 의도 그대로다.
 
 export default function MyPage() {
   const { isLoggedIn, user } = useAuth();
