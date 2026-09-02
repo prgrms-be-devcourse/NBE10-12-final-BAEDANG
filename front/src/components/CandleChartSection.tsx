@@ -26,6 +26,7 @@ export function CandleChartSection({
   lastCandleAt,
   chartHeight = 260,
   onExpand,
+  tourIds,
 }: {
   candleUnit: CandleUnit;
   onCandleUnitChange: (value: CandleUnit) => void;
@@ -39,6 +40,9 @@ export function CandleChartSection({
   chartHeight?: number;
   /** "차트 크게보기" 버튼 클릭 핸들러. 넘기지 않으면 버튼 자체를 숨긴다(모달 안에서는 불필요). */
   onExpand?: () => void;
+  /** 첫 사용자 안내 투어(`TourGuide`)가 짚어야 할 요소에 붙일 `data-tour` 값들.
+   * 확대보기 모달에서는 넘기지 않아 투어 대상에서 제외된다. */
+  tourIds?: { toggle?: string; chart?: string; expandButton?: string };
 }) {
   const trackStyle = {
     background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
@@ -47,7 +51,7 @@ export function CandleChartSection({
 
   return (
     <>
-      <div className="my-4.5 flex flex-wrap items-center gap-2.5">
+      <div className="my-4.5 flex flex-wrap items-center gap-2.5" data-tour={tourIds?.toggle}>
         <PillTabs
           options={[
             { value: "일봉", label: "일봉" },
@@ -86,6 +90,7 @@ export function CandleChartSection({
             onClick={onExpand}
             className="chart-expand-btn flex cursor-pointer items-center gap-1 rounded-full px-3 py-1.5 text-[12.5px] font-bold transition-colors duration-150"
             aria-label="차트 크게보기"
+            data-tour={tourIds?.expandButton}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
               <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
@@ -95,7 +100,7 @@ export function CandleChartSection({
         )}
       </div>
 
-      <div className="mb-4 overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+      <div className="mb-4 overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }} data-tour={tourIds?.chart}>
         {candleLoading ? (
           <div className="flex items-center justify-center" style={{ height: chartHeight }}>
             <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트를 불러오는 중…</span>

@@ -277,6 +277,27 @@ body {
   .chart-expand-modal-close-btn:hover {
     background: var(--line);
   }
+
+  /* 종목 상세 첫 사용자 안내 투어(TourGuide) 버튼들. */
+  .tour-skip-btn {
+    color: var(--mut2);
+  }
+  .tour-skip-btn:hover {
+    color: var(--ink);
+  }
+  .tour-prev-btn {
+    background: var(--fill);
+    color: var(--mut);
+  }
+  .tour-prev-btn:hover {
+    background: var(--line);
+  }
+  .tour-replay-btn {
+    color: var(--mut2);
+  }
+  .tour-replay-btn:hover {
+    color: var(--accentText);
+  }
 }
 
 ::placeholder {

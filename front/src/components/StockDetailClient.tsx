@@ -6,6 +6,7 @@ import { SignupModal } from "./SignupModal";
 import { PillTabs } from "./PillTabs";
 import { CandleChartSection } from "./CandleChartSection";
 import { ChartExpandModal } from "./ChartExpandModal";
+import { TourGuide, type TourStep } from "./TourGuide";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
 import { useTheme } from "./ThemeProvider";
@@ -36,6 +37,54 @@ const TRADABLE_REASON_LABEL: Record<string, string> = {
   QUOTE_NOT_FOUND: "시세 정보가 아직 없어요",
 };
 
+// 이 화면을 처음 보는 사용자를 위한 안내 투어. localStorage에 한 번 완료/건너뛰기
+// 기록을 남기면 다음 방문부터는 자동으로 뜨지 않는다("거래하기" 옆 안내 버튼으로
+// 언제든 다시 볼 수 있다). 버전을 파일명처럼 접미사로 두면, 나중에 단계 구성이
+// 크게 바뀌었을 때 키만 올려서 기존 사용자에게도 새 투어를 다시 보여줄 수 있다.
+const STOCK_DETAIL_TOUR_STORAGE_KEY = "stockDetailTourSeen_v1";
+
+// 차트 → 차트 조작 → 매수/매도 체험 순서로, 화면을 위에서 아래로 훑으면서 실제
+// 모의 매수/매도 체결까지 눌러보게 이어지는 흐름이다(마지막 단계가 자연스러운 클라이맥스).
+const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
+  {
+    target: '[data-tour="chart"]',
+    title: "캔들 차트 읽는 법",
+    description:
+      "빨간 캔들은 시작가보다 오른 날, 파란 캔들은 내린 날이에요. 위아래로 튀어나온 얇은 선(꼬리)은 그날의 최고가·최저가를 보여줘요.",
+  },
+  {
+    target: '[data-tour="candle-toggle"]',
+    title: "기간 바꿔보기",
+    description:
+      "일봉은 하루 단위, 1분봉은 1분 단위로 가격 흐름을 보여줘요. 1개월·6개월·1년 버튼으로 더 긴 흐름도 볼 수 있어요. 눌러서 바꿔볼까요?",
+  },
+  {
+    target: '[data-tour="chart-expand"]',
+    title: "차트 크게 보기",
+    description: "이 버튼을 누르면 차트를 더 크고 자세하게 볼 수 있어요. 한번 눌러보세요.",
+  },
+  {
+    target: '[data-tour="side-toggle"]',
+    title: "매수 · 매도 선택",
+    description: "이 종목을 살지(매수) 팔지(매도) 고르는 곳이에요. 지금은 매수가 선택되어 있어요 — 한번 눌러서 바꿔보세요.",
+  },
+  {
+    target: '[data-tour="quantity"]',
+    title: "주문 수량 입력",
+    description: "몇 주를 사고팔지 정수로 입력해요. 클릭해서 원하는 수량을 넣어보세요.",
+  },
+  {
+    target: '[data-tour="order-summary"]',
+    title: "예상 체결 내역",
+    description: "수수료와 세금까지 반영한 실제 차감·입금 예상 금액이에요. 매수엔 세금이 없고, 매도할 때만 세금이 붙어요.",
+  },
+  {
+    target: '[data-tour="submit"]',
+    title: "매수 · 매도 체험하기",
+    description: "이 버튼을 누르면 실제로 모의 주문이 즉시 체결돼요. 가상의 돈으로 하는 연습이니 걱정 말고 눌러서 체험해보세요!",
+  },
+];
+
 const CATEGORY_GUIDE: Record<string, string> = {
   개별주:
     "개별주는 특정 기업 한 곳의 지분을 사는 거예요. 그 회사가 잘되면 오르고 어려워지면 내려요. 여러 기업에 나눠 담는 ETF보다 변동이 크기 때문에, 한 종목에 자산을 몰아넣지 않는 게 중요해요.",
@@ -62,6 +111,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [candleItems, setCandleItems] = useState<Candle[]>([]);
   const [candleLoading, setCandleLoading] = useState(true);
   const [chartExpanded, setChartExpanded] = useState(false);
+  const [tourActive, setTourActive] = useState(false);
   const [side, setSide] = useState<"매수" | "매도">("매수");
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
@@ -104,6 +154,19 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [warningLabel]);
+
+  // 처음 방문하는 사용자만 자동으로 안내 투어를 띄운다 — 완료/건너뛰기 기록이
+  // 없을 때만 시작한다("거래하기" 옆 안내 버튼으로 언제든 다시 볼 수 있다).
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(STOCK_DETAIL_TOUR_STORAGE_KEY)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setTourActive(true);
+      }
+    } catch {
+      // localStorage를 못 쓰는 환경이면 그냥 투어를 띄우지 않는다.
+    }
+  }, []);
 
   useEffect(() => {
     if (!isLoggedIn || !user) {
@@ -320,6 +383,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           theme={theme}
           lastCandleAt={lastCandleAt}
           onExpand={() => setChartExpanded(true)}
+          tourIds={{ toggle: "candle-toggle", chart: "chart", expandButton: "chart-expand" }}
         />
 
         {chartExpanded && (
@@ -401,43 +465,56 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         style={{ marginTop: tradePanelOffset }}
       >
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
-          <div className="mb-1 text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</span>
+            <button
+              type="button"
+              onClick={() => setTourActive(true)}
+              className="tour-replay-btn cursor-pointer text-[12px] font-bold"
+            >
+              ❔ 화면 가이드
+            </button>
+          </div>
           <div className="mb-3.5 text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
 
-          <PillTabs
-            options={[
-              { value: "매수", label: "매수" },
-              { value: "매도", label: "매도" },
-            ]}
-            value={side}
-            onChange={(v) => {
-              setSide(v as "매수" | "매도");
-              // 주문 내용이 바뀌면 이전 clientOrderId를 그대로 재사용하면 안 된다 —
-              // "같은 ID인데 다른 내용"은 NOT_RETRYABLE(DUPLICATE_ORDER)로 거절된다.
-              setClientOrderId(null);
-              setOrderError(null);
-            }}
-            trackClassName="mb-4 w-full rounded-xl p-1"
-            trackStyle={{ background: "var(--fill)" }}
-            pillColor={txPillColor}
-            pillRadius="9px"
-            buttonClassName="rounded-[9px] py-2 text-[15px] font-bold"
-            inactiveTextStyle={{ color: "var(--mut2)" }}
-          />
-
-          <label className="text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>주문 수량</label>
-          <div className="mt-1 mb-3">
-            <input
-              className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-              inputMode="numeric"
-              value={quantityInput}
-              onChange={(e) => {
-                setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+          <div data-tour="side-toggle">
+            <PillTabs
+              options={[
+                { value: "매수", label: "매수" },
+                { value: "매도", label: "매도" },
+              ]}
+              value={side}
+              onChange={(v) => {
+                setSide(v as "매수" | "매도");
+                // 주문 내용이 바뀌면 이전 clientOrderId를 그대로 재사용하면 안 된다 —
+                // "같은 ID인데 다른 내용"은 NOT_RETRYABLE(DUPLICATE_ORDER)로 거절된다.
                 setClientOrderId(null);
                 setOrderError(null);
               }}
+              trackClassName="mb-4 w-full rounded-xl p-1"
+              trackStyle={{ background: "var(--fill)" }}
+              pillColor={txPillColor}
+              pillRadius="9px"
+              buttonClassName="rounded-[9px] py-2 text-[15px] font-bold"
+              inactiveTextStyle={{ color: "var(--mut2)" }}
             />
+          </div>
+
+          <div data-tour="quantity">
+            <label className="text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>주문 수량</label>
+            <div className="mt-1 mb-3">
+              <input
+                className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+                inputMode="numeric"
+                value={quantityInput}
+                onChange={(e) => {
+                  setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+                  setClientOrderId(null);
+                  setOrderError(null);
+                }}
+              />
+            </div>
           </div>
           {side === "매도" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
@@ -452,7 +529,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             </span>
           </div>
 
-          <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }}>
+          <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }} data-tour="order-summary">
             {isUsdStock && (
               <div className="mb-2 text-[11.5px]" style={{ color: "var(--mut2)" }}>
                 적용 환율 {formatNumber(usdKrwRate)}원{" "}
@@ -492,6 +569,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               disabled
               className="w-full cursor-not-allowed rounded-xl py-3 text-[15px] font-bold"
               style={{ background: "var(--fill)", color: "var(--disabledText)" }}
+              data-tour="submit"
             >
               {blockReason}
             </button>
@@ -505,6 +583,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 if (!submitting) e.currentTarget.style.background = txPillColor;
               }}
               onMouseLeave={(e) => (e.currentTarget.style.background = "var(--accent)")}
+              data-tour="submit"
             >
               {submitting ? "처리 중…" : side === "매수" ? "매수하기" : "매도하기"}
             </button>
@@ -561,6 +640,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       </div>
 
       <SignupModal open={modalOpen} onClose={() => setModalOpen(false)} />
+
+      <TourGuide
+        steps={STOCK_DETAIL_TOUR_STEPS}
+        storageKey={STOCK_DETAIL_TOUR_STORAGE_KEY}
+        active={tourActive}
+        onFinish={() => setTourActive(false)}
+      />
     </div>
   );
 }
