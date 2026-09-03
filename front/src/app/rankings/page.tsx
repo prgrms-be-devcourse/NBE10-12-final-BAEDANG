@@ -35,6 +35,11 @@ export default function RankingsPage() {
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
+  // 해외 주식 탭에서 현재가를 원화 환산가/달러 원가 중 뭘로 볼지. 예전엔 원화가 아래에
+  // 달러가를 항상 같이(두 줄로) 보여줬는데, 그러면 국내 주식(한 줄) 행보다 칸이 길어져서
+  // (팀원 제보) 국내와 높이를 맞추려고 글자를 눌러 넣었더니 이번엔 잘 안 보이는 문제가
+  // 생겼다. 대신 토글로 한 줄만 보여주고 사용자가 원하는 통화를 고르게 한다.
+  const [priceDisplay, setPriceDisplay] = useState<"KRW" | "USD">("KRW");
   const [items, setItems] = useState<RankingItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [hasNext, setHasNext] = useState(false);
@@ -403,7 +408,26 @@ export default function RankingsPage() {
           <span>순위</span>
           <span>종목명</span>
           <span />
-          <span className="text-right">현재가</span>
+          <span className="flex items-center justify-end gap-2">
+            현재가
+            {market === "US" && (
+              <PillTabs
+                options={[
+                  { value: "KRW", label: "원" },
+                  { value: "USD", label: "$" },
+                ]}
+                value={priceDisplay}
+                onChange={(v) => setPriceDisplay(v as "KRW" | "USD")}
+                trackClassName="w-fit gap-0.5 rounded-full p-[2px]"
+                trackStyle={{
+                  background: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.08)",
+                  border: theme === "dark" ? "1px solid rgba(255,255,255,.08)" : "1px solid rgba(15,56,104,.14)",
+                }}
+                buttonClassName="rounded-full px-2 py-0.5 text-[10.5px] font-bold"
+                inactiveTextStyle={{ color: "var(--mut2)" }}
+              />
+            )}
+          </span>
           <span className="text-right">전일대비</span>
           <span className="text-right">거래대금</span>
         </div>
@@ -478,17 +502,11 @@ export default function RankingsPage() {
               >
                 {label}
               </span>
-              {/* 해외 종목은 원화 환산가 아래에 원래 달러가를 보조로 붙이는데, 두 줄이
-                  기본 line-height 그대로면 국내 종목(한 줄)보다 행이 눈에 띄게 길어진다
-                  (제보: 랭킹 화면에서 해외 주식 탭 행 높이가 국내보다 김). leading-none +
-                  약간의 음수 margin-top으로 국내 행과 같은 높이(47.5px)에 맞춘다. */}
-              <span className="text-right leading-none tabular-nums" style={{ color: "var(--ink)" }}>
-                {formatNumber(krwPrice)}
-                {isUsd && (
-                  <div className="-mt-[3px] leading-none text-[10.5px]" style={{ color: "var(--mut2)" }}>
-                    {formatUsd(item.lastPrice)}
-                  </div>
-                )}
+              {/* 원화·달러를 늘 같이(두 줄로) 보여주면 국내 주식(한 줄) 행보다 칸이 길어져서
+                  (팀원 제보) 헤더의 원/$ 토글로 뭘 볼지 고르게 하고 한 줄만 보여준다 —
+                  국내 주식 행과 자연스럽게 같은 높이가 된다. */}
+              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                {isUsd && priceDisplay === "USD" ? formatUsd(item.lastPrice) : formatNumber(krwPrice)}
               </span>
               <span className="flex justify-end">
                 {krwChange === null ? (
