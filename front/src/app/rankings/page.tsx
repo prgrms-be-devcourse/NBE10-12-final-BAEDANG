@@ -409,9 +409,13 @@ export default function RankingsPage() {
           }}
         >
           <span />
-          <span>순위</span>
+          {/* 순위는 자릿수가 들쭉날쭉한 짧은 숫자라 왼쪽 정렬이면 헤더 라벨과
+              시각적으로 어긋나 보인다(제보) — 좁은 숫자 칸은 가운데 정렬이 관례다. */}
+          <span className="text-center">순위</span>
           <span>종목명</span>
-          <span />
+          {/* 개별주/ETF 배지 칸에 헤더 라벨이 없었다(제보) — "구분"을 추가하고,
+              배지도 칸 가운데로 옮겨서 짧은 라벨과 나란히 보이게 한다. */}
+          <span className="text-center">구분</span>
           <span className="flex items-center justify-end gap-2">
             현재가
             {market === "US" && (
@@ -496,12 +500,12 @@ export default function RankingsPage() {
               >
                 ♥
               </button>
-              <span style={{ color: "var(--mut2)" }}>{item.rank}</span>
+              <span className="text-center" style={{ color: "var(--mut2)" }}>{item.rank}</span>
               <span style={{ color: "var(--ink)" }}>
                 {item.name} <Tag>{item.symbol}</Tag>
               </span>
               <span
-                className="w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
+                className="mx-auto w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
                 style={badge}
               >
                 {label}
