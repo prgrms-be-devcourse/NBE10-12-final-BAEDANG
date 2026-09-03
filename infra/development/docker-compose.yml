@@ -28,6 +28,17 @@ services:
     container_name: trading-prometheus
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # command 를 지정하면 이미지 기본 인자가 통째로 대체되므로 config.file/storage 를
+    # 반드시 다시 명시한다. --web.enable-remote-write-receiver 로 k6 부하 지표(push)를
+    # 받는다(이슈 #70). 이게 없으면 k6 → Prometheus 경로가 성립하지 않는다.
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-remote-write-receiver"
+    # 호스트에서 직접 띄운 앱(host.docker.internal:8081)을 scrape 하기 위함.
+    # Docker Desktop 은 자동 제공하지만 Linux 호스트에선 이 매핑이 필요하다.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     networks:
       - common
@@ -39,6 +50,11 @@ services:
       - "3001:3000"
     depends_on:
       - prometheus
+    # 데이터소스·대시보드를 provisioning 으로 코드화(이슈 #70). 대시보드 JSON 은
+    # authored 산출물이라 infra/load-test 에 두고 여기서 마운트한다.
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../load-test/grafana/dashboards:/var/lib/grafana/dashboards:ro
     restart: unless-stopped
     networks:
       - common
