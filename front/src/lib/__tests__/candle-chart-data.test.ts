@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toCandlestickData, toVolumeData } from "../candle-chart-data";
+import { TickMarkType, type UTCTimestamp } from "lightweight-charts";
+import { formatKstTickMark, toCandlestickData, toVolumeData } from "../candle-chart-data";
 import type { Candle } from "../api";
 
 function candle(overrides: Partial<Candle> = {}): Candle {
@@ -134,5 +135,27 @@ describe("toVolumeData", () => {
     const result = toVolumeData(items, "red", "blue");
 
     expect(result.map((p) => p.value)).toEqual([100, 300]);
+  });
+});
+
+describe("formatKstTickMark", () => {
+  // 실행 환경(CI 등)의 로컬 타임존이 KST가 아니어도 항상 KST로 나와야 한다는 걸
+  // 확인하려고, UTC/KST 날짜가 갈리는 경계 시각(UTC 08-27 16:00 = KST 08-28 01:00)을 쓴다.
+  const kstNextDay = (Date.UTC(2026, 7, 27, 16, 0, 0) / 1000) as UTCTimestamp;
+
+  it("DayOfMonth — 로컬 타임존과 무관하게 KST 날짜를 돌려준다(UTC로는 하루 전날)", () => {
+    expect(formatKstTickMark(kstNextDay, TickMarkType.DayOfMonth)).toBe("08. 28.");
+  });
+
+  it("Time — 초 단위 없이 KST 시:분을 24시간제로 돌려준다", () => {
+    expect(formatKstTickMark(kstNextDay, TickMarkType.Time)).toBe("01:00");
+  });
+
+  it("TimeWithSeconds — KST 시:분:초를 24시간제로 돌려준다", () => {
+    expect(formatKstTickMark(kstNextDay, TickMarkType.TimeWithSeconds)).toBe("01:00:00");
+  });
+
+  it("Year — KST 연도를 돌려준다", () => {
+    expect(formatKstTickMark(kstNextDay, TickMarkType.Year)).toBe("2026년");
   });
 });
