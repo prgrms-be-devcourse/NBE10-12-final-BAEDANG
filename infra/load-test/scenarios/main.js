@@ -28,6 +28,11 @@ const LOAD_VUS = Number(__ENV.LOAD_VUS || 50);
 const STRESS_VUS = Number(__ENV.STRESS_VUS || 300);
 const SPIKE_VUS = Number(__ENV.SPIKE_VUS || 400);
 
+// load 시나리오 구간 지속시간(env로 조절 — 짧은 런/CI용). 기본은 정식 부하.
+const LOAD_RAMP = __ENV.LOAD_RAMP || '1m';
+const LOAD_HOLD = __ENV.LOAD_HOLD || '3m';
+const LOAD_RAMPDOWN = __ENV.LOAD_RAMPDOWN || '30s';
+
 const ALL_SCENARIOS = {
   // 스모크: 경로·응답 sanity. 하드 gate.
   smoke: {
@@ -46,9 +51,9 @@ const ALL_SCENARIOS = {
     startTime: '40s',
     gracefulRampDown: '10s',
     stages: [
-      { duration: '1m', target: LOAD_VUS },
-      { duration: '3m', target: LOAD_VUS },
-      { duration: '30s', target: 0 },
+      { duration: LOAD_RAMP, target: LOAD_VUS },
+      { duration: LOAD_HOLD, target: LOAD_VUS },
+      { duration: LOAD_RAMPDOWN, target: 0 },
     ],
     tags: { scenario: 'load' },
     exec: 'browse',
