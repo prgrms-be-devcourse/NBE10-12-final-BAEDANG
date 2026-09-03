@@ -12,8 +12,12 @@ import { useTheme } from "@/components/ThemeProvider";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const PAGE_SIZE = 20;
+// 백엔드 시세 수집 자체가 5초 주기다(docs/erd.md) — 그보다 자주 재조회해도
+// 더 신선한 값을 받을 수 없어 폴링 주기를 여기에 맞춘다.
+const PRICE_POLL_INTERVAL_MS = 5000;
 // 검색창을 열었을 때(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
 // 하드코딩된 예시 그대로다. 산업은 연결할 실제 화면이 없어 장식용으로만 둔다.
 const POPULAR_STOCKS: { symbol: string; name: string; marketCountry: MarketCountry }[] = [
@@ -73,6 +77,33 @@ export default function RankingsPage() {
       cancelled = true;
     };
   }, [market]);
+
+  // 폴링 콜백이 매번 최신 items 길이를 읽을 수 있도록 ref로 따로 들고 있는다 —
+  // 이걸 useVisiblePolling의 의존성으로 직접 넣으면 폴링으로 items가 바뀔 때마다
+  // 인터벌이 매번 재생성된다.
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  const pollInFlightRef = useRef(false);
+
+  // 5초마다 지금까지 로드된 만큼(더보기로 추가 로드했으면 그만큼도 포함)을
+  // 처음부터 다시 조회해서 시세를 갱신한다. 탭이 백그라운드면 useVisiblePolling이
+  // 알아서 멈춘다. 실패해도 화면을 에러로 덮지 않고 다음 주기에 조용히 재시도한다.
+  useVisiblePolling(() => {
+    if (pollInFlightRef.current) return;
+    pollInFlightRef.current = true;
+    getRankings(market, itemsRef.current.length || PAGE_SIZE)
+      .then((page) => {
+        setItems(page.items);
+        setCursor(page.nextCursor ?? undefined);
+        setHasNext(page.hasNext);
+      })
+      .catch(() => {})
+      .finally(() => {
+        pollInFlightRef.current = false;
+      });
+  }, PRICE_POLL_INTERVAL_MS);
 
   // 2자 이상 입력되면 실제 검색 API를 호출한다. 타이핑마다 바로 쏘지 않도록 살짝 디바운스한다.
   useEffect(() => {
