@@ -4,7 +4,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { PillTabs } from "./PillTabs";
-import { CandlestickChart } from "./CandlestickChart";
+import { CandleChartSection } from "./CandleChartSection";
+import { ChartExpandModal } from "./ChartExpandModal";
+import { TourGuide, type TourStep } from "./TourGuide";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
 import { useTheme } from "./ThemeProvider";
@@ -35,6 +37,56 @@ const TRADABLE_REASON_LABEL: Record<string, string> = {
   QUOTE_NOT_FOUND: "시세 정보가 아직 없어요",
 };
 
+// 이 화면을 처음 보는 사용자를 위한 안내 투어. localStorage에 한 번 완료/건너뛰기
+// 기록을 남기면 다음 방문부터는 자동으로 뜨지 않는다("거래하기" 옆 안내 버튼으로
+// 언제든 다시 볼 수 있다). 버전을 파일명처럼 접미사로 두면, 나중에 단계 구성이
+// 크게 바뀌었을 때 키만 올려서 기존 사용자에게도 새 투어를 다시 보여줄 수 있다.
+const STOCK_DETAIL_TOUR_STORAGE_KEY = "stockDetailTourSeen_v1";
+
+// 차트 → 차트 조작 → 매수/매도 체험 순서로, 화면을 위에서 아래로 훑으면서 실제
+// 모의 매수/매도 체결까지 눌러보게 이어지는 흐름이다(마지막 단계가 자연스러운 클라이맥스).
+const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
+  {
+    target: '[data-tour="chart"]',
+    title: "캔들 차트 읽는 법",
+    description:
+      "빨간 캔들은 시작가보다 오른 날,\n파란 캔들은 내린 날이에요.\n위아래로 튀어나온 얇은 선(꼬리)은\n그날의 최고가·최저가를 보여줘요.\n차트 위에서 마우스 휠을 스크롤하면\n확대·축소할 수 있어요.",
+  },
+  {
+    target: '[data-tour="candle-toggle"]',
+    title: "기간 바꿔보기",
+    description:
+      "일봉은 하루 단위, 1분봉은 1분 단위로\n가격 흐름을 보여줘요.\n1개월·6개월·1년 버튼으로 더 긴 흐름도 볼 수 있어요.\n눌러서 바꿔볼까요?",
+  },
+  {
+    target: '[data-tour="chart-expand"]',
+    title: "차트 크게 보기",
+    description:
+      "이 버튼을 누르면 차트를 더 크게 확대해서 볼 수\n있어요. 작은 캔들 하나하나의 움직임이나 특정\n구간의 흐름을 더 꼼꼼히 살펴보기 좋아요.\n확대 화면에서도 일봉·1분봉, 기간은 그대로\n바꿀 수 있어요. 한번 눌러보세요.",
+  },
+  {
+    target: '[data-tour="side-toggle"]',
+    title: "매수 · 매도 선택",
+    description: "이 종목을 살지(매수) 팔지(매도) 고르는 곳이에요.\n지금은 매수가 선택되어 있어요.\n한번 눌러서 바꿔보세요.",
+  },
+  {
+    target: '[data-tour="quantity"]',
+    title: "주문 수량 입력",
+    description: "몇 주를 사고팔지 정수로 입력해요.\n클릭해서 원하는 수량을 넣어보세요.",
+  },
+  {
+    target: '[data-tour="order-summary"]',
+    title: "예상 체결 내역",
+    description: "수수료와 세금까지 반영한\n실제 차감·입금 예상 금액이에요.\n매수엔 세금이 없고, 매도할 때만 세금이 붙어요.",
+  },
+  {
+    target: '[data-tour="submit"]',
+    title: "매수 · 매도 체험하기",
+    description:
+      "이 버튼을 누르면 실제로 모의 주문이 즉시 체결돼요.\n가상의 돈으로 하는 연습이니 걱정 말고\n눌러서 체험해보세요!\n다음에 또 안내가 필요하시면\n상단의 '화면 가이드' 버튼을 눌러주세요.",
+  },
+];
+
 const CATEGORY_GUIDE: Record<string, string> = {
   개별주:
     "개별주는 특정 기업 한 곳의 지분을 사는 거예요. 그 회사가 잘되면 오르고 어려워지면 내려요. 여러 기업에 나눠 담는 ETF보다 변동이 크기 때문에, 한 종목에 자산을 몰아넣지 않는 게 중요해요.",
@@ -60,6 +112,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
   const [candleItems, setCandleItems] = useState<Candle[]>([]);
   const [candleLoading, setCandleLoading] = useState(true);
+  const [chartExpanded, setChartExpanded] = useState(false);
+  const [tourActive, setTourActive] = useState(false);
   const [side, setSide] = useState<"매수" | "매도">("매수");
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
@@ -102,6 +156,19 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [warningLabel]);
+
+  // 처음 방문하는 사용자만 자동으로 안내 투어를 띄운다 — 완료/건너뛰기 기록이
+  // 없을 때만 시작한다("거래하기" 옆 안내 버튼으로 언제든 다시 볼 수 있다).
+  useEffect(() => {
+    try {
+      if (!localStorage.getItem(STOCK_DETAIL_TOUR_STORAGE_KEY)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setTourActive(true);
+      }
+    } catch {
+      // localStorage를 못 쓰는 환경이면 그냥 투어를 띄우지 않는다.
+    }
+  }, []);
 
   useEffect(() => {
     if (!isLoggedIn || !user) {
@@ -184,9 +251,18 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     blockReason = "주문가능금액이 부족해요";
   }
 
-  // 매수/매도 필박스 색 — 매도는 var(--down) 고정, 매수는 라이트/다크에서 색조가 다르다
-  // (design_handoff README: 매수 = 라이트 var(--up) / 다크 oklch(56% 0.17 20)).
-  const txPillColor = side === "매도" ? "var(--down)" : theme === "dark" ? "oklch(56% 0.17 20)" : "var(--up)";
+  // 매수/매도 필박스 색 — 예전에는 --up/--down 토큰을 그대로 썼는데, 그 토큰을
+  // 차트용으로 더 선명하게 조정한 뒤(globals.css) 이 버튼만은 예전 색이 더 낫다는
+  // 피드백을 받아 여기서만 원래 값을 그대로 고정한다(차트·랭킹 등락 배지 등
+  // --up/--down을 공유하는 나머지 화면은 그대로 새 색을 쓴다).
+  const txPillColor =
+    side === "매도"
+      ? theme === "dark"
+        ? "oklch(70% 0.13 232)"
+        : "oklch(56% 0.16 236)"
+      : theme === "dark"
+        ? "oklch(56% 0.17 20)"
+        : "oklch(58% 0.2 25)";
 
   async function handleSubmit() {
     if (blockReason || submitting) return;
@@ -308,61 +384,35 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           </div>
         </div>
 
-        {/* 세그먼트 토글 */}
-        <div className="my-4.5 flex flex-wrap items-center gap-2.5">
-          <PillTabs
-            options={[
-              { value: "일봉", label: "일봉" },
-              { value: "1분봉", label: "1분봉" },
-            ]}
-            value={candleUnit}
-            onChange={(v) => setCandleUnit(v as "일봉" | "1분봉")}
-            trackClassName="w-fit rounded-full p-[3px]"
-            trackStyle={{
-              background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-              border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
-            }}
-            buttonClassName="rounded-full px-4 py-1.5 text-[13.5px] font-bold"
-            inactiveTextStyle={{ color: "var(--mut)" }}
-          />
-          {candleUnit === "일봉" && (
-            <PillTabs
-              options={[
-                { value: "1개월", label: "1개월" },
-                { value: "6개월", label: "6개월" },
-                { value: "1년", label: "1년" },
-              ]}
-              value={period}
-              onChange={(v) => setPeriod(v as "1개월" | "6개월" | "1년")}
-              trackClassName="w-fit rounded-full p-[3px]"
-              trackStyle={{
-                background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-                border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
-              }}
-              buttonClassName="rounded-full px-3.5 py-1.5 text-[13px] font-bold"
-              inactiveTextStyle={{ color: "var(--mut)" }}
-            />
-          )}
-          <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
-            {candleUnit === "일봉"
-              ? `일봉 · ${period}${lastCandleAt ? ` · ${new Date(lastCandleAt).toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" })} 종가까지` : ""}`
-              : `1분봉 · 최근 ${candleItems.length}봉`}
-          </span>
-        </div>
+        <CandleChartSection
+          candleUnit={candleUnit}
+          onCandleUnitChange={setCandleUnit}
+          period={period}
+          onPeriodChange={setPeriod}
+          candleItems={candleItems}
+          candleLoading={candleLoading}
+          theme={theme}
+          lastCandleAt={lastCandleAt}
+          onExpand={() => setChartExpanded(true)}
+          tourIds={{ toggle: "candle-toggle", chart: "chart", expandButton: "chart-expand" }}
+        />
 
-        <div className="mb-4 overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
-          {candleLoading ? (
-            <div className="flex h-[260px] items-center justify-center">
-              <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트를 불러오는 중…</span>
-            </div>
-          ) : candleItems.length >= 2 ? (
-            <CandlestickChart items={candleItems} theme={theme} />
-          ) : (
-            <div className="flex h-[260px] items-center justify-center">
-              <span className="text-[13px]" style={{ color: "var(--mut2)" }}>차트 데이터가 아직 없어요</span>
-            </div>
-          )}
-        </div>
+        {chartExpanded && (
+          <ChartExpandModal
+            name={detail.name}
+            symbol={detail.symbol}
+            market={detail.market}
+            candleUnit={candleUnit}
+            onCandleUnitChange={setCandleUnit}
+            period={period}
+            onPeriodChange={setPeriod}
+            candleItems={candleItems}
+            candleLoading={candleLoading}
+            theme={theme}
+            lastCandleAt={lastCandleAt}
+            onClose={() => setChartExpanded(false)}
+          />
+        )}
 
         <div className="mb-3.5 rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
           <h4 className="mb-2.5 text-[16px] font-bold" style={{ color: "var(--ink)" }}>
@@ -426,43 +476,64 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         style={{ marginTop: tradePanelOffset }}
       >
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
-          <div className="mb-1 text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</div>
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</span>
+            <button
+              type="button"
+              onClick={() => setTourActive(true)}
+              className="tour-replay-btn flex cursor-pointer items-center gap-1 text-[12px] font-bold"
+            >
+              {/* 이모지(❔)는 폰트가 자체 색을 입혀서 라이트 모드에서 흐리게 보였다 —
+                  currentColor를 쓰는 SVG로 바꿔서 버튼 글자색(라이트/다크 각각의
+                  --mut2/hover 색)을 그대로 따라가게 한다. */}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              화면 가이드
+            </button>
+          </div>
           <div className="mb-3.5 text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
 
-          <PillTabs
-            options={[
-              { value: "매수", label: "매수" },
-              { value: "매도", label: "매도" },
-            ]}
-            value={side}
-            onChange={(v) => {
-              setSide(v as "매수" | "매도");
-              // 주문 내용이 바뀌면 이전 clientOrderId를 그대로 재사용하면 안 된다 —
-              // "같은 ID인데 다른 내용"은 NOT_RETRYABLE(DUPLICATE_ORDER)로 거절된다.
-              setClientOrderId(null);
-              setOrderError(null);
-            }}
-            trackClassName="mb-4 w-full rounded-xl p-1"
-            trackStyle={{ background: "var(--fill)" }}
-            pillColor={txPillColor}
-            pillRadius="9px"
-            buttonClassName="rounded-[9px] py-2 text-[15px] font-bold"
-            inactiveTextStyle={{ color: "var(--mut2)" }}
-          />
-
-          <label className="text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>주문 수량</label>
-          <div className="mt-1 mb-3">
-            <input
-              className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-              inputMode="numeric"
-              value={quantityInput}
-              onChange={(e) => {
-                setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+          <div data-tour="side-toggle">
+            <PillTabs
+              options={[
+                { value: "매수", label: "매수" },
+                { value: "매도", label: "매도" },
+              ]}
+              value={side}
+              onChange={(v) => {
+                setSide(v as "매수" | "매도");
+                // 주문 내용이 바뀌면 이전 clientOrderId를 그대로 재사용하면 안 된다 —
+                // "같은 ID인데 다른 내용"은 NOT_RETRYABLE(DUPLICATE_ORDER)로 거절된다.
                 setClientOrderId(null);
                 setOrderError(null);
               }}
+              trackClassName="mb-4 w-full rounded-xl p-1"
+              trackStyle={{ background: "var(--fill)" }}
+              pillColor={txPillColor}
+              pillRadius="9px"
+              buttonClassName="rounded-[9px] py-2 text-[15px] font-bold"
+              inactiveTextStyle={{ color: "var(--mut2)" }}
             />
+          </div>
+
+          <div data-tour="quantity">
+            <label className="text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>주문 수량</label>
+            <div className="mt-1 mb-3">
+              <input
+                className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+                inputMode="numeric"
+                value={quantityInput}
+                onChange={(e) => {
+                  setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+                  setClientOrderId(null);
+                  setOrderError(null);
+                }}
+              />
+            </div>
           </div>
           {side === "매도" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
@@ -477,7 +548,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             </span>
           </div>
 
-          <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }}>
+          <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }} data-tour="order-summary">
             {isUsdStock && (
               <div className="mb-2 text-[11.5px]" style={{ color: "var(--mut2)" }}>
                 적용 환율 {formatNumber(usdKrwRate)}원{" "}
@@ -517,6 +588,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               disabled
               className="w-full cursor-not-allowed rounded-xl py-3 text-[15px] font-bold"
               style={{ background: "var(--fill)", color: "var(--disabledText)" }}
+              data-tour="submit"
             >
               {blockReason}
             </button>
@@ -530,6 +602,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 if (!submitting) e.currentTarget.style.background = txPillColor;
               }}
               onMouseLeave={(e) => (e.currentTarget.style.background = "var(--accent)")}
+              data-tour="submit"
             >
               {submitting ? "처리 중…" : side === "매수" ? "매수하기" : "매도하기"}
             </button>
@@ -586,6 +659,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       </div>
 
       <SignupModal open={modalOpen} onClose={() => setModalOpen(false)} />
+
+      <TourGuide
+        steps={STOCK_DETAIL_TOUR_STEPS}
+        storageKey={STOCK_DETAIL_TOUR_STORAGE_KEY}
+        active={tourActive}
+        onFinish={() => setTourActive(false)}
+      />
     </div>
   );
 }

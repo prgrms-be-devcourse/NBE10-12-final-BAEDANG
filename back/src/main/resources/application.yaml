@@ -60,6 +60,9 @@ server:
   port: 8080
   servlet:
     context-path: /
+  tomcat:
+    mbeanregistry:
+      enabled: true
 
 # ── CORS 허용 오리진 ─────────────────────────────────────────────────────────
 #   프론트(Next.js)가 다른 오리진에서 백엔드를 호출하므로 필요합니다. 배포 환경이
@@ -144,3 +147,17 @@ logging:
     org.hibernate.SQL: DEBUG
     # 바인딩 파라미터까지 보고 싶을 때만 켜세요. 로그가 매우 길어집니다.
     # org.hibernate.orm.jdbc.bind: TRACE
+
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never

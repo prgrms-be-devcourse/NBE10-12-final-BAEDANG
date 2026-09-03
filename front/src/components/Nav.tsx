@@ -40,7 +40,7 @@ export function Nav() {
         className="mr-1.5 whitespace-nowrap text-[16px] font-extrabold"
         style={{ color: "var(--headerLogo)" }}
       >
-        모의주식
+        InvestUP
       </Link>
 
       <PillTabs
