@@ -13,7 +13,7 @@ import { useMarketStatus } from "./MarketStatusProvider";
 import { useTheme } from "./ThemeProvider";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
-import { calculateOrderAmount } from "@/lib/order-amount";
+import { calculateOrderAmount, maxAffordableQuantity } from "@/lib/order-amount";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
 import {
   ApiError,
@@ -253,6 +253,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const holding = holdings.find((h) => h.symbol === detail.symbol);
   const availableQuantity = holding ? Number(holding.quantity) : 0;
   const availableCash = account ? Number(account.cashBalance) : INITIAL_CASH;
+  // 매수 입력의 상한 — 주문가능금액(availableCash)으로 실제 살 수 있는 최대 수량.
+  // 매도는 보유 수량이 이미 자연스러운 상한이라(availableQuantity) 별도 계산이
+  // 필요 없다.
+  const buyMaxQuantity = maxAffordableQuantity({
+    price: detail.price.lastPrice ?? 0,
+    currency: detail.currency === "USD" ? "USD" : "KRW",
+    usdKrwRate,
+    availableCash,
+  });
 
   const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
@@ -566,7 +575,15 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 maxLength={9}
                 value={quantityInput}
                 onChange={(e) => {
-                  setQuantityInput(e.target.value.replace(/[^0-9]/g, "").slice(0, 9));
+                  const digitsOnly = e.target.value.replace(/[^0-9]/g, "").slice(0, 9);
+                  // 매수는 입력 즉시 주문가능금액으로 살 수 있는 최대 수량을 넘지
+                  // 못하게 막는다 — "주문가능금액이 부족해요"로 제출을 막는 것만으론
+                  // 화면에 비현실적인 금액이 그대로 보이는 문제가 있었다.
+                  const capped =
+                    side === "매수" && Number(digitsOnly || 0) > buyMaxQuantity
+                      ? String(buyMaxQuantity)
+                      : digitsOnly;
+                  setQuantityInput(capped);
                   setClientOrderId(null);
                   setOrderError(null);
                 }}
@@ -576,6 +593,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           {side === "매도" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
               보유 {availableQuantity}주
+            </div>
+          )}
+          {side === "매수" && (
+            <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
+              최대 {formatNumber(buyMaxQuantity)}주까지 살 수 있어요
             </div>
           )}
 

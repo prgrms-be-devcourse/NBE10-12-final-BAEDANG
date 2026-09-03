@@ -65,3 +65,32 @@ export function calculateOrderAmount(params: {
     netAmount: netAmount.toNumber(),
   };
 }
+
+/**
+ * 이 예산(`availableCash`, 원)으로 매수할 수 있는 최대 수량. 수수료 공식을 여기서
+ * 다시 구현하지 않고, 나눗셈으로 대략 추정한 뒤 {@link calculateOrderAmount}로
+ * ±1주 오차를 보정한다 — 원 단위 반올림 때문에 나눗셈만으로는 경계값에서 한 주
+ * 어긋날 수 있어서다. 매수 화면에서 "얼마까지 살 수 있는지" 입력 상한을 정할 때
+ * 쓴다(매도는 보유 수량이 상한이라 이 함수가 필요 없다).
+ */
+export function maxAffordableQuantity(params: {
+  price: number | string;
+  currency: "KRW" | "USD";
+  usdKrwRate: number;
+  availableCash: number;
+}): number {
+  const { price, currency, usdKrwRate, availableCash } = params;
+  const unitPrice = new D(price);
+  if (availableCash <= 0 || unitPrice.lessThanOrEqualTo(0)) return 0;
+
+  const unitCostKrw = currency === "USD" ? unitPrice.times(usdKrwRate) : unitPrice;
+  const estimatedCostPerShare = unitCostKrw.times(new D(1).plus(FEE_RATE));
+  let qty = Math.max(0, new D(availableCash).dividedBy(estimatedCostPerShare).floor().toNumber());
+
+  const affordable = (q: number) =>
+    calculateOrderAmount({ side: "매수", quantity: q, price, currency, usdKrwRate }).netAmount <= availableCash;
+
+  while (qty > 0 && !affordable(qty)) qty--;
+  while (affordable(qty + 1)) qty++;
+  return qty;
+}
