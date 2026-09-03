@@ -557,9 +557,16 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
                 style={{ background: "var(--fill)", color: "var(--ink)" }}
                 inputMode="numeric"
+                // 자릿수 제한이 없으면 0을 여러 번 입력하는 등으로 아주 긴 숫자를
+                // 만들 수 있는데, 입력창은 뒷부분만 스크롤되어 보여서 사실상 앞자리가
+                // 잘려 보이지 않는다 — 그 상태로 계산되는 주문 금액이 수십 자리로
+                // 폭발해 화면이 깨지는 문제가 있었다(팀원 제보). 이 앱에서 나올 수
+                // 있는 가장 현실적인 최대 수량보다 훨씬 넉넉한 9자리(최대
+                // 999,999,999주)로 입력 자체를 막는다.
+                maxLength={9}
                 value={quantityInput}
                 onChange={(e) => {
-                  setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+                  setQuantityInput(e.target.value.replace(/[^0-9]/g, "").slice(0, 9));
                   setClientOrderId(null);
                   setOrderError(null);
                 }}
