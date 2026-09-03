@@ -408,7 +408,9 @@ export default function RankingsPage() {
             minHeight: 47,
           }}
         >
-          <span />
+          {/* 하트 아이콘이 관심 종목 찜하기 용도라는 게 라벨 없이는 안 드러난다(제보) —
+              "관심" 헤더를 추가한다. */}
+          <span className="text-center">관심</span>
           {/* 순위는 자릿수가 들쭉날쭉한 짧은 숫자라 왼쪽 정렬이면 헤더 라벨과
               시각적으로 어긋나 보인다(제보) — 좁은 숫자 칸은 가운데 정렬이 관례다. */}
           <span className="text-center">순위</span>
