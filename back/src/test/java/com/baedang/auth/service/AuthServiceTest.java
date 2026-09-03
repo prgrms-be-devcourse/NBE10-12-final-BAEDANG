@@ -16,11 +16,13 @@ import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
 import io.jsonwebtoken.ExpiredJwtException;
+import org.hibernate.exception.ConstraintViolationException;
 import io.jsonwebtoken.JwtException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -111,6 +113,23 @@ class AuthServiceTest {
     }
 
     @Test
+    @DisplayName("가입 INSERT의 닉네임 UNIQUE 충돌은 NICKNAME_DUPLICATED다")
+    void 가입_INSERT의_닉네임_UK_충돌을_매핑한다() {
+        SignUpRequest request = new SignUpRequest("other@example.com", "Password123!", "테스터");
+        when(userRepository.existsByEmail(request.email())).thenReturn(false);
+        when(userRepository.existsByNickname(request.nickname())).thenReturn(false);
+        when(userRepository.saveAndFlush(any(User.class))).thenThrow(
+                new DataIntegrityViolationException("nickname conflict",
+                        new ConstraintViolationException("nickname conflict", new java.sql.SQLException(),
+                                "uq_users_nickname")));
+
+        assertThatThrownBy(() -> authService.signUp(request))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.NICKNAME_DUPLICATED));
+        verify(accountRepository, never()).save(any(Account.class));
+    }
+
+    @Test
     @DisplayName("로그인은 ACTIVE user와 account 두 token을 발급")
     void t2() {
         String rawPassword = "Password123!";
@@ -152,6 +171,26 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.login(new LoginRequest("test@example.com", "Correct123!")))
                 .isInstanceOf(BusinessException.class)
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
+    }
+
+    @Test
+    @DisplayName("없는 email도 dummy BCrypt를 수행해 로그인 실패 시간을 평준화한다")
+    void 없는_email도_dummy_BCrypt를_수행한다() {
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        AuthService service = new AuthService(
+                userRepository,
+                accountRepository,
+                initialDepositLedgerService,
+                encoder,
+                jwtTokenProvider,
+                initialCash,
+                clock);
+        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.login(new LoginRequest("none@example.com", "Password123!")))
+                .isInstanceOf(BusinessException.class)
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
+        verify(encoder).matches(eq("Password123!"), argThat(hash -> hash != null && !hash.isBlank()));
     }
 
     @Test

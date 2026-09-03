@@ -14,6 +14,7 @@ import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,6 +64,11 @@ public class UserService {
         }
 
         user.changeNickname(request.nickname());
+        try {
+            userRepository.flush();
+        } catch (DataIntegrityViolationException exception) {
+            throw new BusinessException(ErrorCode.NICKNAME_DUPLICATED, request.nickname());
+        }
         log.info("닉네임 변경 완료 userId={}", userId);
         return UserResponse.from(user);
     }

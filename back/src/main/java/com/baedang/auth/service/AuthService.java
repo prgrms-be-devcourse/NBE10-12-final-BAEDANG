@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,6 +36,8 @@ import java.time.ZoneOffset;
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+    private static final String DUMMY_PASSWORD_HASH =
+            "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy";
 
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
@@ -100,8 +103,10 @@ public class AuthService {
             user = userRepository.saveAndFlush(user);
         } catch (DataIntegrityViolationException e) {
             log.warn("동시 가입으로 UK 충돌: email={}, nickname={}", normalizedEmail, request.nickname(), e);
-            // UNIQUE 위반. 위 검사와 INSERT 사이에 다른 요청이 끼어든 경우입니다.
-            throw new BusinessException(ErrorCode.EMAIL_DUPLICATED, "동시 가입 충돌");
+            ErrorCode errorCode = isConstraint(e, "uq_users_nickname")
+                    ? ErrorCode.NICKNAME_DUPLICATED
+                    : ErrorCode.EMAIL_DUPLICATED;
+            throw new BusinessException(errorCode, "동시 가입 충돌");
         }
 
         Account account = accountRepository.save(
@@ -132,8 +137,11 @@ public class AuthService {
     public AuthResponse login(LoginRequest request) {
         String normalizedEmail = DomainNormalizer.email(request.email());
 
-        User user = userRepository.findByEmail(normalizedEmail)
-                .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED, "없는 이메일: " + normalizedEmail));
+        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+        if (user == null) {
+            passwordEncoder.matches(request.password(), DUMMY_PASSWORD_HASH);
+            throw new BusinessException(ErrorCode.LOGIN_FAILED, "로그인 실패");
+        }
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.LOGIN_FAILED, "비밀번호 불일치 userId=" + user.getUserId());
@@ -164,10 +172,22 @@ public class AuthService {
             throw new BusinessException(ErrorCode.INVALID_TOKEN);
         }
 
+
         userRepository.findByUserIdAndStatus(userId, UserStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_TOKEN));
 
         return new AccessTokenResponse(jwtTokenProvider.createAccessToken(userId));
+    }
+
+    private boolean isConstraint(DataIntegrityViolationException exception, String constraintName) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof ConstraintViolationException violation) {
+                return constraintName.equals(violation.getConstraintName());
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
 }

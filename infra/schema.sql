@@ -84,15 +84,13 @@ BEGIN;
 
 
 -- ============================================================================
---  1주차 인증 범위
+--  회원 인증 범위
 --
---   회원가입·로그인 화면은 만들되 인증 로직은 1주차에 구현하지 않는다.
---   시드 사용자 1명(user_id = 1)으로 개발하고, 2주차에 로그인을 붙인다.
---     .env  AUTH_ENABLED=false / DEV_FIXED_USER_ID=1
---
---   그래도 users · account 테이블은 지금 만든다.
---   시드로 사용자 1명과 계좌 1개를 넣어두면 나머지 기능이 전부 돌아간다.
+--   users 는 JWT 인증의 회원 원장입니다. 탈퇴는 행 삭제가 아니라
+--   WITHDRAWN 상태 전환으로 처리해 account·ledger 의 FK를 보존합니다.
 -- ============================================================================
+
+
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -106,7 +104,8 @@ CREATE TABLE users (
     status        VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'
                   CHECK (status IN ('ACTIVE','DORMANT','WITHDRAWN')),
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uq_users_nickname UNIQUE (nickname)
 );
 COMMENT ON TABLE users IS '서비스 회원';
 

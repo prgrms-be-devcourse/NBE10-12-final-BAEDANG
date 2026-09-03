@@ -15,6 +15,7 @@ import com.baedang.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -98,6 +99,25 @@ class UserServiceTest {
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.NICKNAME_DUPLICATED);
 
         assertThat(user.getNickname()).isEqualTo("기존닉");
+    }
+
+    @Test
+    @DisplayName("사전 검사 후 발생한 닉네임 UNIQUE 충돌도 NICKNAME_DUPLICATED다")
+    void nickname_UPDATE의_동시_UK_충돌은_NICKNAME_DUPLICATED다() {
+        User user = User.create("test@example.com", "hash", "기존닉");
+        ReflectionTestUtils.setField(user, "userId", 7L);
+
+        when(userRepository.findByUserIdAndStatusForUpdate(7L, UserStatus.ACTIVE))
+                .thenReturn(Optional.of(user));
+        when(userRepository.existsByNickname("경쟁닉")).thenReturn(false);
+        doThrow(new DataIntegrityViolationException("nickname conflict"))
+                .when(userRepository).flush();
+
+        assertThatThrownBy(() -> userService.changeNickname(
+                7L, new UpdateNicknameRequest("경쟁닉")))
+                .isInstanceOf(BusinessException.class)
+                .matches(e -> ((BusinessException) e).getErrorCode()
+                        == ErrorCode.NICKNAME_DUPLICATED);
     }
 
     @Test
