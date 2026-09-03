@@ -263,6 +263,19 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     availableCash,
   });
 
+  // onChange의 상한 클램프만으론 입력값이 그대로인 채 상한이 바뀌는 경우를
+  // 놓친다 — 매도에서 매수로 탭을 바꾸거나(기본값 "10"이 새 상한보다 클 수
+  // 있음), 5초 시세 폴링으로 가격이 올라 buyMaxQuantity 자체가 줄어드는
+  // 경우다. 두 경우 다 입력을 직접 건드리지 않았는데도 "주문가능금액을
+  // 넘는 수량"이 화면에 그대로 남아, 캡션(최대 N주)과 실제 입력값이
+  // 어긋나 보이는 문제가 있었다.
+  useEffect(() => {
+    if (side === "매수" && quantity > buyMaxQuantity) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuantityInput(String(buyMaxQuantity));
+    }
+  }, [side, quantity, buyMaxQuantity]);
+
   const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
   const amount = calculateOrderAmount({
