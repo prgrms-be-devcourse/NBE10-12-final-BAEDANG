@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { TermsModal } from "@/components/TermsModal";
 import { ApiError, signUp } from "@/lib/api";
 
 function SignupForm() {
@@ -17,6 +18,9 @@ function SignupForm() {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [nickname, setNickname] = useState("");
   const [agreed, setAgreed] = useState(false);
+  // 체크박스를 눌러도 곧장 동의 처리되지 않고, 이용약관/개인정보 처리방침 팝업이
+  // 뜬다(제보) — 실제 동의(agreed)는 팝업 하단의 동의 체크박스를 눌러야만 바뀐다.
+  const [termsOpen, setTermsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -133,7 +137,7 @@ function SignupForm() {
             <input
               type="checkbox"
               checked={agreed}
-              onChange={(e) => setAgreed(e.target.checked)}
+              onChange={() => setTermsOpen(true)}
               className="mt-0.5 h-4 w-4 cursor-pointer"
               style={{ accentColor: "var(--accent)" }}
             />
@@ -161,6 +165,13 @@ function SignupForm() {
             {submitting ? "가입 중…" : "모의 투자금 받고 시작하기"}
           </button>
         </form>
+
+        {/* form 안에 두면 팝업 속 동의 체크박스까지 회원가입 form에 DOM으로 딸려
+            들어가서, form 밖(형제)으로 뺐다 — 모달 자체는 position:fixed라
+            어차피 화면 전체를 덮으니 위치상 차이는 없다. */}
+        {termsOpen && (
+          <TermsModal initialAgreed={agreed} onConfirm={setAgreed} onClose={() => setTermsOpen(false)} />
+        )}
 
         <div className="my-4 flex items-center gap-3">
           <div className="h-px flex-1" style={{ background: "var(--line)" }} />
