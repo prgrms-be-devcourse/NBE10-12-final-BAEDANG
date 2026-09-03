@@ -1,0 +1,114 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "title": "Load Test — k6 × Server Correlation (#70)",
+  "uid": "loadtest-correlation",
+  "tags": ["loadtest", "k6"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "testid",
+        "label": "k6 test id",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+        "query": { "query": "label_values(k6_http_reqs_total, testid)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "sort": 5,
+        "includeAll": false,
+        "multi": false
+      }
+    ]
+  },
+  "panels": [
+    { "id": 1, "type": "row", "title": "k6 (client)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
+    {
+      "id": 2, "type": "timeseries", "title": "RPS by endpoint",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (name) (rate(k6_http_reqs_total{testid=~\"$testid\"}[1m]))", "legendFormat": "{{name}}" }
+      ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Latency p95 / p99 by endpoint (client)",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "ms" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "k6_http_req_duration_p95{testid=~\"$testid\"}", "legendFormat": "p95 {{name}}" },
+        { "refId": "B", "expr": "k6_http_req_duration_p99{testid=~\"$testid\"}", "legendFormat": "p99 {{name}}" }
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Error rate (client)",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "max": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "k6_http_req_failed_rate{testid=~\"$testid\"}", "legendFormat": "http_req_failed" }
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "VUs",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "k6_vus{testid=~\"$testid\"}", "legendFormat": "vus" }
+      ]
+    },
+    { "id": 6, "type": "row", "title": "Server: HTTP latency", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }, "collapsed": false },
+    {
+      "id": 7, "type": "timeseries", "title": "Server HTTP p95 by uri (histogram_quantile)",
+      "description": "http_server_requests_seconds_bucket 필요 — application.yaml 의 percentiles-histogram 켜짐 전제(#70).",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket[1m])))", "legendFormat": "p95 {{uri}}" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum by (le, uri) (rate(http_server_requests_seconds_bucket[1m])))", "legendFormat": "p99 {{uri}}" }
+      ]
+    },
+    { "id": 8, "type": "row", "title": "Server: JVM", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 26 }, "collapsed": false },
+    {
+      "id": 9, "type": "timeseries", "title": "JVM heap used vs max",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "heap used" },
+        { "refId": "B", "expr": "sum(jvm_memory_max_bytes{area=\"heap\"})", "legendFormat": "heap max" }
+      ]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "GC pause (rate & avg)",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 27 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [
+        { "matcher": { "id": "byName", "options": "avg pause" }, "properties": [ { "id": "unit", "value": "s" } ] }
+      ] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(jvm_gc_pause_seconds_count[1m]))", "legendFormat": "pauses/s" },
+        { "refId": "B", "expr": "sum(rate(jvm_gc_pause_seconds_sum[1m])) / sum(rate(jvm_gc_pause_seconds_count[1m]))", "legendFormat": "avg pause" }
+      ]
+    },
+    { "id": 11, "type": "row", "title": "Server: HikariCP (DB pool)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 }, "collapsed": false },
+    {
+      "id": 12, "type": "timeseries", "title": "HikariCP active vs pending (pending>0 = pool exhaustion)",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 36 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "hikaricp_connections_active", "legendFormat": "active {{pool}}" },
+        { "refId": "B", "expr": "hikaricp_connections_pending", "legendFormat": "pending {{pool}}" },
+        { "refId": "C", "expr": "hikaricp_connections_max", "legendFormat": "max {{pool}}" }
+      ]
+    }
+  ]
+}
