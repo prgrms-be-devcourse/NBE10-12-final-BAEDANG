@@ -138,8 +138,8 @@ public class AuthService {
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
             throw new BusinessException(ErrorCode.LOGIN_FAILED, "비밀번호 불일치 userId=" + user.getUserId());
         }
-        if (user.getStatus() == UserStatus.WITHDRAWN) {
-            throw new BusinessException(ErrorCode.LOGIN_FAILED, "탈퇴한 회원 userId=" + user.getUserId());
+        if (user.getStatus() != UserStatus.ACTIVE) {
+            throw new BusinessException(ErrorCode.LOGIN_FAILED, "비활성 회원 userId=" + user.getUserId());
         }
 
         Account account = accountRepository

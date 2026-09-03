@@ -49,17 +49,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = authorization.substring(BEARER_PREFIX.length()).trim();
 
+        Long userId;
         try {
-            Long userId = jwtTokenProvider.parseAccessToken(token);
-            var authentication = new UsernamePasswordAuthenticationToken(userId, null, List.of());
-            SecurityContextHolder.getContext().setAuthentication(authentication);
-            chain.doFilter(request,response);
-        } catch (ExpiredJwtException e){
+            userId = jwtTokenProvider.parseAccessToken(token);
+        } catch (ExpiredJwtException e) {
             SecurityContextHolder.clearContext();
             entryPoint.write(response, ErrorCode.TOKEN_EXPIRED);
+            return;
         } catch (JwtException | IllegalArgumentException e) {
             SecurityContextHolder.clearContext();
             entryPoint.write(response, ErrorCode.INVALID_TOKEN);
+            return;
         }
+
+        var authentication = new UsernamePasswordAuthenticationToken(userId, null, List.of());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        chain.doFilter(request, response);
     }
 }

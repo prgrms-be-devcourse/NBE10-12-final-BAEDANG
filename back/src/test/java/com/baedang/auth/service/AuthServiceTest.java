@@ -153,6 +153,27 @@ class AuthServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
     }
+
+    @Test
+    @DisplayName("DORMANT user는 LOGIN_FAILED이고 token을 발급하지 않는다")
+    void DORMANT_user는_로그인할_수_없다() {
+        String rawPassword = "Password123!";
+        User user = User.create(
+                "test@example.com",
+                passwordEncoder.encode(rawPassword),
+                "테스터"
+        );
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        ReflectionTestUtils.setField(user, "status", UserStatus.DORMANT);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        assertThatThrownBy(() -> authService.login(
+                new LoginRequest("test@example.com", rawPassword)))
+                .isInstanceOf(BusinessException.class)
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
+        verify(jwtTokenProvider, never()).createAccessToken(anyLong());
+        verify(jwtTokenProvider, never()).createRefreshToken(anyLong());
+    }
     @Test
     @DisplayName("ACTIVE account가 없으면 ACCOUNT_NOT_FOUND")
     void t5() {

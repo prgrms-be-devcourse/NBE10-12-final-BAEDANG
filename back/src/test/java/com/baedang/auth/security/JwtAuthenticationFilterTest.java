@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.*;
 
 class JwtAuthenticationFilterTest {
@@ -119,4 +120,17 @@ class JwtAuthenticationFilterTest {
         verifyNoInteractions(jwtTokenProvider);
     }
 
+
+    @Test
+    @DisplayName("인증 이후 downstream 예외를 token 오류로 변환하지 않는다")
+    void downstream_예외는_그대로_전파한다() throws Exception {
+        when(jwtTokenProvider.parseAccessToken("valid-token")).thenReturn(7L);
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer valid-token");
+        IllegalArgumentException downstreamFailure = new IllegalArgumentException("domain failure");
+        doThrow(downstreamFailure).when(chain).doFilter(request, response);
+
+        assertThatThrownBy(() -> filter.doFilter(request, response, chain))
+                .isSameAs(downstreamFailure);
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
 }

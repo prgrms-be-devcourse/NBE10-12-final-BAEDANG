@@ -1,5 +1,9 @@
 package com.baedang.market.controller;
 
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.market.service.DailyCandleSeedService;
 import com.baedang.market.service.DailyCandleSeedService.SeedResult;
 import com.baedang.stock.entity.MarketCountry;
@@ -7,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -21,6 +26,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /** {@code toss.seed-daily-candles=true} 로 컨트롤러 빈을 등록시켜 트리거 라우팅을 검증한다. */
 @WebMvcTest(DailyCandleSeedAdminController.class)
 @TestPropertySource(properties = "toss.seed-daily-candles=true")
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class DailyCandleSeedAdminControllerTest {
 
     @Autowired
@@ -28,6 +34,9 @@ class DailyCandleSeedAdminControllerTest {
 
     @MockitoBean
     private DailyCandleSeedService dailyCandleSeedService;
+
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
 
     @Test
     @DisplayName("market 없이 호출하면 seedAll 을 실행한다")
