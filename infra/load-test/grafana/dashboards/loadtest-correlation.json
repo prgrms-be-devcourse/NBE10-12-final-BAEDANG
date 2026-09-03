@@ -109,6 +109,27 @@
         { "refId": "B", "expr": "hikaricp_connections_pending", "legendFormat": "pending {{pool}}" },
         { "refId": "C", "expr": "hikaricp_connections_max", "legendFormat": "max {{pool}}" }
       ]
+    },
+    { "id": 13, "type": "row", "title": "Server: outbound (Toss client) — 5초 폴링·분봉·환율", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 44 }, "collapsed": false },
+    {
+      "id": 14, "type": "timeseries", "title": "Toss client latency p95 / p99",
+      "description": "http_client_requests_seconds_bucket 필요 — application.yaml 의 percentiles-histogram.http.client.requests 전제. 앱→토스 outbound(스케줄러) 지연.",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 45 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_client_requests_seconds_bucket[1m])))", "legendFormat": "p95" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_client_requests_seconds_bucket[1m])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 15, "type": "timeseries", "title": "Toss client call rate by uri",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 45 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (uri) (rate(http_client_requests_seconds_count[1m]))", "legendFormat": "{{uri}}" }
+      ]
     }
   ]
 }
