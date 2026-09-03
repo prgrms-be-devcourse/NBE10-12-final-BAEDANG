@@ -137,6 +137,39 @@ docker run --rm --network common --add-host host.docker.internal:host-gateway `
 
 예: `-e RUN_SCENARIO=load -e LOAD_VUS=80`
 
+## US 세션 런 (야간 KST — 배경부하를 US 기준으로)
+
+KR 대신 **미국 장중**에 돌리면 `QuoteSnapshotScheduler`(5s)·분봉이 **US 유니버스** 기준으로 실동작한다
+(스케줄러는 KR·US를 각각 `isOpen` 게이팅). KR 종목은 장 마감이라 DB의 마지막 종가로 고정 서빙되지만
+rankings/detail은 그대로 동작한다(라이브 Toss 안 침).
+
+**시간대**: US 정규장 ≈ **22:30~05:00 KST**(EDT 기준, DST로 1시간 이동 — 하드코딩 말 것).
+- 회피할 cron: **월 21:00 KST**(KR 랭킹수집, US 개장 직전) · **~05:10~06:10 KST**(US 일봉수집, US 마감 후).
+- 깨끗한 구간 ≈ **23:30~04:30 KST**.
+
+**절차** (워밍 DB는 이미 영속 — 재적재 불필요):
+```bash
+# 1) US 개장 확인
+curl http://localhost:8080/api/market/status        # markets[US].open == true 확인
+
+# 2) 앱 기동 (KR 런과 동일 — 워밍 DB, 필요 시 -Xmx768m 메모리 제한)
+#    US 랭킹을 그 시점 기준으로 갱신하고 싶으면 TOSS_LOAD_STOCK_RANKING=true 로 1회 기동(선택)
+
+# 3) k6 실행 — US 비중을 높여 라이브 배경과 정합
+docker run --rm --network common --add-host host.docker.internal:host-gateway \
+  -v "$(pwd)/infra/load-test/scenarios:/scripts" \
+  -e K6_PROMETHEUS_RW_SERVER_URL=http://trading-prometheus:9090/api/v1/write \
+  -e K6_PROMETHEUS_RW_TREND_STATS="p(95),p(99),avg,max" \
+  -e BASE_URL=http://host.docker.internal:8080/api \
+  -e MARKET_KR_WEIGHT=0.2 \
+  grafana/k6 run -o experimental-prometheus-rw \
+  --tag testid="us-$(date +%s)" /scripts/main.js
+```
+
+- **데이터 준비 상태(2026-09-03 기준)**: US 랭킹 종목 일봉 ~52종목 워밍됨(KR ~87). 부하 테스트엔 충분하나,
+  더 넓은 US 커버리지를 원하면 US 장중에 `TOSS_LOAD_STOCK_RANKING=true` 로 랭킹을 갱신 후 일봉 시드를 재호출한다.
+- 나머지(모니터링 스택·대시보드·$testid 필터·자원 제한)는 KR 런과 **동일**하다.
+
 ## 시나리오 & threshold (설계 §4)
 
 | 시나리오 | executor | 목적 | gate |
