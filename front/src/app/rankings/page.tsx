@@ -396,12 +396,16 @@ export default function RankingsPage() {
 
       <Reveal delay={0.48}>
       <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+        {/* 해외 주식 탭에서는 "현재가" 헤더에 원/$ 토글이 들어가서 국내 탭보다
+            헤더 행이 더 길어진다(제보) — min-height로 두 탭이 항상 같은 높이가
+            되게 고정한다(토글이 필요로 하는 높이에 맞춘 값). */}
         <div
           className="grid items-center px-5 py-2.5 text-[12px] font-bold"
           style={{
             gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr",
             borderBottom: "1px solid var(--line2)",
             color: "var(--mut2)",
+            minHeight: 47,
           }}
         >
           <span />
