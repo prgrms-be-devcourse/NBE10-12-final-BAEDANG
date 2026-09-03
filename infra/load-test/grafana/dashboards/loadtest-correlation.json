@@ -130,6 +130,29 @@
       "targets": [
         { "refId": "A", "expr": "sum by (uri) (rate(http_client_requests_seconds_count[1m]))", "legendFormat": "{{uri}}" }
       ]
+    },
+    { "id": 16, "type": "row", "title": "Rate limiter (Toss pacing) — 그룹별", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 53 }, "collapsed": false },
+    {
+      "id": 17, "type": "timeseries", "title": "RateLimiter wait p95 / p99 by group",
+      "description": "toss_ratelimiter_wait_seconds — acquire() 대기 시간. 값이 오르면 그 그룹이 TPS 상한에 걸려 페이싱 대기 중(병목 신호).",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 54 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, group) (rate(toss_ratelimiter_wait_seconds_bucket[1m])))", "legendFormat": "p95 {{group}}" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum by (le, group) (rate(toss_ratelimiter_wait_seconds_bucket[1m])))", "legendFormat": "p99 {{group}}" }
+      ]
+    },
+    {
+      "id": 18, "type": "timeseries", "title": "RateLimiter acquired vs rejected rate by group",
+      "description": "acquired = 실제 소비율(그룹 TPS 상한과 대조), rejected = tryAcquire 거절율.",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 54 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (group) (rate(toss_ratelimiter_acquired_total[1m]))", "legendFormat": "acquired {{group}}" },
+        { "refId": "B", "expr": "sum by (group) (rate(toss_ratelimiter_rejected_total[1m]))", "legendFormat": "rejected {{group}}" }
+      ]
     }
   ]
 }
