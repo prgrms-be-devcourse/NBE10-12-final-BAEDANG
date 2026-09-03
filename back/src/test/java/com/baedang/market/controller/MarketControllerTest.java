@@ -1,5 +1,9 @@
 package com.baedang.market.controller;
 
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.market.dto.MarketStatusResponse;
 import com.baedang.market.dto.MarketStatusResponse.Market;
 import com.baedang.market.service.MarketStatusService;
@@ -8,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -24,6 +29,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(MarketController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class MarketControllerTest {
 
     private static final ZoneOffset KST = ZoneOffset.ofHours(9);
@@ -33,6 +39,9 @@ class MarketControllerTest {
 
     @MockitoBean
     private MarketStatusService marketStatusService;
+
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
 
     @Test
     @DisplayName("GET /api/market/status — 200, markets 형태와 값 반환")
