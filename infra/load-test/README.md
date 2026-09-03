@@ -29,6 +29,59 @@ k6로 부하를 주고, **클라이언트 지표(RPS·p95·에러율)** 와 **�
    `QuoteSnapshotScheduler`(5s)·분봉(매분)은 프로덕션 유사성 위해 켜둔 채로 둔다(배경 부하로 수용).
 3. 심볼은 rankings 응답에서 **파생**한다(하드코딩 금지). marketCountry는 요청한 `market`에서 얻는다.
 
+## 워밍업 적재 (최초 1회)
+
+테스트 대상(rankings=DB · detail=시세스냅샷+일봉 · status=캐시)이 **라이브 Toss를 거의 안 치도록**
+DB를 미리 채운다. cron 시각(월 07:00 등)을 기다리지 말고 **수동 트리거 플래그**로 당겨 적재한다.
+적재는 본인 토스 키로 실제 호출하므로 **쿼터를 소모**한다(일회성). 적재 데이터는 `pgdata` 볼륨에 남는다.
+
+**전제**: 로컬 DB 기동(`infra/local` 또는 `infra/development`), `.env`에 `TOSS_ENABLED=true` +
+`TOSS_CLIENT_ID`/`TOSS_CLIENT_SECRET`(본인 키).
+
+```bash
+# 1) 로드 플래그를 켜고 1회 기동 → 종목 마스터(~8500) + 랭킹 상위100(KR+US) 적재
+#    (마스터는 STOCK_ALL 1 TPS 등으로 throttle 되어 수 분 소요될 수 있음)
+TOSS_ENABLED=true \
+TOSS_LOAD_STOCK_MASTER=true \
+TOSS_LOAD_STOCK_RANKING=true \
+SEED_DAILY_CANDLES=true \
+  ./gradlew -p back bootRun
+
+# 2) 앱이 뜬 뒤 일봉 200일 시드(#84) 관리자 트리거
+curl -X POST http://localhost:8080/internal/admin/seed/daily-candles
+
+# 3) 적재 완료 확인 후 앱 종료 → 로드 플래그를 모두 끄고(TOSS_ENABLED=true 만) 재기동해 테스트
+```
+
+- ⚠️ **시세·분봉은 미리 적재 불가** — `isOpen` 게이트라 **KR 장중에만** 채워진다. 테스트를 장중에 돌리면
+  `QuoteSnapshotScheduler`(5s)가 자연히 채우고, 미충족 종목은 상세 조회 시 on-demand로 채워진다.
+- ⚠️ **적재는 자원 제한 없이** 하라(대량 적재에 힙 1GB는 빡빡). 자원 제한(§자원 제한 실행)은 **테스트 런에만** 건다.
+
+## 자원 제한 실행 (선택 — 실서버 근사)
+
+개발서버는 EC2 `t4g.micro`(2 vCPU ARM, RAM ~1GB + swap 4GB). 로컬 절대 수치를 여기에 근접시키려면 앱 자원을 제한한다.
+목표 ②(토스 rate limit 여유)엔 불필요하고, ①③(레이턴시·DB풀 한계)의 실서버 근사에만 의미가 있다.
+
+- **방법 A (호스트, 쉬움)** — 힙만 제한. 메모리/GC 압박은 근사, CPU는 로컬 그대로.
+  ```powershell
+  $env:JAVA_TOOL_OPTIONS="-Xmx768m"; ./gradlew -p back bootRun
+  ```
+- **방법 B (컨테이너, 완전)** — CPU·메모리 둘 다 제한. `back/Dockerfile`로 빌드해 `back_1`로 띄우면
+  `prometheus.yml`의 `back_1:8081` 타깃이 살아난다(그땐 k6 `BASE_URL=http://back_1:8080/api`).
+  ```bash
+  docker build -t baedang-back:local back
+  docker run --rm --name back_1 --network common --cpus=2 --memory=1g --memory-swap=5g \
+    -e JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75" \
+    -e TOSS_ENABLED=true -e TOSS_CLIENT_ID=... -e TOSS_CLIENT_SECRET=... \
+    -e DB_URL=jdbc:postgresql://trading-db:5432/trading -e DB_USERNAME=trading -e DB_PASSWORD=trading \
+    -p 8080:8080 -p 8081:8081 baedang-back:local
+  ```
+  (DB 컨테이너 `trading-db`도 같은 network `common`에 있어야 함.)
+
+> **재현 못 하는 것**: t4g.micro는 버스터블(CPU 크레딧)이라 지속 부하 시 baseline으로 스로틀되는 절벽이 있고,
+> swap이 EBS(네트워크 디스크)라 스왑 지연이 크다. 로컬은 이 둘을 흉내 못 내므로 **capacity 절대치는 여전히 낙관적**이다.
+> 진짜 절대 수치는 동급 인스턴스에서 측정한다.
+
 ## 실행
 
 ### 1) 모니터링 스택 기동
