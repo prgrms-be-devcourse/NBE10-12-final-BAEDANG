@@ -9,6 +9,7 @@ import { ChartExpandModal } from "./ChartExpandModal";
 import { TourGuide, type TourStep } from "./TourGuide";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
+import { useMarketStatus } from "./MarketStatusProvider";
 import { useTheme } from "./ThemeProvider";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
@@ -112,6 +113,7 @@ const MINUTE_CANDLE_POLL_INTERVAL_MS = 60 * 1000;
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
   const { rate: usdKrwRate, updatedAt: exchangeRateUpdatedAt } = useExchangeRate();
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -228,6 +230,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 1분봉을 보고 있을 때만 1분마다 조용히 다시 조회한다 — 로딩 스피너를 다시
   // 띄우지 않고 데이터만 갈아끼운다. 실패하면 지금 보여주고 있는 캔들을 그대로
   // 유지하고 다음 주기에 재시도한다. 일봉은 폴링하지 않는다(위 주석 참고).
+  // 이 종목의 시장이 장 마감 중이면 minute_candle 자체가 그 주기로 수집되지
+  // 않으므로(docs/erd.md), 장 시간대에만 폴링한다.
   const candlePollInFlightRef = useRef(false);
   useVisiblePolling(
     () => {
@@ -242,7 +246,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         });
     },
     MINUTE_CANDLE_POLL_INTERVAL_MS,
-    candleUnit === "1분봉"
+    candleUnit === "1분봉" && isMarketOpen(detail.marketCountry)
   );
 
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));

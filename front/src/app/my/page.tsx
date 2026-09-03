@@ -7,6 +7,7 @@ import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   getAccountSummary,
@@ -31,6 +32,7 @@ const VALUATION_POLL_INTERVAL_MS = 5000;
 export default function MyPage() {
   const { isLoggedIn, user } = useAuth();
   const { rate } = useExchangeRate();
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -72,7 +74,10 @@ export default function MyPage() {
   // 5초마다 계좌 요약(평가손익 포함)과 보유 종목을 조용히 다시 조회해 갱신한다.
   // 체결 내역(ledger)은 실제 거래가 있을 때만 바뀌는 과거 기록이라 폴링 대상이
   // 아니다. 실패해도 화면을 에러로 덮지 않고 다음 주기에 재시도하며, 요청이
-  // 겹치지 않도록 in-flight 가드를 둔다.
+  // 겹치지 않도록 in-flight 가드를 둔다. 보유 종목이 국내·해외에 걸쳐 있을 수
+  // 있어 특정 종목의 시장까지는 가리지 않고, 국내·해외 중 한 곳이라도 장중이면
+  // 폴링한다 — 둘 다 마감이면 quote_snapshot 자체가 갱신되지 않으므로
+  // (docs/erd.md) 폴링을 쉰다.
   const valuationPollInFlightRef = useRef(false);
   useVisiblePolling(
     () => {
@@ -89,7 +94,7 @@ export default function MyPage() {
         });
     },
     VALUATION_POLL_INTERVAL_MS,
-    isLoggedIn && !!user
+    isLoggedIn && !!user && (isMarketOpen("KR") || isMarketOpen("US"))
   );
 
   async function handleReset() {

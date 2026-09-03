@@ -8,6 +8,7 @@ import { Reveal } from "@/components/Reveal";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
@@ -31,6 +32,7 @@ const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우�
 
 export default function RankingsPage() {
   const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
   const [items, setItems] = useState<RankingItem[]>([]);
@@ -90,20 +92,27 @@ export default function RankingsPage() {
   // 5초마다 지금까지 로드된 만큼(더보기로 추가 로드했으면 그만큼도 포함)을
   // 처음부터 다시 조회해서 시세를 갱신한다. 탭이 백그라운드면 useVisiblePolling이
   // 알아서 멈춘다. 실패해도 화면을 에러로 덮지 않고 다음 주기에 조용히 재시도한다.
-  useVisiblePolling(() => {
-    if (pollInFlightRef.current) return;
-    pollInFlightRef.current = true;
-    getRankings(market, itemsRef.current.length || PAGE_SIZE)
-      .then((page) => {
-        setItems(page.items);
-        setCursor(page.nextCursor ?? undefined);
-        setHasNext(page.hasNext);
-      })
-      .catch(() => {})
-      .finally(() => {
-        pollInFlightRef.current = false;
-      });
-  }, PRICE_POLL_INTERVAL_MS);
+  // 지금 보고 있는 시장이 장 마감 중이면 quote_snapshot 자체가 5초 주기로
+  // 갱신되지 않으므로(docs/erd.md), 폴링해도 더 신선한 값을 받을 수 없어
+  // 장 시간대에만 폴링한다.
+  useVisiblePolling(
+    () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      getRankings(market, itemsRef.current.length || PAGE_SIZE)
+        .then((page) => {
+          setItems(page.items);
+          setCursor(page.nextCursor ?? undefined);
+          setHasNext(page.hasNext);
+        })
+        .catch(() => {})
+        .finally(() => {
+          pollInFlightRef.current = false;
+        });
+    },
+    PRICE_POLL_INTERVAL_MS,
+    isMarketOpen(market)
+  );
 
   // 2자 이상 입력되면 실제 검색 API를 호출한다. 타이핑마다 바로 쏘지 않도록 살짝 디바운스한다.
   useEffect(() => {

@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { StockDetailClient } from "@/components/StockDetailClient";
+import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { getStockDetail, searchStocks, type MarketCountry, type StockDetail } from "@/lib/api";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
@@ -15,6 +16,7 @@ function isMarketCountry(value: string | null): value is MarketCountry {
 }
 
 function StockDetailPageInner() {
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const params = useParams<{ symbol: string }>();
   const searchParams = useSearchParams();
   const rawSymbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
@@ -69,6 +71,8 @@ function StockDetailPageInner() {
   // 5초마다 종목 상세(시세 포함)를 다시 조회해 갱신한다. 탭이 백그라운드면
   // useVisiblePolling이 알아서 멈춘다. 실패해도 화면을 에러로 덮지 않고 다음
   // 주기에 조용히 재시도한다 — 이미 보여주고 있는 값을 그대로 유지하는 편이 낫다.
+  // 이 종목의 시장이 장 마감 중이면 quote_snapshot이 그 주기로 갱신되지
+  // 않으므로(docs/erd.md), 장 시간대에만 폴링한다.
   const pollInFlightRef = useRef(false);
   useVisiblePolling(
     () => {
@@ -82,7 +86,7 @@ function StockDetailPageInner() {
         });
     },
     PRICE_POLL_INTERVAL_MS,
-    !!resolvedMarketCountry
+    !!resolvedMarketCountry && isMarketOpen(resolvedMarketCountry)
   );
 
   if (error) {
