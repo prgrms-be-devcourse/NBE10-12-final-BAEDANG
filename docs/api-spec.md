@@ -1,7 +1,7 @@
-# Mock Stock Trading Service — API Spec (Week-1 MVP)
+# Mock Stock Trading Service — API Spec
 
-> **Version**: Week-1 MVP · 26.08.20 ~ 08.25 · derived from the ERD and wireframe · **Auth is NOT implemented in week 1** — the server runs against a single seed user (`user_id = 1`)
->
+> **Version**: Week-3 MVP · 26.09.03 ~ 09.09 · derived from the ERD and wireframe
+
 > **Badges**: 17 endpoints · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
 
 ## Contents
@@ -28,19 +28,20 @@
 
 ### Auth
 
-After login, send the token in the header:
-```
-Authorization: Bearer {accessToken}
+Stateless JWT (access + refresh) tokens are used for authentication. Protected endpoints require the token in the header:
+```http
+Authorization: Bearer <accessToken>
 ```
 
-- **Week 1 does NOT implement auth.** Signup/login screens are UX-only; the server runs against a **fixed seed user (`user_id = 1`)**, operating as if that user is logged in (`AUTH_ENABLED=false` in `.env`). The 🔒 endpoints below also work without a token in week 1 — the server uses the fixed user's account.
-- **Decide the auth method (JWT vs session cookie) in week 2.** With Next.js, putting a **Route Handler as a BFF and storing the token in an httpOnly cookie** is safest — the token never reaches browser JS.
+- Access tokens are valid for 15 minutes by default (`JWT_ACCESS_TTL: 15m`).
+- Refresh tokens are valid for 7 days by default (`JWT_REFRESH_TTL: 7d`).
+- The `X-User-Id` header is unsupported and rejected with 401 `UNAUTHORIZED`.
+- Expired tokens return 401 `TOKEN_EXPIRED`. Invalid or tampered tokens return 401 `INVALID_TOKEN`.
 
 | Scope | Target |
 |---|---|
-| public (no login) | rankings · search · stock detail · chart · FX · guide |
-| 🔒 login required | orders · account · holdings · ledger · portfolio reset |
-
+| public (no login) | signup · login · refresh · rankings · search · stock detail · chart · FX · guide |
+| 🔒 login required | logout · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · orders · account · holdings · ledger · portfolio reset |
 ### Response Format
 
 Successful responses return the data directly; collections carry a cursor alongside.
@@ -56,11 +57,10 @@ Successful responses return the data directly; collections carry a cursor alongs
 
 ```json
 {
-  "error": {
-    "code": "INSUFFICIENT_CASH",
-    "message": "주문가능금액이 부족합니다.",
-    "data": { "required": "2415242", "available": "1200000" }
-  }
+  "code": "INSUFFICIENT_CASH",
+  "message": "주문가능금액이 부족합니다.",
+  "timestamp": "2026-08-23T14:02:11+09:00",
+  "data": { "required": "2415242", "available": "1200000" }
 }
 ```
 `message` is written as a sentence that can be shown to the user verbatim.
@@ -121,7 +121,7 @@ Signup + account opening + mock-funding deposit
 ```json
 {
   "email": "user@example.com",
-  "password": "********",
+  "password": "Password123!",
   "nickname": "홍길동"
 }
 ```
@@ -130,8 +130,10 @@ Signup + account opening + mock-funding deposit
 ```json
 {
   "userId": 1,
+  "email": "user@example.com",
   "nickname": "홍길동",
   "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
   "account": {
     "accountId": 1,
     "roundNo": 1,
@@ -144,25 +146,147 @@ Signup opens an account and deposits 50M at once. **`users` INSERT → `account`
 
 | Error code | When |
 |---|---|
-| `DUPLICATE_EMAIL` | email already registered |
-| `INVALID_PASSWORD` | password policy not met |
+| `EMAIL_DUPLICATED` | email already registered |
+| `NICKNAME_DUPLICATED` | nickname already registered |
+| `INVALID_INPUT` | invalid email/password/nickname format |
 
 ### `POST /auth/login`
 **Request**
 ```json
-{ "email": "user@example.com", "password": "********" }
+{
+  "email": "user@example.com",
+  "password": "Password123!"
+}
 ```
-Response has the same shape as signup.
+Response has the same shape as signup (200 OK).
 
 | Error code | When |
 |---|---|
-| `LOGIN_FAILED` | email or password mismatch |
+| `LOGIN_FAILED` | email or password mismatch, or user is inactive/withdrawn |
+
+### `POST /auth/refresh`
+Reissues access token using a valid refresh token.
+
+**Request**
+```json
+{
+  "refreshToken": "eyJhbGciOi..."
+}
+```
+
+**Response · 200**
+```json
+{
+  "accessToken": "eyJhbGciOi..."
+}
+```
+
+| Error code | When |
+|---|---|
+| `TOKEN_EXPIRED` | refresh token expired |
+| `INVALID_TOKEN` | refresh token invalid, tampered, or user inactive |
+
+### `POST /auth/logout` 🔒
+Stateless logout. The client discards local tokens.
+
+**Response · 200**
+Empty body.
+
+| Error code | When |
+|---|---|
+| `UNAUTHORIZED` | missing authentication token |
+| `TOKEN_EXPIRED` | access token expired |
+| `INVALID_TOKEN` | access token invalid |
 
 ### `GET /users/me` 🔒
 My info
+
+**Response · 200**
 ```json
-{ "userId": 1, "email": "user@example.com", "nickname": "홍길동" }
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "홍길동"
+}
 ```
+
+| Error code | When |
+|---|---|
+| `UNAUTHORIZED` | missing or invalid access token |
+| `USER_NOT_FOUND` | user not found or inactive |
+
+### `PATCH /users/me` 🔒
+Change nickname.
+
+**Request**
+```json
+{
+  "nickname": "새닉네임"
+}
+```
+
+**Response · 200**
+```json
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "새닉네임"
+}
+```
+
+| Error code | When |
+|---|---|
+| `UNAUTHORIZED` | missing or invalid access token |
+| `USER_NOT_FOUND` | user not found or inactive |
+| `NICKNAME_DUPLICATED` | nickname already in use by another user |
+| `INVALID_INPUT` | nickname length not 2~20 chars |
+
+### `PUT /users/me/password` 🔒
+Change password.
+
+**Request**
+```json
+{
+  "currentPassword": "Password123!",
+  "newPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+```json
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "홍길동"
+}
+```
+
+| Error code | When |
+|---|---|
+| `UNAUTHORIZED` | missing or invalid access token |
+| `USER_NOT_FOUND` | user not found or inactive |
+| `INVALID_PASSWORD` | current password incorrect |
+| `INVALID_INPUT` | new password format policy not met (8~64 chars) |
+
+### `DELETE /users/me` 🔒
+Withdraw membership (soft-delete: user status `WITHDRAWN`, active account `CLOSED`).
+
+**Request**
+```json
+{
+  "currentPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+Empty body.
+
+| Error code | When |
+|---|---|
+| `UNAUTHORIZED` | missing or invalid access token |
+| `USER_NOT_FOUND` | user not found or inactive |
+| `INVALID_PASSWORD` | current password incorrect |
+| `ACCOUNT_NOT_FOUND` | active account not found |
 
 ---
 
@@ -751,7 +875,7 @@ Closing the old account, opening the new account, and inserting its initial-depo
 | My Page | `/accounts/me` · `/accounts/me/holdings` · `/accounts/me/ledger` |
 | Portfolio Reset | `POST /accounts/me/reset` |
 | Guide | none (static content) |
-| Signup Funnel | no calls in week 1 — UX only · `/auth/*` attaches in week 2 |
+| Signup Funnel | `POST /auth/signup` · `POST /auth/login` |
 
 ## Polling Policy
 
@@ -807,7 +931,7 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 |---|---|
 | search scope | all stocks (~8,500) · `LIKE '%q%'` |
 | fee & tax rates | fee 0.01% (buy & sell) · securities transaction tax 0.2% (sell only) |
-| auth | not implemented in week 1 — fixed seed user |
+| auth | stateless JWT access/refresh tokens · `Authorization: Bearer <accessToken>` |
 | fractional trading | week 2 — whole shares only in week 1. **The toggle was removed from the screen entirely** |
 | order history | ledger-based `GET /accounts/me/ledger` |
 | ledger entries | buy · sell · initial-funding only. Fees/taxes included in the amounts (one line) |
@@ -821,7 +945,6 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 |---|---|
 | `before` boundary | measure whether Toss `/candles` `before` is inclusive and whether the closing-auction (15:30) candle exists |
 | `STALE_QUOTE` threshold | whether 15s is appropriate |
-| auth method (week 2) | JWT vs session cookie |
 | fractional digits (week 2) | US minimum order unit (0.1? 0.001?) |
 
 ---
@@ -830,7 +953,6 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 
 | Endpoint | Content |
 |---|---|
-| `POST /auth/signup` · `/auth/login` | implement auth — week 1 has screens only, server is seed-user fixed |
 | `POST /orders` | limit orders (`limitPrice`, `PENDING` status) |
 | `POST /orders` (fractional) | open US fractional orders. Add `allowsFractional` to the detail response; change the input unit for US stocks only |
 | `GET /accounts/me/orders` | order-history tab — includes rejected orders (they don't land in the ledger) |
@@ -843,4 +965,4 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 Not built yet, but the URL design reserves the slots so nothing collides.
 
 ---
-> Mock Stock Trading Service · Week-1 MVP API Spec · see also `erd.md` · `wireframe.md`
+> Mock Stock Trading Service · Current API Spec · see also `erd.md` · `wireframe.md`

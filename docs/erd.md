@@ -1,6 +1,6 @@
-# Mock Stock Trading Service — ERD (Week-1 MVP)
+# Mock Stock Trading Service — ERD
 
-> **Version**: Week-1 MVP · 26.08.20 ~ 08.25 · **Auth is NOT implemented in week 1** — develop against a single seed user (`user_id = 1`)
+> **Version**: Week-3 MVP · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
 > - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 12 tables · append-only ledger · round-based reset
 
@@ -186,8 +186,7 @@ Every column and its intent — focused especially on **why each column exists**
 ### Bookkeeping — user money
 
 #### `users` — member
-> **Week 1 does NOT implement auth.** Signup/login screens are UX-only; the server runs against a **fixed seed user (`user_id = 1`)** (`AUTH_ENABLED=false` · `DEV_FIXED_USER_ID=1` in `.env`).
-> **Create the table now anyway.** `account.user_id` references it, so retrofitting means touching the FK and data together. Leave `password_hash` **empty or dummy in week 1**; fill it in week 2 with login. Social login/OAuth is also reviewed then.
+> Members authenticate with stateless JWT. Withdrawal changes the user status to `WITHDRAWN` instead of deleting the row so account and ledger foreign keys remain valid.
 | Column | Type | Description |
 |---|---|---|
 | `user_id` | BIGINT PK | internal id. Auto-increment via IDENTITY. |
@@ -461,4 +460,4 @@ Limit orders use the following two phases. Phase 1 commits `PENDING` with a rese
 > 🧪 **Good verification tests** — after every trade, check `buy: net_amount = gross_amount + fee` and `sell: net_amount = gross_amount − fee − tax` always hold, and the cumulative sum of `ledger_entry.amount` (fee included) equals `account.cash_balance`. The surest proof you understand the ledger.
 
 ---
-> Mock Stock Trading Service · Week-1 MVP ERD · see also `schema.sql`
+> Mock Stock Trading Service · Current ERD · see also `schema.sql`

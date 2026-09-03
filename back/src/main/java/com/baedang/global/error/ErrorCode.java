@@ -31,8 +31,7 @@ public enum ErrorCode {
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했어요. 잠시 후 다시 시도해주세요"),
 
     // ── 인증 · 회원 ─────────────────────────────────────────────────────────
-    //   1주차에는 토큰을 발급하지 않으므로 UNAUTHORIZED 는 아직 쓰이지 않습니다.
-    //   2주차에 JWT 를 붙일 때부터 사용하세요.
+    //   JWT 인증과 회원 생명주기 API에서 사용하는 오류입니다.
     EMAIL_DUPLICATED(HttpStatus.CONFLICT, "이미 가입된 이메일이에요"),
     NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임이에요"),
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않아요"),

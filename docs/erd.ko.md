@@ -1,6 +1,6 @@
-# 모의 주식 트레이딩 서비스 — ERD (1주차 MVP)
+# 모의 주식 트레이딩 서비스 — ERD
 
-> **버전**: 1주차 MVP 기준 · 26.08.20 ~ 08.25 · **인증은 1주차 미구현** — 시드 사용자 1명(`user_id = 1`)으로 개발
+> **버전**: 3주차 MVP 기준 · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
 > - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 12 tables · append-only ledger · 회차 기반 초기화
 
@@ -46,7 +46,7 @@
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
-| **계정계** | `users` | 회원 (인증은 2주차) |
+| **계정계** | `users` | 회원 및 JWT 인증 정보 |
 | | `account` | 모의 계좌 (회차 기반) · `locked_cash` 보유 |
 | | `trade_order` | 주문+체결 (일부 TOSS) |
 | | `ledger_entry` | 거래 원장 · append only |
@@ -186,8 +186,7 @@ quote_snapshot.prev_close
 ### 계정계 — 사용자의 돈
 
 #### `users` — 회원
-> **1주차에는 인증을 구현하지 않습니다.** 회원가입·로그인은 **화면 UX 만** 만들고, 서버는 **시드 사용자 1명(`user_id = 1`)으로 고정**해 동작합니다 (`AUTH_ENABLED=false` · `DEV_FIXED_USER_ID=1` in `.env`).
-> **테이블은 지금 만들어 두세요.** `account.user_id` 가 이걸 참조하기 때문에 나중에 붙이려면 FK 와 데이터를 함께 손봐야 합니다. `password_hash` 는 **1주차에 비워두거나 더미 값**을 넣고, 2주차에 로그인을 붙일 때 채웁니다. 소셜 로그인·OAuth 도 그때 검토합니다.
+> 회원은 Stateless JWT로 인증합니다. 탈퇴는 행 삭제 대신 `WITHDRAWN` 상태로 전환해 account·ledger 외래 키를 보존합니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `user_id` | BIGINT PK | 내부 식별자. IDENTITY 로 자동 채번. |
@@ -456,4 +455,4 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 > 🧪 **검증 테스트로 만들면 좋은 것** — 모든 거래 후 `매수 시 net_amount = gross_amount + fee`, `매도 시 net_amount = gross_amount − fee − tax` 가 항상 성립하는지, 그리고 `ledger_entry.amount`(수수료 포함) 의 누적 합이 `account.cash_balance` 와 일치하는지 확인하는 테스트를 두세요. 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
 
 ---
-> 모의 주식 트레이딩 서비스 · 1주차 MVP ERD · `schema.sql` 과 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `schema.sql` 과 함께 보세요
