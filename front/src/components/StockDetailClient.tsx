@@ -28,6 +28,7 @@ import {
   type StockDetail,
 } from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
   MARKET_CLOSED: "장 마감 · 거래 시간이 아니에요",
@@ -101,6 +102,12 @@ function toCandleQuery(candleUnit: "일봉" | "1분봉", period: "1개월" | "6�
   const range: CandleRange = period === "1개월" ? "1M" : period === "6개월" ? "6M" : "1Y";
   return { interval: "1d", range };
 }
+
+// 1분봉은 백엔드가 top-100 종목을 1분마다 수집한다(docs/erd.md) — 그 주기에
+// 맞춰 1분마다 다시 조회한다. 일봉은 장 마감 직후 하루 한 번만 새로 생기므로
+// 세션 중에 계속 폴링해도 더 받을 데이터가 없다 — 그래서 일봉은 폴링하지
+// 않고, 세그먼트/기간이 바뀔 때만 다시 조회하는 기존 동작을 그대로 둔다.
+const MINUTE_CANDLE_POLL_INTERVAL_MS = 60 * 1000;
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
@@ -217,6 +224,26 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       cancelled = true;
     };
   }, [detail.symbol, detail.marketCountry, candleUnit, period]);
+
+  // 1분봉을 보고 있을 때만 1분마다 조용히 다시 조회한다 — 로딩 스피너를 다시
+  // 띄우지 않고 데이터만 갈아끼운다. 실패하면 지금 보여주고 있는 캔들을 그대로
+  // 유지하고 다음 주기에 재시도한다. 일봉은 폴링하지 않는다(위 주석 참고).
+  const candlePollInFlightRef = useRef(false);
+  useVisiblePolling(
+    () => {
+      if (candlePollInFlightRef.current) return;
+      candlePollInFlightRef.current = true;
+      const { interval, range } = toCandleQuery(candleUnit, period);
+      getCandles(detail.symbol, detail.marketCountry, interval, range)
+        .then((data) => setCandleItems(data.items))
+        .catch(() => {})
+        .finally(() => {
+          candlePollInFlightRef.current = false;
+        });
+    },
+    MINUTE_CANDLE_POLL_INTERVAL_MS,
+    candleUnit === "1분봉"
+  );
 
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
   const holding = holdings.find((h) => h.symbol === detail.symbol);
