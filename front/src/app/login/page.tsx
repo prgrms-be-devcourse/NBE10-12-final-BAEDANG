@@ -83,7 +83,7 @@ function LoginForm() {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded-[14px] py-3.5 text-[14px] font-bold text-white transition-[filter] duration-150 disabled:opacity-50"
+            className="w-full cursor-pointer rounded-[14px] py-3.5 text-[14px] font-bold text-white transition-[filter] duration-150 disabled:cursor-not-allowed disabled:opacity-50"
             style={{ background: "var(--accent)" }}
             onMouseEnter={(e) => !submitting && (e.currentTarget.style.filter = "brightness(.92)")}
             onMouseLeave={(e) => (e.currentTarget.style.filter = "none")}
