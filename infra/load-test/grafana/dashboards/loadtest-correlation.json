@@ -153,6 +153,16 @@
         { "refId": "A", "expr": "sum by (group) (rate(toss_ratelimiter_acquired_total[1m]))", "legendFormat": "acquired {{group}}" },
         { "refId": "B", "expr": "sum by (group) (rate(toss_ratelimiter_rejected_total[1m]))", "legendFormat": "rejected {{group}}" }
       ]
+    },
+    {
+      "id": 19, "type": "timeseries", "title": "RateLimiter 여유 (TPS 상한 − 소비) by group",
+      "description": "양수 = 초당 더 부를 수 있는 여유 횟수, 0 근처 = 포화. 토스 호출 주기 조정 판단용(이슈 #70).",
+      "datasource": { "type": "prometheus", "uid": "loadtest-prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 62 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum by (group) (toss_ratelimiter_limit_tps) - sum by (group) (rate(toss_ratelimiter_acquired_total[1m]))", "legendFormat": "여유 {{group}}" }
+      ]
     }
   ]
 }

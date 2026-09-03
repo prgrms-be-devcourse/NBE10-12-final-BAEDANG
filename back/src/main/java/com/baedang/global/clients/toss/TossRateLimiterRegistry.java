@@ -2,6 +2,7 @@ package com.baedang.global.clients.toss;
 
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -66,6 +67,11 @@ public class TossRateLimiterRegistry {
                     .description("Toss API 그룹별 tryAcquire 거절 수")
                     .tag("group", group.name())
                     .register(meterRegistry));
+            // 그룹별 TPS 상한(정적)을 gauge 로 노출한다 — 대시보드에서 여유(=상한-소비) 계산용.
+            Gauge.builder("toss.ratelimiter.limit.tps", group, TossApiGroup::tps)
+                    .description("Toss API 그룹별 TPS 상한")
+                    .tag("group", group.name())
+                    .register(meterRegistry);
         }
     }
 
