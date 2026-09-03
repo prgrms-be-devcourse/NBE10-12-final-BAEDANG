@@ -478,9 +478,17 @@ export default function RankingsPage() {
               >
                 {label}
               </span>
-              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+              {/* 해외 종목은 원화 환산가 아래에 원래 달러가를 보조로 붙이는데, 두 줄이
+                  기본 line-height 그대로면 국내 종목(한 줄)보다 행이 눈에 띄게 길어진다
+                  (제보: 랭킹 화면에서 해외 주식 탭 행 높이가 국내보다 김). leading-none +
+                  약간의 음수 margin-top으로 국내 행과 같은 높이(47.5px)에 맞춘다. */}
+              <span className="text-right leading-none tabular-nums" style={{ color: "var(--ink)" }}>
                 {formatNumber(krwPrice)}
-                {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(item.lastPrice)}</div>}
+                {isUsd && (
+                  <div className="-mt-[3px] leading-none text-[10.5px]" style={{ color: "var(--mut2)" }}>
+                    {formatUsd(item.lastPrice)}
+                  </div>
+                )}
               </span>
               <span className="flex justify-end">
                 {krwChange === null ? (
