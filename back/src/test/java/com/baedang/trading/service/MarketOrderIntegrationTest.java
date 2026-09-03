@@ -177,6 +177,26 @@ class MarketOrderIntegrationTest {
     }
 
     @Test
+    void 탈퇴한_회원의_기존_주문_멱등_재요청은_기존_결과를_반환한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+
+        User user = userRepository.findById(fixture.userId()).orElseThrow();
+        user.withdraw();
+        userRepository.saveAndFlush(user);
+        Account account = accountRepository.findById(fixture.accountId()).orElseThrow();
+        account.close(OffsetDateTime.now(ZoneOffset.UTC));
+        accountRepository.saveAndFlush(account);
+
+        OrderResponse retried = marketOrderService.place(fixture.userId(), request);
+
+        assertThat(retried.orderId()).isEqualTo(first.orderId());
+        assertThat(retried.status()).isEqualTo(first.status());
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+    }
+
+    @Test
     void 같은_심볼이_국내와_미국에_있어도_요청한_시장의_종목으로_체결한다() {
         String symbol = "DUP" + UUID.randomUUID().toString().substring(0, 5).toUpperCase();
         createFixture(

@@ -1,8 +1,11 @@
 package com.baedang.trading.controller;
 
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
-import com.baedang.global.error.GlobalExceptionHandler;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.trading.dto.OrderQuoteResponse;
 import com.baedang.trading.dto.OrderResponse;
 import com.baedang.trading.dto.PlaceOrderRequest;
@@ -10,39 +13,36 @@ import com.baedang.trading.entity.OrderSide;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.service.MarketOrderService;
 import com.baedang.trading.service.OrderQuoteService;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.MediaType;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-@ExtendWith(MockitoExtension.class)
+@WebMvcTest(OrderController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class OrderControllerTest {
 
-    @Mock OrderQuoteService orderQuoteService;
-    @Mock MarketOrderService marketOrderService;
-
-    private MockMvc mockMvc;
-
-    @BeforeEach
-    void setUp() {
-        mockMvc = MockMvcBuilders
-                .standaloneSetup(new OrderController(orderQuoteService, marketOrderService))
-                .setControllerAdvice(new GlobalExceptionHandler())
-                .build();
-    }
+    @Autowired MockMvc mockMvc;
+    @MockitoBean OrderQuoteService orderQuoteService;
+    @MockitoBean MarketOrderService marketOrderService;
+    @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
     void 주문_견적의_금액과_수량을_JSON_문자열로_응답한다() throws Exception {
@@ -65,7 +65,7 @@ class OrderControllerTest {
                 ));
 
         mockMvc.perform(get("/api/orders/quote")
-                        .header("X-User-Id", "1")
+                        .with(authenticatedUser(1L))
                         .param("symbol", "005930")
                         .param("marketCountry", "KR")
                         .param("side", "BUY")
@@ -94,7 +94,7 @@ class OrderControllerTest {
         ));
 
         mockMvc.perform(post("/api/orders")
-                        .header("X-User-Id", "1")
+                        .with(authenticatedUser(1L))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -126,7 +126,7 @@ class OrderControllerTest {
                         Map.of("retryPolicy", "NEW_CLIENT_ORDER_ID")));
 
         mockMvc.perform(post("/api/orders")
-                        .header("X-User-Id", "1")
+                        .with(authenticatedUser(1L))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -151,7 +151,7 @@ class OrderControllerTest {
                         ErrorCode.INVALID_INPUT, Map.of("field", "symbol")));
 
         mockMvc.perform(get("/api/orders/quote")
-                        .header("X-User-Id", "1")
+                        .with(authenticatedUser(1L))
                         .param("marketCountry", "KR")
                         .param("side", "BUY")
                         .param("quantity", "1"))
@@ -161,23 +161,28 @@ class OrderControllerTest {
     }
 
     @Test
-    void 사용자_헤더가_없으면_400_표준에러를_응답한다() throws Exception {
+    void 인증_없이_주문_견적을_요청하면_401을_응답한다() throws Exception {
         mockMvc.perform(get("/api/orders/quote")
                         .param("symbol", "005930")
                         .param("marketCountry", "KR")
                         .param("side", "BUY")
                         .param("quantity", "1"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
     }
 
     @Test
     void 주문_JSON을_읽을_수_없으면_400_표준에러를_응답한다() throws Exception {
         mockMvc.perform(post("/api/orders")
-                        .header("X-User-Id", "1")
+                        .with(authenticatedUser(1L))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"clientOrderId\":"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }
+    private static RequestPostProcessor authenticatedUser(long userId) {
+        return authentication(new UsernamePasswordAuthenticationToken(
+                userId, null, List.of()));
+    }
+
 }
