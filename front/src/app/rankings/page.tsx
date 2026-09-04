@@ -17,6 +17,29 @@ import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, format
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const PAGE_SIZE = 20;
+// 랭킹 화면에서 고른 시장 탭을 세션 동안 기억해둔다 — 해외 주식 탭에서 종목을
+// 눌러 상세로 들어갔다가 뒤로가기로 돌아와도 해외 탭이 그대로 유지돼야 한다는
+// 요구사항 때문. sessionStorage라 탭을 닫으면 사라지고, 다른 탭/새로고침에는
+// 영향을 안 준다.
+const MARKET_STORAGE_KEY = "rankings-market";
+
+function readSavedMarket(): MarketCountry | null {
+  try {
+    const saved = window.sessionStorage.getItem(MARKET_STORAGE_KEY);
+    return saved === "KR" || saved === "US" ? saved : null;
+  } catch {
+    return null; // 프라이빗 모드 등 sessionStorage를 못 쓰는 환경.
+  }
+}
+
+function saveMarket(value: MarketCountry) {
+  try {
+    window.sessionStorage.setItem(MARKET_STORAGE_KEY, value);
+  } catch {
+    // 위와 같은 이유로 무시한다 — 세션 기억이 안 될 뿐 화면 자체는 정상 동작해야 한다.
+  }
+}
+
 // 백엔드 시세 수집 자체가 5초 주기다(docs/erd.md) — 그보다 자주 재조회해도
 // 더 신선한 값을 받을 수 없어 폴링 주기를 여기에 맞춘다.
 const PRICE_POLL_INTERVAL_MS = 5000;
@@ -36,22 +59,35 @@ export default function RankingsPage() {
   const { isOpen: isMarketOpen, isLoading: marketStatusLoading } = useMarketStatus();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
-  // 화면 진입 시 지금 장중인 시장을 기본 탭으로 보여준다 — 국내장 시간이면 국내,
-  // 해외장 시간이면 해외가 기본. 장 상태를 가져오기 전(marketStatusLoading)엔
-  // 아직 판단할 수 없어 일단 국내(KR) 기본값을 유지하다가, 로딩이 끝나는 순간
-  // 딱 한 번만 반영한다 — 이후 60초 주기 재조회로 개장 상태가 실제로 바뀌어도
-  // (예: 화면을 계속 보고 있는 사이 장이 열림) 이미 보고 있는 탭을 임의로
-  // 바꾸면 오히려 사용자를 헷갈리게 하므로 다시 적용하지 않는다. 사용자가 직접
-  // 탭을 고르면(switchMarket) 그 이후로는 자동 전환을 아예 하지 않는다.
+  // 화면 진입 시 기본 탭을 정한다 — ① 이번 세션에서 이미 고른 탭(직접 선택했든
+  // 자동으로 정해졌든)이 있으면 그걸 그대로 쓴다. 해외 주식 탭에서 종목을 눌러
+  // 상세로 들어갔다가 뒤로가기로 돌아왔을 때 국내로 리셋되지 않고 해외가 계속
+  // 보여야 한다는 요구사항이 이것이다. ② 세션에 기록이 없으면(이번 세션 첫
+  // 방문) 지금 장중인 시장을 기본으로 삼는다 — 국내장 시간이면 국내, 해외장
+  // 시간이면 해외. 장 상태를 가져오기 전(marketStatusLoading)엔 아직 판단할
+  // 수 없어 일단 국내(KR) 기본값을 유지하다가, 로딩이 끝나는 순간 딱 한 번만
+  // 반영한다 — 이후 60초 주기 재조회로 개장 상태가 실제로 바뀌어도(예: 화면을
+  // 계속 보고 있는 사이 장이 열림) 이미 보고 있는 탭을 임의로 바꾸면 오히려
+  // 사용자를 헷갈리게 하므로 다시 적용하지 않는다.
   const autoMarketAppliedRef = useRef(false);
   useEffect(() => {
-    if (autoMarketAppliedRef.current || marketStatusLoading) return;
+    if (autoMarketAppliedRef.current) return;
+    const saved = readSavedMarket();
+    if (saved) {
+      autoMarketAppliedRef.current = true;
+      if (saved !== "KR") {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setMarket(saved);
+      }
+      return;
+    }
+    if (marketStatusLoading) return;
     autoMarketAppliedRef.current = true;
     const defaultMarket = pickDefaultMarket(isMarketOpen("KR"), isMarketOpen("US"));
     if (defaultMarket !== "KR") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setMarket(defaultMarket);
     }
+    saveMarket(defaultMarket); // 이후 상세 화면에 갔다 돌아와도 이번에 정한 기본값을 그대로 유지
   }, [marketStatusLoading, isMarketOpen]);
   // 해외 주식 탭에서 현재가를 원화 환산가/달러 원가 중 뭘로 볼지. 예전엔 원화가 아래에
   // 달러가를 항상 같이(두 줄로) 보여줬는데, 그러면 국내 주식(한 줄) 행보다 칸이 길어져서
@@ -200,7 +236,9 @@ export default function RankingsPage() {
   function switchMarket(next: string) {
     // 사용자가 직접 탭을 고른 뒤로는 장 상태 기반 자동 전환을 하지 않는다.
     autoMarketAppliedRef.current = true;
-    setMarket(next as MarketCountry);
+    const nextMarket = next as MarketCountry;
+    setMarket(nextMarket);
+    saveMarket(nextMarket); // 종목 상세로 갔다 뒤로가기로 돌아와도 이 선택이 유지되게 기억해둔다.
   }
 
   const loadMore = useCallback(() => {
