@@ -3,7 +3,7 @@
  * postJson은 private 함수이므로 signUp / login 래퍼를 통해 간접 테스트하고,
  * global.fetch를 vi.fn()으로 모킹합니다.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   signUp,
   login,
@@ -19,6 +19,8 @@ import {
   getLedger,
   resetAccount,
   getMarketStatus,
+  syncAuthTokens,
+  setAuthEventListeners,
   ApiError,
 } from '../api';
 
@@ -38,26 +40,53 @@ function mockFetchNetworkError(message: string) {
 // ─── 테스트 ────────────────────────────────────────────────────────────────
 beforeEach(() => {
   vi.restoreAllMocks();
+  // auth: true인 요청(getAccountSummary 등)이 로그인 여부와 무관하게 항상
+  // 토큰을 갖고 있도록, 매 테스트 전에 고정된 테스트용 토큰으로 맞춰둔다.
+  syncAuthTokens({ accessToken: 'test-access-token', refreshToken: 'test-refresh-token' });
 });
 
 describe('signUp — 성공', () => {
-  it('200 → AuthUser 반환', async () => {
-    mockFetch(200, { userId: 1, email: 'a@b.com', nickname: 'tester' });
+  it('200 → AuthUser 반환(accessToken/refreshToken 포함)', async () => {
+    mockFetch(200, {
+      userId: 1,
+      email: 'a@b.com',
+      nickname: 'tester',
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+    });
     const user = await signUp({ email: 'a@b.com', password: 'pass1234', nickname: 'tester' });
-    expect(user).toEqual({ userId: 1, email: 'a@b.com', nickname: 'tester' });
+    expect(user).toEqual({
+      userId: 1,
+      email: 'a@b.com',
+      nickname: 'tester',
+      accessToken: 'access-1',
+      refreshToken: 'refresh-1',
+    });
   });
 });
 
 describe('login — 성공', () => {
-  it('200 → AuthUser 반환', async () => {
-    mockFetch(200, { userId: 2, email: 'b@c.com', nickname: 'user2' });
+  it('200 → AuthUser 반환(accessToken/refreshToken 포함)', async () => {
+    mockFetch(200, {
+      userId: 2,
+      email: 'b@c.com',
+      nickname: 'user2',
+      accessToken: 'access-2',
+      refreshToken: 'refresh-2',
+    });
     const user = await login({ email: 'b@c.com', password: 'pw' });
-    expect(user).toEqual({ userId: 2, email: 'b@c.com', nickname: 'user2' });
+    expect(user).toEqual({
+      userId: 2,
+      email: 'b@c.com',
+      nickname: 'user2',
+      accessToken: 'access-2',
+      refreshToken: 'refresh-2',
+    });
   });
 });
 
 describe('getAccountSummary — 성공', () => {
-  it('200 → AccountSummary 반환 및 X-User-Id 헤더 전송', async () => {
+  it('200 → AccountSummary 반환 및 Authorization 헤더 전송', async () => {
     const summaryData = {
       accountId: 10,
       roundNo: 1,
@@ -68,9 +97,13 @@ describe('getAccountSummary — 성공', () => {
       unrealizedPnl: '0',
       asOf: '2026-08-28T00:00:00Z',
     };
-    mockFetch(200, summaryData);
-    const summary = await getAccountSummary(1);
+    const fetchSpy = mockFetch(200, summaryData);
+    const summary = await getAccountSummary();
     expect(summary).toEqual(summaryData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/accounts/me'),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-access-token' }) })
+    );
   });
 });
 
@@ -156,7 +189,7 @@ describe('placeOrder — 성공 (accountId 포함)', () => {
       account: { cashBalanceAfter: '49299930' },
     };
     mockFetch(201, orderData);
-    const response = await placeOrder(1, {
+    const response = await placeOrder({
       accountId: 10,
       clientOrderId: 'uuid-1234',
       symbol: '005930',
@@ -240,14 +273,14 @@ describe('getCandles — 성공', () => {
 });
 
 describe('getHoldings — 성공', () => {
-  it('200 → 보유 종목 목록 반환 및 X-User-Id 헤더 전송', async () => {
+  it('200 → 보유 종목 목록 반환 및 Authorization 헤더 전송', async () => {
     const holdingsData = { items: [], asOf: '2026-08-31T00:00:00Z' };
     const fetchSpy = mockFetch(200, holdingsData);
-    const result = await getHoldings(1);
+    const result = await getHoldings();
     expect(result).toEqual(holdingsData);
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining('/api/accounts/me/holdings'),
-      expect.objectContaining({ headers: expect.objectContaining({ 'X-User-Id': '1' }) })
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer test-access-token' }) })
     );
   });
 });
@@ -255,7 +288,7 @@ describe('getHoldings — 성공', () => {
 describe('getLedger — 성공', () => {
   it('파라미터 없이 호출하면 쿼리스트링 없이 요청', async () => {
     const fetchSpy = mockFetch(200, { items: [], nextCursor: null, hasNext: false });
-    await getLedger(1);
+    await getLedger();
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringMatching(/\/api\/accounts\/me\/ledger$/),
       expect.anything()
@@ -264,7 +297,7 @@ describe('getLedger — 성공', () => {
 
   it('cursor/size/entryType을 쿼리스트링에 반영', async () => {
     const fetchSpy = mockFetch(200, { items: [], nextCursor: null, hasNext: false });
-    await getLedger(1, { cursor: 'xyz', size: 10, entryType: 'BUY' });
+    await getLedger({ cursor: 'xyz', size: 10, entryType: 'BUY' });
     const calledUrl = fetchSpy.mock.calls[0][0] as string;
     expect(calledUrl).toContain('cursor=xyz');
     expect(calledUrl).toContain('size=10');
@@ -276,7 +309,7 @@ describe('resetAccount — 성공', () => {
   it('200 → 초기화된 계좌 정보 반환 및 accountId 바디 전송', async () => {
     const resetData = { accountId: 11, roundNo: 2, initialCash: '50000000', cashBalance: '50000000' };
     const fetchSpy = mockFetch(200, resetData);
-    const result = await resetAccount(1, 10);
+    const result = await resetAccount(10);
     expect(result).toEqual(resetData);
     expect(fetchSpy).toHaveBeenCalledWith(
       expect.stringContaining('/api/accounts/me/reset'),
@@ -347,6 +380,53 @@ describe('postJson — HTTP 에러 응답', () => {
     const err = await login({ email: 'x@x.com', password: 'pw' }).catch(e => e);
     expect(err.code).toBe('UNKNOWN_ERROR');
     expect(err.message).toBe('요청을 처리하지 못했어요.');
+  });
+});
+
+describe('auth: true 요청 — accessToken 만료 시 조용히 재발급 후 재시도', () => {
+  afterEach(() => {
+    // 이 describe 안에서만 커스텀 리스너를 등록하므로, 다른 테스트에 새지 않게 정리한다.
+    setAuthEventListeners({});
+  });
+
+  it('TOKEN_EXPIRED → /api/auth/refresh로 재발급 → 원래 요청 재시도 성공', async () => {
+    const summaryData = { accountId: 10, roundNo: 1, initialCash: '50000000', cashBalance: '48000000' };
+    mockFetch(401, { code: 'TOKEN_EXPIRED', message: '로그인이 만료됐어요. 다시 로그인해주세요' }); // 1차 시도
+    mockFetch(200, { accessToken: 'new-access-token' }); // /api/auth/refresh
+    const fetchSpy = mockFetch(200, summaryData); // 재시도
+
+    let refreshedTo: string | undefined;
+    setAuthEventListeners({ onAccessTokenRefreshed: (token) => { refreshedTo = token; } });
+
+    const result = await getAccountSummary();
+    expect(result).toEqual(summaryData);
+    expect(refreshedTo).toBe('new-access-token');
+    // 세 번째(재시도) 호출이 새 accessToken을 실었는지 확인.
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/accounts/me'),
+      expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer new-access-token' }) })
+    );
+  });
+
+  it('재발급 자체가 실패(refreshToken도 무효)하면 원래 만료 에러를 그대로 던지고 인증 만료를 알린다', async () => {
+    mockFetch(401, { code: 'TOKEN_EXPIRED', message: '로그인이 만료됐어요. 다시 로그인해주세요' }); // 1차 시도
+    mockFetch(401, { code: 'INVALID_TOKEN', message: '인증 정보가 올바르지 않아요' }); // /api/auth/refresh 실패
+
+    let expired = false;
+    setAuthEventListeners({ onAuthExpired: () => { expired = true; } });
+
+    const err = await getAccountSummary().catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err.code).toBe('TOKEN_EXPIRED'); // 사용자에겐 원래(만료) 에러를 그대로 보여준다.
+    expect(expired).toBe(true);
+  });
+
+  it('accessToken이 아예 없으면 요청을 보내지 않고 즉시 UNAUTHENTICATED', async () => {
+    syncAuthTokens(null);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const err = await getAccountSummary().catch((e) => e);
+    expect(err.code).toBe('UNAUTHENTICATED');
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 

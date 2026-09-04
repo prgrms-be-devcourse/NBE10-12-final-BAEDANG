@@ -187,14 +187,14 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       return;
     }
     let cancelled = false;
-    getAccountSummary(user.userId)
+    getAccountSummary()
       .then((acc) => {
         if (!cancelled) setAccount(acc);
       })
       .catch(() => {
         if (!cancelled) setAccount(null);
       });
-    getHoldings(user.userId)
+    getHoldings()
       .then((res) => {
         if (!cancelled) setHoldings(res.items);
       })
@@ -338,7 +338,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     let currentAccount = account;
     if (!currentAccount) {
       try {
-        currentAccount = await getAccountSummary(user.userId);
+        currentAccount = await getAccountSummary();
         setAccount(currentAccount);
       } catch {
         setOrderError("계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
@@ -352,7 +352,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     const idToUse = clientOrderId ?? generateClientOrderId();
 
     try {
-      const response = await placeOrder(user.userId, {
+      const response = await placeOrder({
         accountId: currentAccount.accountId,
         clientOrderId: idToUse,
         symbol: detail.symbol,
@@ -370,14 +370,14 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       setAccount((prev) =>
         prev ? { ...prev, cashBalance: response.account.cashBalanceAfter } : null
       );
-      getHoldings(user.userId).then((res) => setHoldings(res.items)).catch(() => {});
+      getHoldings().then((res) => setHoldings(res.items)).catch(() => {});
     } catch (err) {
       if (err instanceof ApiError) {
         setOrderError(err.message);
         setClientOrderId(nextClientOrderId(err.retryPolicy, idToUse));
         // 포트폴리오 초기화로 회차가 변경된 경우 계좌 정보 자동 갱신
         if (err.code === "ACCOUNT_ROUND_CHANGED" || err.code === "ACCOUNT_NOT_FOUND") {
-          getAccountSummary(user.userId).then(setAccount).catch(() => {});
+          getAccountSummary().then(setAccount).catch(() => {});
         }
       } else {
         setOrderError("주문 처리 중 오류가 발생했어요.");
