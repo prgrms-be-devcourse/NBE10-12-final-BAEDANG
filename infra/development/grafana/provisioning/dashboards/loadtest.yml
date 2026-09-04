@@ -1,0 +1,16 @@
+# Grafana 대시보드 provisioning (이슈 #70)
+#   /var/lib/grafana/dashboards 에는 infra/load-test/grafana/dashboards 가
+#   compose 볼륨으로 마운트된다. 그 안의 *.json 을 자동 로드한다.
+apiVersion: 1
+
+providers:
+  - name: loadtest
+    orgId: 1
+    folder: "Load Test"
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

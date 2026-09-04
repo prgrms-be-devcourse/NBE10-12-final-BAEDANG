@@ -162,3 +162,15 @@ management:
       probes:
         enabled: true
       show-details: never
+  metrics:
+    distribution:
+      # http_server_requests 에 히스토그램 버킷을 방출한다(이슈 #70).
+      #   이게 없으면 http_server_requests_seconds_bucket 이 없어
+      #   Prometheus histogram_quantile 로 서버측 p95/p99 를 그릴 수 없다.
+      percentiles-histogram:
+        http.server.requests: true
+        # 앱→토스 outbound 호출(5초 시세·분봉·환율 등)의 p95/p99 를 그리기 위함.
+        http.client.requests: true
+      # 부하 테스트 SLA(p95<500ms)를 명시적 SLO 경계로 잡아 저지연 구간 해상도를 높인다.
+      slo:
+        http.server.requests: 50ms,100ms,200ms,300ms,500ms,1s,2s

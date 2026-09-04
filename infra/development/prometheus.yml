@@ -4,4 +4,10 @@ scrape_configs:
     scrape_interval: 15s
     scrape_timeout: 10s
     static_configs:
-      - targets: ["back_1:8081"]
+      # 앱은 관리포트 8081 에 /actuator/prometheus 를 노출한다(application.yaml).
+      # 두 타깃 중 실제로 떠 있는 쪽만 UP 이 된다(나머지는 down 으로 남을 뿐 해가 없다):
+      #   - host.docker.internal:8081 = 앱을 호스트에서 직접 띄운 경우(로컬 부하 테스트).
+      #       Docker Desktop 은 host.docker.internal 을 자동 제공. Linux 호스트면
+      #       docker-compose.yml 의 prometheus 서비스에 extra_hosts(host-gateway) 필요.
+      #   - back_1:8081 = 앱을 network `common` 컨테이너(서비스명 back)로 배포한 경우(dev 서버).
+      - targets: ["host.docker.internal:8081", "back_1:8081"]
