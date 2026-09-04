@@ -90,7 +90,12 @@ export function maxAffordableQuantity(params: {
   const affordable = (q: number) =>
     calculateOrderAmount({ side: "매수", quantity: q, price, currency, usdKrwRate }).netAmount <= availableCash;
 
-  while (qty > 0 && !affordable(qty)) qty--;
-  while (affordable(qty + 1)) qty++;
+  // 경계 보정은 설계상 ±1~2주 수준이라 실무에선 반복이 1~2회로 끝나지만,
+  // (코드 리뷰, PR #124, SOL4R1S님) 혹시 모를 비정상 입력값으로 추정값이
+  // 크게 어긋나는 최악의 경우에도 calculateOrderAmount를 무한정 다시 호출하지
+  // 않도록 반복 횟수를 제한한다 — 넘으면 그 시점까지 보정한 값을 그대로 쓴다.
+  const MAX_CORRECTION_STEPS = 10;
+  for (let steps = 0; qty > 0 && !affordable(qty) && steps < MAX_CORRECTION_STEPS; steps++) qty--;
+  for (let steps = 0; affordable(qty + 1) && steps < MAX_CORRECTION_STEPS; steps++) qty++;
   return qty;
 }

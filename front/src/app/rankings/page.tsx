@@ -106,6 +106,13 @@ export default function RankingsPage() {
       pollInFlightRef.current = true;
       getRankings(market, itemsRef.current.length || PAGE_SIZE)
         .then((page) => {
+          // 요청한 만큼(itemsRef.current.length)보다 적게 돌아오면, 랭킹 경계에서
+          // 종목이 드나들어(는 매주 월요일 갱신이라 흔치는 않다) 목록 길이가
+          // 출렁인 것일 수 있다(코드 리뷰, PR #124, SOL4R1S님) — 그 응답의
+          // nextCursor를 그대로 받아들이면 무한 스크롤 sentinel이 기대하는
+          // 커서와 어긋날 수 있어서, 이번 주기는 건너뛰고 다음 주기에 다시
+          // 시도한다.
+          if (page.items.length < itemsRef.current.length) return;
           setItems(page.items);
           setCursor(page.nextCursor ?? undefined);
           setHasNext(page.hasNext);

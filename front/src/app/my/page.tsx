@@ -17,6 +17,7 @@ import {
   type AccountSummary,
   type HoldingItem,
   type LedgerItem,
+  type MarketCountry,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
@@ -74,10 +75,12 @@ export default function MyPage() {
   // 5초마다 계좌 요약(평가손익 포함)과 보유 종목을 조용히 다시 조회해 갱신한다.
   // 체결 내역(ledger)은 실제 거래가 있을 때만 바뀌는 과거 기록이라 폴링 대상이
   // 아니다. 실패해도 화면을 에러로 덮지 않고 다음 주기에 재시도하며, 요청이
-  // 겹치지 않도록 in-flight 가드를 둔다. 보유 종목이 국내·해외에 걸쳐 있을 수
-  // 있어 특정 종목의 시장까지는 가리지 않고, 국내·해외 중 한 곳이라도 장중이면
-  // 폴링한다 — 둘 다 마감이면 quote_snapshot 자체가 갱신되지 않으므로
-  // (docs/erd.md) 폴링을 쉰다.
+  // 겹치지 않도록 in-flight 가드를 둔다.
+  // 실제로 보유한 종목의 통화만 보고 폴링 여부를 정한다(코드 리뷰, PR #124,
+  // SOL4R1S님) — 국내 종목만 들고 있는데 해외 장중이라는 이유로(또는 그
+  // 반대로) 5초마다 의미 없는 요청을 보내던 문제를 막는다. 둘 다 안 들고
+  // 있으면(빈 포트폴리오) 애초에 갱신할 평가손익이 없어 폴링하지 않는다.
+  const heldMarketCountries = new Set(holdings.map((h) => (h.currency === "USD" ? "US" : "KR")));
   const valuationPollInFlightRef = useRef(false);
   useVisiblePolling(
     () => {
@@ -94,7 +97,7 @@ export default function MyPage() {
         });
     },
     VALUATION_POLL_INTERVAL_MS,
-    isLoggedIn && !!user && (isMarketOpen("KR") || isMarketOpen("US"))
+    isLoggedIn && !!user && [...heldMarketCountries].some((market) => isMarketOpen(market as MarketCountry))
   );
 
   async function handleReset() {

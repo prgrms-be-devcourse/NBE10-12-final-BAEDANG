@@ -269,10 +269,17 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 경우다. 두 경우 다 입력을 직접 건드리지 않았는데도 "주문가능금액을
   // 넘는 수량"이 화면에 그대로 남아, 캡션(최대 N주)과 실제 입력값이
   // 어긋나 보이는 문제가 있었다.
+  //
+  // <p>클램프로 수량이 바뀌면 clientOrderId도 같이 비운다(코드 리뷰, PR #124,
+  // SOL4R1S님) — 이전 실패 시도의 clientOrderId를 들고 있는 상태에서 수량이
+  // 자동으로 바뀌면, 그 ID로 제출했을 때 "같은 ID인데 다른 내용"으로
+  // DUPLICATE_ORDER 거절을 받을 수 있다(아래 side 전환 핸들러와 같은 이유).
   useEffect(() => {
     if (side === "매수" && quantity > buyMaxQuantity) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuantityInput(String(buyMaxQuantity));
+      setClientOrderId(null);
+      setOrderError(null);
     }
   }, [side, quantity, buyMaxQuantity]);
 
