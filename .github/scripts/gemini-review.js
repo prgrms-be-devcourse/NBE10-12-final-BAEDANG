@@ -2,7 +2,7 @@
 
 const https = require('https');
 const fs = require('fs');
-const { execFileSync, execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 // ---------------------------------------------------------------------------
 // Environment variables (injected by GitHub Actions workflow)
@@ -19,14 +19,23 @@ const ghToken   = process.env.GITHUB_TOKEN;
 const TAG                           = '<!-- GEMINI_AI_REVIEW -->';
 const NOTICE_QUOTA_APPEND           = `\n\n> ※ 안내: 최신 커밋에 대한 Gemini 코드 리뷰 갱신이 API 할당량(Quota) 초과로 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 const NOTICE_SERVER_OVERLOAD_APPEND = `\n\n> ※ 안내: Google AI 서버의 일시적인 과부하(503/Timeout)로 인해 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
-const NOTICE_EMPTY_APPEND          = `\n\n> ※ 안내: Gemini API로부터 유효한 응답을 받지 못하여 최신 커밋 리뷰 갱신이 건너뛰어졌습니다. 위 내용은 이전 커밋 기준 리뷰입니다.`;
 
 const NOTICE_QUOTA_STANDALONE           = `현재 Google Gemini API의 요청 할당량(Quota/Rate Limit)이 초과되어 코드 리뷰 생성이 일시 지연되었습니다.`;
 const NOTICE_SERVER_OVERLOAD_STANDALONE = `Google AI 서버의 일시적인 과부하 또는 응답 지연(Timeout)으로 인해 코드 리뷰 생성을 완료하지 못했습니다.`;
-const NOTICE_EMPTY_STANDALONE          = `Gemini API로부터 유효한 코드 리뷰 응답을 수신하지 못했습니다.`;
 
 const MAX_DIFF_LEN = 60_000;
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 60_000;
+const COMMAND_TIMEOUT_MS = 10_000;
+
+class ConfigurationError extends Error { }
+class ServiceUnavailableError extends Error { }
+
+function report(message, warning = false) {
+  console.log(`${warning ? '::warning::' : ''}${message}`);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${message}\n`);
+  }
+}
 const DIFF_PATHS = [
   '.',
   // Package lockfiles
@@ -62,11 +71,11 @@ const DIFF_PATHS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Guard: API key must be set
+// Guard: required authentication / repository configuration
 // ---------------------------------------------------------------------------
-if (!apiKey) {
-  console.log('GEMINI_API_KEY is not configured in Repository Secrets. Skipping Gemini code review.');
-  process.exit(0);
+if (![apiKey, ghToken, repo, prNumber].every(value => typeof value === 'string' && value.trim())) {
+  report('Gemini 리뷰 설정 오류: GEMINI_API_KEY, GITHUB_TOKEN, REPO, PR_NUMBER를 확인하세요.', true);
+  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -75,17 +84,17 @@ if (!apiKey) {
 let diff = '';
 try {
   diff = execFileSync('git', ['diff', `${baseSha}...${headSha}`, '--', ...DIFF_PATHS], {
-    encoding: 'utf8',
+    encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS,
   });
 } catch (e) {
   console.warn(`[WARN] Failed to get git diff by SHA (${baseSha}...${headSha}):`, e.message);
   try {
     diff = execFileSync('git', ['diff', `origin/${baseRef}...HEAD`, '--', ...DIFF_PATHS], {
-      encoding: 'utf8',
+      encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS,
     });
   } catch (err) {
     console.error(`[ERROR] Failed to get git diff against origin/${baseRef}:`, err.message);
-    diff = execFileSync('git', ['diff', 'HEAD~1', '--', ...DIFF_PATHS], { encoding: 'utf8' });
+    diff = execFileSync('git', ['diff', 'HEAD~1', '--', ...DIFF_PATHS], { encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS });
   }
 }
 
@@ -118,85 +127,77 @@ const guidelines = fs.existsSync(rulesPath)
  */
 let _cachedComment = undefined;
 
+function githubApi(args, input) {
+  try {
+    return execFileSync('gh', ['api', ...args], {
+      env: { ...process.env, GITHUB_TOKEN: ghToken }, input,
+      encoding: 'utf8', timeout: COMMAND_TIMEOUT_MS,
+    });
+  } catch (error) {
+    const details = String(error.stderr || '');
+    if (error.code === 'ENOENT' || /HTTP (400|401|403|404|422)\b/.test(details)) {
+      throw new ConfigurationError('GitHub 댓글 API의 인증·권한·저장소 설정을 확인하세요.');
+    }
+    if (error.code === 'ETIMEDOUT' || error.signal
+        || /HTTP (408|429|5\d\d)\b|timeout|timed out|connection|network|EOF|no such host|TLS|dial tcp/i.test(details)) {
+      throw new ServiceUnavailableError('GitHub 댓글 API 연결 실패 또는 응답 시간 초과');
+    }
+    throw new ConfigurationError('GitHub CLI 실행 실패: 토큰·CLI·요청 설정을 확인하세요.');
+  }
+}
+
 function getExistingComment() {
   if (_cachedComment !== undefined) return _cachedComment;
+  const raw = githubApi([
+    `repos/${repo}/issues/${prNumber}/comments`, '--paginate', '--jq',
+    `[.[] | select(.body | contains("${TAG}"))] | first`,
+  ]).trim();
   try {
-    const raw = execFileSync(
-      'gh',
-      [
-        'api',
-        `repos/${repo}/issues/${prNumber}/comments`,
-        '--paginate',
-        '--jq',
-        `[.[] | select(.body | contains("${TAG}"))] | first`,
-      ],
-      { env: { ...process.env, GITHUB_TOKEN: ghToken }, encoding: 'utf8' }
-    ).trim();
-
     _cachedComment = raw && raw !== 'null' ? JSON.parse(raw) : null;
-  } catch (err) {
-    console.error('Failed to query existing PR comments:', err.message);
-    _cachedComment = null;
+  } catch {
+    throw new ServiceUnavailableError('GitHub 댓글 API가 유효하지 않은 응답을 반환했습니다.');
   }
   return _cachedComment;
 }
 
-/** Posts or updates a PR comment, using stdin to avoid temp files. */
 function upsertComment(body) {
-  const payload = JSON.stringify({ body });
   const existing = getExistingComment();
+  const endpoint = existing
+    ? `repos/${repo}/issues/comments/${existing.id}`
+    : `repos/${repo}/issues/${prNumber}/comments`;
+  githubApi(['-X', existing ? 'PATCH' : 'POST', endpoint, '--input', '-'], JSON.stringify({ body }));
+}
 
-  if (existing) {
-    execFileSync(
-      'gh',
-      ['api', '-X', 'PATCH', `repos/${repo}/issues/comments/${existing.id}`, '--input', '-'],
-      { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload, encoding: 'utf8' }
-    );
-    console.log(`Successfully updated existing Gemini code review comment (ID: ${existing.id}) on PR #${prNumber}`);
-  } else {
-    execFileSync(
-      'gh',
-      ['api', '-X', 'POST', `repos/${repo}/issues/${prNumber}/comments`, '--input', '-'],
-      { env: { ...process.env, GITHUB_TOKEN: ghToken }, input: payload, encoding: 'utf8' }
-    );
-    console.log(`Successfully posted new Gemini code review comment on PR #${prNumber}`);
+function publishComment(body) {
+  try {
+    upsertComment(body);
+    report('Gemini 코드 리뷰를 PR에 게시했습니다.');
+  } catch (error) {
+    if (!(error instanceof ServiceUnavailableError)) throw error;
+    report(`리뷰 게시 생략: ${error.message}. 리뷰 게시 성공을 의미하지 않습니다.`, true);
   }
 }
 
-/** Gracefully handles non-fatal API issues (quota, temporary overload) by preserving existing review or posting a notice. */
+/** 외부 장애는 경고와 실행 요약을 남기고 정상 종료하되 인증·설정 오류는 전파합니다. */
 function handleGracefulNotice(reason, appendText, standaloneText) {
-  console.warn(`[WARN] ${reason}.`);
-  const existing = getExistingComment();
-
-  if (existing) {
-    // 1. 기존 리뷰가 있는 경우: 기존 리뷰 본문은 100% 보존하고 맨 아래에 안내 문구만 추가
-    if (!existing.body.includes('건너뛰어졌습니다') && !existing.body.includes('일시 지연')) {
-      try {
+  report(`Gemini 리뷰 생략: ${reason}. 리뷰 통과를 의미하지 않습니다.`, true);
+  try {
+    const existing = getExistingComment();
+    if (existing) {
+      if (!existing.body.includes('건너뛰어졌습니다') && !existing.body.includes('일시 지연')) {
         upsertComment(existing.body + appendText);
-      } catch (e) {
-        console.error('Failed to append notice to comment:', e.message);
       }
+    } else {
+      upsertComment(`${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n> ${standaloneText}\n\n워크플로우를 재실행하면 리뷰를 다시 시도합니다.`);
     }
-  } else {
-    // 2. 최초 리뷰인데 실패한 경우: 원인을 명시하는 단독 안내 카드 댓글 등록
-    try {
-      const commentBody =
-        `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n` +
-        `> ⚠️ **Gemini 코드 리뷰 일시 지연 안내**\n>\n` +
-        `> ${standaloneText}\n\n` +
-        `---\n` +
-        `*새로운 커밋을 푸시하거나 워크플로우를 재실행하면 코드 리뷰가 다시 시도됩니다.*`;
-      upsertComment(commentBody);
-    } catch (e) {
-      console.error('Failed to post initial notice comment:', e.message);
-    }
+  } catch (error) {
+    if (!(error instanceof ServiceUnavailableError)) throw error;
+    report(`생략 안내 댓글도 게시하지 못했습니다: ${error.message}`, true);
   }
-
-  process.exit(0);
 }
 
 // ---------------------------------------------------------------------------
-// Build prompt and call Gemini API with retry
+// Build prompt and call Gemini API with bounded model fallback
 // ---------------------------------------------------------------------------
 const prompt = [
   guidelines,
@@ -231,107 +232,92 @@ function getModelDisplayName(model) {
 function sendGeminiRequest(model) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
   return new Promise((resolve, reject) => {
-    const req = https.request(
-      url,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(requestData),
-          'x-goog-api-key': apiKey,
-        },
+    let timer;
+    let settled = false;
+    const finish = (error, result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve(result);
+    };
+    const req = https.request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(requestData),
+        'x-goog-api-key': apiKey,
       },
-      (res) => {
-        res.setEncoding('utf8');
-        let body = '';
-        res.on('data', (chunk) => { body += chunk; });
-        res.on('end', () => {
-          resolve({ statusCode: res.statusCode, body });
-        });
-      }
-    );
-
-    req.on('error', (e) => {
-      reject(e);
+    }, res => {
+      res.setEncoding('utf8');
+      let body = '';
+      res.on('data', chunk => { body += chunk; });
+      res.on('end', () => finish(null, { statusCode: res.statusCode, body }));
+      res.on('error', error => finish(error));
+      res.on('aborted', () => finish(new ServiceUnavailableError('Gemini 응답 연결 중단')));
+      res.on('close', () => {
+        if (!settled) finish(new ServiceUnavailableError('Gemini 응답이 완료되기 전에 종료됨'));
+      });
     });
-
-    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
-      req.destroy(new Error(`Gemini API request timed out after ${REQUEST_TIMEOUT_MS}ms`));
-    });
-
+    req.on('error', error => finish(error));
+    // 소켓 유휴 시간이 아닌 DNS·연결·응답 본문 수신을 포함한 전체 요청 제한입니다.
+    timer = setTimeout(() => {
+      const error = new ServiceUnavailableError('Gemini 전체 요청 시간 초과');
+      finish(error);
+      req.destroy(error);
+    }, REQUEST_TIMEOUT_MS);
     req.write(requestData);
     req.end();
   });
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function run() {
-  let lastError = null;
   let allQuotaExceeded = true;
+  let allModelsMissing = true;
 
   for (const model of MODELS) {
-    console.log(`\n[INFO] Attempting code review with model: ${model} (1 attempt)`);
-
+    console.log(`[INFO] Attempting code review with model: ${model} (1 attempt)`);
+    let response;
     try {
-      const { statusCode, body } = await sendGeminiRequest(model);
-
-      // 1. Success (2xx)
-      if (statusCode >= 200 && statusCode < 300) {
-        const json = JSON.parse(body);
-        const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!reviewText || !reviewText.trim()) {
-          console.warn(`[WARN] ${model} returned empty review text. Falling back to next model.`);
-          allQuotaExceeded = false;
-          continue;
-        }
-
-        const modelDisplayName = getModelDisplayName(model);
-        const commentBody =
-          `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n` +
-          `*이 리뷰는 GitHub Actions와 ${modelDisplayName}에 의해 자동으로 생성·갱신되었습니다.*`;
-
-        upsertComment(commentBody);
-        return;
-      }
-
-      // 2. Quota exceeded (429) -> Fallback to next model (different models have separate quotas)
-      if (statusCode === 429) {
-        console.warn(`[WARN] ${model} quota exceeded (429). Falling back to next model.`);
-        continue;
-      }
-
+      response = await sendGeminiRequest(model);
+    } catch (error) {
       allQuotaExceeded = false;
-
-      // 3. Transient server error (5xx) or model not found (404) -> Fallback to next model
-      if (statusCode >= 500 || statusCode === 404) {
-        console.warn(`[WARN] ${model} returned status ${statusCode}: ${body}. Falling back to next model.`);
-        continue;
-      }
-
-      // 4. Other client errors (400, 401, 403) -> Fail CI to surface misconfiguration
-      console.error(`[ERROR] Gemini API returned fatal status ${statusCode}: ${body}`);
-      process.exit(1);
-
-    } catch (err) {
-      allQuotaExceeded = false;
-      console.warn(`[WARN] Network/timeout error on ${model}: ${err.message}. Falling back to next model.`);
-      lastError = err;
+      allModelsMissing = false;
+      console.warn(`[WARN] ${model}: network/timeout failure; trying next model.`);
+      continue;
     }
+    const { statusCode, body } = response;
+    if (statusCode !== 404) allModelsMissing = false;
+    if (statusCode !== 429) allQuotaExceeded = false;
+
+    if (statusCode >= 200 && statusCode < 300) {
+      let reviewText;
+      try {
+        reviewText = JSON.parse(body).candidates?.[0]?.content?.parts?.[0]?.text;
+      } catch {
+        console.warn('[WARN] Invalid upstream JSON; trying next model.');
+        continue;
+      }
+      if (typeof reviewText !== 'string' || !reviewText.trim()) continue;
+      const commentBody = `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n`
+        + `*이 리뷰는 GitHub Actions와 ${getModelDisplayName(model)}에 의해 자동으로 생성·갱신되었습니다.*`;
+      // 댓글 게시 실패를 Gemini 호출 실패로 취급하여 다시 생성하지 않습니다.
+      publishComment(commentBody);
+      return;
+    }
+    if ([408, 429, 404].includes(statusCode) || statusCode >= 500) continue;
+    throw new ConfigurationError(`Gemini API 설정 오류 (HTTP ${statusCode}): API 키·권한·요청 설정을 확인하세요.`);
   }
 
-  // If all models exhausted:
-  if (allQuotaExceeded) {
-    handleGracefulNotice('All Gemini models quota exceeded (429)', NOTICE_QUOTA_APPEND, NOTICE_QUOTA_STANDALONE);
-  } else {
-    handleGracefulNotice(
-      `All models exhausted (${lastError?.message || 'Server Overload'})`,
-      NOTICE_SERVER_OVERLOAD_APPEND,
-      NOTICE_SERVER_OVERLOAD_STANDALONE
-    );
-  }
+  if (allModelsMissing) throw new ConfigurationError('설정된 Gemini 모델이 모두 존재하지 않습니다 (404).');
+  handleGracefulNotice(
+    allQuotaExceeded ? '요청 할당량 초과' : '외부 서버 무응답·장애 또는 유효하지 않은 응답',
+    allQuotaExceeded ? NOTICE_QUOTA_APPEND : NOTICE_SERVER_OVERLOAD_APPEND,
+    allQuotaExceeded ? NOTICE_QUOTA_STANDALONE : NOTICE_SERVER_OVERLOAD_STANDALONE,
+  );
 }
 
-run();
+run().catch(error => {
+  report(`Gemini 리뷰 자동화 오류: ${error.message}`, true);
+  process.exitCode = 1;
+});

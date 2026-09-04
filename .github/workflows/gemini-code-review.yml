@@ -28,8 +28,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Test Gemini Review Error Handling
+        run: node --test .github/scripts/gemini-review.test.js
+
       - name: Run Gemini Code Review
-        continue-on-error: true
+        # 외부 무응답·429·5xx는 스크립트에서 경고 후 정상 종료합니다. 인증·설정 오류는 실패로 표시합니다.
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
