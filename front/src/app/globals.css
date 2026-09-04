@@ -92,10 +92,11 @@
   --heroText: #ffffff;
   --heroBody: rgba(255, 255, 255, 0.85);
   --heroSub: rgba(255, 255, 255, 0.7);
-  --loginBg: linear-gradient(180deg, #114f8c 0%, #0a2b4c 50%, #000000 100%);
-  /* 회원가입 화면 전용 배경 — 로그인 화면과 공유하던 loginBg에서 분리해, 좀 더
-     세련된 톤(짙은 사파이어 블루)으로 위→검정 그라데이션을 만든다. */
-  --registerBg: linear-gradient(180deg, #23456f 0%, #101c33 55%, #000000 100%);
+  /* 다크 모드에서는 로그인 화면 배경을 회원가입 화면 쪽 톤(짙은 사파이어 블루)에
+     맞춘다(제보) — 라이트 모드는 원래부터 같은 값을 공유하니 다크 모드도
+     맞춰서, 두 화면이 항상 같은 배경을 쓰게 한다. */
+  --loginBg: linear-gradient(180deg, #23456f 0%, #101c33 55%, #000000 100%);
+  --registerBg: var(--loginBg);
   --ctaBtn: #e9c253;
   --ctaBtnText: #3a2a00;
   --ctaBanner: #114f8c;
@@ -156,8 +157,8 @@
     --heroText: #ffffff;
     --heroBody: rgba(255, 255, 255, 0.85);
     --heroSub: rgba(255, 255, 255, 0.7);
-    --loginBg: linear-gradient(180deg, #114f8c 0%, #0a2b4c 50%, #000000 100%);
-    --registerBg: linear-gradient(180deg, #23456f 0%, #101c33 55%, #000000 100%);
+    --loginBg: linear-gradient(180deg, #23456f 0%, #101c33 55%, #000000 100%);
+    --registerBg: var(--loginBg);
     --ctaBtn: #e9c253;
     --ctaBtnText: #3a2a00;
     --ctaBanner: #114f8c;

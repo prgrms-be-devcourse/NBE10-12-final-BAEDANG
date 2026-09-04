@@ -1,15 +1,22 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { StockDetailClient } from "@/components/StockDetailClient";
+import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { getStockDetail, searchStocks, type MarketCountry, type StockDetail } from "@/lib/api";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
+
+// 백엔드 시세 수집 자체가 5초 주기다(docs/erd.md) — 그보다 자주 재조회해도
+// 더 신선한 값을 받을 수 없어 폴링 주기를 여기에 맞춘다.
+const PRICE_POLL_INTERVAL_MS = 5000;
 
 function isMarketCountry(value: string | null): value is MarketCountry {
   return value === "KR" || value === "US";
 }
 
 function StockDetailPageInner() {
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const params = useParams<{ symbol: string }>();
   const searchParams = useSearchParams();
   const rawSymbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
@@ -18,6 +25,9 @@ function StockDetailPageInner() {
 
   const [detail, setDetail] = useState<StockDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 폴링은 최초 조회 때 확정된 marketCountry를 그대로 재사용한다 — 매번
+  // searchStocks로 다시 추정할 필요가 없다.
+  const [resolvedMarketCountry, setResolvedMarketCountry] = useState<MarketCountry | null>(null);
 
   useEffect(() => {
     if (!symbol) return;
@@ -25,6 +35,7 @@ function StockDetailPageInner() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetail(null);
     setError(null);
+    setResolvedMarketCountry(null);
 
     async function load() {
       try {
@@ -42,7 +53,10 @@ function StockDetailPageInner() {
           return;
         }
         const data = await getStockDetail(symbol, marketCountry);
-        if (!cancelled) setDetail(data);
+        if (!cancelled) {
+          setDetail(data);
+          setResolvedMarketCountry(marketCountry);
+        }
       } catch {
         if (!cancelled) setError("종목 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
       }
@@ -53,6 +67,27 @@ function StockDetailPageInner() {
       cancelled = true;
     };
   }, [symbol, marketCountryParam]);
+
+  // 5초마다 종목 상세(시세 포함)를 다시 조회해 갱신한다. 탭이 백그라운드면
+  // useVisiblePolling이 알아서 멈춘다. 실패해도 화면을 에러로 덮지 않고 다음
+  // 주기에 조용히 재시도한다 — 이미 보여주고 있는 값을 그대로 유지하는 편이 낫다.
+  // 이 종목의 시장이 장 마감 중이면 quote_snapshot이 그 주기로 갱신되지
+  // 않으므로(docs/erd.md), 장 시간대에만 폴링한다.
+  const pollInFlightRef = useRef(false);
+  useVisiblePolling(
+    () => {
+      if (!symbol || !resolvedMarketCountry || pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      getStockDetail(symbol, resolvedMarketCountry)
+        .then((data) => setDetail(data))
+        .catch(() => {})
+        .finally(() => {
+          pollInFlightRef.current = false;
+        });
+    },
+    PRICE_POLL_INTERVAL_MS,
+    !!resolvedMarketCountry && isMarketOpen(resolvedMarketCountry)
+  );
 
   if (error) {
     return (
