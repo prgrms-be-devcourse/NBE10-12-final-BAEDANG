@@ -29,6 +29,7 @@ jobs:
           node-version: 20
 
       - name: Run Gemini Code Review
+        continue-on-error: true
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
