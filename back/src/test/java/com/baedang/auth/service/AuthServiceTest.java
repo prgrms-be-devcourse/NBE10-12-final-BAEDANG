@@ -8,7 +8,7 @@ import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
-import com.baedang.trading.service.InitialDepositLedgerService;
+import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.entity.User;
@@ -42,7 +42,7 @@ import static org.mockito.Mockito.*;
 class AuthServiceTest {
     private UserRepository userRepository;
     private AccountRepository accountRepository;
-    private InitialDepositLedgerService initialDepositLedgerService;
+    private LedgerService ledgerService;
     private JwtTokenProvider jwtTokenProvider;
     private PasswordEncoder passwordEncoder;
     private Clock clock;
@@ -55,7 +55,7 @@ class AuthServiceTest {
     void setUp() {
         userRepository = mock(UserRepository.class);
         accountRepository = mock(AccountRepository.class);
-        initialDepositLedgerService = mock(InitialDepositLedgerService.class);
+        ledgerService = mock(LedgerService.class);
         jwtTokenProvider = mock(JwtTokenProvider.class);
         passwordEncoder = new BCryptPasswordEncoder();
         clock = Clock.fixed(now, ZoneOffset.UTC);
@@ -63,7 +63,7 @@ class AuthServiceTest {
         authService = new AuthService(
                 userRepository,
                 accountRepository,
-                initialDepositLedgerService,
+                ledgerService,
                 passwordEncoder,
                 jwtTokenProvider,
                 initialCash,
@@ -103,7 +103,7 @@ class AuthServiceTest {
         assertThat(response.account().accountId()).isEqualTo(10L);
         assertThat(response.account().initialCash()).isEqualTo("50000000");
 
-        verify(initialDepositLedgerService).recordInitialDeposit(
+        verify(ledgerService).recordInitialDeposit(
                 10L,
                 initialCash,
                 1,
@@ -180,7 +180,7 @@ class AuthServiceTest {
         AuthService service = new AuthService(
                 userRepository,
                 accountRepository,
-                initialDepositLedgerService,
+                ledgerService,
                 encoder,
                 jwtTokenProvider,
                 initialCash,
@@ -267,7 +267,7 @@ class AuthServiceTest {
         RuntimeException ledgerFailure = new RuntimeException("ledger failure");
 
         doThrow(ledgerFailure)
-                .when(initialDepositLedgerService)
+                .when(ledgerService)
                 .recordInitialDeposit(
                         10L,
                         initialCash,
