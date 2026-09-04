@@ -10,7 +10,7 @@ import {
   type ISeriesApi,
 } from "lightweight-charts";
 import type { Candle } from "@/lib/api";
-import { toCandlestickData, toVolumeData } from "@/lib/candle-chart-data";
+import { formatKstTickMark, toCandlestickData, toVolumeData } from "@/lib/candle-chart-data";
 
 /**
  * `lightweight-charts`(TradingView)로 그리는 실제 캔들스틱 + 거래량 차트 (이슈 #76).
@@ -89,7 +89,10 @@ export function CandlestickChart({
       grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: line2 },
-      timeScale: { borderColor: line2, timeVisible: true, secondsVisible: false },
+      // 눈금 라벨은 뷰어의 브라우저 타임존이 아니라 KST로 고정한다 — docs/erd.md의
+      // 거래일 경계 정의(KST)와 일치시켜서, 보는 사람마다 날짜가 달라 보이거나
+      // 미국 종목 날짜가 하루 밀려 보이는 문제를 막는다.
+      timeScale: { borderColor: line2, timeVisible: true, secondsVisible: false, tickMarkFormatter: formatKstTickMark },
     });
 
     const upColor = resolveCssColor("--up", "#d33d3d");

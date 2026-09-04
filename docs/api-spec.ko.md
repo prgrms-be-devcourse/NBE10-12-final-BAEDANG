@@ -1,6 +1,6 @@
-# 모의 주식 트레이딩 서비스 — API 명세서 (1주차 MVP)
+# 모의 주식 트레이딩 서비스 — API 명세서
 
-> **버전**: 1주차 MVP · 26.08.20 ~ 08.25 · ERD 와 와이어프레임에서 도출 · **인증은 1주차 미구현** — 서버는 시드 사용자 1명(`user_id = 1`)으로 동작 (`AUTH_ENABLED=false`)
+> **버전**: 3주차 MVP · 26.09.03 ~ 09.09 · ERD 와 와이어프레임에서 도출
 >
 > **배지**: 17 엔드포인트 · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
 
@@ -28,19 +28,20 @@
 
 ### 인증
 
-로그인 후 발급받은 토큰을 헤더에 담습니다.
-```
-Authorization: Bearer {accessToken}
+Stateless JWT (access + refresh) 토큰을 사용해 인증합니다. 보호 엔드포인트는 헤더에 토큰을 담아야 합니다:
+```http
+Authorization: Bearer <accessToken>
 ```
 
-- **1주차에는 인증을 구현하지 않습니다.** 회원가입·로그인 화면은 **UX 설계만** 하고, 서버는 **시드 사용자 1명(`user_id = 1`)으로 고정**해 동작합니다 (`AUTH_ENABLED=false` in `.env`). 아래 **🔒 표시된 엔드포인트도 1주차에는 토큰 없이 호출**되며, 서버가 고정 사용자의 계좌를 씁니다.
-- **2주차에 인증 방식(JWT vs 세션 쿠키)을 정하세요.** Next.js 를 쓰신다면 **Route Handler 를 BFF 로 두고 httpOnly 쿠키에 토큰을 담는 방식**이 가장 안전합니다 — 토큰이 브라우저 JS 에 노출되지 않습니다.
+- Access Token 유효기간 기본값은 15분입니다 (`JWT_ACCESS_TTL: 15m`).
+- Refresh Token 유효기간 기본값은 7일입니다 (`JWT_REFRESH_TTL: 7d`).
+- `X-User-Id` 헤더는 더 이상 지원하지 않으며 401 `UNAUTHORIZED`로 거절됩니다.
+- 만료된 토큰은 401 `TOKEN_EXPIRED`, 변조·형식 오류 토큰은 401 `INVALID_TOKEN`을 반환합니다.
 
 | 구분 | 대상 |
 |---|---|
-| 비로그인 허용 | 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
-| 🔒 로그인 필수 | 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 |
-
+| 비로그인 허용 | 회원가입 · 로그인 · 토큰 갱신 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
+| 🔒 로그인 필수 | 로그아웃 · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 |
 ### 응답 형식
 
 성공 시 데이터를 **그대로** 반환하고, 목록은 커서를 함께 내려줍니다.
@@ -56,11 +57,10 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "error": {
-    "code": "INSUFFICIENT_CASH",
-    "message": "주문가능금액이 부족합니다.",
-    "data": { "required": "2415242", "available": "1200000" }
-  }
+  "code": "INSUFFICIENT_CASH",
+  "message": "주문가능금액이 부족합니다.",
+  "timestamp": "2026-08-23T14:02:11+09:00",
+  "data": { "required": "2415242", "available": "1200000" }
 }
 ```
 `message` 는 **사용자에게 그대로 보여줄 수 있는 문장**으로 작성합니다.
@@ -122,7 +122,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 ```json
 {
   "email": "user@example.com",
-  "password": "********",
+  "password": "Password123!",
   "nickname": "홍길동"
 }
 ```
@@ -131,8 +131,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 ```json
 {
   "userId": 1,
+  "email": "user@example.com",
   "nickname": "홍길동",
   "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
   "account": {
     "accountId": 1,
     "roundNo": 1,
@@ -145,25 +147,145 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 | 에러 코드 | 상황 |
 |---|---|
-| `DUPLICATE_EMAIL` | 이미 가입된 이메일 |
-| `INVALID_PASSWORD` | 비밀번호 정책 미충족 |
+| `EMAIL_DUPLICATED` | 이미 가입된 이메일 |
+| `NICKNAME_DUPLICATED` | 이미 사용 중인 닉네임 |
+| `INVALID_INPUT` | 이메일/비밀번호/닉네임 형식 오류 |
 
 ### `POST /auth/login`
 **Request**
 ```json
-{ "email": "user@example.com", "password": "********" }
+{
+  "email": "user@example.com",
+  "password": "Password123!"
+}
 ```
-응답은 회원가입과 동일한 형태입니다.
+응답은 회원가입과 동일한 형태입니다 (200 OK).
 
 | 에러 코드 | 상황 |
 |---|---|
-| `LOGIN_FAILED` | 이메일 또는 비밀번호 불일치 |
+| `LOGIN_FAILED` | 이메일 또는 비밀번호 불일치, 또는 비활성(탈퇴/휴면) 회원 |
+
+### `POST /auth/refresh`
+유효한 Refresh Token으로 새 Access Token을 재발급합니다.
+
+**Request**
+```json
+{
+  "refreshToken": "eyJhbGciOi..."
+}
+```
+
+**Response · 200**
+```json
+{
+  "accessToken": "eyJhbGciOi..."
+}
+```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `TOKEN_EXPIRED` | 만료된 Refresh Token |
+| `INVALID_TOKEN` | 위조/형식 불일치 토큰이거나 탈퇴 회원 |
+
+### `POST /auth/logout` 🔒
+Stateless 로그아웃. 서버 세션이 없으므로 클라이언트가 보관 중인 토큰을 파기합니다.
+
+**Response · 200**
+빈 바디.
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 |
+| `TOKEN_EXPIRED` | 만료된 토큰 |
+| `INVALID_TOKEN` | 유효하지 않은 토큰 |
 
 ### `GET /users/me` 🔒
-내 정보
+내 정보 조회
+
+**Response · 200**
 ```json
-{ "userId": 1, "email": "user@example.com", "nickname": "홍길동" }
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "홍길동"
+}
 ```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+
+### `PATCH /users/me` 🔒
+닉네임 변경
+
+**Request**
+```json
+{
+  "nickname": "새닉네임"
+}
+```
+
+**Response · 200**
+```json
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "새닉네임"
+}
+```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+| `NICKNAME_DUPLICATED` | 다른 회원이 이미 사용 중인 닉네임 |
+| `INVALID_INPUT` | 닉네임 길이 2~20자 미충족 |
+
+### `PUT /users/me/password` 🔒
+비밀번호 변경
+
+**Request**
+```json
+{
+  "currentPassword": "Password123!",
+  "newPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+```json
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "홍길동"
+}
+```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+| `INVALID_PASSWORD` | 현재 비밀번호 불일치 |
+| `INVALID_INPUT` | 새 비밀번호 정책(8~64자) 미충족 |
+
+### `DELETE /users/me` 🔒
+회원 탈퇴 (Soft-delete: 회원 상태 `WITHDRAWN`, 활성 계좌 `CLOSED` 전환)
+
+**Request**
+```json
+{
+  "currentPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+| `INVALID_PASSWORD` | 현재 비밀번호 불일치 |
+| `ACCOUNT_NOT_FOUND` | 활성 계좌를 찾을 수 없음 |
 
 ---
 
@@ -752,7 +874,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | 마이페이지 | `/accounts/me` · `/accounts/me/holdings` · `/accounts/me/ledger` |
 | 포트폴리오 초기화 | `POST /accounts/me/reset` |
 | 이용 가이드 | 없음 (정적 콘텐츠) |
-| 회원가입 유도 | 1주차에는 호출 없음 — 화면 UX 만 만들고 `/auth/*` 는 2주차에 붙입니다 |
+| 회원가입 유도 | `POST /auth/signup` · `POST /auth/login` |
 
 ## 폴링 정책
 
@@ -808,7 +930,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 |---|---|
 | 검색 범위 | 전 종목(약 8,500개) · `LIKE '%q%'` |
 | 수수료 · 세율 | 수수료 0.01%(매수·매도) · 증권거래세 0.2%(매도만) |
-| 인증 | 1주차 미구현 — 시드 사용자 1명 고정 |
+| 인증 | Stateless JWT access/refresh 토큰 · `Authorization: Bearer <accessToken>` |
 | 소수점 거래 | 2주차 — 1주차는 정수 주 단위만. **화면에서 토글 자체를 제거했습니다** |
 | 체결 내역 | 원장 기준 `GET /accounts/me/ledger` |
 | 원장 항목 | 매수 · 매도 · 초기지급 3종. 수수료·세금은 매수·매도 금액에 포함(한 줄) |
@@ -822,20 +944,20 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 |---|---|
 | `before` 경계 | 토스 `/candles` 의 `before` 가 inclusive 인지, 마감 동시호가(15:30) 봉이 존재하는지 실측 필요 |
 | `STALE_QUOTE` 임계값 | 15초 기준이 적절한지 |
-| 인증 방식 (2주차) | JWT vs 세션 쿠키 |
 | 소수점 자릿수 (2주차) | 미국 주식 최소 주문 단위 (0.1? 0.001?) |
 
 ---
 
 ## 2주차 이후 예정
 
+지정가 가격은 옵션 B(매수 지정가 이하 / 매도 지정가 이상 호가 체결), 만료는 접수한 정규 세션 종료 시각입니다. 모든 사용자가 동일한 가상 시장의 물량을 소비하지만, 사용자 주문끼리 직접 매칭하지는 않습니다. 한 사용자의 체결로 줄어든 공유 잔량은 다른 사용자의 체결에도 반영됩니다.
+
 | 엔드포인트 | 내용 |
 |---|---|
-| `POST /auth/signup` · `/auth/login` | 인증 구현 — 1주차에는 화면만 있고 서버는 시드 사용자 고정 |
 | `POST /orders` | 지정가 주문 (`limitPrice`, `PENDING` 상태) |
 | `POST /orders` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/orders` | 주문 내역 탭 — 거절된 주문까지 포함 (원장에는 안 남음) |
-| `DELETE /orders/{id}` | 주문 취소 |
+| `PATCH /orders/{orderId}` | 예정: `{ "status": "CANCELED" }`만 허용, 활성 미체결 잔여분 취소. 이미 체결된 수량/원장은 유지 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
 | `GET /stocks/{symbol}/orderbook` | 호가 |
@@ -844,4 +966,4 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 **지금 만들지는 않지만 URL 설계가 충돌하지 않게 미리 자리를 잡아둔 것입니다.**
 
 ---
-> 모의 주식 트레이딩 서비스 · 1주차 MVP API 명세서 · `erd.md` · `wireframe.md` 와 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 API 명세서 · `erd.md` · `wireframe.md` 와 함께 보세요

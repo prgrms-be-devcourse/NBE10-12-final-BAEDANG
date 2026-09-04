@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AuthProvider } from "@/components/AuthProvider";
 import { ExchangeRateProvider } from "@/components/ExchangeRateProvider";
+import { MarketStatusProvider } from "@/components/MarketStatusProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PageBackground } from "@/components/PageBackground";
 import { Nav } from "@/components/Nav";
@@ -33,10 +34,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <ThemeProvider>
           <AuthProvider>
             <ExchangeRateProvider>
-              <PageBackground>
-                <Nav />
-                <main className="mx-auto max-w-[1180px] px-6 pb-16">{children}</main>
-              </PageBackground>
+              <MarketStatusProvider>
+                <PageBackground>
+                  <Nav />
+                  <main className="mx-auto max-w-[1180px] px-6 pb-16">{children}</main>
+                </PageBackground>
+              </MarketStatusProvider>
             </ExchangeRateProvider>
           </AuthProvider>
         </ThemeProvider>

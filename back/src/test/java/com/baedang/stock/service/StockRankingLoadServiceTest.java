@@ -1,7 +1,7 @@
 package com.baedang.stock.service;
 
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.repository.QuoteSnapshotBatchRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.RankingEntry;
@@ -23,8 +23,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
-import static org.mockito.Mockito.atLeastOnce;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
@@ -39,8 +37,8 @@ class StockRankingLoadServiceTest {
     /** {@code applyRanking} 은 프록시 경유(@Transactional)라 자기 자신을 주입받는다. */
     private final StockRankingLoadService self = mock(StockRankingLoadService.class);
 
-    private final QuoteSnapshotRepository quoteSnapshotRepository =
-            mock(QuoteSnapshotRepository.class);
+    private final QuoteSnapshotBatchRepository quoteSnapshotBatchRepository =
+            mock(QuoteSnapshotBatchRepository.class);
 
     private static final OffsetDateTime RANKED_AT =
             OffsetDateTime.parse("2026-09-07T08:00:00+09:00");
@@ -51,7 +49,7 @@ class StockRankingLoadServiceTest {
     private final Clock clock = Clock.fixed(NOW.toInstant(), ZoneOffset.UTC);
 
     private final StockRankingLoadService service = new StockRankingLoadService(
-            rankingPort, stockRepository, quoteSnapshotRepository, clock, self);
+            rankingPort, stockRepository, quoteSnapshotBatchRepository, clock, self);
 
     @Nested
     class Load {
@@ -158,14 +156,18 @@ class StockRankingLoadServiceTest {
         }
     }
 
+    /**
+     * 목으로 볼 수 있는 것은 <b>배치에 무엇이 실렸는가</b> 뿐이다.
+     * 실린 값이 실제로 INSERT 가 됐는지 UPDATE 가 됐는지는 UPSERT 가 DB 에서 판단하므로
+     * {@code StockRankingLoadIntegrationTest} 가 맡는다.
+     */
     @Nested
     class 신규_편입_시세_초기화 {
 
         @Test
-        void 스냅샷이_없으면_만들고_prev_close를_basePrice로_채운다() {
+        void 스냅샷을_만들고_prev_close를_basePrice로_채운다() {
             직전_유니버스(MarketCountry.KR);
             심볼_조회(종목("005930", 1L));
-            스냅샷_조회();
 
             service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "005930")), RANKED_AT);
 
@@ -183,22 +185,7 @@ class StockRankingLoadServiceTest {
         }
 
         @Test
-        void 스냅샷이_있으면_prev_close만_갱신하고_현재가는_두다() {
-            직전_유니버스(MarketCountry.KR);
-            심볼_조회(종목("005930", 1L));
-            QuoteSnapshot 기존 = 스냅샷(1L, new BigDecimal("71000"));
-            스냅샷_조회(기존);
-
-            service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "005930")), RANKED_AT);
-
-            assertThat(기존.getPrevClose()).isEqualByComparingTo("69000");
-            // 실시간 수집기가 관리하는 값이라 덮어쓰면 안 된다.
-            assertThat(기존.getLastPrice()).isEqualByComparingTo("71000");
-            verify(quoteSnapshotRepository, never()).save(any());
-        }
-
-        @Test
-        void 지난주에도_랭킹이던_종목은_건드리지_않는다() {
+        void 지난_주간_랭킹에도_있던_종목은_건드리지_않는다() {
             Stock 유지 = 종목("005930", 1L);
             유지.applyRanking(1, new BigDecimal("1000000000"));
             직전_유니버스(MarketCountry.KR, 유지);
@@ -207,21 +194,7 @@ class StockRankingLoadServiceTest {
             service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "005930")), RANKED_AT);
 
             // prev_close 는 매일 08:50 배치가 이미 관리한다.
-            verifyNoInteractions(quoteSnapshotRepository);
-        }
-
-        @Test
-        void 조회는_종목마다_하지_않고_한_번에_한다() {
-            직전_유니버스(MarketCountry.KR);
-            심볼_조회(종목("005930", 1L), 종목("000660", 2L));
-            스냅샷_조회();
-
-            service.applyRanking(
-                    MarketCountry.KR,
-                    List.of(엔트리(1, "005930"), 엔트리(2, "000660")),
-                    RANKED_AT);
-
-            verify(quoteSnapshotRepository, times(1)).findByStockIdIn(any());
+            verifyNoInteractions(quoteSnapshotBatchRepository);
         }
 
         @Test
@@ -236,14 +209,13 @@ class StockRankingLoadServiceTest {
             service.applyRanking(MarketCountry.US, List.of(엔트리(1, "AAPL")), RANKED_AT);
 
             assertThat(신규.getIsRanked()).isTrue();
-            verifyNoInteractions(quoteSnapshotRepository);
+            verifyNoInteractions(quoteSnapshotBatchRepository);
         }
 
         @Test
         void 기준가가_0이면_prev_close를_비워둔다() {
             직전_유니버스(MarketCountry.KR);
             심볼_조회(종목("005930", 1L));
-            스냅샷_조회();
 
             service.applyRanking(
                     MarketCountry.KR,
@@ -251,43 +223,33 @@ class StockRankingLoadServiceTest {
                     RANKED_AT);
 
             // 등락률을 0% 로 속이지 않는다 — null 로 내보낸다.
+            // 이미 값이 있는 행을 지우지 않는 것은 UPSERT 의 COALESCE 몫이라 통합 테스트에서 본다.
             assertThat(저장된_스냅샷().getPrevClose()).isNull();
             assertThat(저장된_스냅샷().changeRate()).isNull();
         }
 
         @Test
-        void 현재가가_없으면_스냅샷을_만들지_않고_랭킹만_반영한다() {
+        void 현재가가_없으면_RankingEntry를_통째로_건너뛴다() {
             Stock 종목 = 종목("005930", 1L);
             직전_유니버스(MarketCountry.KR);
             심볼_조회(종목);
-            스냅샷_조회();
 
             service.applyRanking(
                     MarketCountry.KR,
                     List.of(엔트리(1, "005930", null, new BigDecimal("69000"))),
                     RANKED_AT);
 
+            // 현재가는 토스 응답의 필수 필드라, 비어 있으면 응답이 스펙과 다르다는 뜻이다.
+            // 같은 엔트리의 기준가도 신뢰하지 않으므로 prev_close 갱신 대상에서도 빠진다.
+            assertThat(저장된_스냅샷들()).isEmpty();
             // 종목 하나의 시세 결측이 유니버스 전체를 막으면 안 된다.
             assertThat(종목.getIsRanked()).isTrue();
-            verify(quoteSnapshotRepository, never()).save(any());
         }
 
         @Test
-        void 집계_시각이_없으면_수집_시각으로_대체한다() {
-            직전_유니버스(MarketCountry.KR);
-            심볼_조회(종목("005930", 1L));
-            스냅샷_조회();
-
-            service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "005930")), null);
-
-            assertThat(저장된_스냅샷().getQuoteAt()).isEqualTo(NOW);
-        }
-
-        @Test
-        void 일부가_유효하지_않아도_나머지는_저장한다() {
+        void 일부_RankingEntry가_유효하지_않아도_나머지는_실린다() {
             직전_유니버스(MarketCountry.KR);
             심볼_조회(종목("005930", 1L), 종목("000660", 2L), 종목("035720", 3L));
-            스냅샷_조회();
 
             service.applyRanking(
                     MarketCountry.KR,
@@ -297,73 +259,64 @@ class StockRankingLoadServiceTest {
                             엔트리(3, "035720")),
                     RANKED_AT);
 
-            // 한 건이 걸러져도 나머지 두 건은 그대로 저장돼야 한다.
+            // 배치는 전부 아니면 전무다. 걸러내지 않고 실어 보내면 NOT NULL 위반으로
+            // 배치 전체가 죽고 트랜잭션이 롤백돼 이번 주 랭킹 적재가 통째로 날아간다.
             assertThat(저장된_스냅샷들())
                     .extracting(QuoteSnapshot::getStockId)
-                    .containsExactly(1L, 3L);
+                    .containsExactlyInAnyOrder(1L, 3L);
         }
 
         @Test
-        void 스냅샷이_있는_종목과_없는_종목이_섞여도_각각_처리한다() {
+        void 종목마다_저장하지_않고_배치_한_번으로_끝낸다() {
             직전_유니버스(MarketCountry.KR);
             심볼_조회(종목("005930", 1L), 종목("000660", 2L));
-            QuoteSnapshot 기존 = 스냅샷(1L, new BigDecimal("71000"));
-            스냅샷_조회(기존);
 
             service.applyRanking(
                     MarketCountry.KR,
                     List.of(엔트리(1, "005930"), 엔트리(2, "000660")),
                     RANKED_AT);
 
-            assertThat(기존.getPrevClose()).isEqualByComparingTo("69000");
+            // 기존 스냅샷 조회 없이(UPSERT 가 판단한다) 배치 1회로 끝난다.
+            verify(quoteSnapshotBatchRepository, times(1)).saveBulk(any());
             assertThat(저장된_스냅샷들())
                     .extracting(QuoteSnapshot::getStockId)
-                    .containsExactly(2L);
+                    .containsExactlyInAnyOrder(1L, 2L);
         }
 
         @Test
-        void 미국_종목은_USD_스냅샷으로_생성한다() {
+        void 집계_시각이_없으면_수집_시각으로_대체한다() {
+            직전_유니버스(MarketCountry.KR);
+            심볼_조회(종목("005930", 1L));
+
+            service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "005930")), null);
+
+            assertThat(저장된_스냅샷().getQuoteAt()).isEqualTo(NOW);
+        }
+
+        @Test
+        void 미국_종목은_USD_스냅샷으로_실린다() {
             Stock 애플 = Stock.create(
                     "AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true);
             ReflectionTestUtils.setField(애플, "stockId", 1L);
             직전_유니버스(MarketCountry.US);
             심볼_조회(애플);
-            스냅샷_조회();
 
-            service.applyRanking(
-                    MarketCountry.US,
-                    List.of(달러_엔트리(1, "AAPL")),
-                    RANKED_AT);
+            service.applyRanking(MarketCountry.US, List.of(달러_엔트리(1, "AAPL")), RANKED_AT);
 
             assertThat(저장된_스냅샷().getCurrency()).isEqualTo("USD");
             assertThat(저장된_스냅샷().getPrevClose()).isEqualByComparingTo("128.45");
         }
 
-        @Test
-        void 이번에_탈락한_종목의_스냅샷은_건드리지_않는다() {
-            Stock 탈락 = 종목("005930", 1L);
-            탈락.applyRanking(1, new BigDecimal("1000000000"));
-            직전_유니버스(MarketCountry.KR, 탈락);
-            심볼_조회(종목("000660", 2L));
-            스냅샷_조회();
-
-            service.applyRanking(MarketCountry.KR, List.of(엔트리(1, "000660")), RANKED_AT);
-
-            assertThat(탈락.getIsRanked()).isFalse();
-            // 탈락 종목(1L)은 조회 대상에도 들어가지 않는다.
-            assertThat(저장된_스냅샷().getStockId()).isEqualTo(2L);
-        }
-
         private QuoteSnapshot 저장된_스냅샷() {
-            ArgumentCaptor<QuoteSnapshot> captor = ArgumentCaptor.forClass(QuoteSnapshot.class);
-            verify(quoteSnapshotRepository).save(captor.capture());
-            return captor.getValue();
+            List<QuoteSnapshot> snapshots = 저장된_스냅샷들();
+            assertThat(snapshots).hasSize(1);
+            return snapshots.getFirst();
         }
 
         private List<QuoteSnapshot> 저장된_스냅샷들() {
-            ArgumentCaptor<QuoteSnapshot> captor = ArgumentCaptor.forClass(QuoteSnapshot.class);
-            verify(quoteSnapshotRepository, atLeastOnce()).save(captor.capture());
-            return captor.getAllValues();
+            ArgumentCaptor<List<QuoteSnapshot>> captor = ArgumentCaptor.captor();
+            verify(quoteSnapshotBatchRepository).saveBulk(captor.capture());
+            return captor.getValue();
         }
     }
 
@@ -372,16 +325,6 @@ class StockRankingLoadServiceTest {
                 symbol, MarketCountry.KR, "KOSPI", symbol, null, "KRW", "STOCK", true);
         ReflectionTestUtils.setField(stock, "stockId", stockId);
         return stock;
-    }
-
-    private QuoteSnapshot 스냅샷(Long stockId, BigDecimal lastPrice) {
-        return new QuoteSnapshot(stockId, lastPrice, "KRW", RANKED_AT, RANKED_AT);
-    }
-
-    private void 스냅샷_조회(QuoteSnapshot... snapshots) {
-        when(quoteSnapshotRepository.findByStockIdIn(any())).thenReturn(List.of(snapshots));
-        when(quoteSnapshotRepository.save(any(QuoteSnapshot.class)))
-                .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private void 직전_유니버스(MarketCountry marketCountry, Stock... stocks) {

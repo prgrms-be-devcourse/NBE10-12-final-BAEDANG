@@ -1,5 +1,9 @@
 package com.baedang.stock.controller;
 
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.stock.dto.RankingResponse;
@@ -16,6 +20,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -31,6 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(StockController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 public class StockControllerTest {
 
     @Autowired
@@ -47,6 +53,9 @@ public class StockControllerTest {
 
     @MockitoBean
     private StockDetailService stockDetailService;
+
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
 
     @Test
     @DisplayName("종목 검색 API가 검색 결과 반환")

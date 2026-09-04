@@ -2,7 +2,7 @@ package com.baedang.stock.service;
 
 import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.repository.QuoteSnapshotBatchRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.RankingEntry;
@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,20 +35,20 @@ public class StockRankingLoadService {
 
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
-    private final QuoteSnapshotRepository quoteSnapshotRepository;
+    private final QuoteSnapshotBatchRepository quoteSnapshotBatchRepository;
     private final Clock clock;
     private final StockRankingLoadService self;
 
     public StockRankingLoadService(
             RankingPort rankingPort,
             StockRepository stockRepository,
-            QuoteSnapshotRepository quoteSnapshotRepository,
+            QuoteSnapshotBatchRepository quoteSnapshotBatchRepository,
             Clock clock,
             @Lazy StockRankingLoadService self
     ) {
         this.rankingPort = rankingPort;
         this.stockRepository = stockRepository;
-        this.quoteSnapshotRepository = quoteSnapshotRepository;
+        this.quoteSnapshotBatchRepository = quoteSnapshotBatchRepository;
         this.clock = clock;
         this.self = self;
     }
@@ -166,58 +165,50 @@ public class StockRankingLoadService {
     ) {
         if (targets.isEmpty()) return;
 
-        Map<Long, QuoteSnapshot> quoteSnapshotStockIdMap = quoteSnapshotRepository
-                .findByStockIdIn(targets.keySet())
-                .stream()
-                .collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity()));
-
-        int createdCount = 0;
-        int prevCloseCount = 0;
+        List<QuoteSnapshot> quoteSnapshots = new ArrayList<>();
         int skippedCount = 0;
 
         for (Map.Entry<Long, RankingEntry> target : targets.entrySet()) {
             Long stockId = target.getKey();
             RankingEntry entry = target.getValue();
-            QuoteSnapshot quoteSnapshot = quoteSnapshotStockIdMap.get(stockId);
 
-            if (quoteSnapshot == null) {
-                if (!canCreate(entry)) {
-                    skippedCount++;
-                    continue;
-                }
-
-                quoteSnapshot = quoteSnapshotRepository.save(new QuoteSnapshot(
-                        stockId,
-                        entry.lastPrice(),
-                        DomainNormalizer.currency(entry.currency()),
-                        quoteAt,
-                        collectedAt
-                ));
-                createdCount++;
+            if (!isTrustworthy(entry)) {
+                skippedCount++;
+                continue;
             }
+
+            QuoteSnapshot quoteSnapshot = new QuoteSnapshot(
+                    stockId,
+                    entry.lastPrice(),
+                    DomainNormalizer.currency(entry.currency()),
+                    quoteAt,
+                    collectedAt
+            );
 
             if (isUsablePrevClose(entry.basePrice())) {
                 quoteSnapshot.updatePrevClose(entry.basePrice());
-                prevCloseCount++;
             } else {
                 // 0% 로 속이지 않는다 — prev_close 를 비워두면 등락률이 null 로 나간다.
+                // 이미 값이 있는 행은 UPSERT 의 COALESCE 가 기존 값을 지켜준다.
                 log.warn(
                         "StockRankingLoadService: 기준가가 유효하지 않아 prev_close 를 세팅하지 않습니다. "
                                 + "(symbol={}, basePrice={})",
                         entry.symbol(),
                         entry.basePrice()
                 );
-                skippedCount++;
             }
+
+            quoteSnapshots.add(quoteSnapshot);
         }
+
+        quoteSnapshotBatchRepository.saveBulk(quoteSnapshots);
 
         log.info(
                 "StockRankingLoadService(marketCountry={}): 신규 편입 {}건 시세 초기화 "
-                        + "(스냅샷 생성={}, prev_close 세팅={}, 건너뜀={})",
+                        + "(UPSERT={}, 건너뜀={})",
                 marketCountry,
                 targets.size(),
-                createdCount,
-                prevCloseCount,
+                quoteSnapshots.size(),
                 skippedCount
         );
     }
@@ -247,17 +238,21 @@ public class StockRankingLoadService {
         return true;
     }
 
-    private boolean canCreate(RankingEntry entry) {
-        if (entry.lastPrice() == null
-                || entry.lastPrice().signum() <= 0
-                || entry.currency() == null
-                || entry.currency().isBlank()) {
+    /**
+     * 현재가는 토스 랭킹 응답의 필수 필드다. 비어 있다면 응답 자체가 스펙과 다르다는 뜻이므로
+     * 같은 엔트리의 기준가도 믿지 않고 통째로 건너뛴다 — prev_close 도 갱신하지 않는다.
+     *
+     * <p>통화는 {@code hasMatchingCurrency} 가 이미 걸러낸 뒤라 여기서 다시 보지 않는다.
+     */
+    private boolean isTrustworthy(RankingEntry entry) {
+        if (entry.lastPrice() == null || entry.lastPrice().signum() <= 0) {
             log.warn(
-                    "StockRankingLoadService: 현재가·통화가 없어 스냅샷 생성을 건너뜁니다. "
-                            + "(symbol={}, lastPrice={}, currency={})",
+                    "StockRankingLoadService: 토스 랭킹 응답이 스펙과 다릅니다 — 현재가(lastPrice)는 필수인데 "
+                            + "비어 있거나 유효하지 않아 해당 엔트리를 신뢰하지 않고 시세 갱신을 건너뜁니다. "
+                            + "(symbol={}, rank={}, lastPrice={})",
                     entry.symbol(),
-                    entry.lastPrice(),
-                    entry.currency()
+                    entry.rank(),
+                    entry.lastPrice()
             );
             return false;
         }

@@ -4,7 +4,7 @@ import com.baedang.account.dto.AccountResetResponse;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.repository.HoldingRepository;
-import com.baedang.trading.service.InitialDepositLedgerService;
+import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -25,20 +25,20 @@ public class AccountResetService {
 
     private final AccountRepository accountRepository;
     private final HoldingRepository holdingRepository;
-    private final InitialDepositLedgerService initialDepositLedgerService;
+    private final LedgerService ledgerService;
     private final BigDecimal initialCash;
     private final Clock clock;
 
     public AccountResetService(
             AccountRepository accountRepository,
             HoldingRepository holdingRepository,
-            InitialDepositLedgerService initialDepositLedgerService,
+            LedgerService ledgerService,
             @Value("${trading.initial-cash}") BigDecimal initialCash,
             Clock clock
     ) {
         this.accountRepository = accountRepository;
         this.holdingRepository = holdingRepository;
-        this.initialDepositLedgerService = initialDepositLedgerService;
+        this.ledgerService = ledgerService;
         this.initialCash = initialCash;
         this.clock = clock;
     }
@@ -69,7 +69,7 @@ public class AccountResetService {
                 initialCash,
                 resetAt));
 
-        initialDepositLedgerService.recordInitialDeposit(
+        ledgerService.recordInitialDeposit(
                 newAccount.getAccountId(),
                 newAccount.getInitialCash(),
                 newAccount.getRoundNo(),

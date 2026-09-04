@@ -64,7 +64,8 @@ public class OrderAmountCalculator {
                 grossAmountKrw,
                 tradingFeeKrw,
                 sellChargeKrw,
-                netAmountKrw
+                netAmountKrw,
+                BigDecimal.ZERO
         );
     }
 
@@ -96,7 +97,8 @@ public class OrderAmountCalculator {
                 grossAmountKrw,
                 tradingFeeKrw,
                 secFeeKrw,
-                netAmountKrw
+                netAmountKrw,
+                secFeeUsd
         );
     }
 

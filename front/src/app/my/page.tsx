@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import {
   getAccountSummary,
@@ -16,9 +17,15 @@ import {
   type AccountSummary,
   type HoldingItem,
   type LedgerItem,
+  type MarketCountry,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
+
+// 평가손익·평가금액은 quote_snapshot(현재가)에서 파생되는 값이고, 그 시세 자체가
+// 5초 주기로 수집된다(docs/erd.md) — 그 주기에 맞춰 5초마다 다시 조회한다.
+const VALUATION_POLL_INTERVAL_MS = 5000;
 
 // toKrw는 @/lib/format 공용 함수를 쓴다. avgBuyPrice는 매수 시점 환율(avgExchangeRate)로,
 // lastPrice는 최신 환율(rate)로 환산하는 게 맞다 — HoldingsResponse의 설계 의도 그대로다.
@@ -26,6 +33,7 @@ import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw 
 export default function MyPage() {
   const { isLoggedIn, user } = useAuth();
   const { rate } = useExchangeRate();
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -63,6 +71,34 @@ export default function MyPage() {
       cancelled = true;
     };
   }, [isLoggedIn, user]);
+
+  // 5초마다 계좌 요약(평가손익 포함)과 보유 종목을 조용히 다시 조회해 갱신한다.
+  // 체결 내역(ledger)은 실제 거래가 있을 때만 바뀌는 과거 기록이라 폴링 대상이
+  // 아니다. 실패해도 화면을 에러로 덮지 않고 다음 주기에 재시도하며, 요청이
+  // 겹치지 않도록 in-flight 가드를 둔다.
+  // 실제로 보유한 종목의 통화만 보고 폴링 여부를 정한다(코드 리뷰, PR #124,
+  // SOL4R1S님) — 국내 종목만 들고 있는데 해외 장중이라는 이유로(또는 그
+  // 반대로) 5초마다 의미 없는 요청을 보내던 문제를 막는다. 둘 다 안 들고
+  // 있으면(빈 포트폴리오) 애초에 갱신할 평가손익이 없어 폴링하지 않는다.
+  const heldMarketCountries = new Set(holdings.map((h) => (h.currency === "USD" ? "US" : "KR")));
+  const valuationPollInFlightRef = useRef(false);
+  useVisiblePolling(
+    () => {
+      if (!user || valuationPollInFlightRef.current) return;
+      valuationPollInFlightRef.current = true;
+      Promise.all([getAccountSummary(user.userId), getHoldings(user.userId)])
+        .then(([acc, holdingsRes]) => {
+          setAccount(acc);
+          setHoldings(holdingsRes.items);
+        })
+        .catch(() => {})
+        .finally(() => {
+          valuationPollInFlightRef.current = false;
+        });
+    },
+    VALUATION_POLL_INTERVAL_MS,
+    isLoggedIn && !!user && [...heldMarketCountries].some((market) => isMarketOpen(market as MarketCountry))
+  );
 
   async function handleReset() {
     if (!user || !account || resetting) return;

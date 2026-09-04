@@ -108,6 +108,7 @@ toss:
 trading:
   initial-cash: ${INITIAL_CASH:50000000}
 
+  # 요율·SEC 최소액은 프로젝트 고정 환경 설정입니다. 활성 주문 중 변경하지 않습니다.
   # 거래 수수료 0.01% — 매수·매도 공통, 국내·미국 공통
   fee-rate: ${FEE_RATE:0.0001}
 
@@ -134,13 +135,12 @@ trading:
   quote-poll-interval-seconds: ${QUOTE_POLL_INTERVAL_SECONDS:5}
   universe-size: ${QUOTE_UNIVERSE_SIZE:100}
 
-# ── 1주차 임시 설정 ──────────────────────────────────────────────────────────
-#   인증을 1주차에 붙이지 않으므로, 로그인하지 않은 요청은 시드 사용자로 봅니다.
-#   회원가입·로그인 API 는 동작하지만 토큰을 발급하지 않습니다.
-#   2주차에 JWT 를 붙이면 이 블록을 지우세요.
 auth:
-  enabled: ${AUTH_ENABLED:false}
-  dev-fixed-user-id: ${DEV_FIXED_USER_ID:1}
+  jwt:
+    issuer: baedang
+    secret: ${JWT_SECRET}
+    access-ttl: ${JWT_ACCESS_TTL:15m}
+    refresh-ttl: ${JWT_REFRESH_TTL:7d}
 
 logging:
   level:

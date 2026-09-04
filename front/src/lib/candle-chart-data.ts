@@ -1,5 +1,13 @@
-import type { UTCTimestamp } from "lightweight-charts";
+import { TickMarkType, type Time, type UTCTimestamp } from "lightweight-charts";
 import type { Candle } from "@/lib/api";
+
+/**
+ * 차트 데이터는 백엔드 거래일 경계 정의(`docs/erd.md`의 `daily_candle` — "KST 날짜로
+ * 변환, UTC로 자르면 미국 종목 날짜가 하루 밀린다")와 일치시키기 위해 항상 KST(Asia/Seoul)
+ * 기준으로 표시한다. 뷰어의 브라우저/OS 타임존에 맡기면(기본 `Intl`/`Date` 동작) 사람마다
+ * 다른 날짜가 보이고, 문서에 명시된 것과 같은 종류의 하루 밀림 문제도 재현될 수 있다.
+ */
+export const CHART_TIME_ZONE = "Asia/Seoul";
 
 /**
  * 백엔드 캔들 응답(`Candle[]`, 금액이 전부 문자열)을 `lightweight-charts`가 요구하는
@@ -84,4 +92,38 @@ export function toVolumeData(items: Candle[], upColor: string, downColor: string
     points.push({ time, value: Math.max(0, volume), color });
   }
   return sortAndDedupeByTime(points);
+}
+
+const tickFormatCache = new Map<string, Intl.DateTimeFormat>();
+
+/** `Intl.DateTimeFormat` 인스턴스 생성 비용을 아끼려고 옵션 조합별로 하나씩만 만들어 재사용한다. */
+function getTickFormat(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const key = JSON.stringify(options);
+  let format = tickFormatCache.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat("ko-KR", { ...options, timeZone: CHART_TIME_ZONE });
+    tickFormatCache.set(key, format);
+  }
+  return format;
+}
+
+/**
+ * `CandlestickChart`의 `timeScale.tickMarkFormatter`로 넘기는 KST 고정 포맷터.
+ * 우리 데이터는 항상 `UTCTimestamp`(초)라 `BusinessDay`/문자열 `Time`은 고려하지 않는다.
+ */
+export function formatKstTickMark(time: Time, tickMarkType: TickMarkType): string {
+  const date = new Date((time as UTCTimestamp) * 1000);
+  switch (tickMarkType) {
+    case TickMarkType.Year:
+      return getTickFormat({ year: "numeric" }).format(date);
+    case TickMarkType.Month:
+      return getTickFormat({ month: "short" }).format(date);
+    case TickMarkType.DayOfMonth:
+      return getTickFormat({ month: "2-digit", day: "2-digit" }).format(date);
+    case TickMarkType.TimeWithSeconds:
+      return getTickFormat({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date);
+    case TickMarkType.Time:
+    default:
+      return getTickFormat({ hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+  }
 }

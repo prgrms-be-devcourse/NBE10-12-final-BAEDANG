@@ -25,15 +25,10 @@ BEGIN;
 --       미국  a_tax = max(gross_amount x A_TAX_RATE, A_TAX_MIN_USD x 환율)
 --                                                     (0.0000206, 최소 $0.01)
 --
---   [요율은 DB 에 저장하지 않는다]   ← 확정
---     .env 의 FEE_RATE / K_TAX_RATE / A_TAX_RATE / A_TAX_MIN_USD 가 유일한 정의 지점이고,
---     테이블에는 계산 "결과값"만 들어간다 — trade_order.fee / trade_order.tax.
---
---     · 요율은 주문마다 다른 값이 아니라 전역 정책이다. 주문 행마다 복사하면
---       같은 값이 수만 번 중복되고, 정책이 바뀔 때 어디가 진실인지 모호해진다.
---     · 결과값만 있어도 충분하다. 요율이 나중에 바뀌어도 과거 거래는 그대로 남는다.
---       원장이 지켜야 하는 것은 "그때 얼마를 냈는가"이지 "몇 %였는가"가 아니다.
---     · 굳이 적용 요율을 되짚어야 하면 tax / gross_amount 로 역산할 수 있다.
+--   [적용 금액과 고정 요율]
+--     요율과 SEC 최소액은 .env의 프로젝트 고정 설정을 사용하며 주문에 저장하지 않는다.
+--     재시작/재배포 후에도 같은 설정을 유지한다. fee/tax에는 계산된 금액만 저장한다.
+--     개별 체결에는 정산 차액과 단가·수량·환율을 보존한다. 확정 정산 금액은 재계산하지 않는다.
 --
 --     !! 팀원 전원이 같은 .env 값을 써야 한다. 한 사람만 다르면 같은 주문인데
 --        금액이 달라지고, 원인을 찾기 어려운 종류의 버그가 된다.
@@ -84,15 +79,13 @@ BEGIN;
 
 
 -- ============================================================================
---  1주차 인증 범위
+--  회원 인증 범위
 --
---   회원가입·로그인 화면은 만들되 인증 로직은 1주차에 구현하지 않는다.
---   시드 사용자 1명(user_id = 1)으로 개발하고, 2주차에 로그인을 붙인다.
---     .env  AUTH_ENABLED=false / DEV_FIXED_USER_ID=1
---
---   그래도 users · account 테이블은 지금 만든다.
---   시드로 사용자 1명과 계좌 1개를 넣어두면 나머지 기능이 전부 돌아간다.
+--   users 는 JWT 인증의 회원 원장입니다. 탈퇴는 행 삭제가 아니라
+--   WITHDRAWN 상태 전환으로 처리해 account·ledger 의 FK를 보존합니다.
 -- ============================================================================
+
+
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -106,7 +99,8 @@ CREATE TABLE users (
     status        VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE'
                   CHECK (status IN ('ACTIVE','DORMANT','WITHDRAWN')),
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+    updated_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    CONSTRAINT uq_users_nickname UNIQUE (nickname)
 );
 COMMENT ON TABLE users IS '서비스 회원';
 
@@ -149,7 +143,7 @@ COMMENT ON COLUMN account.locked_cash IS '미체결 주문 동결액. 주문가�
 --   ② "얼마가 묶여 있는가"는 그 자체로 화면에 보여줄 정보다.
 --        예수금 50,000,000 / 주문 대기 2,415,242 / 주문가능 47,584,758
 --   ③ 검증식이 생긴다.
---        locked_cash = SUM(trade_order.net_amount WHERE status='PENDING')
+--        locked_cash = 활성 BUY 주문의 SUM(reserved_cash)
 --      고아 PENDING 이 생기면 이 식이 깨지므로 즉시 잡아낼 수 있다.
 --
 --   !! 동결액에는 수수료(매도는 세금까지) 를 포함한 net_amount 를 쓴다.
@@ -682,7 +676,7 @@ COMMENT ON COLUMN exchange_rate.mid_rate IS '은행간 매매기준율. 일반�
 
 -- ────────────────────────────────────────────────────────────────────────────
 --  9. 주문 (MVP 는 시장가 즉시 체결이므로 주문 = 체결)
---     지정가를 도입하면 trade_execution 을 분리한다.
+--     개별 확정 체결 기록은 trade_execution 에 저장한다.
 -- ────────────────────────────────────────────────────────────────────────────
 CREATE TABLE trade_order (
     order_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -697,9 +691,9 @@ CREATE TABLE trade_order (
     -- PENDING : 접수 완료, 자금(또는 수량) 동결됨. 아직 체결 전.
     -- FILLED  : 체결 완료. 동결 해제 + 실제 출금/입금 확정.
     -- REJECTED: 검증 단계에서 거절. 동결하지 않는다.
-    -- CANCELED: 사용자가 취소. 동결 해제.  EXPIRED: 타임아웃 자동 해제.
-    status          VARCHAR(12)   NOT NULL
-                    CHECK (status IN ('PENDING','FILLED','REJECTED','CANCELED','EXPIRED')),
+    -- PARTIALLY_FILLED: 일부 체결. CANCELED/EXPIRED: 잔여분 취소/정규 세션 종료 만료.
+    status          VARCHAR(20)   NOT NULL
+                    CHECK (status IN ('PENDING','PARTIALLY_FILLED','FILLED','REJECTED','CANCELED','EXPIRED')),
     reject_reason   VARCHAR(40),              -- MARKET_CLOSED / STOCK_SUSPENDED /
                                               -- INSUFFICIENT_CASH / STALE_QUOTE /
                                               -- FUTURE_QUOTE ...
@@ -707,7 +701,7 @@ CREATE TABLE trade_order (
     quote_at        TIMESTAMPTZ,              -- 체결 또는 거절 판정에 사용한 시세 시각
     exchange_rate   NUMERIC(19,6),            -- 체결 또는 거절 판정에 사용한 환율
 
-    -- 체결 결과 (status = FILLED 일 때만 채워짐)
+    -- 체결 결과 (MARKET 단일 체결 / LIMIT은 개별 체결 금액의 누계)
     executed_price  NUMERIC(19,4),            -- 체결 단가 (종목 통화 기준)
     gross_amount    NUMERIC(19,4),            -- 체결 금액 (원화 환산)
     fee             NUMERIC(19,4) DEFAULT 0,  -- 수수료
@@ -717,15 +711,73 @@ CREATE TABLE trade_order (
     tax             NUMERIC(19,4) DEFAULT 0,
     net_amount      NUMERIC(19,4),            -- 실제 예수금 증감액
 
+    limit_price NUMERIC(19,4),
+    filled_quantity NUMERIC(19,6) NOT NULL DEFAULT 0,
+    execution_count INTEGER NOT NULL DEFAULT 0,
+    last_executed_at TIMESTAMPTZ,
+    reserved_cash NUMERIC(19,4) NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ,
+    closed_at TIMESTAMPTZ,
+    CONSTRAINT uq_order_account UNIQUE (order_id, account_id),
+    CONSTRAINT ck_order_type CHECK (order_type IN ('MARKET','LIMIT')),
+    CONSTRAINT ck_order_filled_quantity CHECK (filled_quantity >= 0 AND filled_quantity <= quantity),
+    CONSTRAINT ck_order_execution_count CHECK (execution_count >= 0),
+    CONSTRAINT ck_order_reserve CHECK (reserved_cash >= 0
+        AND (side = 'BUY' OR reserved_cash = 0)),
+    CONSTRAINT ck_order_lifecycle CHECK (
+        (status = 'PENDING' AND filled_quantity = 0 AND closed_at IS NULL)
+        OR (status = 'PARTIALLY_FILLED' AND filled_quantity > 0 AND filled_quantity < quantity AND closed_at IS NULL)
+        OR (status = 'FILLED' AND filled_quantity = quantity AND reserved_cash = 0 AND closed_at IS NOT NULL)
+        OR (status IN ('CANCELED','EXPIRED','REJECTED') AND filled_quantity < quantity
+            AND reserved_cash = 0 AND closed_at IS NOT NULL)),
+    CONSTRAINT ck_order_closed_time CHECK (closed_at IS NULL OR (closed_at >= ordered_at
+        AND (last_executed_at IS NULL OR closed_at >= last_executed_at))),
+    CONSTRAINT ck_order_limit_terms CHECK (order_type <> 'LIMIT' OR (
+        limit_price IS NOT NULL AND limit_price > 0 AND expires_at IS NOT NULL AND expires_at > ordered_at
+        AND (side <> 'BUY' OR status NOT IN ('PENDING','PARTIALLY_FILLED') OR reserved_cash > 0))),
+    CONSTRAINT ck_order_market_terms CHECK (order_type <> 'MARKET' OR (
+        status IN ('FILLED','REJECTED') AND limit_price IS NULL AND reserved_cash = 0)),
     ordered_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
     CONSTRAINT uq_account_client_order UNIQUE (account_id, client_order_id)
 );
 CREATE INDEX ix_order_history ON trade_order (account_id, ordered_at DESC);
+CREATE INDEX ix_order_active ON trade_order (account_id, stock_id, side, order_id)
+    WHERE status IN ('PENDING','PARTIALLY_FILLED');
+CREATE INDEX ix_order_expiry ON trade_order (expires_at, order_id)
+    WHERE status IN ('PENDING','PARTIALLY_FILLED');
+
+CREATE TABLE trade_execution (
+    execution_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    order_id BIGINT NOT NULL REFERENCES trade_order(order_id),
+    execution_key UUID NOT NULL,
+    sequence_no INTEGER NOT NULL CHECK (sequence_no > 0),
+    quantity NUMERIC(19,6) NOT NULL CHECK (quantity > 0),
+    price NUMERIC(19,4) NOT NULL CHECK (price > 0),
+    exchange_rate NUMERIC(19,6) NOT NULL CHECK (exchange_rate > 0),
+    sec_fee_usd NUMERIC NOT NULL CHECK (sec_fee_usd >= 0 AND sec_fee_usd = round(sec_fee_usd, 2)),
+    gross_amount_krw NUMERIC(19,4) NOT NULL CHECK (gross_amount_krw >= 0 AND gross_amount_krw = round(gross_amount_krw)),
+    fee_krw NUMERIC(19,4) NOT NULL CHECK (fee_krw >= 0 AND fee_krw = round(fee_krw)),
+    tax_krw NUMERIC(19,4) NOT NULL CHECK (tax_krw >= 0 AND tax_krw = round(tax_krw)),
+    net_amount_krw NUMERIC(19,4) NOT NULL CHECK (net_amount_krw >= 0 AND net_amount_krw = round(net_amount_krw)),
+    quote_at TIMESTAMPTZ NOT NULL,
+    executed_at TIMESTAMPTZ NOT NULL,
+    book_level_id BIGINT CHECK (book_level_id > 0),
+    CONSTRAINT uq_execution_key UNIQUE (order_id, execution_key),
+    CONSTRAINT uq_execution_sequence UNIQUE (order_id, sequence_no),
+    CONSTRAINT uq_execution_order UNIQUE (execution_id, order_id),
+    -- 금액 등식은 DB에서도 확인하며, 매수/매도 방향과의 일치는 주문을 전달받는 엔티티에서 검증한다.
+    CONSTRAINT ck_execution_amount CHECK (
+        (net_amount_krw = gross_amount_krw + fee_krw AND tax_krw = 0 AND sec_fee_usd = 0)
+        OR net_amount_krw = gross_amount_krw - fee_krw - tax_krw),
+    CONSTRAINT ck_execution_quote_time CHECK (quote_at <= executed_at)
+);
+COMMENT ON TABLE trade_execution IS '개별 확정 체결. 반올림 전 거래대금은 저장된 단가·수량·환율로 복원; 기존 MARKET은 이력이 없을 수 있음';
+COMMENT ON COLUMN trade_execution.book_level_id IS '소비한 공유 호가 레벨 고유 ID. 레벨의 가격·버전은 불변이고 체결 가격은 price에 별도 보존; MARKET은 NULL';
 
 COMMENT ON COLUMN trade_order.quote_at IS '체결 또는 거절 판정에 사용한 시세의 기준 시각';
 COMMENT ON COLUMN trade_order.reference_price IS 'REJECTED 판정 당시 사용한 종목 통화 기준 가격';
 COMMENT ON COLUMN trade_order.exchange_rate IS '나중에 환차손익을 분리하려면 반드시 필요';
-COMMENT ON COLUMN trade_order.tax IS '적용된 세금 "금액". 요율은 DB 가 아니라 .env 에 있다 (K_TAX_RATE / A_TAX_RATE)';
+COMMENT ON COLUMN trade_order.tax IS '확정 세금 금액. 프로젝트 고정 환경 설정 요율로 계산하며 LIMIT은 개별 체결 차액을 누적';
 COMMENT ON COLUMN trade_order.fee IS '적용된 수수료 "금액". 요율은 .env 의 FEE_RATE';
 
 
@@ -736,7 +788,7 @@ COMMENT ON COLUMN trade_order.fee IS '적용된 수수료 "금액". 요율은 .e
 --    수수료와 세금은 별도 항목으로 쪼개지 않고 BUY / SELL 의 amount 에 포함한다.
 --      매수  amount = -(gross_amount + fee)
 --      매도  amount = +(gross_amount - fee - tax)
---    즉 amount 는 언제나 trade_order.net_amount 와 같다 (부호만 다름).
+--    신규 정상 원장은 trade_execution.net_amount_krw 와 같다 (부호만 다름).
 --    수수료 총액을 따로 집계할 일이 없다면 이쪽이 훨씬 단순하고, 목록도 절반으로 줄어든다.
 --    나중에 수수료 통계가 필요해지면 trade_order.fee 를 SUM 하면 되므로 정보가 사라지지도 않는다.
 --
@@ -752,6 +804,7 @@ CREATE TABLE ledger_entry (
     entry_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     account_id    BIGINT        NOT NULL REFERENCES account(account_id),
     order_id      BIGINT        REFERENCES trade_order(order_id),  -- 초기금 지급은 NULL
+    execution_id  BIGINT,                    -- 신규 개별 체결 연결, 기존 기록/초기 지급은 NULL
     entry_type    VARCHAR(20)   NOT NULL
                   CHECK (entry_type IN ('INITIAL_DEPOSIT','BUY','SELL')),
     amount        NUMERIC(19,4) NOT NULL,   -- 예수금 증감 (부호 있음, = net_amount)
@@ -760,7 +813,7 @@ CREATE TABLE ledger_entry (
     -- 체결 시점 환율. 원화 종목은 1, 미국 종목은 그때의 USD/KRW.
     --   amount 는 이미 원화로 환산된 값이므로 계산에는 쓰이지 않는다.
     --   "이 거래를 얼마짜리 환율로 했는가"를 원장만 보고 알 수 있게 하는 감사 항목이다.
-    --   trade_order.exchange_rate 와 같은 값이지만, 원장은 append-only 라
+    --   trade_execution.exchange_rate 와 같은 값이며, 원장은 append-only 라
     --   주문 테이블이 나중에 어떻게 바뀌든 이 기록은 그대로 남는다.
     --   1주차에는 화면에 안 써도 좋다. 지금 안 남기면 과거 값은 복원할 수 없다.
     exchange_rate NUMERIC(19,6) NOT NULL DEFAULT 1,
@@ -768,13 +821,22 @@ CREATE TABLE ledger_entry (
     memo          VARCHAR(200),             -- "삼성전자 10주 @ 241,500 (수수료 포함)"
     occurred_at   TIMESTAMPTZ   NOT NULL DEFAULT now(),
 
-    CONSTRAINT ck_ledger_rate_positive CHECK (exchange_rate > 0)
+    CONSTRAINT ck_ledger_rate_positive CHECK (exchange_rate > 0),
+    CONSTRAINT fk_ledger_order_account FOREIGN KEY (order_id, account_id)
+        REFERENCES trade_order (order_id, account_id),
+    CONSTRAINT fk_ledger_execution_order FOREIGN KEY (execution_id, order_id)
+        REFERENCES trade_execution (execution_id, order_id),
+    CONSTRAINT ck_ledger_execution_order
+        CHECK (execution_id IS NULL OR (order_id IS NOT NULL AND entry_type IN ('BUY','SELL')))
 );
 CREATE INDEX ix_ledger_account ON ledger_entry (account_id, occurred_at);
 CREATE INDEX ix_ledger_order ON ledger_entry (order_id, entry_id) WHERE order_id IS NOT NULL;
 
+-- 정상 체결 원장은 1회만 기록. 상쇄 정정은 execution_id NULL + order_id로 원인을 남긴다.
+CREATE UNIQUE INDEX uq_ledger_execution ON ledger_entry (execution_id) WHERE execution_id IS NOT NULL;
+
 COMMENT ON TABLE ledger_entry IS 'UPDATE/DELETE 금지. 잘못 기록했으면 반대 부호 항목을 새로 넣어 상쇄한다';
-COMMENT ON COLUMN ledger_entry.amount IS '수수료·세금 포함. trade_order.net_amount 와 절대값이 같다';
+COMMENT ON COLUMN ledger_entry.amount IS '수수료·세금 포함. 신규 정상 원장은 trade_execution.net_amount_krw 와 절대값이 같다';
 COMMENT ON COLUMN ledger_entry.exchange_rate IS '체결 시점 환율. 원화 종목은 1';
 
 
@@ -908,12 +970,10 @@ COMMIT;
 --
 -- ── 지정가 도입 시 반드시 필요한 것 ─────────────────────────────────────────
 --   Phase 1 커밋 직후 장애가 나면 동결액이 영원히 안 풀린다.
---   타임아웃 기반 자동 해제 배치를 만들 것.
---     UPDATE trade_order SET status='EXPIRED'
---      WHERE status='PENDING' AND ordered_at < now() - INTERVAL '5 min';
---     → 해당 금액만큼 locked_cash 를 되돌린다.
---
---   검증식:  locked_cash = SUM(net_amount WHERE status='PENDING')
+--   저장된 정규 세션 종료 expires_at에 PENDING/PARTIALLY_FILLED 잔여분을 만료한다.
+--   계좌 잠금 아래 잔여 동결만 해제하며 체결분/원장은 되돌리지 않는다.
+--   locked_cash = 활성 BUY의 SUM(reserved_cash)
+--   locked_quantity = 활성 SELL의 SUM(quantity - filled_quantity), 계좌·종목별
 --
 --  포트폴리오 초기화
 --   UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id=?;

@@ -1,5 +1,9 @@
 package com.baedang.market.controller;
 
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.dto.ExchangeRateHistoryResponse;
@@ -9,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -22,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(ExchangeRateController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class ExchangeRateControllerTest {
 
     @Autowired
@@ -29,6 +35,9 @@ class ExchangeRateControllerTest {
 
     @MockitoBean
     private ExchangeRateService exchangeRateService;
+
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
 
     @Test
     @DisplayName("base/quote 생략 시 기본값(USD/KRW)으로 조회한다")

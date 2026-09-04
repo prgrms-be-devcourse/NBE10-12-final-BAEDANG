@@ -9,10 +9,11 @@ import { ChartExpandModal } from "./ChartExpandModal";
 import { TourGuide, type TourStep } from "./TourGuide";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
+import { useMarketStatus } from "./MarketStatusProvider";
 import { useTheme } from "./ThemeProvider";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
-import { calculateOrderAmount } from "@/lib/order-amount";
+import { calculateOrderAmount, maxAffordableQuantity } from "@/lib/order-amount";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
 import {
   ApiError,
@@ -28,6 +29,7 @@ import {
   type StockDetail,
 } from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
   MARKET_CLOSED: "장 마감 · 거래 시간이 아니에요",
@@ -102,9 +104,16 @@ function toCandleQuery(candleUnit: "일봉" | "1분봉", period: "1개월" | "6�
   return { interval: "1d", range };
 }
 
+// 1분봉은 백엔드가 top-100 종목을 1분마다 수집한다(docs/erd.md) — 그 주기에
+// 맞춰 1분마다 다시 조회한다. 일봉은 장 마감 직후 하루 한 번만 새로 생기므로
+// 세션 중에 계속 폴링해도 더 받을 데이터가 없다 — 그래서 일봉은 폴링하지
+// 않고, 세그먼트/기간이 바뀔 때만 다시 조회하는 기존 동작을 그대로 둔다.
+const MINUTE_CANDLE_POLL_INTERVAL_MS = 60 * 1000;
+
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
   const { rate: usdKrwRate, updatedAt: exchangeRateUpdatedAt } = useExchangeRate();
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -218,10 +227,61 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     };
   }, [detail.symbol, detail.marketCountry, candleUnit, period]);
 
+  // 1분봉을 보고 있을 때만 1분마다 조용히 다시 조회한다 — 로딩 스피너를 다시
+  // 띄우지 않고 데이터만 갈아끼운다. 실패하면 지금 보여주고 있는 캔들을 그대로
+  // 유지하고 다음 주기에 재시도한다. 일봉은 폴링하지 않는다(위 주석 참고).
+  // 이 종목의 시장이 장 마감 중이면 minute_candle 자체가 그 주기로 수집되지
+  // 않으므로(docs/erd.md), 장 시간대에만 폴링한다.
+  const candlePollInFlightRef = useRef(false);
+  useVisiblePolling(
+    () => {
+      if (candlePollInFlightRef.current) return;
+      candlePollInFlightRef.current = true;
+      const { interval, range } = toCandleQuery(candleUnit, period);
+      getCandles(detail.symbol, detail.marketCountry, interval, range)
+        .then((data) => setCandleItems(data.items))
+        .catch(() => {})
+        .finally(() => {
+          candlePollInFlightRef.current = false;
+        });
+    },
+    MINUTE_CANDLE_POLL_INTERVAL_MS,
+    candleUnit === "1분봉" && isMarketOpen(detail.marketCountry)
+  );
+
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
   const holding = holdings.find((h) => h.symbol === detail.symbol);
   const availableQuantity = holding ? Number(holding.quantity) : 0;
   const availableCash = account ? Number(account.cashBalance) : INITIAL_CASH;
+  // 매수 입력의 상한 — 주문가능금액(availableCash)으로 실제 살 수 있는 최대 수량.
+  // 매도는 보유 수량이 이미 자연스러운 상한이라(availableQuantity) 별도 계산이
+  // 필요 없다.
+  const buyMaxQuantity = maxAffordableQuantity({
+    price: detail.price.lastPrice ?? 0,
+    currency: detail.currency === "USD" ? "USD" : "KRW",
+    usdKrwRate,
+    availableCash,
+  });
+
+  // onChange의 상한 클램프만으론 입력값이 그대로인 채 상한이 바뀌는 경우를
+  // 놓친다 — 매도에서 매수로 탭을 바꾸거나(기본값 "10"이 새 상한보다 클 수
+  // 있음), 5초 시세 폴링으로 가격이 올라 buyMaxQuantity 자체가 줄어드는
+  // 경우다. 두 경우 다 입력을 직접 건드리지 않았는데도 "주문가능금액을
+  // 넘는 수량"이 화면에 그대로 남아, 캡션(최대 N주)과 실제 입력값이
+  // 어긋나 보이는 문제가 있었다.
+  //
+  // <p>클램프로 수량이 바뀌면 clientOrderId도 같이 비운다(코드 리뷰, PR #124,
+  // SOL4R1S님) — 이전 실패 시도의 clientOrderId를 들고 있는 상태에서 수량이
+  // 자동으로 바뀌면, 그 ID로 제출했을 때 "같은 ID인데 다른 내용"으로
+  // DUPLICATE_ORDER 거절을 받을 수 있다(아래 side 전환 핸들러와 같은 이유).
+  useEffect(() => {
+    if (side === "매수" && quantity > buyMaxQuantity) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuantityInput(String(buyMaxQuantity));
+      setClientOrderId(null);
+      setOrderError(null);
+    }
+  }, [side, quantity, buyMaxQuantity]);
 
   const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
@@ -526,9 +586,24 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
                 style={{ background: "var(--fill)", color: "var(--ink)" }}
                 inputMode="numeric"
+                // 자릿수 제한이 없으면 0을 여러 번 입력하는 등으로 아주 긴 숫자를
+                // 만들 수 있는데, 입력창은 뒷부분만 스크롤되어 보여서 사실상 앞자리가
+                // 잘려 보이지 않는다 — 그 상태로 계산되는 주문 금액이 수십 자리로
+                // 폭발해 화면이 깨지는 문제가 있었다(팀원 제보). 이 앱에서 나올 수
+                // 있는 가장 현실적인 최대 수량보다 훨씬 넉넉한 9자리(최대
+                // 999,999,999주)로 입력 자체를 막는다.
+                maxLength={9}
                 value={quantityInput}
                 onChange={(e) => {
-                  setQuantityInput(e.target.value.replace(/[^0-9]/g, ""));
+                  const digitsOnly = e.target.value.replace(/[^0-9]/g, "").slice(0, 9);
+                  // 매수는 입력 즉시 주문가능금액으로 살 수 있는 최대 수량을 넘지
+                  // 못하게 막는다 — "주문가능금액이 부족해요"로 제출을 막는 것만으론
+                  // 화면에 비현실적인 금액이 그대로 보이는 문제가 있었다.
+                  const capped =
+                    side === "매수" && Number(digitsOnly || 0) > buyMaxQuantity
+                      ? String(buyMaxQuantity)
+                      : digitsOnly;
+                  setQuantityInput(capped);
                   setClientOrderId(null);
                   setOrderError(null);
                 }}
@@ -538,6 +613,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           {side === "매도" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
               보유 {availableQuantity}주
+            </div>
+          )}
+          {side === "매수" && (
+            <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
+              최대 {formatNumber(buyMaxQuantity)}주까지 살 수 있어요
             </div>
           )}
 

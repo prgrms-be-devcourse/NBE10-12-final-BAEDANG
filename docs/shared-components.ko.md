@@ -171,6 +171,8 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 `calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
 설정된 수수료·세율을 쓰는 Spring 빈이므로 주입받아 사용합니다. 입력 유효성·거래 가능 여부는 주문 정책에서 검증합니다.
 
+요율·SEC 최소액은 주문별 스냅샷이 아닌 프로젝트 고정 `.env` 설정입니다. 활성 주문이 있는 동안 재시작·재배포에도 동일한 값을 유지합니다.
+
 - KR 주문은 환율을 계산에 사용하지 않으며 결과 환율은 1입니다.
 - US 주문은 단가를 센트 `HALF_UP` → 수량 곱하기 → 환율 적용 → 원 단위 `HALF_UP` 순서입니다.
 - 수수료는 원 단위로 확정한 거래대금에 수수료율을 곱한 뒤 원 단위 반올림합니다.
@@ -185,7 +187,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 | 소스 | 공개 기능 | 범위·주의점 |
 | --- | --- | --- |
-| [InitialDepositLedgerService](../back/src/main/java/com/baedang/trading/service/InitialDepositLedgerService.java) | `recordInitialDeposit(accountId, initialCash, roundNo, occurredAt)` | 가입·초기화 직후 초기 지급 원장을 한 번 저장. MANDATORY로 기존 트랜잭션에 참여하며 예수금을 다시 증가시키지 않음. 양수 ID·금액, 1 이상 회차와 계좌 개설 시각을 전달; 중복 요청 처리는 호출부 책임. 과거 원장 보정용이 아님 |
+| [LedgerService](../back/src/main/java/com/baedang/trading/service/LedgerService.java) | `recordInitialDeposit(accountId, initialCash, roundNo, occurredAt)`, `recordBuy/recordSell(order, savedExecution, balanceAfter, stock)` | MANDATORY. 초기 지급/체결 원장의 메모·부호·INSERT만 담당. 잔액 변경/정산은 호출부 책임. 소유 주문·저장된 체결·체결 직후 잔액을 전달합니다. 계좌·종목·방향은 주문에서 얻고 체결의 주문 연결을 검증하며, executionId 중복 정상 원장은 DB에서 거절하여 전체 트랜잭션 롤백. |
 | [HoldingValuator](../back/src/main/java/com/baedang/account/service/HoldingValuator.java) | `valuate(holdings, quoteByStockId, usdKrwRate)` | 계좌·보유 목록의 원화 평가. 종목별 반올림 후 합산하는 기존 정책을 재사용 |
 | [LedgerCursor](../back/src/main/java/com/baedang/account/support/LedgerCursor.java) | 정적 `encode(entryId)`, `decode(cursor)` | 원장 전용 Base64URL 커서. 디코딩 오류는 `INVALID_CURSOR`. 랭킹 커서와 형식이 다름 |
 | [StockCategory](../back/src/main/java/com/baedang/stock/entity/StockCategory.java) | 정적 `from(securityType, isCommonShare)` | ETF / ETN 우선, 보통주 여부가 false면 PREFERRED, 나머지 INDIVIDUAL |
@@ -198,6 +200,10 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 캘린더가 필요한 로직은 기존 [MarketCalendarPort](../back/src/main/java/com/baedang/market/port/MarketCalendarPort.java)와 [MarketSessionProvider](../back/src/main/java/com/baedang/market/port/MarketSessionProvider.java)를 주입받아 사용하세요. 외부 호출이나 캐시를 별도로 복제하지 않습니다.
 
 스트라이프 락은 아직 공용 헬퍼가 아닙니다. `CandleQueryService`와 `StockOnDemandQuoteService`의 별도 락 구현은 유지하며, 하나의 전역 락으로 공유하지 않습니다.
+
+### DecimalScaleValidator — 거래 입력 소수 자릿수 검증
+
+`com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale(value, scale)`을 정적으로 호출합니다. null은 false, 후행 0을 제외하고 허용 소수 자릿수로 손실 없이 표현 가능하면 true입니다. 원본 값·스케일을 변경하지 않으며 전체 NUMERIC precision, 양수 여부, 통화별 정산 계산은 검증하지 않습니다. 주문·체결·정산 입력의 기존 조건문에 결합하고, 예외 선택은 호출부에서 담당합니다.
 
 ## 8. 프론트 공용 모듈
 
