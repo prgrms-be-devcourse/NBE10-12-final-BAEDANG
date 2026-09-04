@@ -26,8 +26,7 @@ const NOTICE_SERVER_OVERLOAD_STANDALONE = `Google AI 서버의 일시적인 과�
 const NOTICE_EMPTY_STANDALONE          = `Gemini API로부터 유효한 코드 리뷰 응답을 수신하지 못했습니다.`;
 
 const MAX_DIFF_LEN = 60_000;
-const REQUEST_TIMEOUT_MS = 120_000;
-const MAX_RETRIES = 3;
+const REQUEST_TIMEOUT_MS = 30_000;
 const DIFF_PATHS = [
   '.',
   // Package lockfiles
@@ -218,7 +217,16 @@ const requestData = JSON.stringify({
   generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
 });
 
-const MODELS = ['gemini-3.6-flash', 'gemini-3.5-flash'];
+const MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
+
+function getModelDisplayName(model) {
+  switch (model) {
+    case 'gemini-3.7-flash': return 'Gemini 3.7 Flash';
+    case 'gemini-3.6-flash': return 'Gemini 3.6 Flash';
+    case 'gemini-3.5-flash': return 'Gemini 3.5 Flash';
+    default: return model;
+  }
+}
 
 function sendGeminiRequest(model) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
@@ -262,81 +270,68 @@ function sleep(ms) {
 
 async function run() {
   let lastError = null;
+  let allQuotaExceeded = true;
 
   for (const model of MODELS) {
-    console.log(`\n[INFO] Attempting code review with model: ${model}`);
+    console.log(`\n[INFO] Attempting code review with model: ${model} (1 attempt)`);
 
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        console.log(`Calling ${model} (Attempt ${attempt}/${MAX_RETRIES})...`);
-        const { statusCode, body } = await sendGeminiRequest(model);
+    try {
+      const { statusCode, body } = await sendGeminiRequest(model);
 
-        // 1. Success (2xx)
-        if (statusCode >= 200 && statusCode < 300) {
-          const json = JSON.parse(body);
-          const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (!reviewText || !reviewText.trim()) {
-            handleGracefulNotice('Empty review text returned', NOTICE_EMPTY_APPEND, NOTICE_EMPTY_STANDALONE);
-            return;
-          }
-
-          const modelDisplayName = model === 'gemini-3.6-flash' ? 'Gemini 3.6 Flash' : 'Gemini 3.5 Flash';
-          const commentBody =
-            `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n` +
-            `*이 리뷰는 GitHub Actions와 ${modelDisplayName}에 의해 자동으로 생성·갱신되었습니다.*`;
-
-          upsertComment(commentBody);
-          return;
+      // 1. Success (2xx)
+      if (statusCode >= 200 && statusCode < 300) {
+        const json = JSON.parse(body);
+        const reviewText = json.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!reviewText || !reviewText.trim()) {
+          console.warn(`[WARN] ${model} returned empty review text. Falling back to next model.`);
+          allQuotaExceeded = false;
+          continue;
         }
 
-        // 2. Quota exceeded (429) -> Graceful skip with quota notice
-        if (statusCode === 429) {
-          handleGracefulNotice('Gemini API quota exceeded (429)', NOTICE_QUOTA_APPEND, NOTICE_QUOTA_STANDALONE);
-          return;
-        }
+        const modelDisplayName = getModelDisplayName(model);
+        const commentBody =
+          `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n` +
+          `*이 리뷰는 GitHub Actions와 ${modelDisplayName}에 의해 자동으로 생성·갱신되었습니다.*`;
 
-        // 3. Transient server error (500, 502, 503, 504) -> Retry or fallback to next model
-        if (statusCode >= 500) {
-          console.warn(`[WARN] ${model} returned server error ${statusCode}: ${body}`);
-          if (attempt < MAX_RETRIES) {
-            const waitMs = attempt * 3000;
-            console.log(`Waiting ${waitMs / 1000}s before retry on ${model}...`);
-            await sleep(waitMs);
-            continue;
-          } else {
-            console.warn(`[WARN] Retries exhausted for ${model}. Falling back to next model.`);
-            break; // Try next model in MODELS
-          }
-        }
-
-        // 4. Model not found (404) -> Fallback to next model
-        if (statusCode === 404) {
-          console.warn(`[WARN] Model ${model} returned 404 Not Found. Falling back to next model.`);
-          break; // Try next model in MODELS
-        }
-
-        // 5. Other client errors (400, 401, 403) -> Fail CI to surface misconfiguration
-        console.error(`[ERROR] Gemini API returned status ${statusCode}: ${body}`);
-        process.exit(1);
-
-      } catch (err) {
-        console.warn(`[WARN] Network error on ${model} (Attempt ${attempt}): ${err.message}`);
-        lastError = err;
-        if (attempt < MAX_RETRIES) {
-          const waitMs = attempt * 3000;
-          console.log(`Waiting ${waitMs / 1000}s before retry on ${model}...`);
-          await sleep(waitMs);
-        }
+        upsertComment(commentBody);
+        return;
       }
+
+      // 2. Quota exceeded (429) -> Fallback to next model (different models have separate quotas)
+      if (statusCode === 429) {
+        console.warn(`[WARN] ${model} quota exceeded (429). Falling back to next model.`);
+        continue;
+      }
+
+      allQuotaExceeded = false;
+
+      // 3. Transient server error (5xx) or model not found (404) -> Fallback to next model
+      if (statusCode >= 500 || statusCode === 404) {
+        console.warn(`[WARN] ${model} returned status ${statusCode}: ${body}. Falling back to next model.`);
+        continue;
+      }
+
+      // 4. Other client errors (400, 401, 403) -> Fail CI to surface misconfiguration
+      console.error(`[ERROR] Gemini API returned fatal status ${statusCode}: ${body}`);
+      process.exit(1);
+
+    } catch (err) {
+      allQuotaExceeded = false;
+      console.warn(`[WARN] Network/timeout error on ${model}: ${err.message}. Falling back to next model.`);
+      lastError = err;
     }
   }
 
-  // If all models and retries exhausted -> Graceful skip with server overload notice
-  handleGracefulNotice(
-    `All models exhausted (${lastError?.message || 'Server Overload'})`,
-    NOTICE_SERVER_OVERLOAD_APPEND,
-    NOTICE_SERVER_OVERLOAD_STANDALONE
-  );
+  // If all models exhausted:
+  if (allQuotaExceeded) {
+    handleGracefulNotice('All Gemini models quota exceeded (429)', NOTICE_QUOTA_APPEND, NOTICE_QUOTA_STANDALONE);
+  } else {
+    handleGracefulNotice(
+      `All models exhausted (${lastError?.message || 'Server Overload'})`,
+      NOTICE_SERVER_OVERLOAD_APPEND,
+      NOTICE_SERVER_OVERLOAD_STANDALONE
+    );
+  }
 }
 
 run();
