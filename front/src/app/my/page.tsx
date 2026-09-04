@@ -54,7 +54,7 @@ export default function MyPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError(false);
-    Promise.all([getAccountSummary(user.userId), getHoldings(user.userId), getLedger(user.userId)])
+    Promise.all([getAccountSummary(), getHoldings(), getLedger()])
       .then(([acc, holdingsRes, ledgerRes]) => {
         if (cancelled) return;
         setAccount(acc);
@@ -86,7 +86,7 @@ export default function MyPage() {
     () => {
       if (!user || valuationPollInFlightRef.current) return;
       valuationPollInFlightRef.current = true;
-      Promise.all([getAccountSummary(user.userId), getHoldings(user.userId)])
+      Promise.all([getAccountSummary(), getHoldings()])
         .then(([acc, holdingsRes]) => {
           setAccount(acc);
           setHoldings(holdingsRes.items);
@@ -105,11 +105,11 @@ export default function MyPage() {
     setResetting(true);
     setResetError(null);
     try {
-      await resetAccount(user.userId, account.accountId);
+      await resetAccount(account.accountId);
       const [freshAccount, freshHoldings, freshLedger] = await Promise.all([
-        getAccountSummary(user.userId),
-        getHoldings(user.userId),
-        getLedger(user.userId),
+        getAccountSummary(),
+        getHoldings(),
+        getLedger(),
       ]);
       setAccount(freshAccount);
       setHoldings(freshHoldings.items);
