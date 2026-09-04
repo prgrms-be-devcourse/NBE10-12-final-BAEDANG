@@ -67,10 +67,8 @@ class OrderBookGeneratorTest {
 
         assertThat(asks).extracting(GeneratedOrderBookLevel::levelDepth).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
         assertThat(bids).extracting(GeneratedOrderBookLevel::levelDepth).containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-        assertThat(asks).isSortedAccordingTo(
-                (a, b) -> a.price().compareTo(b.price()));
-        assertThat(bids).isSortedAccordingTo(
-                (a, b) -> b.price().compareTo(a.price()));
+        assertThat(asks).isSortedAccordingTo((a, b) -> a.price().compareTo(b.price()));
+        assertThat(bids).isSortedAccordingTo((a, b) -> b.price().compareTo(a.price()));
         assertThat(bids.get(9).price()).isLessThan(asks.get(0).price());
         assertThat(asks.get(0).price()).isGreaterThan(book.basePrice());
         assertThat(bids.get(0).price()).isLessThan(book.basePrice());
@@ -101,16 +99,6 @@ class OrderBookGeneratorTest {
     }
 
     @Test
-    void 깊이_이전에_상단_유동성이_크다() {
-        // 노이즈(0.8~1.2)보다 깊이 배수(1.00→0.40)가 우세하므로 ASK 1 수량이
-        // ASK 10보다 반드시 커야 한다는 보장(설계서 §4 "고정 벽 모양 회피")을 확인한다.
-        GeneratedOrderBook book = generateWithSeed(123L);
-
-        assertThat(book.bestAsk().quantity())
-                .isGreaterThan(book.levelsBySide(OrderBookSide.ASK).get(9).quantity());
-    }
-
-    @Test
     void 가격_구간을_넘어_가도_새_구간_단위를_적용한다() {
         GeneratedOrderBook book = generator.generate(
                 v1(), krIndividual(), new BigDecimal("1995"),
@@ -125,6 +113,17 @@ class OrderBookGeneratorTest {
         assertThat(askPrices).containsExactly(
                 "1996", "1997", "1998", "1999", "2000",
                 "2005", "2010", "2015", "2020", "2025");
+    }
+
+    @Test
+    void 깊이_이전에_상단_유동성이_크다() {
+        // 라운드 부스트(최대 1.60)와 노이즈(최대 1.2)를 합쳐도(1.92) 깊이 배수비
+        // 1.00/0.40=2.5가 이기므로, ASK 1 수량은 최악·최선 조합에서도 ASK 10보다 크다
+        // (설계서 §4 "상단 유동성을 크게"가 부스트 도입 후에도 유지됨을 고정).
+        GeneratedOrderBook book = generateWithSeed(123L);
+
+        assertThat(book.bestAsk().quantity())
+                .isGreaterThan(book.levelsBySide(OrderBookSide.ASK).get(9).quantity());
     }
 
     @Test
@@ -149,8 +148,50 @@ class OrderBookGeneratorTest {
         assertThat(book.currency()).isEqualTo("USD");
         assertThat(book.bestAsk().price()).isEqualByComparingTo("100.01");
         assertThat(book.bestBid().price()).isEqualByComparingTo("99.99");
-        // baseNotional 15,000 / 100.01 ≈ 150주 × 깊이 배수 × 노이즈(0.8~1.2)
+        // baseNotional 15,000 / 100.01 ≈ 150주 × 깊이 1.00 × 노이즈(0.8~1.2) —
+        // ASK 1 = 100.01은 10001 steps(tick 0.01)로 어떤 10 배수에도 안 걸려 부스트 없음.
+        // 최우선 매수 BID 1 = 99.99(9999 steps)도 부스트 없음.
         assertThat(book.bestAsk().quantity()).isBetween(new BigDecimal("120"), new BigDecimal("180"));
+    }
+
+    @Test
+    void 라운드_가격은_인접_호가보다_두껍다() {
+        // 기준가 69,900 → ASK 1 = 70,000(tick 100원, 700 steps = ×100 → 1.60 부스트),
+        // ASK 2 = 70,100(701 steps → 부스트 없음). 깊이 배수 1.00/0.96을 합쳐도
+        // 노이즈 최악 경계에서 역전하지 않는다: 286×0.8×1.6=366 > 285×0.96×1.2=328.
+        GeneratedOrderBook book = generator.generate(
+                v1(), krIndividual(), new BigDecimal("69900"),
+                Instant.parse("2026-09-03T01:00:00Z"),
+                Instant.parse("2026-09-03T01:00:03Z"), 42L
+        );
+
+        List<GeneratedOrderBookLevel> asks = book.levelsBySide(OrderBookSide.ASK);
+        assertThat(asks.get(0).price()).isEqualByComparingTo("70000");
+        assertThat(asks.get(1).price()).isEqualByComparingTo("70100");
+        assertThat(asks.get(0).quantity()).isGreaterThan(asks.get(1).quantity());
+    }
+
+    @Test
+    void 라운드넘버_부스트는_tick_상대_배수로_판정한다() {
+        // 70,000원 종목(tick 100): 700 steps = ×100 → 1.60
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("70000"), new BigDecimal("100")))
+                .isEqualByComparingTo("1.60");
+        // 35,000 → 350 steps: ×50 → 1.40
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("35000"), new BigDecimal("100")))
+                .isEqualByComparingTo("1.40");
+        // 71,200 → 712 steps: 어느 배수에도 안 걸림 → 1.00
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("71200"), new BigDecimal("100")))
+                .isEqualByComparingTo("1");
+        // 700원 종목(tick 1): 100원 경계 = 100 steps → 1.60 — 절대원화 표가 아님을 확인
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("700"), BigDecimal.ONE))
+                .isEqualByComparingTo("1.60");
+        // 미국 $1.00(tick 0.01): 100 steps = $1 → 1.60 / 50 steps = $0.50 → 1.40 / 10 steps = $0.10 → 1.15
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("1.00"), new BigDecimal("0.01")))
+                .isEqualByComparingTo("1.60");
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("0.50"), new BigDecimal("0.01")))
+                .isEqualByComparingTo("1.40");
+        assertThat(OrderBookGenerator.roundNumberBoost(new BigDecimal("2.10"), new BigDecimal("0.01")))
+                .isEqualByComparingTo("1.15");
     }
 
     @Test
