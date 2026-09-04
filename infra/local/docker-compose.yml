@@ -31,6 +31,17 @@ services:
     #   daily_candle 이 일반 테이블로 남을 뿐 나머지는 전부 그대로 동작합니다.
     # image: postgres:18-alpine
     container_name: trading-db
+    # pg_stat_statements 로 부하 테스트 중 상위 쿼리·DB time 을 수집한다(이슈 #70).
+    #   shared_preload_libraries 는 재시작이 필요하고, -c 로 넘기면 conf 값을 통째로
+    #   덮으므로 timescaledb 를 반드시 함께 명시한다(빠지면 하이퍼테이블이 깨진다).
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=timescaledb,pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
+      - "pg_stat_statements.max=10000"
     ports:
       - "5432:5432"
     environment:

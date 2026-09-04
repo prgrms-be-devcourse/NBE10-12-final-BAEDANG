@@ -951,12 +951,14 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 
 ## Week 2+
 
+LIMIT uses option B (buy at asks <= limit, sell at bids >= limit) and expires at the accepted regular-session close. All users consume liquidity from the same synthetic market, but user orders are never directly matched against each other. Liquidity consumed by one user reduces the shared remainder available to others.
+
 | Endpoint | Content |
 |---|---|
 | `POST /orders` | limit orders (`limitPrice`, `PENDING` status) |
 | `POST /orders` (fractional) | open US fractional orders. Add `allowsFractional` to the detail response; change the input unit for US stocks only |
 | `GET /accounts/me/orders` | order-history tab — includes rejected orders (they don't land in the ledger) |
-| `DELETE /orders/{id}` | order cancel |
+| `PATCH /orders/{orderId}` | Planned: only `{ "status": "CANCELED" }`, cancel active unfilled remainder; retain completed fills and ledger |
 | `GET /accounts/me/assets/history` | asset trend chart (daily snapshots) |
 | `GET /accounts/me/report` | investment-habit diagnosis |
 | `GET /stocks/{symbol}/orderbook` | order book |

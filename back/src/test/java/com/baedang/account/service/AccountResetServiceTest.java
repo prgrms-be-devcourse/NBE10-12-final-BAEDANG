@@ -6,7 +6,7 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
-import com.baedang.trading.service.InitialDepositLedgerService;
+import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -51,7 +51,7 @@ class AccountResetServiceTest {
         service = new AccountResetService(
                 accountRepository,
                 holdingRepository,
-                new InitialDepositLedgerService(ledgerEntryRepository),
+                new LedgerService(ledgerEntryRepository),
                 INITIAL_CASH,
                 Clock.fixed(RESET_INSTANT, ZoneOffset.UTC));
     }

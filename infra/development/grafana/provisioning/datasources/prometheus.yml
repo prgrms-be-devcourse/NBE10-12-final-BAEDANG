@@ -1,0 +1,13 @@
+# Grafana 데이터소스 provisioning (이슈 #70)
+#   Prometheus 는 포트를 호스트로 노출하지 않으므로 network `common` 안에서
+#   컨테이너명(trading-prometheus:9090)으로 접근한다.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: loadtest-prometheus
+    type: prometheus
+    access: proxy
+    url: http://trading-prometheus:9090
+    isDefault: true
+    editable: false
