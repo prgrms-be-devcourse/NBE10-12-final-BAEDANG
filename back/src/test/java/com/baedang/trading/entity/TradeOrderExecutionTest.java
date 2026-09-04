@@ -69,6 +69,35 @@ class TradeOrderExecutionTest {
         assertThat(execution.getSecFeeUsd()).isZero();
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "88.335, 883.35, false",
+            "88.3300, 883.30, true",
+            "88.34, 883.40, true",
+            "88.34, 883.35, false"
+    })
+    void 미국_지정가_체결단가는_센트단위이며_거래대금과_정확히_일치해야_한다(
+            BigDecimal price, BigDecimal grossUsd, boolean valid) {
+        BigDecimal quantity = new BigDecimal("10");
+        TradeOrder order = TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.BUY,
+                quantity, new BigDecimal("100"), new BigDecimal("1000"), AT, AT.plusHours(6));
+        ReflectionTestUtils.setField(order, "orderId", 3L);
+        BigDecimal grossKrw = grossUsd.setScale(0, java.math.RoundingMode.HALF_UP);
+        var amounts = new ExecutionAmounts(grossUsd, price.multiply(quantity), BigDecimal.ZERO,
+                grossKrw, BigDecimal.ZERO, BigDecimal.ZERO, grossKrw);
+
+        if (valid) {
+            TradeExecution execution = TradeExecution.limit(order, MarketCountry.US, UUID.randomUUID(), 1,
+                    quantity, price, RATE, amounts, AT, AT.plusSeconds(1), 1L);
+            assertThat(execution.getPrice()).isEqualTo(price);
+            assertThat(execution.grossAmountUsd(MarketCountry.US)).isEqualByComparingTo(grossUsd);
+        } else {
+            assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.US, UUID.randomUUID(), 1,
+                    quantity, price, RATE, amounts, AT, AT.plusSeconds(1), 1L))
+                    .isExactlyInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     @Test
     void 지정가_체결의_시장과_정산금액은_필수다() {
         TradeOrder order = order(OrderSide.BUY);

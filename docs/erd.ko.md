@@ -273,7 +273,7 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 
 한 체결은 한 호가 레벨만 소비합니다. 같은 `book_level_id`를 여러 체결이 소비할 수 있으므로 UNIQUE가 아니며, 공유 잔량 차감은 체결과 같은 트랜잭션에서 보호합니다. 호가 레벨의 가격·버전 식별은 불변이고 ID는 재사용하지 않습니다. 체결의 `price`는 실제 체결 단가 스냅샷입니다. 현재 호가 테이블은 없으므로 `book_level_id`에 FK는 없으며, 호가 저장소 연결 시 FK와 참조된 레벨 보존 정책을 함께 적용합니다.
 
-지정가 체결 생성 시 `TradeExecution.limit(order, marketCountry, ...)`에 주문 종목의 시장을 전달합니다. KR은 환율 1·USD 거래대금 0·SEC 비용 0, US는 USD 거래대금이 `price × quantity`인지 검증합니다. 시장은 검증 입력으로만 사용하며 체결 테이블에 중복 저장하지 않습니다.
+지정가 체결 생성 시 `TradeExecution.limit(order, marketCountry, ...)`에 주문 종목의 시장을 전달합니다. KR은 환율 1·USD 거래대금 0·SEC 비용 0, US는 체결단가가 센트 단위로 표현 가능하고 USD 거래대금이 `price × quantity`인지 검증합니다. 후행 0은 허용하며 엔티티에서 단가를 반올림하지 않습니다. 시장은 검증 입력으로만 사용하며 체결 테이블에 중복 저장하지 않습니다.
 
 #### `ledger_entry` — 거래 원장
 `(execution_id, order_id)` → 체결, `(order_id, account_id)` → 주문의 두 복합 FK로 원장·체결·계좌 연결을 보장합니다.

@@ -85,7 +85,8 @@ public class TradeExecution {
         boolean matchesMarket = switch (marketCountry) {
             case KR -> rate.rate().compareTo(BigDecimal.ONE) == 0
                     && amounts.grossAmountUsd().signum() == 0 && amounts.secFeeUsd().signum() == 0;
-            case US -> amounts.grossAmountUsd().compareTo(price.multiply(quantity)) == 0;
+            case US -> isRepresentableAtScale(price, 2)
+                    && amounts.grossAmountUsd().compareTo(price.multiply(quantity)) == 0;
         };
         if (!matchesMarket) {
             throw new IllegalArgumentException("종목 시장과 체결 환율·USD 거래대금·SEC 비용이 일치하지 않습니다");

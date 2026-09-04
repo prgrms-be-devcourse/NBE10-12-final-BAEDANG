@@ -276,7 +276,7 @@ LIMIT cumulative settlement is unchanged. Reconstruct US raw cumulative tax as `
 
 Each execution consumes exactly one book level. Multiple executions may consume the same `book_level_id`, so it is not unique; protect shared liquidity debits within the execution transaction. A level's price/version identity is immutable and IDs must not be reused. Execution `price` is the actual fill-price snapshot. There is currently no book table or FK on `book_level_id`; integrating book storage must include both its FK and retention of referenced levels.
 
-When creating a LIMIT fill, pass the order stock's market to `TradeExecution.limit(order, marketCountry, ...)`. KR requires FX 1, USD gross 0 and SEC fee 0; US requires USD gross to equal `price × quantity`. The market is a validation input only, not another execution column.
+When creating a LIMIT fill, pass the order stock's market to `TradeExecution.limit(order, marketCountry, ...)`. KR requires FX 1, USD gross 0 and SEC fee 0; US requires a cent-representable execution price and USD gross equal to `price × quantity`. Trailing zeros are allowed; the entity does not round the price. The market is a validation input only, not another execution column.
 
 #### `ledger_entry` — ledger
 Two composite FKs, `(execution_id, order_id)` to the execution and `(order_id, account_id)` to the order, enforce ledger/execution/account ownership.
