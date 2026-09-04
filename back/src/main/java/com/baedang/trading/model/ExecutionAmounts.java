@@ -3,19 +3,22 @@ package com.baedang.trading.model;
 import com.baedang.trading.entity.OrderSide;
 import java.math.BigDecimal;
 
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
+
 /** 한 체결의 정산 차액과 원본 금액. 누적 차액 산출은 정산 계산기가 담당합니다. */
 public record ExecutionAmounts(BigDecimal grossAmountUsd, BigDecimal unroundedGrossAmountKrw,
                                BigDecimal secFeeUsd,
                                BigDecimal grossAmountKrw, BigDecimal feeKrw, BigDecimal taxKrw, BigDecimal netAmountKrw) {
     public ExecutionAmounts {
-        for (BigDecimal value : new BigDecimal[]{grossAmountUsd, unroundedGrossAmountKrw, secFeeUsd,
-                grossAmountKrw, feeKrw, taxKrw, netAmountKrw}) {
-            if (value == null || value.signum() < 0) throw new IllegalArgumentException("체결 금액은 음수일 수 없습니다");
+        BigDecimal[] values = {grossAmountUsd, unroundedGrossAmountKrw, secFeeUsd,
+                grossAmountKrw, feeKrw, taxKrw, netAmountKrw};
+        // 앞의 두 원본 거래대금은 반올림하지 않으며, SEC는 센트·확정 원화 금액은 원 단위입니다.
+        for (int i = 0; i < values.length; i++) {
+            BigDecimal value = values[i];
+            if (value == null || value.signum() < 0 || (i >= 2 && !isRepresentableAtScale(value, i == 2 ? 2 : 0))) {
+                throw new IllegalArgumentException("체결 금액의 값 또는 소수 자릿수가 올바르지 않습니다");
+            }
         }
-        for (BigDecimal money : new BigDecimal[]{grossAmountKrw, feeKrw, taxKrw, netAmountKrw}) {
-            money.setScale(0, java.math.RoundingMode.UNNECESSARY);
-        }
-        secFeeUsd.setScale(2, java.math.RoundingMode.UNNECESSARY);
     }
 
     public void validateSide(OrderSide side) {

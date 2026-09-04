@@ -201,6 +201,10 @@ For calendar-dependent logic, inject the existing [MarketCalendarPort](../back/s
 
 Striped locks are not yet a shared helper. Keep the separate implementations in `CandleQueryService` and `StockOnDemandQuoteService`; do not share one global lock.
 
+### DecimalScaleValidator — Trading Input Scale Validation
+
+Call `com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale(value, scale)` statically. Null returns false; trailing zeros are ignored when checking lossless representability at the requested scale. The original value/scale is unchanged. This does not validate total NUMERIC precision, positivity or currency settlement calculations. Combine it with existing order/execution/settlement input conditions; callers choose the exception.
+
 ## 8. Frontend Shared Modules
 
 ### Amount Calculation and Display

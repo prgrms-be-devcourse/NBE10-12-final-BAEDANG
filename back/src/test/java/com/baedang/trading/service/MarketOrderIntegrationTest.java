@@ -997,13 +997,18 @@ class MarketOrderIntegrationTest {
         assertThat(partial.getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
         assertThat(partial.getExecutionCount()).isEqualTo(1);
         assertThat(partial.getLastExecutedAt()).isEqualTo(at.plusSeconds(1));
+        assertThatThrownBy(() -> jdbcTemplate.update("UPDATE trade_order SET reserved_cash = 0 WHERE order_id = ?", orderId))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .hasMessageContaining("ck_order_limit_terms");
         assertThat(tradeExecutionRepository.findByOrderIdOrderBySequenceNoAsc(orderId,
                 org.springframework.data.domain.PageRequest.of(0, 10)).getContent().getFirst().getBookLevelId()).isEqualTo(bookLevelId);
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             accountRepository.findByAccountIdAndUserIdForUpdate(fixture.accountId(), fixture.userId()).orElseThrow();
             TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
-            order.cancel(at.plusSeconds(2));
-            jdbcTemplate.update("UPDATE account SET locked_cash = 0 WHERE account_id = ?", fixture.accountId());
+            var release = order.cancel(at.plusSeconds(2));
+            assertThat(release.releasedCash()).isEqualByComparingTo("200");
+            jdbcTemplate.update("UPDATE account SET locked_cash = locked_cash - ? WHERE account_id = ?",
+                    release.releasedCash(), fixture.accountId());
         });
         TradeOrder canceled = tradeOrderRepository.findById(orderId).orElseThrow();
         assertThat(canceled.getStatus()).isEqualTo(OrderStatus.CANCELED);
@@ -1034,9 +1039,10 @@ class MarketOrderIntegrationTest {
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
             accountRepository.findByAccountIdAndUserIdForUpdate(fixture.accountId(), fixture.userId()).orElseThrow();
             TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
-            if (target.equals("CANCELED")) order.cancel(at.plusSeconds(1));
-            else order.expire(at.plusHours(6));
-            jdbcTemplate.update("UPDATE account SET locked_cash = 0 WHERE account_id = ?", fixture.accountId());
+            var release = target.equals("CANCELED") ? order.cancel(at.plusSeconds(1)) : order.expire(at.plusHours(6));
+            assertThat(release.releasedCash()).isEqualByComparingTo("300");
+            jdbcTemplate.update("UPDATE account SET locked_cash = locked_cash - ? WHERE account_id = ?",
+                    release.releasedCash(), fixture.accountId());
         });
         TradeOrder closed = tradeOrderRepository.findById(orderId).orElseThrow();
         Account account = accountRepository.findById(fixture.accountId()).orElseThrow();

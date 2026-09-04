@@ -201,6 +201,10 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 스트라이프 락은 아직 공용 헬퍼가 아닙니다. `CandleQueryService`와 `StockOnDemandQuoteService`의 별도 락 구현은 유지하며, 하나의 전역 락으로 공유하지 않습니다.
 
+### DecimalScaleValidator — 거래 입력 소수 자릿수 검증
+
+`com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale(value, scale)`을 정적으로 호출합니다. null은 false, 후행 0을 제외하고 허용 소수 자릿수로 손실 없이 표현 가능하면 true입니다. 원본 값·스케일을 변경하지 않으며 전체 NUMERIC precision, 양수 여부, 통화별 정산 계산은 검증하지 않습니다. 주문·체결·정산 입력의 기존 조건문에 결합하고, 예외 선택은 호출부에서 담당합니다.
+
 ## 8. 프론트 공용 모듈
 
 ### 금액 계산·표시

@@ -6,6 +6,8 @@ import com.baedang.trading.model.OrderAmount;
 import com.baedang.stock.entity.MarketCountry;
 import jakarta.persistence.*;
 
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
+
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.UUID;
@@ -96,11 +98,11 @@ public class TradeExecution {
                                          OffsetDateTime quoteAt, OffsetDateTime executedAt, Long bookLevelId) {
         if (order.getOrderId() == null || key == null || sequenceNo < 1 || quantity == null || quantity.signum() <= 0
                 || price == null || price.signum() <= 0 || quoteAt == null || executedAt == null || quoteAt.isAfter(executedAt)
-                || amounts == null) throw new IllegalArgumentException("체결 필수 값이 올바르지 않습니다");
+                || amounts == null || !isRepresentableAtScale(quantity, 6)
+                || !isRepresentableAtScale(price, 4) || !isRepresentableAtScale(rate.rate(), 6)) {
+            throw new IllegalArgumentException("체결 필수 값이 올바르지 않습니다");
+        }
         amounts.validateSide(order.getSide());
-        quantity.setScale(6, java.math.RoundingMode.UNNECESSARY);
-        price.setScale(4, java.math.RoundingMode.UNNECESSARY);
-        rate.rate().setScale(6, java.math.RoundingMode.UNNECESSARY);
         BigDecimal nativeGross = price.multiply(quantity);
         if (amounts.unroundedGrossAmountKrw().compareTo(nativeGross.multiply(rate.rate())) != 0
                 || (amounts.grossAmountUsd().signum() != 0 && amounts.grossAmountUsd().compareTo(nativeGross) != 0)) {

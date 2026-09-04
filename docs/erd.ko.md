@@ -248,6 +248,8 @@ quote_snapshot.prev_close
 
 취소·만료 후에도 체결 누계는 보존하고 활성 잔여 수량과 잔여 동결액만 0으로 종료합니다. LIMIT의 단일 체결가·환율 대신 개별 체결을 조회하며, `gross_amount/fee/tax/net_amount`는 체결 차액의 합계입니다.
 
+활성 BUY(PENDING/PARTIALLY_FILLED)에 잔여 수량이 있으면 `reserved_cash > 0`을 엔티티와 DB에서 검증합니다. 필요한 동결액의 충분성은 정산 서비스에서 계산합니다. `cancel(at)` / `expire(at)`는 `OrderClosureResult(changed, releasedCash, releasedQuantity)`를 반환합니다. 최초 종료는 0으로 변경하기 전의 매수 동결액 또는 매도 미체결 수량을 반환하고, 같은 종료 요청의 반복은 false와 두 해제량 0을 반환합니다. 호출부는 계좌 잠금 아래 같은 트랜잭션에서 반환된 해제량을 account/holding에 반영해야 하며, 종료 후 주문 getter로 해제량을 읽지 않습니다. 반환 객체는 DB에 저장하지 않습니다.
+
 `reserved_cash`는 최초 동결액 이력이 아닌 현재 상태입니다. 접수·미체결분 취소·만료는 `locked_cash`만 변경하므로 결제 원장을 남기지 않습니다. 실제 체결 시에만 해당 체결분의 예수금 변동을 원장에 기록합니다.
 
 #### `trade_execution` — 개별 체결

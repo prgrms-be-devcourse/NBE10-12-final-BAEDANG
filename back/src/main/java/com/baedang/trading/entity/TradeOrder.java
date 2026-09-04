@@ -1,6 +1,9 @@
 package com.baedang.trading.entity;
 
 import jakarta.persistence.*;
+import com.baedang.trading.model.OrderClosureResult;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -183,12 +186,11 @@ public class TradeOrder {
                 || side == null || quantity == null || quantity.signum() <= 0 || limitPrice == null || limitPrice.signum() <= 0
                 || reservedCash == null || reservedCash.signum() < 0 || (side == OrderSide.SELL && reservedCash.signum() != 0)
                 || (side == OrderSide.BUY && reservedCash.signum() == 0)
-                || orderedAt == null || expiresAt == null || !orderedAt.isBefore(expiresAt)) {
+                || orderedAt == null || expiresAt == null || !orderedAt.isBefore(expiresAt)
+                || !isRepresentableAtScale(reservedCash, 0)
+                || !isRepresentableAtScale(quantity, 6) || !isRepresentableAtScale(limitPrice, 4)) {
             throw new IllegalArgumentException("지정가 접수 근거가 올바르지 않습니다");
         }
-        reservedCash.setScale(0, java.math.RoundingMode.UNNECESSARY);
-        quantity.setScale(6, java.math.RoundingMode.UNNECESSARY);
-        limitPrice.setScale(4, java.math.RoundingMode.UNNECESSARY);
         TradeOrder order = new TradeOrder(accountId, stockId, clientOrderId, side, quantity, OrderStatus.PENDING, orderedAt);
         order.orderType = OrderType.LIMIT;
         order.limitPrice = limitPrice;
@@ -223,16 +225,16 @@ public class TradeOrder {
                 || (side == OrderSide.BUY ? execution.getPrice().compareTo(limitPrice) > 0
                                          : execution.getPrice().compareTo(limitPrice) < 0)
                 || nextReservedCash == null || nextReservedCash.signum() < 0
-                || nextReservedCash.compareTo(reservedCash) > 0) {
+                || nextReservedCash.compareTo(reservedCash) > 0 || !isRepresentableAtScale(nextReservedCash, 0)) {
             throw new IllegalArgumentException("체결 반영 순서/대상/잔여 동결액이 올바르지 않습니다");
         }
         execution.validateOrder(this);
         BigDecimal nextFilled = filledQuantity.add(execution.getQuantity());
         if (nextFilled.compareTo(quantity) > 0 || (nextFilled.compareTo(quantity) == 0 && nextReservedCash.signum() != 0)
-                || (side == OrderSide.SELL && nextReservedCash.signum() != 0)) {
+                || (side == OrderSide.SELL && nextReservedCash.signum() != 0)
+                || (side == OrderSide.BUY && nextFilled.compareTo(quantity) < 0 && nextReservedCash.signum() == 0)) {
             throw new IllegalArgumentException("체결 수량 또는 종료 동결액이 올바르지 않습니다");
         }
-        nextReservedCash.setScale(0, java.math.RoundingMode.UNNECESSARY);
         filledQuantity = nextFilled;
         executionCount = execution.getSequenceNo();
         lastExecutedAt = execution.getExecutedAt();
@@ -245,21 +247,23 @@ public class TradeOrder {
         if (status == OrderStatus.FILLED) closedAt = execution.getExecutedAt();
     }
 
-    public boolean cancel(OffsetDateTime at) { return closeRemainder(OrderStatus.CANCELED, at); }
-    public boolean expire(OffsetDateTime at) { return closeRemainder(OrderStatus.EXPIRED, at); }
+    public OrderClosureResult cancel(OffsetDateTime at) { return closeRemainder(OrderStatus.CANCELED, at); }
+    public OrderClosureResult expire(OffsetDateTime at) { return closeRemainder(OrderStatus.EXPIRED, at); }
 
-    private boolean closeRemainder(OrderStatus target, OffsetDateTime at) {
+    private OrderClosureResult closeRemainder(OrderStatus target, OffsetDateTime at) {
         if (orderType != OrderType.LIMIT) throw new IllegalStateException("지정가 잔여분만 종료할 수 있습니다");
-        if (status == target) return false;
+        if (status == target) return OrderClosureResult.unchanged();
         if (!isActive() || at == null || at.isBefore(orderedAt)
                 || (lastExecutedAt != null && at.isBefore(lastExecutedAt))
                 || (target == OrderStatus.EXPIRED ? at.isBefore(expiresAt) : !at.isBefore(expiresAt))) {
             throw new IllegalStateException("주문 상태 또는 종료 시각이 올바르지 않습니다");
         }
+        OrderClosureResult result = new OrderClosureResult(true, reservedCash,
+                side == OrderSide.SELL ? activeRemainingQuantity() : BigDecimal.ZERO);
         status = target;
         reservedCash = BigDecimal.ZERO;
         closedAt = at;
-        return true;
+        return result;
     }
 
     public Long getOrderId() { return orderId; }

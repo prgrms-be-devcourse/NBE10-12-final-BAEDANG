@@ -110,9 +110,14 @@ class TradeOrderExecutionTest {
     void 부분체결_종료와_반복요청은_체결분을_보존한다(OrderStatus target) {
         TradeOrder order = order(OrderSide.BUY);
         order.applyExecution(execution(order, "1", "90"), new BigDecimal("200"));
-        boolean closed = target == OrderStatus.CANCELED ? order.cancel(AT.plusSeconds(3)) : order.expire(AT.plusHours(6));
-        assertThat(closed).isTrue();
-        assertThat(target == OrderStatus.CANCELED ? order.cancel(AT.plusSeconds(4)) : order.expire(AT.plusHours(7))).isFalse();
+        var closed = target == OrderStatus.CANCELED ? order.cancel(AT.plusSeconds(3)) : order.expire(AT.plusHours(6));
+        assertThat(closed.changed()).isTrue();
+        assertThat(closed.releasedCash()).isEqualByComparingTo("200");
+        assertThat(closed.releasedQuantity()).isZero();
+        var repeated = target == OrderStatus.CANCELED ? order.cancel(AT.plusSeconds(4)) : order.expire(AT.plusHours(7));
+        assertThat(repeated.changed()).isFalse();
+        assertThat(repeated.releasedCash()).isZero();
+        assertThat(repeated.releasedQuantity()).isZero();
         assertThat(order.getStatus()).isEqualTo(target);
         assertThat(order.getFilledQuantity()).isEqualByComparingTo("1");
         assertThat(order.getGrossAmount()).isEqualByComparingTo("90");
@@ -239,6 +244,81 @@ class TradeOrderExecutionTest {
         assertThat(second.getExchangeRate()).isEqualByComparingTo("1424.6");
         assertThat(order.getNetAmount()).isEqualByComparingTo("2748870");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED);
+    }
+
+    @Test
+    void 매수_부분체결의_잔여_동결은_0이_될_수_없다() {
+        TradeOrder order = order(OrderSide.BUY);
+        assertThatThrownBy(() -> order.applyExecution(execution(order, "1", "90"), BigDecimal.ZERO))
+                .isExactlyInstanceOf(IllegalArgumentException.class);
+        assertThat(order.getFilledQuantity()).isZero();
+        assertThat(order.getExecutionCount()).isZero();
+        assertThat(order.getReservedCash()).isEqualByComparingTo("300");
+    }
+
+    @ParameterizedTest
+    @CsvSource({"CANCELED, 0", "CANCELED, 1", "EXPIRED, 0", "EXPIRED, 1"})
+    void 매도_종료는_미체결_수량만_한번_해제한다(OrderStatus target, int filled) {
+        TradeOrder order = order(OrderSide.SELL);
+        if (filled == 1) {
+            TradeExecution execution = TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1,
+                    BigDecimal.ONE, new BigDecimal("100"), RATE, amount("100"), AT, AT.plusSeconds(1), 1L);
+            ReflectionTestUtils.setField(execution, "executionId", 1L);
+            order.applyExecution(execution, BigDecimal.ZERO);
+        }
+        OffsetDateTime at = target == OrderStatus.CANCELED ? AT.plusSeconds(2) : AT.plusHours(6);
+        var result = target == OrderStatus.CANCELED ? order.cancel(at) : order.expire(at);
+        assertThat(result.changed()).isTrue();
+        assertThat(result.releasedCash()).isZero();
+        assertThat(result.releasedQuantity()).isEqualByComparingTo(BigDecimal.valueOf(3 - filled));
+        assertThat(order.getFilledQuantity()).isEqualByComparingTo(BigDecimal.valueOf(filled));
+        assertThat(order.activeRemainingQuantity()).isZero();
+        var repeated = target == OrderStatus.CANCELED ? order.cancel(at) : order.expire(at);
+        assertThat(repeated.changed()).isFalse();
+        assertThat(repeated.releasedCash()).isZero();
+        assertThat(repeated.releasedQuantity()).isZero();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1.0000001, 100, 300", "1, 100.00001, 300", "1, 100, 300.01"})
+    void 접수의_초과_소수자릿수는_입력검증_예외다(BigDecimal qty, BigDecimal price, BigDecimal reserve) {
+        assertThatThrownBy(() -> TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.BUY,
+                qty, price, reserve, AT, AT.plusHours(6))).isExactlyInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"1.0000001, 90, 1", "1, 90.00001, 1", "1, 90, 1.0000001"})
+    void 체결의_초과_소수자릿수는_입력검증_예외다(BigDecimal qty, BigDecimal price, BigDecimal fx) {
+        TradeOrder order = order(OrderSide.BUY);
+        BigDecimal usd = qty.multiply(price);
+        var amounts = new ExecutionAmounts(usd, usd.multiply(fx), BigDecimal.ZERO,
+                new BigDecimal("90"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("90"));
+        var rate = new ExecutionRateEvidence(fx, AT, AT, AT.plusMinutes(1));
+        assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.US, UUID.randomUUID(), 1,
+                qty, price, rate, amounts, AT, AT.plusSeconds(1), 1L))
+                .isExactlyInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 정산의_소수_원화와_센트미만은_거절하고_후행0은_보존한다() {
+        BigDecimal fractional = new BigDecimal("1.001");
+        assertThatThrownBy(() -> new ExecutionAmounts(fractional, fractional, BigDecimal.ZERO,
+                fractional, BigDecimal.ZERO, BigDecimal.ZERO, fractional))
+                .isExactlyInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ExecutionAmounts(BigDecimal.ONE, BigDecimal.ONE, fractional,
+                BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ONE))
+                .isExactlyInstanceOf(IllegalArgumentException.class);
+        BigDecimal original = new BigDecimal("100.0000000");
+        var order = TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.BUY,
+                new BigDecimal("1.0000000"), original, original, AT, AT.plusHours(6));
+        assertThat(order.getLimitPrice()).isEqualTo(original);
+        assertThat(order.getReservedCash()).isEqualTo(original);
+        var amounts = new ExecutionAmounts(BigDecimal.ZERO, original, new BigDecimal("0.0100"),
+                original, BigDecimal.ZERO, BigDecimal.ZERO, original);
+        assertThat(amounts.grossAmountKrw()).isEqualTo(original);
+        assertThat(amounts.secFeeUsd()).isEqualTo(new BigDecimal("0.0100"));
+        assertThatThrownBy(() -> order(OrderSide.BUY).applyExecution(execution(order(OrderSide.BUY), "1", "90"),
+                new BigDecimal("200.1"))).isExactlyInstanceOf(IllegalArgumentException.class);
     }
 
     private TradeOrder order(OrderSide side) {

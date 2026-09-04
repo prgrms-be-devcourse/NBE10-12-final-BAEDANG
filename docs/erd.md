@@ -251,6 +251,8 @@ Fee/tax rates and the SEC minimum use the project-fixed `.env` settings `FEE_RAT
 
 Cancellation/expiration retain filled totals and zero only the active remainder/reserve. Read individual LIMIT executions instead of a single price/rate; gross_amount/fee/tax/net_amount are sums of execution deltas.
 
+Active BUY orders (PENDING/PARTIALLY_FILLED) with remaining quantity require `reserved_cash > 0` in both the entity and DB; the settlement service calculates reserve sufficiency. `cancel(at)` / `expire(at)` return `OrderClosureResult(changed, releasedCash, releasedQuantity)`. The first transition returns the buy reserve or sell remainder before clearing it; a repeated identical closure returns false and zero release amounts. Under the account lock, the caller must apply these amounts to account/holding in the same transaction, rather than reading cleared order getters. This result object is not persisted.
+
 `reserved_cash` stores current state, not the initial reservation history. Acceptance and cancellation/expiration of unfilled quantities change only `locked_cash` and create no settlement ledger entry. Record cash movements in the ledger only for actual fills.
 
 #### `trade_execution` — individual fills

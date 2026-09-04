@@ -734,7 +734,7 @@ CREATE TABLE trade_order (
         AND (last_executed_at IS NULL OR closed_at >= last_executed_at))),
     CONSTRAINT ck_order_limit_terms CHECK (order_type <> 'LIMIT' OR (
         limit_price IS NOT NULL AND limit_price > 0 AND expires_at IS NOT NULL AND expires_at > ordered_at
-        AND (side <> 'BUY' OR status <> 'PENDING' OR reserved_cash > 0))),
+        AND (side <> 'BUY' OR status NOT IN ('PENDING','PARTIALLY_FILLED') OR reserved_cash > 0))),
     CONSTRAINT ck_order_market_terms CHECK (order_type <> 'MARKET' OR (
         status IN ('FILLED','REJECTED') AND limit_price IS NULL AND reserved_cash = 0)),
     ordered_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
