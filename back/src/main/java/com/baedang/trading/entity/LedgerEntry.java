@@ -13,7 +13,7 @@ import java.time.OffsetDateTime;
  *
  * <p><b>항목은 세 가지뿐입니다</b> — INITIAL_DEPOSIT / BUY / SELL.
  * 수수료와 세금은 별도 줄로 쪼개지 않고 매수·매도 금액에 포함합니다.
- * 원장 한 줄이 {@code trade_order.net_amount} 하나에 대응합니다.
+ * 신규 거래 원장은 개별 체결에 대응하며 주문당 여러 줄이 존재할 수 있습니다.
  *
  * <p>검증식: {@code SUM(amount) = account.cash_balance} (계좌별).
  * 테스트로 만들어두면 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
@@ -38,6 +38,10 @@ public class LedgerEntry {
     /** 원인이 된 주문. 초기금 지급은 주문이 없으므로 null. */
     @Column(name = "order_id")
     private Long orderId;
+
+    /** 개별 체결 근거. 초기 지급/기존 시장가 원장/독립 정정 기록은 null일 수 있습니다. */
+    @Column(name = "execution_id")
+    private Long executionId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "entry_type", nullable = false, length = 20)
@@ -115,6 +119,22 @@ public class LedgerEntry {
     }
 
     public Long getEntryId() { return entryId; }
+    public Long getExecutionId() { return executionId; }
+
+    /** 신규 정상 체결 원장. 과거 기록 보정과 중복 요청 판정은 호출부의 별도 책임입니다. */
+    public static LedgerEntry execution(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, String memo) {
+        if (execution == null || execution.getExecutionId() == null || balanceAfter == null || balanceAfter.signum() < 0) {
+            throw new IllegalArgumentException("저장된 체결과 체결 직후 잔액이 필요합니다");
+        }
+        execution.validateOrder(order);
+        boolean buy = order.getSide() == OrderSide.BUY;
+        LedgerEntry entry = new LedgerEntry(order.getAccountId(), order.getOrderId(),
+                buy ? EntryType.BUY : EntryType.SELL,
+                buy ? execution.getNetAmountKrw().negate() : execution.getNetAmountKrw(), balanceAfter,
+                execution.getExchangeRate(), memo, execution.getExecutedAt());
+        entry.executionId = execution.getExecutionId();
+        return entry;
+    }
     public Long getAccountId() { return accountId; }
     public Long getOrderId() { return orderId; }
     public EntryType getEntryType() { return entryType; }
