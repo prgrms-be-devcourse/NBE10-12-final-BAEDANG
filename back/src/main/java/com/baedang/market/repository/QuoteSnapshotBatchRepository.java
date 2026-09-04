@@ -4,7 +4,6 @@ import com.baedang.market.entity.QuoteSnapshot;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.List;
 
@@ -40,8 +39,8 @@ public class QuoteSnapshotBatchRepository {
                         statement.setBigDecimal(3, snapshot.getPrevClose());
                     }
                     statement.setString(4, snapshot.getCurrency());
-                    statement.setTimestamp(5, Timestamp.from(snapshot.getQuoteAt().toInstant()));
-                    statement.setTimestamp(6, Timestamp.from(snapshot.getCollectedAt().toInstant()));
+                    statement.setObject(5, snapshot.getQuoteAt());
+                    statement.setObject(6, snapshot.getCollectedAt());
                 });
     }
 }

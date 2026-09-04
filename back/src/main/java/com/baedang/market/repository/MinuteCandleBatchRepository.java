@@ -4,7 +4,6 @@ import com.baedang.market.entity.MinuteCandle;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.List;
 
@@ -37,7 +36,7 @@ public class MinuteCandleBatchRepository {
                 candles.size(),
                 (statement, candle) -> {
                     statement.setLong(1, candle.getStockId());
-                    statement.setTimestamp(2, Timestamp.from(candle.getCandleAt().toInstant()));
+                    statement.setObject(2, candle.getCandleAt());
                     statement.setBigDecimal(3, candle.getOpenPrice());
                     statement.setBigDecimal(4, candle.getHighPrice());
                     statement.setBigDecimal(5, candle.getLowPrice());
