@@ -166,6 +166,25 @@ export function login(input: { email: string; password: string }): Promise<AuthU
 }
 
 /**
+ * `POST /api/auth/password/forgot` — 비밀번호 찾기 메일 발송 요청.
+ *
+ * <p>⚠️ 이 엔드포인트는 아직 백엔드에 구현되어 있지 않다(2026-09-04 기준, 프론트
+ * 화면만 먼저 만들어달라는 요청으로 화면부터 구현 — 백엔드는 팀원에게 별도 요청
+ * 예정). 지금 호출하면 404/네트워크 에러가 나고, `forgot-password` 페이지가
+ * 그 경우 일반 에러 문구를 보여준다. 백엔드 구현 시 지켜야 할 계약:
+ *
+ * <ul>
+ *   <li>가입 여부와 무관하게 항상 200을 반환한다 — 존재하지 않는 이메일에 404/
+ *       다른 응답을 주면 "이 이메일은 가입 안 돼 있음"을 외부에 노출(계정 열거
+ *       공격)하게 된다. 실제 이메일 발송은 존재할 때만 하되, 응답은 똑같이 200.</li>
+ *   <li>요청 본문은 `{ email: string }` 하나만 받는다.</li>
+ * </ul>
+ */
+export function requestPasswordReset(email: string): Promise<void> {
+  return request<void>("/api/auth/password/forgot", { method: "POST", body: { email } });
+}
+
+/**
  * `POST /api/auth/refresh` — refreshToken으로 새 accessToken을 받는다.
  * `AuthProvider`가 만료 전에 미리(선제적으로) 호출해 세션을 유지하는 용도다 —
  * `request()` 내부의 재시도용 재발급과는 별개의, 명시적으로 호출하는 경로다.
