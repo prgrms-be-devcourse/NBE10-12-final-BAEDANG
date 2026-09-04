@@ -11,6 +11,11 @@ public record OrderAmount(
         BigDecimal grossAmount,
         BigDecimal fee,
         BigDecimal tax,
-        BigDecimal netAmount
+        BigDecimal netAmount,
+        BigDecimal secFeeUsd
 ) {
+    public ExecutionAmounts executionAmounts() {
+        return new ExecutionAmounts(grossAmountUsd, unroundedGrossAmountKrw, secFeeUsd,
+                grossAmount, fee, tax, netAmount);
+    }
 }

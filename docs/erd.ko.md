@@ -31,6 +31,8 @@
 | users → account | 1:N |
 | account → trade_order | 1:N |
 | trade_order → ledger_entry | 1:N |
+| trade_order → trade_execution | 1:N |
+| trade_execution → ledger_entry | 신규 정상 체결 1:1 (기존 이력/상쇄 정정은 execution_id NULL) |
 | trade_order → holding | 1:N |
 | account → ledger_entry | 1:N |
 | account → daily_account_snapshot | 1:N |
@@ -142,7 +144,7 @@ quote_snapshot.prev_close
 | `exchange_rate` | TOSS | 전부 `/exchange-rate`. `collected_at` 만 **자체**. |
 | `trade_order` | 자체 + TOSS | 주문 내용은 자체 생성, `executed_price`·`quote_at` 은 `quote_snapshot` 에서 복사(원천 `/prices`), `exchange_rate` 는 `/exchange-rate`. **토스에 주문을 보내지는 않음** — 체결은 우리 DB 안에서만. |
 | `holding` | 자체 | 원장에서 파생. `avg_exchange_rate` 만 토스 환율에서 유래. |
-| `ledger_entry` | 자체 | 전부 자체 생성. `exchange_rate` 만 `trade_order.exchange_rate` 를 **그대로 복사**해 넣음(원천은 토스 `/exchange-rate`). 원장은 append-only 라 주문 테이블이 나중에 어떻게 바뀌든 이 기록은 그대로 남습니다. |
+| `ledger_entry` | 자체 | 체결/원장 서비스가 기록하며 개별 trade_execution의 환율을 그대로 사용. 기존 MARKET은 trade_order와 같은 값. append-only. |
 | `users` `account` `daily_account_snapshot` `stock_external_id` | 자체 | 외부 API 와 무관. **계정계는 전적으로 우리가 소유** — 이것이 이 프로젝트가 채널계가 아니라 계정계인 이유. |
 
 ### 배치 일정 (확정)
@@ -211,7 +213,7 @@ quote_snapshot.prev_close
 | `opened_at` `closed_at` | TIMESTAMPTZ | 회차의 시작·종료 시각. 회차별 운용 기간 계산. |
 
 #### `trade_order` — 주문 + 체결
-MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 주문도 남깁니다** — "왜 안 됐는지" 설명용. 지정가를 도입하면 체결 부분을 `trade_execution` 으로 분리하게 됩니다.
+주문 조건과 누적 체결 결과를 보존합니다. 개별 체결 근거는 `trade_execution`에 기록하며, 시장가는 한 번에 체결하고 지정가는 부분 체결을 누적합니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `order_id` | BIGINT PK | 주문 번호. 체결 내역 화면 정렬 키. |
@@ -219,28 +221,69 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | `stock_id` | BIGINT FK | 거래 대상 종목. 심볼이 아니라 내부 ID(심볼은 바뀔 수 있고 시장마다 중복). |
 | `client_order_id` | UUID | **계좌 범위 멱등성 키.** 프론트가 주문 화면 진입 시 생성해 함께 보냄. `UNIQUE(account_id, client_order_id)`로 같은 계좌의 중복 체결을 차단하면서 서로 다른 사용자의 우연한 UUID 중복은 허용합니다. |
 | `side` | VARCHAR(4) | `BUY` / `SELL`. |
-| `order_type` | VARCHAR(10) | MVP는 `MARKET` 고정. 컬럼 미리 두어 `LIMIT` 추가 시 스키마 변경 불필요. |
+| `order_type` | VARCHAR(10) | `MARKET` / `LIMIT`. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
-| `status` | VARCHAR(12) | **주문의 생애주기.** 시장가는 **`PENDING` 을 거치지 않습니다** — 하나의 트랜잭션에서 처음부터 `FILLED` 또는 `REJECTED` 로 INSERT 합니다. `PENDING` 은 주문 접수·동결과 체결이 별도 트랜잭션인 지정가 주문에서만 사용합니다.
-  `PENDING` 접수 완료·자금/수량 동결 · `FILLED` 체결 완료·동결 해제+출금 확정 · `REJECTED` 검증 단계 거절(동결 안 함) · `CANCELED` 사용자 취소 · `EXPIRED` 타임아웃 자동 해제.
-  상태 전이는 **조건부 UPDATE** 로 — `WHERE order_id=? AND status='PENDING'` 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것. |
+| `status` | VARCHAR(20) | MARKET은 FILLED/REJECTED로 즉시 확정. LIMIT은 PENDING → PARTIALLY_FILLED → FILLED 또는 활성 잔여분 CANCELED/EXPIRED. 계좌 잠금 아래 상태·체결 순번을 검증하며 EXPIRED는 저장된 정규 세션 종료 시각 기준. |
 | `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `NOT_IN_UNIVERSE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
 | `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
 | `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
-| `exchange_rate` | NUMERIC(19,6) | 체결 또는 거절 판정 시점 환율. 원화 종목은 1. |
-| `gross_amount` | NUMERIC(19,4) | 체결 금액(원화 환산). `executed_price × quantity × exchange_rate`. |
+| `exchange_rate` | NUMERIC(19,6) | MARKET 체결 또는 거절 판정 시점 환율 원본. 원화 종목은 1. LIMIT은 개별 체결에서 조회. |
+| `gross_amount` | NUMERIC(19,4) | MARKET 단일 정산 금액 또는 LIMIT 체결 차액 누계(원화). |
 | `fee` | NUMERIC(19,4) | 거래 수수료 — **`gross_amount × 0.0001` (0.01%, 매수·매도 공통)**. **율이 아니라 적용된 금액 저장** — 정책이 바뀌어도 과거 기록 보존. |
 | `tax` | NUMERIC(19,4) | 시장별 매도 비용. 국내: **`gross_amount × 0.002` (0.2%)**. 미국: SEC Fee **`max(USD gross × 0.0000206, $0.01)`**, 원화 환산 전 센트 반올림. 매수는 0. 요율과 최소 금액은 `.env` 로 관리하고 적용된 금액을 저장합니다. |
 | `net_amount` | NUMERIC(19,4) | 실제 예수금 증감액. **매수: gross + fee (차감) / 매도: gross − fee − tax (입금)**. 이 등식이 항상 성립하는지 검증 테스트 필수. |
 | `ordered_at` | TIMESTAMPTZ | 주문 접수 시각. `quote_at` 과의 차이가 곧 시세 지연. |
 
+지정가 주문의 추가 컬럼:
+
+| 컬럼 | 용도 |
+|---|---|
+| `limit_price` | 지정가. NUMERIC(19,4), 종목 통화 기준 |
+| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각 |
+| `reserved_cash` | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
+| `expires_at`, `closed_at` | 접수 세션 종료 시각 / 실제 주문 종료 시각 |
+
+수수료율·세율·SEC 최소액은 `.env`의 `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE`, `A_TAX_MIN_USD`를 프로젝트 고정값으로 사용합니다. 주문별 요율/계산 버전은 저장하지 않습니다. 재시작·재배포에도 동일한 설정을 유지하며, 활성 주문이 있는 동안 변경하지 않습니다. 체결마다 달라질 수 있는 환율과는 별개의 정책입니다.
+
+취소·만료 후에도 체결 누계는 보존하고 활성 잔여 수량과 잔여 동결액만 0으로 종료합니다. LIMIT의 단일 체결가·환율 대신 개별 체결을 조회하며, `gross_amount/fee/tax/net_amount`는 체결 차액의 합계입니다.
+
+활성 BUY(PENDING/PARTIALLY_FILLED)에 잔여 수량이 있으면 `reserved_cash > 0`을 엔티티와 DB에서 검증합니다. 필요한 동결액의 충분성은 정산 서비스에서 계산합니다. `cancel(at)` / `expire(at)`는 `OrderClosureResult(changed, releasedCash, releasedQuantity)`를 반환합니다. 최초 종료는 0으로 변경하기 전의 매수 동결액 또는 매도 미체결 수량을 반환하고, 같은 종료 요청의 반복은 false와 두 해제량 0을 반환합니다. 호출부는 계좌 잠금 아래 같은 트랜잭션에서 반환된 해제량을 account/holding에 반영해야 하며, 종료 후 주문 getter로 해제량을 읽지 않습니다. 반환 객체는 DB에 저장하지 않습니다.
+
+`reserved_cash`는 최초 동결액 이력이 아닌 현재 상태입니다. 접수·미체결분 취소·만료는 `locked_cash`만 변경하므로 결제 원장을 남기지 않습니다. 실제 체결 시에만 해당 체결분의 예수금 변동을 원장에 기록합니다.
+
+#### `trade_execution` — 개별 체결
+
+주문과 1:N 관계입니다. 수량·가격·환율·정산 차액·시각·호가 출처를 보존합니다. `(order_id, execution_key)`와 `(order_id, sequence_no)`가 각각 UNIQUE입니다. 기존 시장가에는 이 행이 없어도 이력을 조회할 수 있습니다.
+
+| 컬럼 | 용도 |
+|---|---|
+| `execution_id`, `order_id` | 체결 식별·주문 FK. 계좌·종목·매매 방향은 주문에서 조회하며 중복 저장하지 않음 |
+| `execution_key`, `sequence_no` | 주문 내 체결 재시도 키 / 1부터 증가하는 반영 순번 |
+| `quantity`, `price` | 이번 체결 수량(NUMERIC(19,6)) / 종목 통화 단가(NUMERIC(19,4)) |
+| `exchange_rate` | 해당 체결 트랜잭션에 전달되어 실제 계산에 사용한 환율. NUMERIC(19,6), KR은 1 |
+| `sec_fee_usd` | 이번 체결의 센트 단위 SEC 비용 차액. 매수/KR은 0 |
+| `gross_amount_krw`, `fee_krw`, `tax_krw`, `net_amount_krw` | 이번 체결의 원화 정산 차액. NUMERIC(19,4), 값은 원 단위 정수 |
+| `quote_at`, `executed_at` | 가격 기준 시각 / 체결 확정 시각 |
+| `book_level_id` | 소비한 공유 호가 레벨의 고유 ID(양수 BIGINT). 시세를 직접 사용하는 MARKET은 NULL |
+
+환율은 토스 응답이 소수점 6자리 이하라는 프로젝트 전제에 맞춰 NUMERIC(19,6)으로 저장합니다. 반올림 전 거래대금은 별도 컬럼 없이 저장된 체결 값으로 복원합니다. `grossAmountUsd(marketCountry)`는 US에서 `price × quantity`, KR에서 0이며, `unroundedGrossAmountKrw()`는 `price × quantity × exchange_rate`입니다(KR 환율은 1). 계산에 사용한 단가·수량·환율과 원본 거래대금의 일치를 체결 생성 시 검증하며, 복원 과정에서는 반올림하지 않습니다. 환율 확보 시각·유효 구간은 `ExecutionRateEvidence` 입력으로 검증하되 DB에 저장하지 않습니다. 외부 조회는 DB 트랜잭션 전에 수행하며, 같은 체결 트랜잭션 안에서는 전달된 환율을 공유하고 다음 트랜잭션은 새로 준비한 환율을 사용합니다. 접수 환율을 이후 체결에 고정하지 않으며, 확정 이력은 최신 환율로 다시 계산하지 않습니다.
+
+LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세금은 `SUM(sec_fee_usd × exchange_rate)`로 복원하고, 이를 원 단위 `HALF_UP`으로 반올림한 값에서 기존 `SUM(tax_krw)`를 빼서 이번 체결 세금을 구합니다. 이전 체결의 SEC 비용에 새 환율을 다시 곱하거나 체결마다 SEC 최소액을 독립 부과하지 않습니다. KR 누적 세금은 누적 원화 거래대금과 프로젝트 고정 세율로 계산합니다. 별도 원본 세금/누적 USD 캐시 컬럼은 저장하지 않습니다.
+
+한 체결은 한 호가 레벨만 소비합니다. 같은 `book_level_id`를 여러 체결이 소비할 수 있으므로 UNIQUE가 아니며, 공유 잔량 차감은 체결과 같은 트랜잭션에서 보호합니다. 호가 레벨의 가격·버전 식별은 불변이고 ID는 재사용하지 않습니다. 체결의 `price`는 실제 체결 단가 스냅샷입니다. 현재 호가 테이블은 없으므로 `book_level_id`에 FK는 없으며, 호가 저장소 연결 시 FK와 참조된 레벨 보존 정책을 함께 적용합니다.
+
+지정가 체결 생성 시 `TradeExecution.limit(order, marketCountry, ...)`에 주문 종목의 시장을 전달합니다. KR은 환율 1·USD 거래대금 0·SEC 비용 0, US는 체결단가가 센트 단위로 표현 가능하고 USD 거래대금이 `price × quantity`인지 검증합니다. 후행 0은 허용하며 엔티티에서 단가를 반올림하지 않습니다. 시장은 검증 입력으로만 사용하며 체결 테이블에 중복 저장하지 않습니다.
+
 #### `ledger_entry` — 거래 원장
+`(execution_id, order_id)` → 체결, `(order_id, account_id)` → 주문의 두 복합 FK로 원장·체결·계좌 연결을 보장합니다.
+
 **예수금이 움직인 모든 사건을 기록합니다. UPDATE 와 DELETE 를 하지 않는 것이 이 테이블의 존재 이유입니다.** 잘못 기록했으면 수정하지 말고 반대 부호 항목을 넣어 상쇄합니다.
-**항목은 세 가지뿐입니다 — `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료와 세금을 **별도 줄로 쪼개지 않고 매수·매도 금액에 포함**합니다. 정상 체결은 원장 한 줄이 `trade_order.net_amount` 하나에 대응하지만, append-only 정정이나 향후 부분 체결에서는 같은 `order_id`에 후속 행이 추가될 수 있습니다. 멱등 응답의 최초 체결 잔액은 `(order_id, entry_id)` 인덱스로 가장 이른 행을 조회합니다.
+**항목은 `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료·세금은 체결 원장 금액에 포함합니다. 신규 정상 체결 원장 한 줄은 `trade_execution.net_amount_krw`에 대응합니다. 주문당 여러 원장/상쇄 정정이 가능하며 기존 시장가 멱등 응답은 `(order_id, entry_id)`로 최초 원장 잔액을 조회합니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `entry_id` | BIGINT PK | 원장 번호. 시간순으로 증가. |
+| `execution_id` | BIGINT FK, NULL | 신규 정상 체결 연결. non-null 부분 UNIQUE. 초기 지급/기존 이력/독립 상쇄 정정은 NULL. `order_id`는 UNIQUE 아님. |
 | `account_id` | BIGINT FK | 어느 계좌의 원장인지. |
 | `order_id` | BIGINT FK, NULL | 원인이 된 주문. **최초 지급·초기화는 NULL.** `(order_id, entry_id)` 인덱스로 주문별 원장을 시간순 조회. |
 | `entry_type` | VARCHAR(20) | **세 가지뿐.**
@@ -248,9 +291,9 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
   `BUY` — gross + fee 차감 (−)
   `SELL` — gross − fee − tax 입금 (+)
   **`RESET` 항목은 두지 않습니다.** 초기화는 새 계좌를 만드는 일이고, 새 계좌의 `INITIAL_DEPOSIT` 한 줄이 그 역할을 대신합니다. 이전 회차의 마감 시각은 `account.closed_at` 에 남습니다. |
-| `amount` | NUMERIC(19,4) | **부호 있는 예수금 증감액, 수수료·세금 포함** — 언제나 `trade_order.net_amount` 와 절대값이 같음. 매수는 음수, 매도는 양수. **이 컬럼의 누적 합이 `account.cash_balance` 와 일치해야 함** — 항목이 세 가지뿐이라 이 검증식이 아주 단순해집니다. |
+| `amount` | NUMERIC(19,4) | 신규 정상 체결은 `trade_execution.net_amount_krw`의 부호 있는 금액(매수 − / 매도 +). 기존 MARKET은 주문 netAmount와 대응. 계좌별 원장 합계는 cash_balance와 일치. |
 | `balance_after` | NUMERIC(19,4) | 이 항목 반영 직후의 잔액. 엄밀히는 파생값이지만, **정합성이 깨진 지점을 즉시 찾아내는 용도**로 매우 유용. |
-| `exchange_rate` | NUMERIC(19,6) | **체결 시점 환율.** 원화 종목은 1, 미국 종목은 그때의 USD/KRW. `amount` 는 이미 원화 환산값이라 계산에는 안 쓰임 — **"이 거래를 얼마짜리 환율로 했는가"를 원장만 보고 알 수 있게 하는 감사 항목.** `trade_order.exchange_rate` 와 같은 값이지만, 원장은 append-only 라 주문 테이블이 나중에 어떻게 바뀌든 이 기록은 그대로 남습니다. **1주차 화면에는 안 써도 됨 — 다만 지금 안 남기면 과거 값은 복원 불가.** |
+| `exchange_rate` | NUMERIC(19,6) | 개별 체결의 환율 원본. KR은 1. 원장 감사 근거를 최신 환율로 재계산하지 않음. |
 | `memo` | VARCHAR(200) | 사람이 읽을 설명. 수수료를 별도 줄로 쪼개지 않으므로 **"삼성전자 10주 @ 241,500 (수수료 포함)"** 처럼 내역을 여기에 담습니다. 디버깅·CS 대응이 쉬워짐. |
 | `occurred_at` | TIMESTAMPTZ | 발생 시각. `(account_id, occurred_at)` 인덱스로 기간별 조회 처리. |
 
@@ -415,14 +458,14 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 
 ### 지정가 주문 — 서로 다른 두 트랜잭션
 
-지정가 주문은 아래 두 단계를 사용합니다. Phase 1이 동결과 `PENDING`을 커밋하고 체결 Worker가 나중에 Phase 2를 수행합니다. 이 흐름을 도입할 때 취소·만료·장애 복구도 반드시 함께 구현합니다.
+지정가 주문은 아래 두 단계를 사용합니다. Phase 1이 동결과 `PENDING`을 커밋하고 체결 Worker가 나중에 Phase 2를 반복 수행합니다. 외부 조회는 트랜잭션 밖에서 준비하며 취소·만료·복구도 같은 동결 정책을 따릅니다.
 
 ### Phase 1 — 주문 접수 [동결]
 | 단계 | 동작 | 설명 |
 |---|---|---|
 | ① | `SELECT … FOR UPDATE` | 계좌 행 잠금. **검증보다 먼저 잠가야** 그 사이에 값이 안 바뀝니다. |
 | ② | 검증 | 장 시간 · `is_ranked` · 거래정지 · 시세 유효시간(15초) · **주문가능금액 = `cash_balance − locked_cash` ≥ `net_amount`** |
-| ③ | `locked_cash += net_amount` | **자금 동결.** 수수료·세금을 포함한 `net_amount` 를 묶습니다 — `gross_amount` 만 묶으면 체결 시점에 수수료만큼 부족해집니다. |
+| ③ | `locked_cash += reserved_cash` | 매수 비용까지 고려해 계산된 최초 동결액. 주문의 현재 동결액에도 저장하며 미체결 주문의 net_amount(체결 누계)는 0. |
 | ④ | `INSERT trade_order (PENDING)` | `(account_id, client_order_id)` 유니크 위반이면 중복 클릭이므로 기존 주문 결과를 반환. |
 
 ### Phase 2 — 주문 체결 [확정]
@@ -430,16 +473,16 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 |---|---|---|
 | ① | `locked_cash −= ?` `cash_balance −= ?` | 계좌 재잠금 → **동결 해제와 실제 출금을 동시에** 반영. |
 | ② | `UPSERT holding` | 수량 증가 + 이동평균 단가·환율 재계산. **락 순서는 항상 `account` → `holding`**. 엇갈리면 데드락. |
-| ③ | `UPDATE … WHERE status='PENDING'` | **조건부 UPDATE 로 경합 방지.** 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것이므로 롤백. |
-| ④ | `INSERT ledger_entry` | 원장 기록. append only — **`BUY` 한 줄에 수수료까지 포함해 넣고 `exchange_rate` 를 함께 남깁니다.** |
+| ③ | `INSERT trade_execution` + `applyExecution(...)` | 계좌 잠금 아래 활성 상태와 다음 순번을 검증. 부분 체결은 PARTIALLY_FILLED, 잔여 수량 0이면 FILLED. |
+| ④ | `LedgerService.recordBuy/recordSell(...)` | 저장한 체결에 연결된 원장 한 줄. 정산 차액·환율·직후 잔액을 append-only로 보존. |
 
 > 💡 **지정가 매도는 대칭입니다.** Phase 1 에서 `holding.locked_quantity` 를 늘리고, Phase 2 에서 `quantity` 와 `locked_quantity` 를 함께 줄이며 예수금을 입금합니다. **`avg_buy_price` 는 건드리지 않습니다** — 이동평균법에서는 매도 시 수량과 취득원가가 같은 비율로 줄어 남은 주당 평균단가가 변하지 않기 때문입니다.
 
-> ⛔ **지정가를 도입하면 반드시 필요한 것** — Phase 1 커밋 직후 장애가 나면 **동결액이 영원히 안 풀립니다.** 사용자는 "돈이 있는데 왜 주문이 안 되지?"가 됩니다. 타임아웃 기반 자동 해제 배치를 만드세요:
-> `UPDATE trade_order SET status='EXPIRED' WHERE status='PENDING' AND ordered_at < now() − INTERVAL '5 min'` → 해당 금액만큼 `locked_cash` 를 되돌림.
+> 지정가 접수 후 장애가 나도 동결이 고아 상태로 남지 않도록, 세션 종료 만료와 재시작 복구를 함께 구현해야 합니다.
+> 저장한 `expires_at`에 PENDING/PARTIALLY_FILLED 잔여분을 만료하고 계좌 잠금 아래 잔여 동결만 해제합니다. 5분 타이머나 자정 기준이 아닙니다.
 > **시장가 주문은 즉시 체결 트랜잭션 전체가 롤백되므로 이 배치가 필요 없습니다.**
 
-> ✅ **검증식이 하나 늘어납니다.** `locked_cash = SUM(trade_order.net_amount WHERE status='PENDING')` — 미체결 주문 합계와 동결액이 항상 같아야 합니다. 고아 PENDING 이 생기면 이 식이 깨지므로 즉시 잡아낼 수 있습니다.
+> 동결 검증: 계좌별 `locked_cash = SUM(활성 BUY.reserved_cash)`, 계좌·종목별 `locked_quantity = SUM(활성 SELL.quantity - filled_quantity)`입니다.
 
 ---
 

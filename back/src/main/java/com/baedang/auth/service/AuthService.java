@@ -9,7 +9,7 @@ import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.global.normalizer.DomainNormalizer;
-import com.baedang.trading.service.InitialDepositLedgerService;
+import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.entity.User;
@@ -41,7 +41,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final AccountRepository accountRepository;
-    private final InitialDepositLedgerService initialDepositLedgerService;
+    private final LedgerService ledgerService;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final BigDecimal initialCash;
@@ -58,14 +58,14 @@ public class AuthService {
      */
     public AuthService(UserRepository userRepository,
                        AccountRepository accountRepository,
-                       InitialDepositLedgerService initialDepositLedgerService,
+                       LedgerService ledgerService,
                        PasswordEncoder passwordEncoder,
                        JwtTokenProvider jwtTokenProvider,
                        @Value("${trading.initial-cash}") BigDecimal initialCash,
                        Clock clock) {
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
-        this.initialDepositLedgerService = initialDepositLedgerService;
+        this.ledgerService = ledgerService;
         this.passwordEncoder = passwordEncoder;
         this.jwtTokenProvider = jwtTokenProvider;
         this.initialCash = initialCash;
@@ -79,7 +79,7 @@ public class AuthService {
      * 생기면 이후 모든 조회에서 null 체크를 해야 합니다. 한 트랜잭션으로 묶어
      * "회원은 반드시 계좌가 있다" 를 불변식으로 만드는 편이 훨씬 단순합니다.
      *
-     * <p>초기 지급 원장은 InitialDepositLedgerService에 위임하며 회원·계좌·원장을 같은 트랜잭션으로 저장합니다.
+     * <p>초기 지급 원장은 LedgerService에 위임하며 회원·계좌·원장을 같은 트랜잭션으로 저장합니다.
      */
     @Transactional
     public AuthResponse signUp(SignUpRequest request) {
@@ -111,7 +111,7 @@ public class AuthService {
 
         Account account = accountRepository.save(
                 Account.open(user.getUserId(), 1, initialCash, openedAt));
-        initialDepositLedgerService.recordInitialDeposit(
+        ledgerService.recordInitialDeposit(
                 account.getAccountId(),
                 account.getInitialCash(),
                 account.getRoundNo(),
