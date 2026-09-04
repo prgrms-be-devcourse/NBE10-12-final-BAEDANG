@@ -12,6 +12,7 @@ import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
+import { pickDefaultMarket } from "@/lib/default-market";
 import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
@@ -32,9 +33,26 @@ const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우�
 
 export default function RankingsPage() {
   const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
-  const { isOpen: isMarketOpen } = useMarketStatus();
+  const { isOpen: isMarketOpen, isLoading: marketStatusLoading } = useMarketStatus();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
+  // 화면 진입 시 지금 장중인 시장을 기본 탭으로 보여준다 — 국내장 시간이면 국내,
+  // 해외장 시간이면 해외가 기본. 장 상태를 가져오기 전(marketStatusLoading)엔
+  // 아직 판단할 수 없어 일단 국내(KR) 기본값을 유지하다가, 로딩이 끝나는 순간
+  // 딱 한 번만 반영한다 — 이후 60초 주기 재조회로 개장 상태가 실제로 바뀌어도
+  // (예: 화면을 계속 보고 있는 사이 장이 열림) 이미 보고 있는 탭을 임의로
+  // 바꾸면 오히려 사용자를 헷갈리게 하므로 다시 적용하지 않는다. 사용자가 직접
+  // 탭을 고르면(switchMarket) 그 이후로는 자동 전환을 아예 하지 않는다.
+  const autoMarketAppliedRef = useRef(false);
+  useEffect(() => {
+    if (autoMarketAppliedRef.current || marketStatusLoading) return;
+    autoMarketAppliedRef.current = true;
+    const defaultMarket = pickDefaultMarket(isMarketOpen("KR"), isMarketOpen("US"));
+    if (defaultMarket !== "KR") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMarket(defaultMarket);
+    }
+  }, [marketStatusLoading, isMarketOpen]);
   // 해외 주식 탭에서 현재가를 원화 환산가/달러 원가 중 뭘로 볼지. 예전엔 원화가 아래에
   // 달러가를 항상 같이(두 줄로) 보여줬는데, 그러면 국내 주식(한 줄) 행보다 칸이 길어져서
   // (팀원 제보) 국내와 높이를 맞추려고 글자를 눌러 넣었더니 이번엔 잘 안 보이는 문제가
@@ -180,6 +198,8 @@ export default function RankingsPage() {
   }, [searchOpen]);
 
   function switchMarket(next: string) {
+    // 사용자가 직접 탭을 고른 뒤로는 장 상태 기반 자동 전환을 하지 않는다.
+    autoMarketAppliedRef.current = true;
     setMarket(next as MarketCountry);
   }
 
