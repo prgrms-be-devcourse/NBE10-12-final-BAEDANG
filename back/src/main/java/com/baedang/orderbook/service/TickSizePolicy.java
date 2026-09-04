@@ -66,7 +66,7 @@ public class TickSizePolicy {
                 .map(grid -> grid.lastValidStrictlyBelow(price))
                 .filter(Objects::nonNull)
                 .max(BigDecimal::compareTo)
-                .orElseThrow(() -> new IllegalArgumentException("이전 유효 호가를 계산할 수 없습니다"));
+            .orElseThrow(() -> new IllegalArgumentException("이전 유효 호가를 계산할 수 없습니다"));
         if (result.signum() <= 0) throw new IllegalArgumentException("이전 유효 호가는 양수여야 합니다");
         return result;
     }
@@ -74,6 +74,20 @@ public class TickSizePolicy {
     public boolean isValidPrice(StockDescriptor stock, BigDecimal price) {
         requirePositive(price);
         return gridsFor(stock).stream().anyMatch(grid -> grid.containsValid(price));
+    }
+
+    /**
+     * 해당 가격이 속한 구간의 호가 단위. 유효성 판정과 독립적으로 구간 범위로만 찾는다 —
+     * 기준가는 실제 시세라 현행 단위표에 안 맞는 값(미국 하프페니 등)일 수 있고,
+     * 그때도 라운드 넘버 판정은 그 구간 단위를 기준으로 해야 하기 때문이다.
+     */
+    public BigDecimal tickSizeAt(StockDescriptor stock, BigDecimal price) {
+        requirePositive(price);
+        return gridsFor(stock).stream()
+                .filter(grid -> grid.contains(price))
+                .findFirst()
+                .map(PriceGrid::tickSize)
+                .orElseThrow(() -> new IllegalArgumentException("가격 구간을 찾을 수 없습니다: " + price));
     }
 
     private List<PriceGrid> gridsFor(StockDescriptor stock) {
@@ -103,6 +117,7 @@ public class TickSizePolicy {
 
         BigDecimal firstValidStrictlyAbove(BigDecimal price) {
             BigDecimal candidate = belowQuotient(price).add(BigDecimal.ONE).multiply(tickSize);
+            if (candidate.compareTo(lowerInclusive) < 0) return null;
             return withinUpper(candidate) ? cap(candidate) : null;
         }
 
@@ -115,9 +130,12 @@ public class TickSizePolicy {
             return withinUpper(candidate) ? cap(candidate) : null;
         }
 
+        boolean contains(BigDecimal price) {
+            return price.compareTo(lowerInclusive) >= 0 && withinUpper(price);
+        }
+
         boolean containsValid(BigDecimal price) {
-            if (price.compareTo(lowerInclusive) < 0 || !withinUpper(price)) return false;
-            return price.remainder(tickSize).signum() == 0;
+            return contains(price) && price.remainder(tickSize).signum() == 0;
         }
 
         private boolean withinUpper(BigDecimal value) {

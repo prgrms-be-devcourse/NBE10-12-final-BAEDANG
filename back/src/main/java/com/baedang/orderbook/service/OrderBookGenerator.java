@@ -92,12 +92,14 @@ public class OrderBookGenerator {
             price = side == OrderBookSide.ASK
                     ? tickSizePolicy.nextValidPriceAbove(stock, price)
                     : tickSizePolicy.previousValidPriceBelow(stock, price);
-            levels.add(new GeneratedOrderBookLevel(side, depth, price, quantity(price, baseNotional, depth, policy, random)));
+            levels.add(new GeneratedOrderBookLevel(
+                    side, depth, price, quantity(stock, price, baseNotional, depth, policy, random)));
         }
         return levels;
     }
 
     private BigDecimal quantity(
+            StockDescriptor stock,
             BigDecimal price,
             BigDecimal baseNotional,
             int depth,
@@ -107,12 +109,37 @@ public class OrderBookGenerator {
         int noiseBps = random.nextInt(policy.noiseMaxBps() - policy.noiseMinBps() + 1) + policy.noiseMinBps();
         BigDecimal noiseFactor = BigDecimal.valueOf(noiseBps, 4);
         BigDecimal baseQuantity = baseNotional.divide(price, 0, RoundingMode.HALF_UP);
+        BigDecimal roundBoost = roundNumberBoost(price, tickSizePolicy.tickSizeAt(stock, price));
         return baseQuantity
                 .multiply(DEPTH_MULTIPLIERS.get(depth - 1))
                 .multiply(noiseFactor)
+                .multiply(roundBoost)
                 .setScale(0, RoundingMode.HALF_UP)
                 .max(policy.minQuantity())
                 .min(policy.maxQuantity());
+    }
+
+    /**
+     * 라운드 넘버 부스트 — 사람이 딱 떨어지는 가격에 주문을 몰아 두는 실증 효과
+     * (Osler 계열: $1·$0.10 경계 클러스터링)를 흉내 낸다.
+     *
+     * <p>판정 기준은 절대 원화가 아니라 <b>그 가격 구간의 호가 단위(tick) 배수</b>다:
+     * price = tick × steps로 놓면 steps가 100/50/10의 배수일수록 강하게 부스트한다.
+     * 그러면 70,000원 종목(100원 틱)은 1만·5천·1천원 경계에서, 700원 종목(1원 틱)은
+     * 100·50·10원 경계에서, 미국 종목(0.01달러 틱)은 $1·$0.50·$0.10 경계에서
+     * 자동으로 같은 리듬이 나온다 — 가격대별 별도 표가 필요 없다.
+     *
+     * <p>벽 위치는 현재가와 함께 움직인다(현재가가 70,350이면 70,000 벽이 창 안으로,
+     * 70,050이면 벽이 창 밖으로 밀려난다). 깊이 인덱스에 고정 파형을 얹는 방식은
+     * 종목·버전 불문 같은 자리에 영구 벽이 생겨 설계서가 피하려는 "고정 벽 모양"에
+     * 걸리므로 쓰지 않는다.
+     */
+    static BigDecimal roundNumberBoost(BigDecimal price, BigDecimal tickSize) {
+        BigDecimal steps = price.divideToIntegralValue(tickSize);
+        if (steps.remainder(new BigDecimal("100")).signum() == 0) return new BigDecimal("1.60");
+        if (steps.remainder(new BigDecimal("50")).signum() == 0) return new BigDecimal("1.40");
+        if (steps.remainder(new BigDecimal("10")).signum() == 0) return new BigDecimal("1.15");
+        return BigDecimal.ONE;
     }
 
     private BigDecimal baseNotionalFor(OrderBookProperties policy, StockDescriptor stock) {
