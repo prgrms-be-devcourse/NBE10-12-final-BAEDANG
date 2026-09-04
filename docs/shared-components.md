@@ -171,6 +171,8 @@ Source: [OrderAmountCalculator.java](../back/src/main/java/com/baedang/trading/s
 `calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
 Inject this Spring bean so it uses the configured fee and tax rates. The order policy validates input and tradability.
 
+Rates and the SEC minimum are project-fixed `.env` settings, not per-order snapshots. Keep them unchanged across restarts/deployments while orders are active.
+
 - KR orders do not use the supplied exchange rate in the calculation; the result's exchange rate is 1.
 - US orders round the unit price to cents with `HALF_UP`, multiply by quantity, apply the exchange rate, then round to whole won with `HALF_UP`.
 - The trading fee is calculated from the gross amount already rounded to whole won, then rounded to whole won itself.
@@ -185,7 +187,7 @@ Even when reused across use cases, these components retain domain-specific contr
 
 | Source | Public functionality | Scope / caveat |
 | --- | --- | --- |
-| [InitialDepositLedgerService](../back/src/main/java/com/baedang/trading/service/InitialDepositLedgerService.java) | `recordInitialDeposit(accountId, initialCash, roundNo, occurredAt)` | Persist one initial-deposit entry immediately after signup/reset account creation. MANDATORY joins the existing transaction without increasing cash again. Supply positive ID/amount, round ≥ 1, and the account opening time; the caller handles duplicate requests. Not for historical ledger repairs |
+| [LedgerService](../back/src/main/java/com/baedang/trading/service/LedgerService.java) | `recordInitialDeposit(accountId, initialCash, roundNo, occurredAt)`, `recordBuy/recordSell(order, savedExecution, balanceAfter, stock)` | MANDATORY. Only memos/signs/INSERT for initial funding and fills; caller owns settlement/balance mutation. Pass the owning order, saved execution and immediate balance. Account/stock/side come from the order; execution/order ownership is validated. Duplicate normal execution ledger entries fail at DB level and roll back the transaction. |
 | [HoldingValuator](../back/src/main/java/com/baedang/account/service/HoldingValuator.java) | `valuate(holdings, quoteByStockId, usdKrwRate)` | KRW valuation for account summaries and holdings lists; reuse the existing round-per-stock-before-summing policy |
 | [LedgerCursor](../back/src/main/java/com/baedang/account/support/LedgerCursor.java) | Static `encode(entryId)`, `decode(cursor)` | Ledger-only Base64URL cursor; decoding errors produce `INVALID_CURSOR`. Different format from ranking cursors |
 | [StockCategory](../back/src/main/java/com/baedang/stock/entity/StockCategory.java) | Static `from(securityType, isCommonShare)` | ETF / ETN take precedence; false common-share flag yields PREFERRED, otherwise INDIVIDUAL |

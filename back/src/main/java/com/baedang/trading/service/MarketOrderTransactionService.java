@@ -13,6 +13,8 @@ import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
+import com.baedang.trading.entity.TradeExecution;
+import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderReceipt;
@@ -39,15 +41,11 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 
-import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
-import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
-
 /** 시장가 주문의 DB 변경을 하나의 트랜잭션으로 즉시 확정합니다. */
 @Service
 public class MarketOrderTransactionService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketOrderTransactionService.class);
-    private static final int MAX_MEMO_LENGTH = 200;
 
     private final AccountRepository accountRepository;
     private final StockRepository stockRepository;
@@ -55,6 +53,8 @@ public class MarketOrderTransactionService {
     private final HoldingRepository holdingRepository;
     private final TradeOrderRepository tradeOrderRepository;
     private final LedgerEntryRepository ledgerEntryRepository;
+    private final TradeExecutionRepository tradeExecutionRepository;
+    private final LedgerService ledgerService;
     private final OrderAmountCalculator amountCalculator;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
@@ -66,6 +66,8 @@ public class MarketOrderTransactionService {
             HoldingRepository holdingRepository,
             TradeOrderRepository tradeOrderRepository,
             LedgerEntryRepository ledgerEntryRepository,
+            TradeExecutionRepository tradeExecutionRepository,
+            LedgerService ledgerService,
             OrderAmountCalculator amountCalculator,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
@@ -76,6 +78,8 @@ public class MarketOrderTransactionService {
         this.holdingRepository = holdingRepository;
         this.tradeOrderRepository = tradeOrderRepository;
         this.ledgerEntryRepository = ledgerEntryRepository;
+        this.tradeExecutionRepository = tradeExecutionRepository;
+        this.ledgerService = ledgerService;
         this.amountCalculator = amountCalculator;
         this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
@@ -212,13 +216,12 @@ public class MarketOrderTransactionService {
             account.creditMarketSell(amount.netAmount());
         }
 
-        String memo = createMemo(stock, order);
-        LedgerEntry ledgerEntry = terms.side() == OrderSide.BUY
-                ? LedgerEntry.buy(account.getAccountId(), order.getOrderId(), amount.netAmount(),
-                    account.getCashBalance(), amount.exchangeRate(), memo, orderedAt)
-                : LedgerEntry.sell(account.getAccountId(), order.getOrderId(), amount.netAmount(),
-                    account.getCashBalance(), amount.exchangeRate(), memo, orderedAt);
-        ledgerEntryRepository.save(ledgerEntry);
+        TradeExecution execution = tradeExecutionRepository.save(TradeExecution.market(order, amount));
+        if (terms.side() == OrderSide.BUY) {
+            ledgerService.recordBuy(order, execution, account.getCashBalance(), stock);
+        } else {
+            ledgerService.recordSell(order, execution, account.getCashBalance(), stock);
+        }
 
         log.info("시장가 주문 체결: orderId={}, accountId={}, stockId={}, side={}, quantity={}",
                 order.getOrderId(), account.getAccountId(), stock.getStockId(), terms.side(), terms.quantity());
@@ -270,9 +273,4 @@ public class MarketOrderTransactionService {
         }
     }
 
-    private String createMemo(Stock stock, TradeOrder order) {
-        String memo = stock.getName() + " " + plain(order.getQuantity()) + "주 @ "
-                + currency(order.getExecutedPrice(), stock.getCurrency()) + " (수수료·세금 포함)";
-        return memo.length() <= MAX_MEMO_LENGTH ? memo : memo.substring(0, MAX_MEMO_LENGTH);
-    }
 }
