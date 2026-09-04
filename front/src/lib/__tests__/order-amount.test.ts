@@ -8,7 +8,7 @@
  *   - SEC Fee: max(gross_usd * 0.0000206, $0.01) → 센트 반올림 → KRW 환산 → 원 단위 HALF_UP
  */
 import { describe, it, expect } from 'vitest';
-import { calculateOrderAmount } from '../order-amount';
+import { calculateOrderAmount, maxAffordableQuantity } from '../order-amount';
 
 // 테스트에서 쓰는 고정 환율 시나리오
 const RATE = 1400; // USD/KRW
@@ -151,5 +151,42 @@ describe('엣지 케이스', () => {
     expect(r.fee).toBe(0);
     expect(r.tax).toBe(0);
     expect(r.netAmount).toBe(0);
+  });
+});
+
+// ─────────────────────────────────────────────
+// maxAffordableQuantity — 매수 입력 상한(보유 예수금 기준)
+// ─────────────────────────────────────────────
+describe('maxAffordableQuantity', () => {
+  it('국내(KRW) — 예산이 정확히 N주 매수 금액과 같으면 N을 돌려준다 (10주 netAmount=500,050원)', () => {
+    const qty = maxAffordableQuantity({ price: 50000, currency: 'KRW', usdKrwRate: RATE, availableCash: 500_050 });
+    expect(qty).toBe(10);
+  });
+
+  it('국내(KRW) — 예산이 1원 모자라면 한 주 적게 계산한다 (9주 netAmount=450,045원)', () => {
+    const qty = maxAffordableQuantity({ price: 50000, currency: 'KRW', usdKrwRate: RATE, availableCash: 500_049 });
+    expect(qty).toBe(9);
+  });
+
+  it('미국(USD) — 예산이 정확히 2주 매수 금액과 같으면 2를 돌려준다 (2주 netAmount=510,939원)', () => {
+    const qty = maxAffordableQuantity({ price: 182.456, currency: 'USD', usdKrwRate: RATE, availableCash: 510_939 });
+    expect(qty).toBe(2);
+  });
+
+  it('미국(USD) — 예산이 1원 모자라면 한 주 적게 계산한다 (1주 netAmount=255,470원)', () => {
+    const qty = maxAffordableQuantity({ price: 182.456, currency: 'USD', usdKrwRate: RATE, availableCash: 510_938 });
+    expect(qty).toBe(1);
+  });
+
+  it('예산 0 — 0주', () => {
+    expect(maxAffordableQuantity({ price: 50000, currency: 'KRW', usdKrwRate: RATE, availableCash: 0 })).toBe(0);
+  });
+
+  it('가격 0 — 0주(0으로 나누기 방지)', () => {
+    expect(maxAffordableQuantity({ price: 0, currency: 'KRW', usdKrwRate: RATE, availableCash: 1_000_000 })).toBe(0);
+  });
+
+  it('예산이 1주 가격보다도 적으면 0주', () => {
+    expect(maxAffordableQuantity({ price: 50000, currency: 'KRW', usdKrwRate: RATE, availableCash: 100 })).toBe(0);
   });
 });

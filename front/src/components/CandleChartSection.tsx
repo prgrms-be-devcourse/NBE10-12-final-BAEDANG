@@ -2,6 +2,7 @@
 
 import { PillTabs } from "./PillTabs";
 import { CandlestickChart } from "./CandlestickChart";
+import { CHART_TIME_ZONE } from "@/lib/candle-chart-data";
 import type { Candle } from "@/lib/api";
 
 export type CandleUnit = "일봉" | "1분봉";
@@ -12,11 +13,15 @@ export type CandlePeriod = "1개월" | "6개월" | "1년";
  * 어긋나거나 빈 문자열이 오면 `new Date(...)`가 Invalid Date를 만들어
  * `toLocaleDateString`이 "Invalid Date" 같은 값을 그대로 보여줄 수 있다.
  * 파싱에 실패하면 null을 돌려줘서 호출부가 그 부분을 통째로 생략하게 한다.
+ *
+ * <p>타임존을 지정하지 않으면 뷰어의 브라우저/OS 타임존을 따라가 버려서 사람마다
+ * 다른 날짜가 보일 수 있다 — 캔들 차트 자체(`CandlestickChart`)와 마찬가지로
+ * `docs/erd.md`가 정의한 거래일 경계(KST)에 맞춰 `Asia/Seoul`로 고정한다.
  */
 function formatLastCandleDate(iso: string): string | null {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return null;
-  return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit" });
+  return date.toLocaleDateString("ko-KR", { month: "2-digit", day: "2-digit", timeZone: CHART_TIME_ZONE });
 }
 
 /**

@@ -8,12 +8,17 @@ import { Reveal } from "@/components/Reveal";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
+import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const PAGE_SIZE = 20;
+// 백엔드 시세 수집 자체가 5초 주기다(docs/erd.md) — 그보다 자주 재조회해도
+// 더 신선한 값을 받을 수 없어 폴링 주기를 여기에 맞춘다.
+const PRICE_POLL_INTERVAL_MS = 5000;
 // 검색창을 열었을 때(입력 전) 기본으로 보여주는 큐레이션 목록 — design_handoff 원본의
 // 하드코딩된 예시 그대로다. 산업은 연결할 실제 화면이 없어 장식용으로만 둔다.
 const POPULAR_STOCKS: { symbol: string; name: string; marketCountry: MarketCountry }[] = [
@@ -27,8 +32,14 @@ const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우�
 
 export default function RankingsPage() {
   const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
+  // 해외 주식 탭에서 현재가를 원화 환산가/달러 원가 중 뭘로 볼지. 예전엔 원화가 아래에
+  // 달러가를 항상 같이(두 줄로) 보여줬는데, 그러면 국내 주식(한 줄) 행보다 칸이 길어져서
+  // (팀원 제보) 국내와 높이를 맞추려고 글자를 눌러 넣었더니 이번엔 잘 안 보이는 문제가
+  // 생겼다. 대신 토글로 한 줄만 보여주고 사용자가 원하는 통화를 고르게 한다.
+  const [priceDisplay, setPriceDisplay] = useState<"KRW" | "USD">("KRW");
   const [items, setItems] = useState<RankingItem[]>([]);
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [hasNext, setHasNext] = useState(false);
@@ -73,6 +84,46 @@ export default function RankingsPage() {
       cancelled = true;
     };
   }, [market]);
+
+  // 폴링 콜백이 매번 최신 items 길이를 읽을 수 있도록 ref로 따로 들고 있는다 —
+  // 이걸 useVisiblePolling의 의존성으로 직접 넣으면 폴링으로 items가 바뀔 때마다
+  // 인터벌이 매번 재생성된다.
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+  const pollInFlightRef = useRef(false);
+
+  // 5초마다 지금까지 로드된 만큼(더보기로 추가 로드했으면 그만큼도 포함)을
+  // 처음부터 다시 조회해서 시세를 갱신한다. 탭이 백그라운드면 useVisiblePolling이
+  // 알아서 멈춘다. 실패해도 화면을 에러로 덮지 않고 다음 주기에 조용히 재시도한다.
+  // 지금 보고 있는 시장이 장 마감 중이면 quote_snapshot 자체가 5초 주기로
+  // 갱신되지 않으므로(docs/erd.md), 폴링해도 더 신선한 값을 받을 수 없어
+  // 장 시간대에만 폴링한다.
+  useVisiblePolling(
+    () => {
+      if (pollInFlightRef.current) return;
+      pollInFlightRef.current = true;
+      getRankings(market, itemsRef.current.length || PAGE_SIZE)
+        .then((page) => {
+          // items·nextCursor·hasNext는 항상 같은 응답에서 나온 값이라 서로
+          // 일관돼 있다 — 응답이 이전보다 짧다고 걸러내면(예: 요청한 만큼보다
+          // 적게 옴), 랭킹이 실제로 줄어든 경우(종목 상장폐지 등)에는 그 뒤로
+          // 영원히 최신 상태를 반영하지 못하는 문제가 생긴다(코드 리뷰, PR #124,
+          // SOL4R1S님 — 100개 표시 후 백엔드가 계속 99개를 반환하면 모든 폴링
+          // 응답을 영구히 버리게 됨). 응답을 그대로 통째로 받아들인다.
+          setItems(page.items);
+          setCursor(page.nextCursor ?? undefined);
+          setHasNext(page.hasNext);
+        })
+        .catch(() => {})
+        .finally(() => {
+          pollInFlightRef.current = false;
+        });
+    },
+    PRICE_POLL_INTERVAL_MS,
+    isMarketOpen(market)
+  );
 
   // 2자 이상 입력되면 실제 검색 API를 호출한다. 타이핑마다 바로 쏘지 않도록 살짝 디바운스한다.
   useEffect(() => {
@@ -351,19 +402,48 @@ export default function RankingsPage() {
 
       <Reveal delay={0.48}>
       <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+        {/* 해외 주식 탭에서는 "현재가" 헤더에 원/$ 토글이 들어가서 국내 탭보다
+            헤더 행이 더 길어진다(제보) — min-height로 두 탭이 항상 같은 높이가
+            되게 고정한다(토글이 필요로 하는 높이에 맞춘 값). */}
         <div
           className="grid items-center px-5 py-2.5 text-[12px] font-bold"
           style={{
             gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr",
             borderBottom: "1px solid var(--line2)",
             color: "var(--mut2)",
+            minHeight: 47,
           }}
         >
-          <span />
-          <span>순위</span>
+          {/* 하트 아이콘이 관심 종목 찜하기 용도라는 게 라벨 없이는 안 드러난다(제보) —
+              "관심" 헤더를 추가한다. */}
+          <span className="text-center">관심</span>
+          {/* 순위는 자릿수가 들쭉날쭉한 짧은 숫자라 왼쪽 정렬이면 헤더 라벨과
+              시각적으로 어긋나 보인다(제보) — 좁은 숫자 칸은 가운데 정렬이 관례다. */}
+          <span className="text-center">순위</span>
           <span>종목명</span>
-          <span />
-          <span className="text-right">현재가</span>
+          {/* 개별주/ETF 배지 칸에 헤더 라벨이 없었다(제보) — "구분"을 추가하고,
+              배지도 칸 가운데로 옮겨서 짧은 라벨과 나란히 보이게 한다. */}
+          <span className="text-center">구분</span>
+          <span className="flex items-center justify-end gap-2">
+            현재가
+            {market === "US" && (
+              <PillTabs
+                options={[
+                  { value: "KRW", label: "원" },
+                  { value: "USD", label: "$" },
+                ]}
+                value={priceDisplay}
+                onChange={(v) => setPriceDisplay(v as "KRW" | "USD")}
+                trackClassName="w-fit gap-0.5 rounded-full p-[2px]"
+                trackStyle={{
+                  background: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.08)",
+                  border: theme === "dark" ? "1px solid rgba(255,255,255,.08)" : "1px solid rgba(15,56,104,.14)",
+                }}
+                buttonClassName="rounded-full px-2 py-0.5 text-[10.5px] font-bold"
+                inactiveTextStyle={{ color: "var(--mut2)" }}
+              />
+            )}
+          </span>
           <span className="text-right">전일대비</span>
           <span className="text-right">거래대금</span>
         </div>
@@ -428,19 +508,21 @@ export default function RankingsPage() {
               >
                 ♥
               </button>
-              <span style={{ color: "var(--mut2)" }}>{item.rank}</span>
+              <span className="text-center" style={{ color: "var(--mut2)" }}>{item.rank}</span>
               <span style={{ color: "var(--ink)" }}>
                 {item.name} <Tag>{item.symbol}</Tag>
               </span>
               <span
-                className="w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
+                className="mx-auto w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
                 style={badge}
               >
                 {label}
               </span>
+              {/* 원화·달러를 늘 같이(두 줄로) 보여주면 국내 주식(한 줄) 행보다 칸이 길어져서
+                  (팀원 제보) 헤더의 원/$ 토글로 뭘 볼지 고르게 하고 한 줄만 보여준다 —
+                  국내 주식 행과 자연스럽게 같은 높이가 된다. */}
               <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                {formatNumber(krwPrice)}
-                {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(item.lastPrice)}</div>}
+                {isUsd && priceDisplay === "USD" ? formatUsd(item.lastPrice) : formatNumber(krwPrice)}
               </span>
               <span className="flex justify-end">
                 {krwChange === null ? (
