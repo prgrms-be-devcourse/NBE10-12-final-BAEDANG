@@ -5,7 +5,7 @@ import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.MarketCalendarPort;
-import com.baedang.trading.service.InitialDepositLedgerService;
+import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -60,7 +60,7 @@ class AuthInitialDepositIntegrationTest {
     @MockitoBean MarketCalendarPort marketCalendarPort;
     @Autowired AuthService authService;
     @Autowired AccountResetService resetService;
-    @Autowired InitialDepositLedgerService initialDepositLedgerService;
+    @Autowired LedgerService ledgerService;
     @Autowired AccountRepository accountRepository;
     @Autowired JdbcTemplate jdbc;
 
@@ -135,7 +135,7 @@ class AuthInitialDepositIntegrationTest {
 
     @Test
     void 트랜잭션_없이_초기원장만_저장하는_호출은_거절한다() {
-        assertThatThrownBy(() -> initialDepositLedgerService.recordInitialDeposit(
+        assertThatThrownBy(() -> ledgerService.recordInitialDeposit(
                 1L, INITIAL_CASH, 1, NOW.atOffset(ZoneOffset.UTC)))
                 .isInstanceOf(IllegalTransactionStateException.class);
         assertCounts(0, 0, 0);

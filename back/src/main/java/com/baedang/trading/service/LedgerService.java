@@ -1,6 +1,10 @@
 package com.baedang.trading.service;
 
 import com.baedang.trading.entity.LedgerEntry;
+import com.baedang.trading.entity.TradeExecution;
+import com.baedang.trading.entity.TradeOrder;
+import com.baedang.trading.entity.OrderSide;
+import com.baedang.stock.entity.Stock;
 import com.baedang.trading.repository.LedgerEntryRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -9,13 +13,15 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
-/** 원장 기록 서비스. 현재는 신규 계좌의 초기 지급 기록만 담당합니다. */
+/** 원장 메모·부호·INSERT만 담당합니다. 잔액 변경과 정산 계산은 하지 않습니다. */
 @Service
-public class InitialDepositLedgerService {
+public class LedgerService {
+
+    private static final int MAX_MEMO_LENGTH = 200;
 
     private final LedgerEntryRepository ledgerEntryRepository;
 
-    public InitialDepositLedgerService(LedgerEntryRepository ledgerEntryRepository) {
+    public LedgerService(LedgerEntryRepository ledgerEntryRepository) {
         this.ledgerEntryRepository = ledgerEntryRepository;
     }
 
@@ -42,5 +48,28 @@ public class InitialDepositLedgerService {
 
         String memo = roundNo == 1 ? "모의투자금 지급" : "모의투자금 지급 · " + roundNo + "회차";
         ledgerEntryRepository.save(LedgerEntry.initialDeposit(accountId, initialCash, memo, occurredAt));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordBuy(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, Stock stock) {
+        recordExecution(order, execution, balanceAfter, stock, OrderSide.BUY);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordSell(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, Stock stock) {
+        recordExecution(order, execution, balanceAfter, stock, OrderSide.SELL);
+    }
+
+    private void recordExecution(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, Stock stock, OrderSide side) {
+        if (order == null || order.getSide() != side || execution == null || stock == null
+                || stock.getStockId() == null || !stock.getStockId().equals(order.getStockId())) {
+            throw new IllegalArgumentException("체결 방향/종목이 원장 요청과 일치하지 않습니다");
+        }
+        String memo = stock.getName() + " "
+                + com.baedang.global.formatter.FinancialDecimalFormatter.plain(execution.getQuantity()) + "주 @ "
+                + com.baedang.global.formatter.FinancialDecimalFormatter.currency(execution.getPrice(), stock.getCurrency())
+                + " (수수료·세금 포함)";
+        if (memo.length() > MAX_MEMO_LENGTH) memo = memo.substring(0, MAX_MEMO_LENGTH);
+        ledgerEntryRepository.save(LedgerEntry.execution(order, execution, balanceAfter, memo));
     }
 }
