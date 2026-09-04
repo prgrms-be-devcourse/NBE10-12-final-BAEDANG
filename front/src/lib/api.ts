@@ -83,7 +83,7 @@ export class ApiError extends Error {
 }
 
 type RequestInput = {
-  method: "GET" | "POST";
+  method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   headers?: Record<string, string>;
   body?: unknown;
   /** true면 tokenStore의 accessToken을 Authorization 헤더로 실어 보낸다. */
@@ -172,6 +172,43 @@ export function login(input: { email: string; password: string }): Promise<AuthU
  */
 export function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string }> {
   return request<{ accessToken: string }>("/api/auth/refresh", { method: "POST", body: { refreshToken } });
+}
+
+// ── 회원 정보 ──────────────────────────────────────────────────────────────────
+
+export type UserProfile = {
+  userId: number;
+  email: string;
+  nickname: string;
+};
+
+/** `GET /api/users/me` — 내 회원 정보. */
+export function getMe(): Promise<UserProfile> {
+  return request<UserProfile>("/api/users/me", { method: "GET", auth: true });
+}
+
+/** `PATCH /api/users/me` — 닉네임 변경. 중복이면 `NICKNAME_DUPLICATED`. */
+export function updateNickname(nickname: string): Promise<UserProfile> {
+  return request<UserProfile>("/api/users/me", { method: "PATCH", auth: true, body: { nickname } });
+}
+
+/** `PUT /api/users/me/password` — 비밀번호 변경. 현재 비밀번호가 틀리면 `INVALID_PASSWORD`. */
+export function changeUserPassword(currentPassword: string, newPassword: string): Promise<UserProfile> {
+  return request<UserProfile>("/api/users/me/password", {
+    method: "PUT",
+    auth: true,
+    body: { currentPassword, newPassword },
+  });
+}
+
+/**
+ * `DELETE /api/users/me` — 회원 탈퇴. 계정을 지우지 않고 상태만 WITHDRAWN·CLOSED로
+ * 바꾼다(`docs/erd.md`). 백엔드가 토큰을 무효화하진 않으니(stateless JWT), 성공하면
+ * 호출부가 반드시 로컬 로그인 상태를 지워야 한다 — 안 지우면 이미 탈퇴한 계정으로
+ * 계속 요청을 보내다 USER_NOT_FOUND류 에러만 반복해서 보게 된다.
+ */
+export function withdrawAccount(currentPassword: string): Promise<void> {
+  return request<void>("/api/users/me", { method: "DELETE", auth: true, body: { currentPassword } });
 }
 
 // ── 계좌 ──────────────────────────────────────────────────────────────────────
