@@ -950,12 +950,14 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 
 ## 2주차 이후 예정
 
+지정가 가격은 옵션 B(매수 지정가 이하 / 매도 지정가 이상 호가 체결), 만료는 접수한 정규 세션 종료 시각입니다. 모든 사용자가 동일한 가상 시장의 물량을 소비하지만, 사용자 주문끼리 직접 매칭하지는 않습니다. 한 사용자의 체결로 줄어든 공유 잔량은 다른 사용자의 체결에도 반영됩니다.
+
 | 엔드포인트 | 내용 |
 |---|---|
 | `POST /orders` | 지정가 주문 (`limitPrice`, `PENDING` 상태) |
 | `POST /orders` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/orders` | 주문 내역 탭 — 거절된 주문까지 포함 (원장에는 안 남음) |
-| `DELETE /orders/{id}` | 주문 취소 |
+| `PATCH /orders/{orderId}` | 예정: `{ "status": "CANCELED" }`만 허용, 활성 미체결 잔여분 취소. 이미 체결된 수량/원장은 유지 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
 | `GET /stocks/{symbol}/orderbook` | 호가 |

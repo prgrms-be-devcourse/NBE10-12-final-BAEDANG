@@ -30,6 +30,8 @@ import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -96,6 +98,9 @@ class MarketOrderIntegrationTest {
     @Autowired HoldingRepository holdingRepository;
     @Autowired TradeOrderRepository tradeOrderRepository;
     @Autowired LedgerEntryRepository ledgerEntryRepository;
+    @Autowired com.baedang.trading.repository.TradeExecutionRepository tradeExecutionRepository;
+    @Autowired OrderAmountCalculator amountCalculator;
+    @Autowired LedgerService ledgerService;
     @Autowired JdbcTemplate jdbcTemplate;
     @Autowired PlatformTransactionManager transactionManager;
 
@@ -120,6 +125,12 @@ class MarketOrderIntegrationTest {
         TradeOrder order = tradeOrderRepository.findById(response.orderId()).orElseThrow();
 
         assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED);
+        var execution = tradeExecutionRepository.findByOrderIdAndExecutionKey(order.getOrderId(), order.getClientOrderId()).orElseThrow();
+        assertThat(execution.getQuantity()).isEqualByComparingTo("2");
+        assertThat(execution.getGrossAmountKrw()).isEqualByComparingTo("20000");
+        assertThat(execution.getBookLevelId()).isNull();
+        assertThat(ledgerEntryRepository.findFirstByOrderIdOrderByEntryIdAsc(order.getOrderId())
+                .orElseThrow().getExecutionId()).isEqualTo(execution.getExecutionId());
         assertThat(account.getCashBalance()).isEqualByComparingTo("29998");
         assertThat(account.getLockedCash()).isEqualByComparingTo("0");
         assertThat(holding.getQuantity()).isEqualByComparingTo("2");
@@ -849,6 +860,192 @@ class MarketOrderIntegrationTest {
                 stock.getStockId(), price, currency, collectedAt, collectedAt));
         return new Fixture(
                 user.getUserId(), account.getAccountId(), stock.getStockId(), symbol, marketCountry);
+    }
+
+    @Test
+    void 원장_저장_실패는_체결_주문_잔액_보유수량을_모두_롤백한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        jdbcTemplate.execute("ALTER TABLE ledger_entry ADD CONSTRAINT test_reject_execution_ledger CHECK (account_id <> "
+                + fixture.accountId() + ")");
+        try {
+            assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request(fixture, "BUY", "2")))
+                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+            assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance()).isEqualByComparingTo("50000");
+            assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isZero();
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_execution e JOIN trade_order o ON o.order_id = e.order_id WHERE o.account_id = ?",
+                    Long.class, fixture.accountId())).isZero();
+            assertThat(holdingRepository.findByAccountIdAndStockId(fixture.accountId(), fixture.stockId())).isEmpty();
+            assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isZero();
+        } finally {
+            jdbcTemplate.execute("ALTER TABLE ledger_entry DROP CONSTRAINT test_reject_execution_ledger");
+        }
+    }
+
+    @Test
+    void 같은_체결과_정상원장을_두번_기록할_수_없다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest request = request(fixture, "BUY", "2");
+        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        TradeOrder order = tradeOrderRepository.findById(first.orderId()).orElseThrow();
+        var amount = amountCalculator.calculate(MarketCountry.KR, OrderSide.BUY, new BigDecimal("10000"), new BigDecimal("2"), BigDecimal.ONE);
+        assertThatThrownBy(() -> tradeExecutionRepository.save(com.baedang.trading.entity.TradeExecution.market(order, amount)))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        var execution = tradeExecutionRepository.findByOrderIdAndExecutionKey(order.getOrderId(), order.getClientOrderId()).orElseThrow();
+        assertThatThrownBy(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status ->
+                ledgerService.recordBuy(order, execution, new BigDecimal("29998"), stockRepository.findById(fixture.stockId()).orElseThrow())))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+        assertThat(tradeExecutionRepository.countByOrderId(order.getOrderId())).isEqualTo(1);
+        assertThat(marketOrderService.place(fixture.userId(), request)).isEqualTo(first);
+        assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+    }
+
+    @Test
+    void 원장의_계좌와_주문과_체결_연결을_DB에서도_검증한다() {
+        Fixture owner = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        Fixture other = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        OffsetDateTime at = Instant.parse("2026-09-03T01:00:00Z").atOffset(ZoneOffset.UTC);
+        // 원장이 아직 없는 체결을 만들어 UNIQUE 실패와 FK 실패를 구분합니다.
+        TradeOrder order = tradeOrderRepository.saveAndFlush(TradeOrder.filledMarketOrder(
+                owner.accountId(), owner.stockId(), UUID.randomUUID(), OrderSide.BUY,
+                BigDecimal.ONE, new BigDecimal("10000"), at, BigDecimal.ONE,
+                new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ZERO, new BigDecimal("10001"), at));
+        var amounts = amountCalculator.calculate(MarketCountry.KR, OrderSide.BUY,
+                new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ONE);
+        var execution = tradeExecutionRepository.save(com.baedang.trading.entity.TradeExecution.market(order, amounts));
+        OrderResponse otherOrder = marketOrderService.place(other.userId(), request(other, "BUY", "1"));
+        String insert = """
+                INSERT INTO ledger_entry (account_id, order_id, execution_id, entry_type, amount, balance_after,
+                                          exchange_rate, occurred_at)
+                VALUES (?, ?, ?, 'BUY', -10001, 39999, 1, ?)
+                """;
+        assertThatThrownBy(() -> jdbcTemplate.update(insert, other.accountId(), order.getOrderId(), execution.getExecutionId(), at))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .hasMessageContaining("fk_ledger_order_account");
+        assertThatThrownBy(() -> jdbcTemplate.update(insert, other.accountId(), otherOrder.orderId(), execution.getExecutionId(), at))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .hasMessageContaining("fk_ledger_execution_order");
+        assertThat(jdbcTemplate.update(insert, owner.accountId(), order.getOrderId(), execution.getExecutionId(), at)).isEqualTo(1);
+        assertThat(ledgerEntryRepository.countByAccountId(owner.accountId())).isEqualTo(1);
+    }
+
+    @Test
+    void 기존_체결행이_없는_시장가도_최초원장의_잔액으로_재생한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        PlaceOrderRequest request = request(fixture, "BUY", "2");
+        OffsetDateTime at = Instant.parse("2026-09-01T00:00:00Z").atOffset(ZoneOffset.UTC);
+        TradeOrder legacy = tradeOrderRepository.saveAndFlush(TradeOrder.filledMarketOrder(
+                fixture.accountId(), fixture.stockId(), UUID.fromString(request.clientOrderId()), OrderSide.BUY,
+                new BigDecimal("2"), new BigDecimal("10000"), at, BigDecimal.ONE,
+                new BigDecimal("20000"), new BigDecimal("2"), BigDecimal.ZERO, new BigDecimal("20002"), at));
+        ledgerEntryRepository.save(LedgerEntry.buy(fixture.accountId(), legacy.getOrderId(),
+                new BigDecimal("20002"), new BigDecimal("29998"), BigDecimal.ONE, "legacy", at));
+        clearInvocations(marketSessionProvider, exchangeRateProvider);
+        OrderResponse response = marketOrderService.place(fixture.userId(), request);
+        assertThat(response.account().cashBalanceAfter()).isEqualTo("29998");
+        assertThat(tradeExecutionRepository.countByOrderId(legacy.getOrderId())).isZero();
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"1", "1383.60", "1383.123456"})
+    void 소수점_6자리_이하_환율과_반올림전_거래대금을_DB에_보존한다(String rateText) {
+        BigDecimal rate = new BigDecimal(rateText);
+        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(rate);
+        Fixture fixture = createFixture(new BigDecimal("500000"), new BigDecimal("88.33"), MarketCountry.US, "NASDAQ", "USD");
+        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        var execution = tradeExecutionRepository.findByOrderIdAndExecutionKey(first.orderId(), UUID.fromString(request.clientOrderId())).orElseThrow();
+        assertThat(tradeOrderRepository.findById(first.orderId()).orElseThrow().getExchangeRate()).isEqualByComparingTo(rate);
+        assertThat(execution.getExchangeRate()).isEqualByComparingTo(rate);
+        assertThat(execution.grossAmountUsd(MarketCountry.US)).isEqualByComparingTo("88.33");
+        assertThat(execution.unroundedGrossAmountKrw()).isEqualByComparingTo(new BigDecimal("88.33").multiply(rate));
+        assertThat(ledgerEntryRepository.findFirstByOrderIdOrderByEntryIdAsc(first.orderId()).orElseThrow().getExchangeRate())
+                .isEqualByComparingTo(rate);
+        assertThat(marketOrderService.place(fixture.userId(), request)).isEqualTo(first);
+    }
+
+    @Test
+    void 매수매도_원장도_상위_트랜잭션이_필수다() {
+        assertThatThrownBy(() -> ledgerService.recordBuy(null, null, null, null)).isInstanceOf(IllegalTransactionStateException.class);
+        assertThatThrownBy(() -> ledgerService.recordSell(null, null, null, null)).isInstanceOf(IllegalTransactionStateException.class);
+    }
+
+    @Test
+    void 지정가_모델의_부분체결_원장_연결과_취소를_DB에_보존한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("1000"), new BigDecimal("100"));
+        OffsetDateTime at = Instant.parse("2026-09-03T01:00:00Z").atOffset(ZoneOffset.UTC);
+        var rate = new com.baedang.trading.model.ExecutionRateEvidence(BigDecimal.ONE, at, at, at.plusMinutes(1));
+        Long bookLevelId = 1L;
+        // 모델/스키마 검증용 fixture. 주문·잔액·보유수량·원장을 함께 구성합니다.
+        Long orderId = new TransactionTemplate(transactionManager).execute(status -> {
+            accountRepository.findByAccountIdAndUserIdForUpdate(fixture.accountId(), fixture.userId()).orElseThrow();
+            TradeOrder order = tradeOrderRepository.save(TradeOrder.pendingLimitOrder(fixture.accountId(), fixture.stockId(),
+                    UUID.randomUUID(), OrderSide.BUY, new BigDecimal("3"), new BigDecimal("100"), new BigDecimal("300"),
+                    at, at.plusHours(6)));
+            var amounts = new com.baedang.trading.model.ExecutionAmounts(BigDecimal.ZERO, new BigDecimal("90"),
+                    BigDecimal.ZERO, new BigDecimal("90"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("90"));
+            var execution = tradeExecutionRepository.save(com.baedang.trading.entity.TradeExecution.limit(order, MarketCountry.KR,
+                    UUID.randomUUID(), 1, BigDecimal.ONE, new BigDecimal("90"), rate, amounts, at, at.plusSeconds(1), bookLevelId));
+            order.applyExecution(execution, new BigDecimal("200"));
+            jdbcTemplate.update("UPDATE account SET cash_balance = 910, locked_cash = 200 WHERE account_id = ?", fixture.accountId());
+            holdingRepository.save(Holding.firstBuy(fixture.accountId(), fixture.stockId(), BigDecimal.ONE,
+                    BigDecimal.ZERO, new BigDecimal("90"), at.plusSeconds(1)));
+            ledgerService.recordBuy(order, execution, new BigDecimal("910"), stockRepository.findById(fixture.stockId()).orElseThrow());
+            return order.getOrderId();
+        });
+        TradeOrder partial = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(partial.getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
+        assertThat(partial.getExecutionCount()).isEqualTo(1);
+        assertThat(partial.getLastExecutedAt()).isEqualTo(at.plusSeconds(1));
+        assertThat(tradeExecutionRepository.findByOrderIdOrderBySequenceNoAsc(orderId,
+                org.springframework.data.domain.PageRequest.of(0, 10)).getContent().getFirst().getBookLevelId()).isEqualTo(bookLevelId);
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            accountRepository.findByAccountIdAndUserIdForUpdate(fixture.accountId(), fixture.userId()).orElseThrow();
+            TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
+            order.cancel(at.plusSeconds(2));
+            jdbcTemplate.update("UPDATE account SET locked_cash = 0 WHERE account_id = ?", fixture.accountId());
+        });
+        TradeOrder canceled = tradeOrderRepository.findById(orderId).orElseThrow();
+        assertThat(canceled.getStatus()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(canceled.getFilledQuantity()).isEqualByComparingTo("1");
+        assertThat(canceled.activeRemainingQuantity()).isZero();
+        assertThat(canceled.getReservedCash()).isZero();
+        assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"CANCELED", "EXPIRED"})
+    void 전부_미체결인_주문은_동결과_해제만_수행하고_원장을_남기지_않는다(String target) {
+        Fixture fixture = createKrFixture(new BigDecimal("1000"), new BigDecimal("100"));
+        OffsetDateTime at = Instant.parse("2026-09-03T01:00:00Z").atOffset(ZoneOffset.UTC);
+        var rate = new com.baedang.trading.model.ExecutionRateEvidence(BigDecimal.ONE, at, at, at.plusMinutes(1));
+        Long orderId = new TransactionTemplate(transactionManager).execute(status -> {
+            accountRepository.findByAccountIdAndUserIdForUpdate(fixture.accountId(), fixture.userId()).orElseThrow();
+            TradeOrder order = tradeOrderRepository.save(TradeOrder.pendingLimitOrder(fixture.accountId(), fixture.stockId(),
+                    UUID.randomUUID(), OrderSide.BUY, new BigDecimal("3"), new BigDecimal("100"),
+                    new BigDecimal("300"), at, at.plusHours(6)));
+            jdbcTemplate.update("UPDATE account SET locked_cash = 300 WHERE account_id = ?", fixture.accountId());
+            return order.getOrderId();
+        });
+        assertThat(tradeOrderRepository.findById(orderId).orElseThrow().getReservedCash()).isEqualByComparingTo("300");
+        assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance()).isEqualByComparingTo("1000");
+        assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isZero();
+
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            accountRepository.findByAccountIdAndUserIdForUpdate(fixture.accountId(), fixture.userId()).orElseThrow();
+            TradeOrder order = tradeOrderRepository.findById(orderId).orElseThrow();
+            if (target.equals("CANCELED")) order.cancel(at.plusSeconds(1));
+            else order.expire(at.plusHours(6));
+            jdbcTemplate.update("UPDATE account SET locked_cash = 0 WHERE account_id = ?", fixture.accountId());
+        });
+        TradeOrder closed = tradeOrderRepository.findById(orderId).orElseThrow();
+        Account account = accountRepository.findById(fixture.accountId()).orElseThrow();
+        assertThat(closed.getStatus()).isEqualTo(OrderStatus.valueOf(target));
+        assertThat(closed.getReservedCash()).isZero();
+        assertThat(account.getLockedCash()).isZero();
+        assertThat(account.getCashBalance()).isEqualByComparingTo("1000");
+        assertThat(tradeExecutionRepository.countByOrderId(orderId)).isZero();
+        assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isZero();
     }
 
     private Account activeAccount(Long userId) {

@@ -108,6 +108,7 @@ toss:
 trading:
   initial-cash: ${INITIAL_CASH:50000000}
 
+  # 요율·SEC 최소액은 프로젝트 고정 환경 설정입니다. 활성 주문 중 변경하지 않습니다.
   # 거래 수수료 0.01% — 매수·매도 공통, 국내·미국 공통
   fee-rate: ${FEE_RATE:0.0001}
 
