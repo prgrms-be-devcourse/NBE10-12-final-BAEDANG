@@ -26,14 +26,16 @@ jobs:
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: 'gradle'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
 
       - name: Grant execute permission for gradlew
         run: chmod +x ./gradlew
         working-directory: back
 
       - name: Run Backend Tests with Gradle
-        run: ./gradlew test --warn
+        run: ./gradlew test --warn --build-cache --parallel
         working-directory: back
 
       - name: Upload Test Report
