@@ -13,4 +13,7 @@ import java.math.BigDecimal;
 public interface ExecutionExchangeRateProvider {
 
     BigDecimal currentUsdKrwRate();
+
+    /** 외부 조회는 거래 트랜잭션 밖에서 수행하고, 잠금 후에도 스냅샷 유효성을 재검증합니다. */
+    ExecutionExchangeRateSnapshot currentUsdKrwSnapshot();
 }
