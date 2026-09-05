@@ -10,6 +10,7 @@ import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableA
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 
 /** 확정된 개별 체결. 수정/삭제하지 않으며 주문 요약이나 최신 환율로 재계산하지 않습니다. */
@@ -54,7 +55,9 @@ public class TradeExecution {
 
     protected TradeExecution() { }
 
-    public static TradeExecution market(TradeOrder order, OrderAmount amount) {
+    /** 검증 시각은 DB 저장용 마이크로초 절삭 전 시각입니다. 환율 유효기간을 늘리거나 축소하지 않습니다. */
+    public static TradeExecution market(TradeOrder order, OrderAmount amount,
+                                        ExecutionRateEvidence rate, OffsetDateTime validatedAt) {
         if (order == null || amount == null || order.getOrderType() != OrderType.MARKET || order.getStatus() != OrderStatus.FILLED
                 || order.getExecutedPrice().compareTo(amount.executedPrice()) != 0
                 || order.getExchangeRate().compareTo(amount.exchangeRate()) != 0
@@ -63,8 +66,14 @@ public class TradeExecution {
                 || order.getNetAmount().compareTo(amount.netAmount()) != 0) {
             throw new IllegalArgumentException("즉시 체결된 시장가 주문이 필요합니다");
         }
+        if (rate == null || !rate.isValidAt(validatedAt)
+                || rate.rate().compareTo(amount.exchangeRate()) != 0
+                || !validatedAt.toInstant().truncatedTo(ChronoUnit.MICROS)
+                    .equals(order.getOrderedAt().toInstant().truncatedTo(ChronoUnit.MICROS))) {
+            throw new IllegalArgumentException("시장가 체결 환율과 유효 시각 근거가 일치하지 않습니다");
+        }
         return create(order, order.getClientOrderId(), 1, order.getQuantity(), amount.executedPrice(),
-                ExecutionRateEvidence.rateOnly(amount.exchangeRate()), amount.executionAmounts(),
+                rate, amount.executionAmounts(),
                 order.getQuoteAt(), order.getOrderedAt(), null);
     }
 

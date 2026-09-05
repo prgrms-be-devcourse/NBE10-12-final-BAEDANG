@@ -1,5 +1,7 @@
 package com.baedang.trading.service;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.OrderAmount;
@@ -9,24 +11,32 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
+
 @Component
-public class OrderAmountCalculator {
+public class MarketOrderSettlementCalculator {
 
     private static final int USD_SCALE = 2;
     private static final int KRW_SCALE = 0;
     private static final RoundingMode MONEY_ROUNDING = RoundingMode.HALF_UP;
+    // NUMERIC(19,4) 금액/단가, NUMERIC(19,6) 수량/환율의 정수부 상한(미포함).
+    private static final BigDecimal MONEY_LIMIT = new BigDecimal("1000000000000000");
+    private static final BigDecimal RATE_LIMIT = new BigDecimal("10000000000000");
 
     private final BigDecimal feeRate;
     private final BigDecimal krSellTaxRate;
     private final BigDecimal usSecFeeRate;
     private final BigDecimal usSecFeeMinimumUsd;
 
-    public OrderAmountCalculator(
+    public MarketOrderSettlementCalculator(
             @Value("${trading.fee-rate}") BigDecimal feeRate,
             @Value("${trading.k-tax-rate}") BigDecimal krSellTaxRate,
             @Value("${trading.a-tax-rate}") BigDecimal usSecFeeRate,
             @Value("${trading.a-tax-min-usd}") BigDecimal usSecFeeMinimumUsd
     ) {
+        for (BigDecimal value : new BigDecimal[]{feeRate, krSellTaxRate, usSecFeeRate, usSecFeeMinimumUsd}) {
+            if (value == null || value.signum() < 0) throw new IllegalArgumentException("요율은 0 이상이어야 합니다");
+        }
         this.feeRate = feeRate;
         this.krSellTaxRate = krSellTaxRate;
         this.usSecFeeRate = usSecFeeRate;
@@ -41,10 +51,28 @@ public class OrderAmountCalculator {
             BigDecimal quantity,
             BigDecimal exchangeRate
     ) {
-        return switch (marketCountry) {
-            case KR -> calculateKr(side, executedPrice, quantity);
-            case US -> calculateUs(side, executedPrice, quantity, exchangeRate);
+        if (marketCountry == null || side == null || executedPrice == null || executedPrice.signum() <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT);
+        }
+        if (quantity == null || quantity.signum() <= 0 || quantity.compareTo(RATE_LIMIT) >= 0
+                || !isRepresentableAtScale(quantity, 6)) {
+            throw new BusinessException(ErrorCode.INVALID_QUANTITY);
+        }
+        // USD는 원시 시세가 아닌 실제 정산 단가로 반올림한 뒤 저장 가능 범위를 검사합니다.
+        BigDecimal price = marketCountry == MarketCountry.US ? usd(executedPrice) : executedPrice;
+        if (price.compareTo(MONEY_LIMIT) >= 0 || !isRepresentableAtScale(price, 4)) {
+            throw new BusinessException(ErrorCode.INVALID_SETTLEMENT_AMOUNT);
+        }
+        if (marketCountry == MarketCountry.US && (exchangeRate == null || exchangeRate.signum() <= 0
+                || exchangeRate.compareTo(RATE_LIMIT) >= 0 || !isRepresentableAtScale(exchangeRate, 6))) {
+            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+        }
+        OrderAmount amount = switch (marketCountry) {
+            case KR -> calculateKr(side, price, quantity);
+            case US -> calculateUs(side, price, quantity, exchangeRate);
         };
+        validateMoney(amount.grossAmount(), amount.fee(), amount.tax(), amount.netAmount());
+        return amount;
     }
 
     private OrderAmount calculateKr(OrderSide side, BigDecimal priceKrw, BigDecimal quantity) {
@@ -75,8 +103,7 @@ public class OrderAmountCalculator {
             BigDecimal quantity,
             BigDecimal exchangeRate
     ) {
-        BigDecimal roundedPriceUsd = usd(priceUsd);
-        BigDecimal grossAmountUsd = roundedPriceUsd.multiply(quantity);
+        BigDecimal grossAmountUsd = priceUsd.multiply(quantity);
         BigDecimal unroundedGrossAmountKrw = grossAmountUsd.multiply(exchangeRate);
         BigDecimal grossAmountKrw = krw(unroundedGrossAmountKrw);
         BigDecimal tradingFeeKrw = krw(grossAmountKrw.multiply(feeRate));
@@ -90,7 +117,7 @@ public class OrderAmountCalculator {
         BigDecimal netAmountKrw = netAmount(side, grossAmountKrw, tradingFeeKrw, secFeeKrw);
 
         return new OrderAmount(
-                roundedPriceUsd,
+                priceUsd,
                 exchangeRate,
                 grossAmountUsd,
                 unroundedGrossAmountKrw,
@@ -100,6 +127,15 @@ public class OrderAmountCalculator {
                 netAmountKrw,
                 secFeeUsd
         );
+    }
+
+    private void validateMoney(BigDecimal... values) {
+        for (BigDecimal value : values) {
+            if (value.abs().compareTo(MONEY_LIMIT) >= 0 || !isRepresentableAtScale(value, KRW_SCALE)) {
+                throw new BusinessException(ErrorCode.INVALID_SETTLEMENT_AMOUNT);
+            }
+        }
+        // 0 이하 정산액은 기존 주문 정책에서 REJECTED로 기록하므로 여기서 차단하지 않습니다.
     }
 
     private BigDecimal netAmount(

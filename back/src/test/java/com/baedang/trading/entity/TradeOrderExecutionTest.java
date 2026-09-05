@@ -116,13 +116,13 @@ class TradeOrderExecutionTest {
         assertThat(order.getReservedCash()).isEqualByComparingTo("300");
         assertThat(first.grossAmountUsd(com.baedang.stock.entity.MarketCountry.KR)).isZero();
         assertThat(first.unroundedGrossAmountKrw()).isEqualByComparingTo("90");
-        order.applyExecution(first, new BigDecimal("110"));
-        assertThat(order.getReservedCash()).isEqualByComparingTo("110");
+        order.applyExecution(first, new BigDecimal("210"));
+        assertThat(order.getReservedCash()).isEqualByComparingTo("210");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
         assertThat(order.activeRemainingQuantity()).isEqualByComparingTo("2");
         assertThat(order.getFilledQuantity()).isEqualByComparingTo("1");
         assertThat(order.getClosedAt()).isNull();
-        assertThatThrownBy(() -> order.applyExecution(first, new BigDecimal("110")))
+        assertThatThrownBy(() -> order.applyExecution(first, new BigDecimal("210")))
                 .isInstanceOf(IllegalArgumentException.class);
         order.applyExecution(execution(order, "2", "180"), BigDecimal.ZERO);
         assertThat(order.getStatus()).isEqualTo(OrderStatus.FILLED);
@@ -135,21 +135,21 @@ class TradeOrderExecutionTest {
     }
 
     @ParameterizedTest
-    @EnumSource(value = OrderStatus.class, names = {"CANCELED", "EXPIRED"})
-    void 부분체결_종료와_반복요청은_체결분을_보존한다(OrderStatus target) {
+    @CsvSource({"CANCELED,0", "CANCELED,1", "EXPIRED,0", "EXPIRED,1"})
+    void 매수_취소만료는_잔여동결을_한번만_반환하고_체결분을_보존한다(OrderStatus target, int filled) {
         TradeOrder order = order(OrderSide.BUY);
-        order.applyExecution(execution(order, "1", "90"), new BigDecimal("200"));
+        if (filled == 1) order.applyExecution(execution(order, "1", "90"), new BigDecimal("210"));
         var closed = target == OrderStatus.CANCELED ? order.cancel(AT.plusSeconds(3)) : order.expire(AT.plusHours(6));
         assertThat(closed.changed()).isTrue();
-        assertThat(closed.releasedCash()).isEqualByComparingTo("200");
+        assertThat(closed.releasedCash()).isEqualByComparingTo(filled == 1 ? "210" : "300");
         assertThat(closed.releasedQuantity()).isZero();
         var repeated = target == OrderStatus.CANCELED ? order.cancel(AT.plusSeconds(4)) : order.expire(AT.plusHours(7));
         assertThat(repeated.changed()).isFalse();
         assertThat(repeated.releasedCash()).isZero();
         assertThat(repeated.releasedQuantity()).isZero();
         assertThat(order.getStatus()).isEqualTo(target);
-        assertThat(order.getFilledQuantity()).isEqualByComparingTo("1");
-        assertThat(order.getGrossAmount()).isEqualByComparingTo("90");
+        assertThat(order.getFilledQuantity()).isEqualByComparingTo(BigDecimal.valueOf(filled));
+        if (filled == 1) assertThat(order.getGrossAmount()).isEqualByComparingTo("90");
         assertThat(order.activeRemainingQuantity()).isZero();
         assertThat(order.getReservedCash()).isZero();
     }
@@ -193,7 +193,7 @@ class TradeOrderExecutionTest {
                 new BigDecimal("100"), RATE, amount, AT, AT.plusMinutes(1), 1L))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1, BigDecimal.ONE,
-                new BigDecimal("100"), ExecutionRateEvidence.rateOnly(BigDecimal.ONE), amount,
+                new BigDecimal("100"), new ExecutionRateEvidence(BigDecimal.ONE, null, null, null), amount,
                 AT, AT.plusSeconds(1), 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1, BigDecimal.ONE,
                 new BigDecimal("100"), RATE, amount, AT, AT.plusSeconds(1), null))
@@ -233,7 +233,7 @@ class TradeOrderExecutionTest {
         TradeOrder order = order(OrderSide.BUY);
         TradeOrder other = order(OrderSide.BUY);
         ReflectionTestUtils.setField(other, "orderId", 4L);
-        assertThatThrownBy(() -> order.applyExecution(execution(other, "1", "90"), new BigDecimal("200")))
+        assertThatThrownBy(() -> order.applyExecution(execution(other, "1", "90"), new BigDecimal("210")))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThat(order.getFilledQuantity()).isZero();
         assertThat(order.getStatus()).isEqualTo(OrderStatus.PENDING);

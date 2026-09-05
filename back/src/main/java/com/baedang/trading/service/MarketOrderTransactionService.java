@@ -8,6 +8,7 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.Holding;
+import com.baedang.trading.entity.EntryType;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
@@ -55,7 +56,7 @@ public class MarketOrderTransactionService {
     private final LedgerEntryRepository ledgerEntryRepository;
     private final TradeExecutionRepository tradeExecutionRepository;
     private final LedgerService ledgerService;
-    private final OrderAmountCalculator amountCalculator;
+    private final MarketOrderSettlementCalculator amountCalculator;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
 
@@ -68,7 +69,7 @@ public class MarketOrderTransactionService {
             LedgerEntryRepository ledgerEntryRepository,
             TradeExecutionRepository tradeExecutionRepository,
             LedgerService ledgerService,
-            OrderAmountCalculator amountCalculator,
+            MarketOrderSettlementCalculator amountCalculator,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
     ) {
@@ -157,8 +158,14 @@ public class MarketOrderTransactionService {
         BigDecimal executionRate = stock.getMarketCountry() == MarketCountry.KR
                 ? BigDecimal.ONE
                 : executionContext.executionRate();
-        OrderAmount amount = amountCalculator.calculate(
-                stock.getMarketCountry(), terms.side(), quote.getLastPrice(), terms.quantity(), executionRate);
+        OrderAmount amount;
+        try {
+            amount = amountCalculator.calculate(
+                    stock.getMarketCountry(), terms.side(), quote.getLastPrice(), terms.quantity(), executionRate);
+        } catch (BusinessException e) {
+            // 저장 범위 초과 등 계산 실패는 주문을 저장하지 않으므로 같은 ID로 재시도할 수 있습니다.
+            throw new BusinessException(e.getErrorCode(), ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
 
         Holding holding = terms.side() == OrderSide.SELL
                 ? holdingRepository.findByAccountIdAndStockIdForUpdate(account.getAccountId(), stock.getStockId())
@@ -216,7 +223,8 @@ public class MarketOrderTransactionService {
             account.creditMarketSell(amount.netAmount());
         }
 
-        TradeExecution execution = tradeExecutionRepository.save(TradeExecution.market(order, amount));
+        TradeExecution execution = tradeExecutionRepository.save(TradeExecution.market(
+                order, amount, executionContext.executionRateEvidence(), now.atOffset(ZoneOffset.UTC)));
         if (terms.side() == OrderSide.BUY) {
             ledgerService.recordBuy(order, execution, account.getCashBalance(), stock);
         } else {
@@ -242,9 +250,10 @@ public class MarketOrderTransactionService {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER, "orderId=" + order.getOrderId());
         }
         LedgerEntry ledgerEntry = ledgerEntryRepository
-                .findFirstByOrderIdOrderByEntryIdAsc(order.getOrderId())
+                .findFirstByOrderIdAndEntryTypeAndExecutionIdIsNotNullOrderByEntryIdAsc(
+                        order.getOrderId(), order.getSide() == OrderSide.BUY ? EntryType.BUY : EntryType.SELL)
                 .orElseThrow(() -> new BusinessException(
-                        ErrorCode.INTERNAL_ERROR, "filled order ledger missing: orderId=" + order.getOrderId()));
+                        ErrorCode.INTERNAL_ERROR, "filled order execution ledger missing: orderId=" + order.getOrderId()));
         return MarketOrderResult.filled(MarketOrderReceipt.from(
                 order, stock, ledgerEntry.getBalanceAfter()));
     }

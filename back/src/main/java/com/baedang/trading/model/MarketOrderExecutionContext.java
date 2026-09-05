@@ -14,9 +14,13 @@ public record MarketOrderExecutionContext(
         MarketCountry marketCountry,
         boolean marketOpen,
         Instant marketOpenUntil,
-        BigDecimal executionRate,
+        ExecutionRateEvidence executionRateEvidence,
         Instant checkedAt
 ) {
+
+    public BigDecimal executionRate() {
+        return executionRateEvidence.rate();
+    }
 
     public boolean isMarketOpenAt(Instant now) {
         return marketOpen

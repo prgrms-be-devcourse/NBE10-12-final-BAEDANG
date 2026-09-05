@@ -3,6 +3,7 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
@@ -12,6 +13,7 @@ import com.baedang.trading.dto.PlaceOrderRequest;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.entity.OrderSide;
 import org.junit.jupiter.api.Test;
@@ -47,7 +49,35 @@ class MarketOrderServiceTest {
     @Mock ExecutionExchangeRateProvider exchangeRateProvider;
 
     @Test
-    void REJECTED가_커밋된_뒤_업무_예외로_변환한다() {
+    void 미국_시장가는_캐시_원본_수신시각과_유효기간을_트랜잭션에_전달한다() {
+        Instant now = Instant.parse("2026-09-04T01:00:00Z");
+        var at = now.atOffset(ZoneOffset.UTC);
+        var snapshot = new ExecutionExchangeRateSnapshot(new BigDecimal("1383.601234"),
+                at.minusSeconds(50), at.minusMinutes(1), at.plusSeconds(5));
+        var request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
+        var command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US))
+                .thenReturn(Optional.of(Stock.create("AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true)));
+        when(marketSessionProvider.currentSession(MarketCountry.US, now)).thenReturn(new MarketSessionStatus(true, Instant.MAX));
+        when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
+        when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
+        var service = new MarketOrderService(marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> service.place(1L, request)).isInstanceOf(BusinessException.class);
+        var captor = ArgumentCaptor.forClass(MarketOrderExecutionContext.class);
+        verify(transactionService).execute(eq(1L), eq(command), captor.capture());
+        assertThat(captor.getValue().executionRateEvidence()).isEqualTo(ExecutionRateEvidence.from(snapshot));
+        assertThat(captor.getValue().checkedAt()).isEqualTo(now);
+        assertThat(captor.getValue().executionRate()).isEqualTo(snapshot.rate());
+        verify(exchangeRateProvider, never()).currentUsdKrwRate();
+    }
+
+    @Test
+    void 거절결과를_업무예외와_새_ID_재시도_정책으로_변환한다() {
         PlaceOrderRequest request = new PlaceOrderRequest(
                 10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "10");
         MarketOrderCommand command = new MarketOrderCommand(
@@ -95,7 +125,7 @@ class MarketOrderServiceTest {
                 MarketCountry.KR,
                 true,
                 Instant.parse("2026-08-26T02:00:00Z"),
-                BigDecimal.ONE,
+                ExecutionRateEvidence.krw(contextCheckedAt.atOffset(ZoneOffset.UTC)),
                 contextCheckedAt));
         verify(marketSessionProvider).currentSession(MarketCountry.KR, sessionLookupAt);
         verifyNoInteractions(exchangeRateProvider);

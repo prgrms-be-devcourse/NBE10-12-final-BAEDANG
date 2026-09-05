@@ -13,14 +13,15 @@ import com.baedang.trading.dto.PlaceOrderRequest;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.Map;
 
@@ -99,22 +100,25 @@ public class MarketOrderService {
         }
         Instant sessionLookupAt = clock.instant();
         MarketSessionStatus session;
-        BigDecimal executionRate;
+        ExecutionRateEvidence rateEvidence = null;
         try {
             session = marketSessionProvider.currentSession(stock.getMarketCountry(), sessionLookupAt);
-            executionRate = BigDecimal.ONE;
             if (stock.getMarketCountry() == MarketCountry.US) {
-                executionRate = exchangeRateProvider.currentUsdKrwRate();
-                if (executionRate == null || executionRate.signum() <= 0) {
+                var snapshot = exchangeRateProvider.currentUsdKrwSnapshot();
+                if (snapshot == null) {
                     throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
                 }
+                rateEvidence = ExecutionRateEvidence.from(snapshot);
             }
         } catch (BusinessException e) {
             throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
         }
         Instant checkedAt = clock.instant();
+        if (stock.getMarketCountry() == MarketCountry.KR) {
+            rateEvidence = ExecutionRateEvidence.krw(checkedAt.atOffset(ZoneOffset.UTC));
+        }
         return new MarketOrderExecutionContext(
-                stock.getMarketCountry(), session.open(), session.validUntil(), executionRate, checkedAt);
+                stock.getMarketCountry(), session.open(), session.validUntil(), rateEvidence, checkedAt);
     }
 
     private BusinessException withRetryPolicy(
