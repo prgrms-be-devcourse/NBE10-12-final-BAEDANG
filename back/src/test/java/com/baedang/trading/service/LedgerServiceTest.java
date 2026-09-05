@@ -5,6 +5,7 @@ import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.MarketCountry;
@@ -41,6 +42,7 @@ class LedgerServiceTest {
         LedgerEntry entry = captor.getValue();
         assertThat(entry.getAccountId()).isEqualTo(7L);
         assertThat(entry.getOrderId()).isNull();
+        assertThat(entry.getExecutionId()).isNull();
         assertThat(entry.getEntryType()).isEqualTo(EntryType.INITIAL_DEPOSIT);
         assertThat(entry.getAmount()).isEqualTo(amount);
         assertThat(entry.getBalanceAfter()).isEqualTo(amount);
@@ -123,7 +125,8 @@ class LedgerServiceTest {
     private TradeExecution execution(TradeOrder order) {
         TradeExecution execution = TradeExecution.market(order, new OrderAmount(new BigDecimal("100"), BigDecimal.ONE,
                 BigDecimal.ZERO, new BigDecimal("300"), new BigDecimal("300"), BigDecimal.ZERO,
-                BigDecimal.ZERO, new BigDecimal("300"), BigDecimal.ZERO));
+                BigDecimal.ZERO, new BigDecimal("300"), BigDecimal.ZERO),
+                ExecutionRateEvidence.krw(OPENED_AT), OPENED_AT);
         ReflectionTestUtils.setField(execution, "executionId", 5L);
         return execution;
     }

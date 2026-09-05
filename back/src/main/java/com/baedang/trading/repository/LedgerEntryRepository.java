@@ -17,6 +17,10 @@ public interface LedgerEntryRepository extends Repository<LedgerEntry, Long> {
 
     Optional<LedgerEntry> findFirstByOrderIdOrderByEntryIdAsc(Long orderId);
 
+    /** 체결 연결 없는 과거 원장과 독립 상쇄 정정은 시장가 멱등 응답의 근거로 사용하지 않습니다. */
+    Optional<LedgerEntry> findFirstByOrderIdAndEntryTypeAndExecutionIdIsNotNullOrderByEntryIdAsc(
+            Long orderId, EntryType entryType);
+
     long countByAccountId(Long accountId);
 
     /**
