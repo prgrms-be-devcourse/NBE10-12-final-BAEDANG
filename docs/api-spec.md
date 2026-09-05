@@ -682,6 +682,8 @@ Clients must follow `data.retryPolicy` instead of inferring ID reuse from the HT
 ```
 `cashBalanceAfter` is the balance recorded by the first fill ledger entry, not the current balance at retry time. Idempotent responses replay that same audit value. Portfolio valuation and current account state remain outside the fill path; call `GET /accounts/me` for the latest values.
 
+Market-order replay selects a normal ledger entry matching the order side with a non-null execution_id. A FILLED order without this entry returns INTERNAL_ERROR; legacy replay from an unlinked ledger is not supported. Database foreign keys guarantee execution existence and order ownership, so no additional execution lookup is made solely for that check.
+
 **Server processing order**
 ```
 ① Verify accountId ownership and read clientOrderId; return the stored result on an exact retry even for a closed round
@@ -716,13 +718,17 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 | `INSUFFICIENT_QUANTITY` | 422 | `NEW_CLIENT_ORDER_ID` | 보유 수량이 부족해요 |
 | `STALE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 정보가 오래되었어요. 다시 시도해주세요 |
 | `FUTURE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
-| `INVALID_SETTLEMENT_AMOUNT` | 422 | `NEW_CLIENT_ORDER_ID` | 정산 금액이 올바르지 않아요 |
+| `INVALID_SETTLEMENT_AMOUNT` | 422 | read `data.retryPolicy` for the actual path | 정산 금액이 올바르지 않아요 |
 | `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
 | `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
 | `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
 | `ACCOUNT_ROUND_CHANGED` | 409 | `NOT_RETRYABLE` | 포트폴리오가 초기화됐어요. 계좌 정보를 새로고침한 후 다시 주문해주세요 |
 
 `STALE_QUOTE` uses `trading.quote-max-staleness-seconds`; `FUTURE_QUOTE` rejects any quote timestamp later than the server's validation time. The separate `trading.execution-context-max-age-seconds` setting limits account-lock wait time after external market data preparation finishes.
+
+US market orders also carry FX receipt time, `validFrom` and `validUntil` into the transaction and execution factory. After acquiring the account lock, new orders revalidate source validity and the 60-second receipt TTL independently of context freshness; execution creation also checks the same validation time and agreement with the settlement rate. Missing, expired or future FX evidence results in EXCHANGE_RATE_NOT_FOUND (404, SAME_CLIENT_ORDER_ID), without saving an order/execution/ledger or making an external call inside the transaction. KR uses 1 without an FX lookup. Existing-order idempotent responses return stored results before this check; only the applied rate is persisted.
+
+Market settlement rounds US unit prices to cents using HALF_UP before checking storage bounds. Prices and settlement amounts must fit NUMERIC(19,4), and quantities/FX rates must fit NUMERIC(19,6); FX rates are not rounded. Storage overflow returns INVALID_SETTLEMENT_AMOUNT with SAME_CLIENT_ORDER_ID without saving an order/execution/ledger. A representable calculation whose net settlement is non-positive still saves a REJECTED order and returns NEW_CLIENT_ORDER_ID.
 
 ---
 
@@ -950,6 +956,17 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 ---
 
 ## Week 2+
+
+### Confirmed LIMIT settlement contract (#119)
+
+The calculators and FX snapshot contract are available; acceptance APIs (#120), the shared book (#121), and engine/worker/preview (#122) remain separate implementation stages. MARKET behavior is unchanged by the calculator rename to `MarketOrderSettlementCalculator`.
+
+- Whole-share orders only. Reserve rounded KRW gross at limit price × full quantity × acceptance FX, plus rounded fee; KR needs no external FX. No exchange-rate buffer. Acceptance FX does not fix execution FX.
+- BUY fills use only their own `reservedCash`, deducting this fill's actual net, not cumulative net or a quantity-proportional reserve. Do not use free cash. The engine reduces to an affordable integer quantity; defer if not even one share is affordable. Active buy remainder requires positive reserve.
+- Full fill releases all unused reserve after settlement; cancellation/expiration releases the remainder without reverting previous fills. Release reduces locked cash, not increases cash balance.
+- Require `netAmountKrw > 0` per book-level execution. Defer a zero/negative candidate without recording a fill/ledger or consuming liquidity. Do not combine the next level or skip levels to bypass this rule.
+- Multiple valid levels use sequential order-cumulative gross/fee/tax deltas and one FX snapshot per transaction. The SEC minimum is not charged again for each level or transaction. Earlier fills retain their own FX.
+- `LimitOrderSettlementCalculator` calculates supplied candidates; #122 selects levels/quantities and writes financial/liquidity state atomically. Snapshot TTL is 60 seconds intersected with source validity and must be rechecked after locking.
 
 LIMIT uses option B (buy at asks <= limit, sell at bids >= limit) and expires at the accepted regular-session close. All users consume liquidity from the same synthetic market, but user orders are never directly matched against each other. Liquidity consumed by one user reduces the shared remainder available to others.
 

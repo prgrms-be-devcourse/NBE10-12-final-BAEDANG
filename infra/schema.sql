@@ -771,7 +771,7 @@ CREATE TABLE trade_execution (
         OR net_amount_krw = gross_amount_krw - fee_krw - tax_krw),
     CONSTRAINT ck_execution_quote_time CHECK (quote_at <= executed_at)
 );
-COMMENT ON TABLE trade_execution IS '개별 확정 체결. 반올림 전 거래대금은 저장된 단가·수량·환율로 복원; 기존 MARKET은 이력이 없을 수 있음';
+COMMENT ON TABLE trade_execution IS '개별 확정 체결. 반올림 전 거래대금은 저장된 단가·수량·환율로 복원; MARKET도 체결 이력을 기록';
 COMMENT ON COLUMN trade_execution.book_level_id IS '소비한 공유 호가 레벨 고유 ID. 레벨의 가격·버전은 불변이고 체결 가격은 price에 별도 보존; MARKET은 NULL';
 
 COMMENT ON COLUMN trade_order.quote_at IS '체결 또는 거절 판정에 사용한 시세의 기준 시각';
@@ -804,7 +804,7 @@ CREATE TABLE ledger_entry (
     entry_id      BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     account_id    BIGINT        NOT NULL REFERENCES account(account_id),
     order_id      BIGINT        REFERENCES trade_order(order_id),  -- 초기금 지급은 NULL
-    execution_id  BIGINT,                    -- 신규 개별 체결 연결, 기존 기록/초기 지급은 NULL
+    execution_id  BIGINT,                    -- 정상 체결 연결, 초기 지급/독립 상쇄 정정은 NULL
     entry_type    VARCHAR(20)   NOT NULL
                   CHECK (entry_type IN ('INITIAL_DEPOSIT','BUY','SELL')),
     amount        NUMERIC(19,4) NOT NULL,   -- 예수금 증감 (부호 있음, = net_amount)

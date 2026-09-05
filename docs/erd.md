@@ -32,7 +32,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | account → trade_order | 1:N |
 | trade_order → ledger_entry | 1:N |
 | trade_order → trade_execution | 1:N |
-| trade_execution → ledger_entry | 1:1 for new normal fills; legacy/offset corrections have NULL execution_id |
+| trade_execution → ledger_entry | 1:1 for normal fills; initial funding/offset corrections have NULL execution_id |
 | trade_order → holding | 1:N |
 | account → ledger_entry | 1:N |
 | account → daily_account_snapshot | 1:N |
@@ -144,7 +144,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `exchange_rate` | TOSS | all from `/exchange-rate`. Only `collected_at` is **own**. |
 | `trade_order` | own + TOSS | order content is own; `executed_price`·`quote_at` copied from `quote_snapshot` (source `/prices`), `exchange_rate` from `/exchange-rate`. **Nothing is sent to Toss** — fills happen only inside our DB. |
 | `holding` | own | derived from the ledger. Only `avg_exchange_rate` originates from Toss FX. |
-| `ledger_entry` | own | Recorded by execution/ledger services using the original trade_execution FX. Historical MARKET entries share the order FX. Append-only. |
+| `ledger_entry` | own | Recorded by execution/ledger services using the original trade_execution FX. Append-only. |
 | `users` `account` `daily_account_snapshot` `stock_external_id` | own | unrelated to external APIs. **The bookkeeping side is entirely ours** — which is why this project is bookkeeping, not channel. |
 
 ### Batch Schedule (confirmed)
@@ -255,6 +255,10 @@ Active BUY orders (PENDING/PARTIALLY_FILLED) with remaining quantity require `re
 
 `reserved_cash` stores current state, not the initial reservation history. Acceptance and cancellation/expiration of unfilled quantities change only `locked_cash` and create no settlement ledger entry. Record cash movements in the ledger only for actual fills.
 
+Initial BUY reserve is whole-won HALF_UP(limit price × full integer quantity × acceptance FX) plus whole-won HALF_UP(rounded gross × fee rate), without an FX buffer (KR uses 1 without an external lookup). On a partial fill subtract only this execution's net from reserve and both account cash/locked cash. No free-cash top-up or proportional reserve recalculation. A remaining BUY quantity requires a positive reserve; on full fill release unused excess as well. Cancellation/expiration releases the entire remaining reserve.
+
+Cumulative settlement evidence is reconstructed from stored execution price, quantity, FX, SEC USD and confirmed amounts, without adding columns, policy snapshots, initial reserve or acceptance FX fields. Integer quantity, storage bounds, cumulative rounding and per-level positive net are validated before an execution can be persisted; zero/negative candidates are deferred. Actual writes remain the engine's responsibility.
+
 #### `trade_execution` — individual fills
 
 One order has many executions. Each preserves quantity, price, FX, settlement deltas, timestamps and book origin. UNIQUE(order_id, execution_key) and UNIQUE(order_id, sequence_no) prevent duplicate identities. Historical market orders remain readable without these rows.
@@ -282,11 +286,11 @@ When creating a LIMIT fill, pass the order stock's market to `TradeExecution.lim
 Two composite FKs, `(execution_id, order_id)` to the execution and `(order_id, account_id)` to the order, enforce ledger/execution/account ownership.
 
 **Records every event that moves the deposit. Not UPDATE-ing and not DELETE-ing is this table's reason to exist.** If recorded wrong, don't edit — add an opposite-sign entry to offset.
-**Entries are INITIAL_DEPOSIT, BUY and SELL.** Fees/taxes are included in the execution ledger amount. Each new normal entry corresponds to `trade_execution.net_amount_krw`. Multiple entries/offset corrections per order are allowed. Existing market replay reads the earliest balance via `(order_id, entry_id)`.
+**Entries are INITIAL_DEPOSIT, BUY and SELL.** Fees/taxes are included in the execution ledger amount. Each normal entry corresponds to `trade_execution.net_amount_krw`. Multiple entries/offset corrections per order are allowed. Market replay reads the earliest normal ledger balance matching the order side with a non-null execution_id, or returns INTERNAL_ERROR if none exists.
 | Column | Type | Description |
 |---|---|---|
 | `entry_id` | BIGINT PK | ledger number. Increases in time order. |
-| `execution_id` | BIGINT FK, NULL | New normal execution link, partially UNIQUE when non-null. Initial funding/legacy/independent offset corrections use NULL. order_id is not UNIQUE. |
+| `execution_id` | BIGINT FK, NULL | Normal execution link, partially UNIQUE when non-null. Initial funding/independent offset corrections use NULL. order_id is not UNIQUE. |
 | `account_id` | BIGINT FK | which account. |
 | `order_id` | BIGINT FK, NULL | causing order. **NULL for initial funding and reset.** Indexed by `(order_id, entry_id)` for ordered lookup. |
 | `entry_type` | VARCHAR(20) | **Only three.**
@@ -294,7 +298,7 @@ Two composite FKs, `(execution_id, order_id)` to the execution and `(order_id, a
   `BUY` — gross + fee deducted (−)
   `SELL` — gross − fee − tax credited (+)
   **No `RESET` entry.** Reset creates a new account, and the new account's `INITIAL_DEPOSIT` row fills that role. The prior round's close time lives in `account.closed_at`. |
-| `amount` | NUMERIC(19,4) | Signed `trade_execution.net_amount_krw` for new normal fills (buy − / sell +); historical MARKET entries correspond to order netAmount. Per-account ledger sum equals cash_balance. |
+| `amount` | NUMERIC(19,4) | Signed `trade_execution.net_amount_krw` for normal fills (buy − / sell +). Per-account ledger sum equals cash_balance. |
 | `balance_after` | NUMERIC(19,4) | balance right after this entry. Strictly derived, but **very useful for instantly finding where integrity broke**. |
 | `exchange_rate` | NUMERIC(19,6) | Original execution FX; 1 for KR. Never recalculate ledger audit data using a newer rate. |
 | `memo` | VARCHAR(200) | human-readable note. Since fees aren't split out, the breakdown lives here — "삼성전자 10주 @ 241,500 (수수료 포함)" style. Easier debugging and CS. |
