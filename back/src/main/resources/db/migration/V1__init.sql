@@ -981,12 +981,17 @@ CREATE TABLE order_book_level (
     )
 );
 
--- #100(지정가 모델) 병합 후 trade_execution 이 추가되면 아래 FK 를 연결합니다:
--- ALTER TABLE trade_execution
---     ADD CONSTRAINT fk_trade_execution_book_version
---     FOREIGN KEY (book_version_id)
---     REFERENCES order_book_version(book_version_id)
---     ON DELETE RESTRICT;
+-- PR #127의 nullable book_level_id를 호가 레벨과 연결한다(설계서 §3.2).
+-- MARKET 체결은 NULL, LIMIT 체결은 소비한 레벨을 참조한다.
+ALTER TABLE trade_execution
+    ADD CONSTRAINT fk_trade_execution_book_level
+    FOREIGN KEY (book_level_id)
+    REFERENCES order_book_level(level_id)
+    ON DELETE RESTRICT;
+
+CREATE INDEX ix_trade_execution_book_level
+    ON trade_execution (book_level_id)
+    WHERE book_level_id IS NOT NULL;
 
 COMMIT;
 
