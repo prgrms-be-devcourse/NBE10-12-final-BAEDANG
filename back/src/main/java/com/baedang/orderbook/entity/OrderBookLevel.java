@@ -1,8 +1,10 @@
 package com.baedang.orderbook.entity;
 
+import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.Objects;
 
 @Entity
@@ -76,6 +78,18 @@ public class OrderBookLevel {
             BigDecimal quantity
     ) {
         return new OrderBookLevel(bookVersion, side, levelDepth, price, quantity);
+    }
+
+    /** publisher가 생성 결과 20개 레벨을 새 버전 산하 엔티티로 변환한다. */
+    public static List<OrderBookLevel> from(OrderBookVersion bookVersion, List<GeneratedOrderBookLevel> generated) {
+        return generated.stream()
+                .map(level -> create(
+                        bookVersion,
+                        level.side(),
+                        level.levelDepth(),
+                        level.price(),
+                        level.quantity()))
+                .toList();
     }
 
     public void consume(BigDecimal quantity) {

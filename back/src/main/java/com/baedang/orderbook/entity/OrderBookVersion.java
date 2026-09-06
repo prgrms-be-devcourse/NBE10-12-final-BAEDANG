@@ -1,5 +1,6 @@
 package com.baedang.orderbook.entity;
 
+import com.baedang.orderbook.model.GeneratedOrderBook;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
@@ -91,6 +92,19 @@ public class OrderBookVersion {
                 generatedAt,
                 policyVersion,
                 seed
+        );
+    }
+
+    /** publisher가 생성 입력({@link GeneratedOrderBook}) 그대로 새 활성 버전을 연다. */
+    public static OrderBookVersion open(GeneratedOrderBook generated) {
+        return new OrderBookVersion(
+                generated.stockId(),
+                generated.basePrice(),
+                generated.currency(),
+                generated.quoteAt(),
+                generated.generatedAt(),
+                generated.policyVersion(),
+                generated.seed()
         );
     }
 
