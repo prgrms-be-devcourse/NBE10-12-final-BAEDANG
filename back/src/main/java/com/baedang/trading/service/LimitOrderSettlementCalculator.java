@@ -15,12 +15,12 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 
 import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
+import static com.baedang.trading.support.NumericBounds.MONEY_LIMIT;
+import static com.baedang.trading.support.NumericBounds.RATE_LIMIT;
 
 /** 호가 하나의 주문 누적 차액 계산. 호가 탐색/수량 선택/외부 조회/DB 변경은 호출부 책임입니다. */
 @Component
 public class LimitOrderSettlementCalculator {
-    private static final BigDecimal MONEY_LIMIT = new BigDecimal("1000000000000000"); // NUMERIC(19,4)
-    private static final BigDecimal RATE_LIMIT = new BigDecimal("10000000000000"); // NUMERIC(19,6)
 
     private final BigDecimal feeRate;
     private final BigDecimal krSellTaxRate;

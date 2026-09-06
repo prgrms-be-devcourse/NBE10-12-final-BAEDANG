@@ -12,6 +12,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 
 import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
+import static com.baedang.trading.support.NumericBounds.MONEY_LIMIT;
+import static com.baedang.trading.support.NumericBounds.RATE_LIMIT;
 
 @Component
 public class MarketOrderSettlementCalculator {
@@ -19,9 +21,6 @@ public class MarketOrderSettlementCalculator {
     private static final int USD_SCALE = 2;
     private static final int KRW_SCALE = 0;
     private static final RoundingMode MONEY_ROUNDING = RoundingMode.HALF_UP;
-    // NUMERIC(19,4) 금액/단가, NUMERIC(19,6) 수량/환율의 정수부 상한(미포함).
-    private static final BigDecimal MONEY_LIMIT = new BigDecimal("1000000000000000");
-    private static final BigDecimal RATE_LIMIT = new BigDecimal("10000000000000");
 
     private final BigDecimal feeRate;
     private final BigDecimal krSellTaxRate;

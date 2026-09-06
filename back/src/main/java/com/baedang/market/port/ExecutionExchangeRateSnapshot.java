@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 
+import static com.baedang.trading.support.NumericBounds.RATE_LIMIT;
+
 /** 체결용 USD/KRW 환율. 원본 유효기간과 수신 완료 후 TTL을 모두 만족해야 합니다. */
 public record ExecutionExchangeRateSnapshot(BigDecimal rate, OffsetDateTime fetchedAt,
                                             OffsetDateTime validFrom, OffsetDateTime validUntil) {
@@ -15,7 +17,7 @@ public record ExecutionExchangeRateSnapshot(BigDecimal rate, OffsetDateTime fetc
 
     public ExecutionExchangeRateSnapshot {
         if (rate == null || rate.signum() <= 0 || rate.stripTrailingZeros().scale() > 6
-                || rate.compareTo(new BigDecimal("10000000000000")) >= 0
+                || rate.compareTo(RATE_LIMIT) >= 0
                 || fetchedAt == null || validFrom == null || validUntil == null
                 || !validFrom.isBefore(validUntil) || fetchedAt.isBefore(validFrom)
                 || !fetchedAt.isBefore(validUntil)) {
