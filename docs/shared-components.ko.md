@@ -243,6 +243,10 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [QuoteRealtimePolicy](../back/src/main/java/com/baedang/stock/service/QuoteRealtimePolicy.java) | `isRealtime(country, quote)`, `isMarketOpen(country)` | 현재·시세 시점 세션을 이용한 판정. 캘린더 조회가 발생할 수 있어 순수 계산 함수가 아님 |
 | [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
 
+| [TickSizePolicy](../back/src/main/java/com/baedang/orderbook/service/TickSizePolicy.java) | `nextValidPriceAbove`, `previousValidPriceBelow`, `isValidPrice`, `tickSizeAt` | 시장·종목 유형별 호가 단위 및 경계를 넘는 유효 가격 계산. NUMERIC(19,4) 최대 범위(999999999999999.9999) 내에서 계산 |
+| [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed)` | 고정 seed와 설정 기반 순수 가상 호가 생성기. V1 깊이 배수·정수 노이즈·tick 상대 라운드 넘버 부스트 적용. 양수 가격 및 정수 수량 생성 |
+| [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 지정가 부분 체결 엔진(#122)이 동일 트랜잭션에서 활성 버전과 10개 레벨을 비관적 락으로 잠금. BUY→ASK, SELL→BID |
+| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `enabled()`, `policyVersion()`, `levelsPerSide()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 설정값 검증 레코드. V1 기본값: enabled=false, 3s 주기, 10레벨, 15s maxQuoteAge, 1m retention |
 캘린더가 필요한 로직은 기존 [MarketCalendarPort](../back/src/main/java/com/baedang/market/port/MarketCalendarPort.java)와 [MarketSessionProvider](../back/src/main/java/com/baedang/market/port/MarketSessionProvider.java)를 주입받아 사용하세요. 외부 호출이나 캐시를 별도로 복제하지 않습니다.
 
 스트라이프 락은 아직 공용 헬퍼가 아닙니다. `CandleQueryService`와 `StockOnDemandQuoteService`의 별도 락 구현은 유지하며, 하나의 전역 락으로 공유하지 않습니다.
@@ -250,6 +254,26 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 ### DecimalScaleValidator — 거래 입력 소수 자릿수 검증
 
 `com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale(value, scale)`을 정적으로 호출합니다. null은 false, 후행 0을 제외하고 허용 소수 자릿수로 손실 없이 표현 가능하면 true입니다. 원본 값·스케일을 변경하지 않으며 전체 NUMERIC precision, 양수 여부, 통화별 정산 계산은 검증하지 않습니다. 주문·체결·정산 입력의 기존 조건문에 결합하고, 예외 선택은 호출부에서 담당합니다.
+
+### 가상 호가 및 잠금 계약 (Virtual Order Book & Locking Contracts)
+
+가상 호가 모듈(`com.baedang.orderbook`)은 Toss 현재가를 기반으로 모든 사용자가 공유하는 가상 매수 10호가·매도 10호가를 공급하고, #122 체결 엔진을 위한 잠금 저장소 계약을 제공합니다.
+
+#### 1. 잠금 순서 규칙 (교착 상태 방지)
+- **Publisher (호가 게시·종료)**: `stock → order_book_version` (account, trade_order, holding을 잠그지 않음)
+- **Consumer (#122 지정가 체결 엔진)**: `account → trade_order → order_book_version → order_book_level(체결 가격 순서) → holding` (stock을 잠그지 않음)
+- 두 주체 간 상호 대기가 발생하지 않도록 잠금 계층을 엄격히 분리합니다.
+
+#### 2. 체결 엔진(#122) 연동 계약
+- **포트 호출**: `OrderBookExecutionStore.lockForExecution(...)`는 `Propagation.MANDATORY`로 실행되며, 호출 전 #122가 `account → trade_order`를 잠근 동일 트랜잭션 안에서 호출해야 합니다.
+- **방향 매핑**: 주문 BUY는 가상 공급 ASK를 소비하고, 주문 SELL은 가상 공급 BID를 소비합니다 (`BUY → ASK`, `SELL → BID`).
+- **레벨 정렬 순서**: ASK는 `price ASC, levelDepth ASC`, BID는 `price DESC, levelDepth ASC`로 비관적 락(`FOR UPDATE`)을 획득합니다.
+- **불일치 처리**: 기대하는 `bookVersion`이나 `revision`이 일치하지 않거나 이미 종료된 버전이면 `Optional.empty()`를 반환합니다. 이 결과에 대한 재시도/보류 처리는 #122의 책임이며, HTTP 접수용 `SAME_CLIENT_ORDER_ID`로 일괄 매핑하지 않습니다.
+- **상태 전이 primitive**: 한 트랜잭션에서 여러 레벨을 소비하더라도 `OrderBookVersion.advanceRevision()`은 트랜잭션당 1회만 호출합니다.
+
+#### 3. 수량 및 정밀도 정책
+- **정수 수량 정책**: DB 컬럼은 후속 소수점 호환성을 위해 `NUMERIC(19,6)`을 유지하지만, V1 가상 호가 생성과 체결 소비는 **정수 주 단위** 정책입니다 (`minQuantity=1`, `maxQuantity=1000000`).
+- **수량 분포의 성격**: 깊이 배수와 라운드 넘버 부스트는 모의 시장 V1 공급 정책일 뿐이며, 실제 시장의 호가 잔량 분포를 실증 재현한 것이 아니므로 상단 수량이 항상 크다는 절대 불변식을 가정하지 않습니다.
 
 ## 8. 프론트 공용 모듈
 
