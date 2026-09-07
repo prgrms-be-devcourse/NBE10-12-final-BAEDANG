@@ -4,10 +4,7 @@ import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.repository.AccountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,12 +14,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/** 저장된 만료 시각만 읽습니다. 신규 접수 플래그와 무관하게 복구를 계속합니다. */
+/** 저장된 만료 시각으로 주문을 순차 복구하며 실패 건은 다음 스캔에서 재시도합니다. */
 @Service
 public class LimitOrderExpirationService {
 
     private static final Logger log = LoggerFactory.getLogger(LimitOrderExpirationService.class);
-    private static final long EXPIRATION_SCAN_MS = 30_000L;
 
     private final AtomicBoolean running = new AtomicBoolean();
     private final TradeOrderRepository orders;
@@ -42,8 +38,6 @@ public class LimitOrderExpirationService {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelay = EXPIRATION_SCAN_MS)
-    @EventListener(ApplicationReadyEvent.class)
     @Transactional(propagation = Propagation.NEVER)
     public void expireDue() {
         if (!running.compareAndSet(false, true)) {

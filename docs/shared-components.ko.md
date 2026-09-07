@@ -36,7 +36,7 @@
 | [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | `PasswordEncoder` 빈 주입 후 `encode(raw)`, `matches(raw, encoded)` 사용 | 현재 BCrypt 사용. 직접 해시 함수를 만들거나 인코더를 반복 생성하지 않음 |
 | [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | JPA Auditing과 `auditingDateTimeProvider` 자동 적용 | 현재 제공자는 `OffsetDateTime.now(ZoneOffset.UTC)`를 직접 사용하므로 주입 Clock을 고정해도 감사 시각은 고정되지 않음 |
 | [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | 상속으로 `createdAt`, `updatedAt` 자동 기록 | 실제 테이블에 `created_at`, `updated_at` 두 컬럼이 있는 경우만 상속. 계좌의 `openedAt`·원장의 `occurredAt`을 대체하지 않음 |
-| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 스케줄링 활성화 및 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 일봉 전용 실행기: 스레드 1개, 큐 10개, 종료 대기 최대 30초. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 공용 `taskScheduler`, 만료 전용 `limitOrderTaskScheduler`, 일봉 전용 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 일봉 전용 실행기: 스레드 1개, 큐 10개, 종료 대기 최대 30초. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
 | [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | `/api/**`에 자동 적용. 허용 출처는 `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS`로 설정 | 직접 호출할 필요 없음. CORS 허용은 인증·인가를 대신하지 않음 |
 
 ### 오류 처리·외부 통신
@@ -307,5 +307,5 @@ API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 �
 - LimitOrderService: 접수·견적·취소 NEVER 진입점. 외부 정보를 DB 변경 전에 준비합니다. 접수 비활성화는 기존 주문 재생·취소를 차단하지 않습니다.
 - LimitOrderTransactionService: REQUIRED 계좌 우선 잠금 접수·종료. 외부 호출·원장 INSERT 없음. 만료 경합 결과를 값으로 반환하여 커밋 후 HTTP 오류로 변환합니다.
 - OrderReadService: 읽기 전용 소유권 검증, 현재 회차 주문 커서·주문별 체결 커서. 체결 직후 잔액은 연결 원장에서 조회합니다.
-- LimitOrderExpirationService: NEVER 시작 시/30초 스캔, 외부 시장 호출 없음, 주문별 독립 종료 트랜잭션과 실패 재시도.
+- LimitOrderExpirationService: NEVER 스캔, 외부 시장 호출 없음. 주문별 종료 트랜잭션에 2초 잠금 대기 제한을 적용하고 실패 건은 다음 스캔에서 재시도합니다. LimitOrderExpirationScheduler가 전용 단일 스레드 limitOrderTaskScheduler에서 시작 시 비동기 복구 및 완료 후 30초 간격 실행을 담당합니다.
 - Account.reserveCash/releaseCash, Holding.reserveQuantity/releaseQuantity: 동결 상태만 변경. 호출부는 계좌 잠금 및 필요한 보유 잠금을 획득해야 합니다. 보유 메서드는 명시적 UTC 변경 시각을 받습니다.

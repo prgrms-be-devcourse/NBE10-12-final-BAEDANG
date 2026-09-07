@@ -42,6 +42,9 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -97,6 +100,7 @@ class LimitOrderLifecycleIntegrationTest {
     @MockitoBean MarketSessionProvider sessions;
     @MockitoBean ExecutionExchangeRateProvider rates;
     @MockitoBean MarketCalendarPort calendars;
+    @MockitoBean com.baedang.trading.scheduler.LimitOrderExpirationScheduler scheduledTriggers;
 
     @Autowired LimitOrderService service;
     @Autowired OrderReadService reads;
@@ -219,6 +223,134 @@ class LimitOrderLifecycleIntegrationTest {
                 .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData().get("retryPolicy")).isEqualTo("NEW_CLIENT_ORDER_ID"));
         assertThat(locked()).isZero();
         assertThat(reads.list(user, null, 20).items().getFirst().status()).isEqualTo(OrderStatus.REJECTED);
+    }
+
+    @Test
+    void 백건을_넘는_만료주문도_모두_해제한다() {
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            ids.add(service.place(user, request("BUY", "1", "100", "USD")).orderId());
+        }
+        time.set(NOW.plusSeconds(3600));
+        expiration.expireDue();
+        assertThat(orders.findAllById(ids)).allSatisfy(o -> {
+            assertThat(o.getStatus()).isEqualTo(OrderStatus.EXPIRED);
+            assertThat(o.getReservedCash()).isEqualByComparingTo("0");
+        });
+        assertThat(locked()).isZero();
+    }
+
+    @Test
+    void 취소와_만료가_경합해도_한번만_해제한다() throws Exception {
+        var order = service.place(user, request("BUY", "1", "100", "USD"));
+        time.set(NOW.plusSeconds(3600));
+        var start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var cancel = pool.submit(() -> {
+                start.await();
+                assertThatThrownBy(() -> service.cancel(user, order.orderId()))
+                        .isInstanceOfSatisfying(BusinessException.class,
+                                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ORDER_STATE_CONFLICT));
+                return null;
+            });
+            var expire = pool.submit(() -> { start.await(); expiration.expireDue(); return null; });
+            start.countDown();
+            cancel.get(10, TimeUnit.SECONDS);
+            expire.get(10, TimeUnit.SECONDS);
+        }
+        assertThat(orders.findById(order.orderId()).orElseThrow().getStatus()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account))
+                .isEqualByComparingTo("50000000");
+    }
+
+    @Test
+    void 잠금실패_주문을_건너뛰고_다음스캔에서_복구한다() throws Exception {
+        var blocked = service.place(user, request("BUY", "1", "100", "USD"));
+        long otherUser = jdbc.queryForObject("INSERT INTO users(email,password_hash,nickname) VALUES (?,'x','other') RETURNING user_id",
+                Long.class, UUID.randomUUID() + "@test.com");
+        long otherAccount = jdbc.queryForObject("INSERT INTO account(user_id,initial_cash,cash_balance,opened_at) VALUES (?,50000000,50000000,?) RETURNING account_id",
+                Long.class, otherUser, NOW.atOffset(ZoneOffset.UTC));
+        var next = service.place(otherUser, new LimitOrderRequest(otherAccount, UUID.randomUUID().toString(),
+                symbol, "US", "BUY", "1", "100", "USD"));
+        time.set(NOW.plusSeconds(3600));
+        var locked = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(2)) {
+            var holder = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(s -> {
+                jdbc.queryForObject("SELECT account_id FROM account WHERE account_id=? FOR UPDATE", Long.class, account);
+                locked.countDown();
+                try {
+                    if (!release.await(15, TimeUnit.SECONDS)) throw new IllegalStateException("test lock release timeout");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(e);
+                }
+            }));
+            try {
+                assertThat(locked.await(5, TimeUnit.SECONDS)).isTrue();
+                pool.submit(expiration::expireDue).get(8, TimeUnit.SECONDS);
+                assertThat(orders.findById(blocked.orderId()).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+                assertThat(orders.findById(next.orderId()).orElseThrow().getStatus()).isEqualTo(OrderStatus.EXPIRED);
+                assertThat(locked()).isEqualByComparingTo("140014");
+            } finally {
+                release.countDown();
+            }
+            holder.get(5, TimeUnit.SECONDS);
+        }
+        expiration.expireDue();
+        assertThat(orders.findById(blocked.orderId()).orElseThrow().getStatus()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(locked()).isZero();
+    }
+
+    @Test
+    void 주문목록_다음페이지는_중복과_누락없이_내림차순으로_이어진다() {
+        List<Long> ids = new ArrayList<>();
+        for (int i = 0; i < 5; i++) ids.add(service.place(user, request("BUY", "1", "100", "USD")).orderId());
+        var first = reads.list(user, null, 2);
+        var second = reads.list(user, first.nextCursor(), 2);
+        var third = reads.list(user, second.nextCursor(), 2);
+        List<Long> actual = new ArrayList<>();
+        for (var page : List.of(first, second, third)) page.items().forEach(o -> actual.add(o.orderId()));
+        assertThat(actual).containsExactlyElementsOf(ids.reversed());
+        assertThat(first.hasNext()).isTrue();
+        assertThat(second.hasNext()).isTrue();
+        assertThat(third.hasNext()).isFalse();
+        assertThat(third.nextCursor()).isNull();
+    }
+
+    @Test
+    void 체결목록_다음페이지는_순서와_원장잔액을_보존한다() {
+        var order = service.place(user, request("BUY", "3", "100", "USD"));
+        // 조회 전용 픽스처: 1주씩 3번 체결된 이력과 각 체결 직후 원장을 적재합니다.
+        for (int sequence = 1; sequence <= 3; sequence++) {
+            var at = NOW.plusSeconds(sequence).atOffset(ZoneOffset.UTC);
+            long execution = jdbc.queryForObject("""
+                    INSERT INTO trade_execution(order_id,execution_key,sequence_no,quantity,price,exchange_rate,
+                    sec_fee_usd,gross_amount_krw,fee_krw,tax_krw,net_amount_krw,quote_at,executed_at,book_level_id)
+                    VALUES (?,?,?,1,100,1400,0,140000,14,0,140014,?,?,1) RETURNING execution_id
+                    """, Long.class, order.orderId(), UUID.randomUUID(), sequence, at, at);
+            jdbc.update("""
+                    INSERT INTO ledger_entry(account_id,order_id,execution_id,entry_type,amount,balance_after,exchange_rate,occurred_at)
+                    VALUES (?,?,?,'BUY',-140014,?,1400,?)
+                    """, account, order.orderId(), execution, 50000000 - sequence * 140014, at);
+        }
+        jdbc.update("""
+                UPDATE trade_order SET status='FILLED',filled_quantity=3,execution_count=3,
+                gross_amount=420000,fee=42,tax=0,net_amount=420042,reserved_cash=0,
+                last_executed_at=?,closed_at=? WHERE order_id=?
+                """, NOW.plusSeconds(3).atOffset(ZoneOffset.UTC), NOW.plusSeconds(3).atOffset(ZoneOffset.UTC), order.orderId());
+        jdbc.update("UPDATE account SET cash_balance=49579958,locked_cash=0 WHERE account_id=?", account);
+        var first = reads.executions(user, order.orderId(), null, 2);
+        var second = reads.executions(user, order.orderId(), first.nextCursor(), 2);
+        assertThat(first.items()).extracting(e -> e.sequenceNo()).containsExactly(1, 2);
+        assertThat(second.items()).extracting(e -> e.sequenceNo()).containsExactly(3);
+        assertThat(first.items()).extracting(e -> e.balanceAfter()).containsExactly("49859986", "49719972");
+        assertThat(second.items().getFirst().balanceAfter()).isEqualTo("49579958");
+        assertThat(first.stock()).isEqualTo(second.stock());
+        assertThat(first.hasNext()).isTrue();
+        assertThat(second.hasNext()).isFalse();
+        assertThat(second.nextCursor()).isNull();
     }
 
     @Test

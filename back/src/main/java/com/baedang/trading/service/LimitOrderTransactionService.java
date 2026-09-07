@@ -22,6 +22,8 @@ import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -33,6 +35,9 @@ import java.util.Optional;
 /** account → order → holding 순서로 잠그며 외부 API는 호출하지 않습니다. */
 @Service
 public class LimitOrderTransactionService {
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private final AccountRepository accounts;
     private final TradeOrderRepository orders;
@@ -148,6 +153,11 @@ public class LimitOrderTransactionService {
     /** 만료 경합 결과를 예외가 아닌 값으로 반환하여 종료 및 동결 해제를 먼저 커밋합니다. */
     @Transactional
     public OrderDetailResponse close(Long userId, Long accountId, Long orderId, boolean expiration) {
+        if (expiration) {
+            // PostgreSQL 트랜잭션 로컬 설정: 계좌/주문/보유 잠금 대기를 제한하며 종료 시 자동 해제됩니다.
+            // 첫 행 잠금은 여전히 account입니다. 한 주문의 대기가 뒤의 만료 주문을 막지 않게 합니다.
+            entityManager.createNativeQuery("SET LOCAL lock_timeout = '2s'").executeUpdate();
+        }
         Account account = accounts.findByAccountIdAndUserIdForUpdate(accountId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ORDER_NOT_FOUND));
         TradeOrder order = orders.findForUpdate(orderId)
