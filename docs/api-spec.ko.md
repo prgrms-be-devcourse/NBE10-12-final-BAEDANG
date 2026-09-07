@@ -574,7 +574,7 @@ minute_candle 에 60초 이내 데이터가 있나?
 
 ## 거래
 
-### `GET /orders/quote` 🔒
+### `GET /orders/quote/market` 🔒
 수수료 · 세금 미리보기
 
 ```
@@ -624,7 +624,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 - 통화 경계마다 **HALF_UP**으로 반올림합니다. 미국 주문은 주당 달러 가격을 센트로 먼저 반올림합니다. 그 가격으로 `grossKrw`를 계산하고, 거래 수수료와 `secFeeUsd → secFeeKrw`도 각각 원 단위로 반올림합니다. 국내 주문은 원화 gross를 먼저 반올림한 뒤 fee·tax를 각각 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
 - **견적과 실제 체결 사이에 가격이 바뀔 수 있습니다.** 견적은 참고값이고, 체결 시점에 서버가 다시 계산합니다.
 
-### `POST /orders` 🔒
+### `POST /orders/market` 🔒
 매수 · 매도 (시장가 즉시 체결)
 
 **Request**
@@ -876,7 +876,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | 메인 | `/market/status` (선택) |
 | 주식 랭킹 | `/exchange-rates/latest` · `/stocks/rankings` · `/stocks/search` |
 | 종목 상세 | `/stocks/{symbol}` · `/stocks/{symbol}/candles` |
-| 거래 패널 | `/orders/quote` · `POST /orders` |
+| 거래 패널 | `/orders/quote/market` · `POST /orders/market` |
 | 마이페이지 | `/accounts/me` · `/accounts/me/holdings` · `/accounts/me/ledger` |
 | 포트폴리오 초기화 | `POST /accounts/me/reset` |
 | 이용 가이드 | 없음 (정적 콘텐츠) |
@@ -971,10 +971,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 
 | 엔드포인트 | 내용 |
 |---|---|
-| `POST /orders` | 지정가 주문 (`limitPrice`, `PENDING` 상태) |
-| `POST /orders` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
-| `GET /accounts/me/orders` | 주문 내역 탭 — 거절된 주문까지 포함 (원장에는 안 남음) |
-| `PATCH /orders/{orderId}` | 예정: `{ "status": "CANCELED" }`만 허용, 활성 미체결 잔여분 취소. 이미 체결된 수량/원장은 유지 |
+| `POST /orders/market` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
 | `GET /stocks/{symbol}/orderbook` | 호가 |
@@ -989,13 +986,13 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 
 주문 상세·목록·지정가 접수·취소 응답에는 `symbol`, `name`, `marketCountry`를 제공합니다. 체결 목록 응답은 `{orderId, stock: {symbol, name, marketCountry}, items, nextCursor, hasNext}` 구조입니다. 종목 정보는 개별 체결 항목이 아닌 페이지 상위에 한 번 제공하며, 빈 목록에도 orderId와 stock을 반환합니다. 페이지네이션과 체결 정렬은 유지합니다. `currency` 필드는 반환하지 않으며 지정가·체결 단가는 KR이면 KRW, US이면 USD입니다. 원본 입력 통화는 `requestedLimitCurrency`로 구분합니다. 지정가 견적을 포함하여 가격 문자열은 KRW 원 단위, USD 소수점 두 자리로 통일합니다. 환율 정밀도와 정산 계산은 변경하지 않으며 gross/fee/tax/net/reservedCash/balanceAfter는 계속 KRW입니다. 경로·쿼리 파라미터 타입 변환 실패는 HTTP 400 `INVALID_INPUT` 및 문제 파라미터명을 담은 `data.field`로 응답하며 원본 입력값은 노출하지 않습니다.
 
-주문 유형에 따라 엔드포인트를 분리합니다: 시장가는 `POST /orders/market` 및 `GET /orders/quote/market`, 지정가는 `POST /orders/limit` 및 `GET /orders/quote/limit`을 사용합니다. 요청 바디의 orderType은 받지 않으며 URL 경로로 주문 유형을 확정합니다. MARKET의 limitPrice/limitCurrency는 입력 오류입니다. 기존 시장가 응답은 유지하며 프론트 요청 수정은 별도 담당 범위입니다.
+주문 유형에 따라 엔드포인트를 분리합니다: 시장가는 `POST /orders/market` 및 `GET /orders/quote/market`, 지정가는 `POST /orders/limit` 및 `GET /orders/quote/limit`을 사용합니다. 요청 바디의 orderType은 받지 않으며 URL 경로로 주문 유형을 확정합니다. 시장가 요청의 미등록 필드는 무시하며 limitPrice/limitCurrency를 보내도 URL로 결정한 주문 유형은 바뀌지 않습니다. 기존 시장가 응답은 유지하며 프론트 요청 수정은 별도 담당 범위입니다.
 
 LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW 원 단위, 미국은 KRW 원 단위 또는 USD 센트 단위를 허용합니다. 후행 0은 허용하지만 초과 자릿수·지수 표기는 거절합니다. 미국 원화 입력은 접수 환율로 나누어 HALF_UP 센트 반올림한 USD 지정가를 고정 저장합니다. 0달러가 되거나 저장 범위를 초과하면 거절합니다. 이후 원화 가격 한도를 계속 추적하는 주문은 아닙니다.
 
 매수 동결액은 원본 입력을 기준으로 합니다. 원화는 입력 단가 × 전체 수량 + 원 단위 수수료, 달러는 단가 × 전체 수량 × 환율의 원 단위 반올림액 + 수수료입니다. 센트 환산 가격을 원화로 역산하지 않습니다. 매도는 수량만 동결합니다. 미국 접수는 매수/매도 모두 검증된 체결용 환율 스냅샷을 사용하여 접수 환율을 보존하고 원화 입력을 환산합니다. 실제 체결 환율은 별개입니다. 센트 환산 반올림만으로도 동결액이 부족해 일부 수량만 체결되거나 보류될 수 있습니다.
 
-접수 성공은 `POST /orders/limit` 기준 201 OrderDetailResponse: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, 누적 grossAmount/fee/tax/netAmount, rejectReason, orderedAt/expiresAt/closedAt입니다. activeRemainingQuantity는 활성 잔여 수량으로 종료 후 0입니다. 멱등 비교는 원본 가격의 수치와 입력 통화를 사용하고 새 환율로 재환산하지 않습니다. 현재 저장 상태를 반환하며 종료 주문을 재활성화하지 않습니다. 저장된 REJECTED는 같은 오류를 재생합니다. 기존 주문 조회는 신규 접수 플래그보다 먼저, 잠금 후 회차 검사보다 먼저 수행합니다.
+접수 성공은 `POST /orders/limit` 기준 201 OrderDetailResponse: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, 누적 grossAmount/fee/tax/netAmount, rejectReason, orderedAt/expiresAt/closedAt입니다. activeRemainingQuantity는 활성 잔여 수량으로 종료 후 0입니다. 멱등 비교는 원본 가격의 수치와 입력 통화를 사용하고 새 환율로 재환산하지 않습니다. 현재 저장 상태를 반환하며 종료 주문을 재활성화하지 않습니다. 저장된 REJECTED는 같은 오류를 재생합니다. 기존 주문은 외부 조회 전에 확인하고, 잠금 후 회차 검사보다 먼저 재확인합니다.
 
 견적은 acceptable/reason, availableCash/availableQuantity, expiresAt, 원본·환산 지정가, acceptanceExchangeRate, limitEstimate(grossAmount/fee/tax/netAmount/reservedCash), executionPreview(status=UNSUPPORTED)를 제공합니다. 환산 지정가에 전량 한 번 체결하는 가정이며 원화 원본으로 계산한 동결액과 다를 수 있습니다. 동결·물량 소비는 하지 않습니다. 미지원은 예상 체결 0주가 아닙니다. 예상 매도 순금액이 0 이하라는 이유만으로 접수를 막지는 않습니다.
 
@@ -1007,6 +1004,6 @@ LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW �
 
 지정가(LIMIT) 주문 접수는 상시 활성화되어 동작합니다. 기존 주문 재생·조회·취소·만료가 지원됩니다. 정적 사전 검증 실패는 저장하지 않습니다. 트랜잭션에서 확정한 업무 거절은 원본 조건·환율과 LIMIT REJECTED를 저장하고 NEW_CLIENT_ORDER_ID를 반환하며 동결·체결·원장은 생성하지 않습니다. 저장 전 컨텍스트/환율/시세/통화/계산 오류는 SAME_CLIENT_ORDER_ID입니다.
 
-만료는 저장된 expiresAt 기준 30초 주기 및 시작 시 복구를 수행합니다. 계좌 우선 잠금의 주문별 트랜잭션이며 실패 건은 다음 주기에 재시도합니다. 외부 캘린더·환율 조회는 없습니다. 취소·만료는 동결만 해제하며 이미 체결된 금액·보유·원장을 되돌리지 않습니다.
+만료는 전용 단일 스레드 스케줄러에서 저장된 expiresAt을 기준으로 이전 스캔 완료 30초 후 실행하며, 시작 시에도 비동기로 복구합니다. 만료 트랜잭션은 PostgreSQL SET LOCAL lock_timeout을 2초로 설정하고, 잠금 실패 건은 롤백 후 다음 스캔에서 재시도합니다. 계좌 우선 잠금의 주문별 트랜잭션이며 실패 건은 다음 주기에 재시도합니다. 외부 캘린더·환율 조회는 없습니다. 취소·만료는 동결만 해제하며 이미 체결된 금액·보유·원장을 되돌리지 않습니다.
 
 레거시 보정·데이터 백필은 제공하지 않습니다. 스키마 적용을 위한 DB 재생성 등은 별도 명시적 승인이 필요합니다.

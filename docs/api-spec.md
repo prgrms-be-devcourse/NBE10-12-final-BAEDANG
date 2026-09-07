@@ -575,7 +575,7 @@ The ranked-universe collector runs once per minute, sequentially in 20-stock gro
 
 ## Trading
 
-### `GET /orders/quote` 🔒
+### `GET /orders/quote/market` 🔒
 Fee & tax preview
 
 ```
@@ -625,7 +625,7 @@ sell  gross 2,415,000 − fee   242 − tax 4,830  = 2,409,928 credited
 - **Round at the currency boundary with `HALF_UP`.** For US orders, first round the per-share USD price to cents. Calculate KRW gross from that `priceUsd × quantity × exchangeRate` and round to whole won. Calculate `secFeeUsd` separately from `priceUsd × quantity`, apply the `$0.01` minimum, round it to cents, then convert it to KRW and round to whole won. For KR orders, round the KRW gross amount first, calculate fee/tax from that value, then round again. Keep final ledger amounts as integers so the invariant holds exactly.
 - **Price can move between quote and fill.** The quote is a reference; the server recomputes at fill time.
 
-### `POST /orders` 🔒
+### `POST /orders/market` 🔒
 Buy / sell (market immediate fill)
 
 **Request**
@@ -877,7 +877,7 @@ Closing the old account, opening the new account, and inserting its initial-depo
 | Main | `/market/status` (optional) |
 | Stock Rankings | `/exchange-rates/latest` · `/stocks/rankings` · `/stocks/search` |
 | Stock Detail | `/stocks/{symbol}` · `/stocks/{symbol}/candles` |
-| Trade Panel | `/orders/quote` · `POST /orders` |
+| Trade Panel | `/orders/quote/market` · `POST /orders/market` |
 | My Page | `/accounts/me` · `/accounts/me/holdings` · `/accounts/me/ledger` |
 | Portfolio Reset | `POST /accounts/me/reset` |
 | Guide | none (static content) |
@@ -972,10 +972,7 @@ LIMIT uses option B (buy at asks <= limit, sell at bids >= limit) and expires at
 
 | Endpoint | Content |
 |---|---|
-| `POST /orders` | limit orders (`limitPrice`, `PENDING` status) |
-| `POST /orders` (fractional) | open US fractional orders. Add `allowsFractional` to the detail response; change the input unit for US stocks only |
-| `GET /accounts/me/orders` | order-history tab — includes rejected orders (they don't land in the ledger) |
-| `PATCH /orders/{orderId}` | Planned: only `{ "status": "CANCELED" }`, cancel active unfilled remainder; retain completed fills and ledger |
+| `POST /orders/market` (fractional) | open US fractional orders. Add `allowsFractional` to the detail response; change the input unit for US stocks only |
 | `GET /accounts/me/assets/history` | asset trend chart (daily snapshots) |
 | `GET /accounts/me/report` | investment-habit diagnosis |
 | `GET /stocks/{symbol}/orderbook` | order book |
@@ -990,13 +987,13 @@ Not built yet, but the URL design reserves the slots so nothing collides.
 
 Order detail, list, LIMIT acceptance and cancellation responses include `symbol`, `name`, and `marketCountry`. Execution list responses provide `{orderId, stock: {symbol, name, marketCountry}, items, nextCursor, hasNext}`. Stock fields appear once at page level, not in each execution item; orderId and stock are also returned for empty pages. Pagination and execution ordering are unchanged. No `currency` field is returned: limit/execution prices use KRW for KR and USD for US; `requestedLimitCurrency` identifies the original input currency. Price strings use whole won for KRW and exactly two decimal places for USD, including LIMIT quotes. FX precision and settlement calculations are unchanged; gross/fee/tax/net/reservedCash/balanceAfter remain KRW. Invalid path/query parameter types return HTTP 400 `INVALID_INPUT` with `data.field` identifying the parameter (e.g. `orderId` or `size`), without echoing the input value.
 
-Endpoints are separated by order type: `POST /orders/market` & `GET /orders/quote/market` for market orders, `POST /orders/limit` & `GET /orders/quote/limit` for limit orders. Neither request body accepts `orderType`; the URL path defines the order type. MARKET rejects limitPrice/limitCurrency. Existing MARKET response fields are unchanged. Frontend request updates are owned separately.
+Endpoints are separated by order type: `POST /orders/market` & `GET /orders/quote/market` for market orders, `POST /orders/limit` & `GET /orders/quote/limit` for limit orders. Neither request body accepts `orderType`; the URL path defines the order type. Unknown MARKET request fields are ignored; limitPrice/limitCurrency do not change the URL-selected order type. Existing MARKET response fields are unchanged. Frontend request updates are owned separately.
 
 LIMIT requires string limitPrice and limitCurrency. KR accepts KRW whole-won prices only. US accepts KRW whole-won or USD cent prices. Trailing zeros are allowed; excess precision and exponent notation are rejected, never silently rounded. For US KRW input, the backend stores HALF_UP(requestedLimitPrice / acceptanceExchangeRate, 2) as the fixed USD limitPrice. A result of zero or a storage overflow is rejected. The order does not continue tracking a KRW price ceiling/floor as FX changes.
 
 BUY reserve is computed from the original input: KRW input × full quantity + rounded trading fee; USD input × full quantity × acceptance FX rounded to KRW, plus rounded trading fee. Do not reconvert the cent-rounded USD limit back to KRW to calculate reserve. SELL reserves quantity only. US acceptance uses the validated execution FX snapshot for both directions; this also preserves acceptance FX and supports KRW input conversion. Actual execution rates remain independent. Partial fills may need to reduce quantity or defer even when only cent conversion rounding causes reserve insufficiency.
 
-POST /orders/limit returns 201 with OrderDetailResponse for accepted LIMIT orders: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, cumulative grossAmount/fee/tax/netAmount, rejectReason and orderedAt/expiresAt/closedAt. activeRemainingQuantity is active remainder (zero after closure). Repeated requests compare original price numerically and input currency, never reconvert with new FX, and return current stored state without reactivation. Stored REJECTED results replay the same error. Existing orders are checked before the new-acceptance flag and after locking before the round check.
+POST /orders/limit returns 201 with OrderDetailResponse for accepted LIMIT orders: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, cumulative grossAmount/fee/tax/netAmount, rejectReason and orderedAt/expiresAt/closedAt. activeRemainingQuantity is active remainder (zero after closure). Repeated requests compare original price numerically and input currency, never reconvert with new FX, and return current stored state without reactivation. Stored REJECTED results replay the same error. Existing orders are checked before external lookups and rechecked after locking before the round check.
 
 LIMIT quote returns acceptable/reason, availableCash/availableQuantity, expiresAt, original and converted prices, acceptanceExchangeRate, limitEstimate {grossAmount, fee, tax, netAmount, reservedCash}, and executionPreview {status: "UNSUPPORTED"}. The estimate assumes one fill at the converted limit; reserve can differ because KRW input is preserved. No resources are reserved or consumed. Unsupported preview is not a zero-fill prediction; non-positive estimated sell proceeds do not by themselves prevent acceptance.
 
@@ -1008,6 +1005,6 @@ LIMIT quote returns acceptable/reason, availableCash/availableQuantity, expiresA
 
 LIMIT order acceptance is always enabled. Existing-order replay, queries, cancellation and expiration are supported. Static preflight failures are not persisted. Validated transactional business rejections are stored as LIMIT REJECTED with original terms and FX, no reservation, execution or ledger, and return NEW_CLIENT_ORDER_ID. Pre-insert context/FX/quote/currency/calculation failures keep SAME_CLIENT_ORDER_ID.
 
-Expiration scans stored expiresAt every 30 seconds, plus startup recovery. Each order closes in its own account-first transaction. Failures are logged and retried on later scans; no calendar/FX calls are made. Cancellation/expiration only release locked resources; settled cash/holdings/ledger are not reversed.
+Expiration scans stored expiresAt on a dedicated single-thread scheduler, 30 seconds after the previous scan completes, plus asynchronous startup recovery. Each expiration transaction sets PostgreSQL SET LOCAL lock_timeout to 2 seconds; lock failures roll back and are retried on the next scan. Each order closes in its own account-first transaction. Failures are logged and retried on later scans; no calendar/FX calls are made. Cancellation/expiration only release locked resources; settled cash/holdings/ledger are not reversed.
 
 No historical data backfill or legacy correction is provided. Schema changes require an explicitly authorized database recreation or deployment schema procedure.
