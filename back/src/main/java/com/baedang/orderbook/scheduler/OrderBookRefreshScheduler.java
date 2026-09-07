@@ -80,7 +80,10 @@ public class OrderBookRefreshScheduler {
         this.clock = clock;
     }
 
-    @Scheduled(fixedDelayString = "${trading.orderbook.refresh-interval:3s}")
+    @Scheduled(
+            fixedDelayString = "${trading.orderbook.refresh-interval:3s}",
+            initialDelayString = "${trading.orderbook.refresh-initial-delay:0s}"
+    )
     @Transactional(propagation = Propagation.NEVER)
     public void refreshOrderBooks() {
         for (MarketCountry country : List.of(MarketCountry.KR, MarketCountry.US)) {
@@ -92,7 +95,10 @@ public class OrderBookRefreshScheduler {
         }
     }
 
-    @Scheduled(fixedDelayString = "${trading.orderbook.unconsumed-retention:1m}")
+    @Scheduled(
+            fixedDelayString = "${trading.orderbook.unconsumed-retention:1m}",
+            initialDelayString = "${trading.orderbook.retention-initial-delay:0s}"
+    )
     @Transactional(propagation = Propagation.NEVER)
     public void deleteExpiredUnconsumedVersions() {
         try {
