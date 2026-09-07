@@ -1,3 +1,8 @@
+# 기존 볼륨을 유지한 채 가상 호가 스키마를 올리는 경우(애플리케이션 중지 후):
+#   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ../migrations/2026-09-07-orderbook.sql
+# 이 migration은 기존 trade_execution.book_level_id 고아 참조와 중복 active 버전을
+# 먼저 검사하고, 문제가 있으면 전체 트랜잭션을 중단합니다. 기존 체결·원장 행은 수정하지 않습니다.
+
 # 모의 주식 트레이딩 서비스 — 로컬 개발 환경
 #
 #   docker compose up -d        기동
