@@ -133,10 +133,12 @@ class OrderBookHttpIntegrationTest {
         assertThat(body.path("description").asText()).isEqualTo("현재가 기반 가상 호가·가상 잔량");
         assertThat(body.path("asks")).hasSize(10);
         assertThat(body.path("bids")).hasSize(10);
-        assertThat(body.path("asks").get(0).path("price").isTextual()).isTrue();
-        assertThat(body.path("asks").get(0).path("quantity").isTextual()).isTrue();
-        assertThat(body.path("bids").get(0).path("price").isTextual()).isTrue();
-        assertThat(body.path("bids").get(0).path("quantity").isTextual()).isTrue();
+        for (String side : new String[]{"asks", "bids"}) {
+            for (JsonNode level : body.path(side)) {
+                assertThat(level.path("price").isTextual()).isTrue();
+                assertThat(level.path("quantity").isTextual()).isTrue();
+            }
+        }
     }
 
     @Test

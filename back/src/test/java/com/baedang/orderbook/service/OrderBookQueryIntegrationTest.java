@@ -296,6 +296,7 @@ class OrderBookQueryIntegrationTest {
                         OrderBookLevel ask = levelRepository.findAskLevelsForUpdate(versionId).getFirst();
                         ask.consume(BigDecimal.ONE);
                         version.advanceRevision();
+                        versionRepository.flush();
                         writerReady.countDown();
                         try {
                             assertThat(releaseWriter.await(5, TimeUnit.SECONDS)).isTrue();
@@ -371,18 +372,29 @@ class OrderBookQueryIntegrationTest {
     void future_quote_조회는_503이고_오류_GET은_DB_상태를_변경하지_않는다() {
         Long versionId = publicationService.publish(
                 generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
-        long levelCount = levelRepository.countByBookVersion_BookVersionId(versionId);
-        long revision = versionRepository.findById(versionId).orElseThrow().getRevision();
         jdbcTemplate.update(
                 "update order_book_version set quote_at = ? where book_version_id = ?",
                 BASE.plusSeconds(1).atOffset(ZoneOffset.UTC), versionId);
+        OrderBookVersion beforeGet = versionRepository.findById(versionId).orElseThrow();
+        long revision = beforeGet.getRevision();
+        boolean active = beforeGet.isActive();
+        var closedAt = beforeGet.getClosedAt();
+        var remainingQuantities = levelRepository.findActiveSnapshotRows(krStock.getStockId()).stream()
+                .map(row -> row.getRemainingQuantity())
+                .toList();
 
         assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
-        assertThat(levelRepository.countByBookVersion_BookVersionId(versionId)).isEqualTo(levelCount);
-        assertThat(versionRepository.findById(versionId).orElseThrow().getRevision()).isEqualTo(revision);
+        OrderBookVersion afterGet = versionRepository.findById(versionId).orElseThrow();
+        assertThat(afterGet.getRevision()).isEqualTo(revision);
+        assertThat(afterGet.isActive()).isEqualTo(active);
+        assertThat(afterGet.getClosedAt()).isEqualTo(closedAt);
+        assertThat(levelRepository.findActiveSnapshotRows(krStock.getStockId()))
+                .extracting(row -> row.getRemainingQuantity())
+                .containsExactlyElementsOf(remainingQuantities);
+
     }
 
     @Test
