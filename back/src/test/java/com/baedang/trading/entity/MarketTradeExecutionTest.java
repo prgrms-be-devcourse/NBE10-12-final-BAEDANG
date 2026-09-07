@@ -1,7 +1,8 @@
 package com.baedang.trading.entity;
 
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.model.ExecutionRateEvidence;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -19,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class MarketTradeExecutionTest {
     private static final OffsetDateTime AT = OffsetDateTime.parse("2026-09-05T01:00:00.123456789Z");
     private static final BigDecimal RATE = new BigDecimal("1383.600000");
-    private static final OrderAmount AMOUNT = new OrderAmount(new BigDecimal("10.00"), RATE,
+    private static final MarketOrderAmount AMOUNT = new MarketOrderAmount(new BigDecimal("10.00"), RATE,
             new BigDecimal("10.00"), new BigDecimal("13836.00000000"),
             new BigDecimal("13836"), BigDecimal.ONE, BigDecimal.ZERO, new BigDecimal("13837"), BigDecimal.ZERO);
 
@@ -87,7 +88,7 @@ class MarketTradeExecutionTest {
     @Test
     void 매도_주문의_체결과_연결_검증을_수행한다() {
         OffsetDateTime storedAt = AT.truncatedTo(ChronoUnit.MICROS);
-        OrderAmount sellAmount = new OrderAmount(new BigDecimal("10.00"), RATE,
+        MarketOrderAmount sellAmount = new MarketOrderAmount(new BigDecimal("10.00"), RATE,
                 new BigDecimal("10.00"), new BigDecimal("13836.00000000"),
                 new BigDecimal("13836"), BigDecimal.ONE, new BigDecimal("27"), new BigDecimal("13808"), BigDecimal.ZERO);
         TradeOrder sellOrder = TradeOrder.filledMarketOrder(1L, 2L, UUID.randomUUID(), OrderSide.SELL,
@@ -139,9 +140,9 @@ class MarketTradeExecutionTest {
                 .isExactlyInstanceOf(IllegalArgumentException.class)
                 .hasMessage("종목 시장이 필요합니다");
 
-        assertThat(execution.grossAmountUsd(com.baedang.stock.entity.MarketCountry.KR))
+        assertThat(execution.grossAmountUsd(MarketCountry.KR))
                 .isEqualByComparingTo(BigDecimal.ZERO);
-        assertThat(execution.grossAmountUsd(com.baedang.stock.entity.MarketCountry.US))
+        assertThat(execution.grossAmountUsd(MarketCountry.US))
                 .isEqualByComparingTo(new BigDecimal("10.00"));
     }
 

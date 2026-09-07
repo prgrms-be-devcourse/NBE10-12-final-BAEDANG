@@ -7,7 +7,7 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.PlaceOrderRequest;
+import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
@@ -85,7 +85,7 @@ class MarketOrderTransactionServiceTest {
     @Test
     void 시장가_주문_진입점은_외부_트랜잭션_참여를_금지한다() throws Exception {
         var attribute = new AnnotationTransactionAttributeSource().getTransactionAttribute(
-                MarketOrderService.class.getMethod("place", Long.class, PlaceOrderRequest.class), MarketOrderService.class);
+                MarketOrderService.class.getMethod("place", Long.class, MarketOrderRequest.class), MarketOrderService.class);
 
         assertThat(attribute).isNotNull();
         assertThat(attribute.getPropagationBehavior()).isEqualTo(Propagation.NEVER.value());
@@ -293,7 +293,7 @@ class MarketOrderTransactionServiceTest {
         TradeOrder rejectedOrder = createOrder(OrderStatus.REJECTED, ErrorCode.INSUFFICIENT_CASH.name());
 
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
-        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
         when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(rejectedOrder));
 
         MarketOrderResult result = service.execute(USER_ID, command, context);
@@ -311,7 +311,7 @@ class MarketOrderTransactionServiceTest {
         TradeOrder existingOrderWithQty1 = createOrder(OrderStatus.REJECTED, ErrorCode.INSUFFICIENT_CASH.name());
 
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
-        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
         when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrderWithQty1));
 
         assertThatThrownBy(() -> service.execute(USER_ID, command, context))

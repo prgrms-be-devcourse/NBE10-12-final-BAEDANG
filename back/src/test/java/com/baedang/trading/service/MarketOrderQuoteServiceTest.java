@@ -10,7 +10,7 @@ import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.OrderQuoteResponse;
+import com.baedang.trading.dto.MarketOrderQuoteResponse;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-class OrderQuoteServiceTest {
+class MarketOrderQuoteServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-08-25T03:00:00Z");
 
@@ -50,7 +50,7 @@ class OrderQuoteServiceTest {
     @Mock Account account;
     @Mock Stock stock;
 
-    private OrderQuoteService service;
+    private MarketOrderQuoteService service;
 
     @BeforeEach
     void setUp() {
@@ -60,7 +60,7 @@ class OrderQuoteServiceTest {
                 new BigDecimal("0.0000206"),
                 new BigDecimal("0.01")
         );
-        service = new OrderQuoteService(
+        service = new MarketOrderQuoteService(
                 new OrderQuoteQueryService(
                         accountRepository,
                         stockRepository,
@@ -78,7 +78,7 @@ class OrderQuoteServiceTest {
     void 시장가_매수_견적의_금액과_실행가능_결과를_반환한다() {
         givenTradableKrStock(new BigDecimal("241500"), 5);
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "buy", "10");
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "buy", "10");
 
         assertThat(result.symbol()).isEqualTo("005930");
         assertThat(result.marketCountry()).isEqualTo(MarketCountry.KR);
@@ -96,7 +96,7 @@ class OrderQuoteServiceTest {
     void 국내_종목_견적은_환율을_조회하지_않는다() {
         givenTradableKrStock(new BigDecimal("241500"), 5);
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
 
         assertThat(result.exchangeRate()).isEqualTo("1");
         verifyNoInteractions(exchangeRateProvider);
@@ -157,7 +157,7 @@ class OrderQuoteServiceTest {
         givenTradableKrStock(new BigDecimal("241500"), 5);
         when(account.availableCash()).thenReturn(new BigDecimal("1000000"));
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "10");
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "10");
 
         assertThat(result.executable()).isFalse();
         assertThat(result.reason()).isEqualTo(ErrorCode.INSUFFICIENT_CASH.name());
@@ -170,7 +170,7 @@ class OrderQuoteServiceTest {
         when(account.getAccountId()).thenReturn(11L);
         when(holdingRepository.findByAccountIdAndStockId(11L, 101L)).thenReturn(Optional.empty());
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "SELL", "1");
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "SELL", "1");
 
         assertThat(result.executable()).isFalse();
         assertThat(result.reason()).isEqualTo(ErrorCode.INSUFFICIENT_QUANTITY.name());
@@ -180,7 +180,7 @@ class OrderQuoteServiceTest {
     void 시세가_15초를_초과하면_오래된_시세로_판정한다() {
         givenTradableKrStock(new BigDecimal("241500"), 16);
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
 
         assertThat(result.executable()).isFalse();
         assertThat(result.reason()).isEqualTo(ErrorCode.STALE_QUOTE.name());
@@ -206,7 +206,7 @@ class OrderQuoteServiceTest {
                 NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
 
-        OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
 
         assertThat(result.reason()).isEqualTo(ErrorCode.NOT_IN_UNIVERSE.name());
         verifyNoInteractions(marketSessionProvider);

@@ -13,6 +13,7 @@ import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.trading.service.OrderReadService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -44,6 +45,7 @@ class AccountControllerTest {
     @MockitoBean AccountService accountService;
     @MockitoBean AccountResetService accountResetService;
     @MockitoBean LedgerQueryService ledgerQueryService;
+    @MockitoBean OrderReadService orderReadService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
@@ -206,6 +208,17 @@ class AccountControllerTest {
                 "005930", "삼성전자", "KRW", "6", "228000", "1", "241500",
                 "1449000", "81000", "0.0592", true);
         return new HoldingsResponse(List.of(item), OffsetDateTime.parse("2026-08-11T12:36:59+09:00"));
+    }
+
+    @Test
+    void 계좌의_주문목록을_조회하면_200과_페이징_결과를_응답한다() throws Exception {
+        when(orderReadService.list(7L, null, 20))
+                .thenReturn(new OrderReadService.Page<>(List.of(), null, false));
+
+        mockMvc.perform(get("/api/accounts/me/orders").with(authenticatedUser(7L)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray())
+                .andExpect(jsonPath("$.hasNext").value(false));
     }
 
     @Test

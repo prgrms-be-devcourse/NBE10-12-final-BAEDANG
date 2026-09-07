@@ -12,7 +12,7 @@ import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.repository.LedgerEntryRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
@@ -83,7 +83,7 @@ class LedgerQueryServiceTest {
     void 최신순_항목에_종목명을_조인하고_occurredAt_을_UTC_로_정규화한다() {
         givenActiveAccount();
         OffsetDateTime executedAt = OffsetDateTime.of(2026, 8, 11, 12, 37, 2, 0, ZoneOffset.ofHours(9));
-        var amount = new OrderAmount(new BigDecimal("241500"), BigDecimal.ONE, BigDecimal.ZERO,
+        var amount = new MarketOrderAmount(new BigDecimal("241500"), BigDecimal.ONE, BigDecimal.ZERO,
                 new BigDecimal("2415000"), new BigDecimal("2415000"), new BigDecimal("242"),
                 BigDecimal.ZERO, new BigDecimal("2415242"), BigDecimal.ZERO);
         TradeOrder buyOrder = TradeOrder.filledMarketOrder(1L, 101L, UUID.randomUUID(), OrderSide.BUY,

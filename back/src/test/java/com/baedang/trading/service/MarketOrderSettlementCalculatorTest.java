@@ -2,7 +2,7 @@ package com.baedang.trading.service;
 
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -32,7 +32,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 국내_매수는_주문금액과_수수료를_원단위로_반올림한다() {
-        OrderAmount result = calculator.calculate(
+        MarketOrderAmount result = calculator.calculate(
                 MarketCountry.KR,
                 OrderSide.BUY,
                 new BigDecimal("241500"),
@@ -50,7 +50,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 국내_매도는_수수료와_증권거래세를_차감한다() {
-        OrderAmount result = calculator.calculate(
+        MarketOrderAmount result = calculator.calculate(
                 MarketCountry.KR,
                 OrderSide.SELL,
                 new BigDecimal("241500"),
@@ -66,7 +66,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 미국_매수는_주당가격을_센트로_반올림한_뒤_수량과_환율을_적용한다() {
-        OrderAmount result = calculator.calculate(
+        MarketOrderAmount result = calculator.calculate(
                 MarketCountry.US,
                 OrderSide.BUY,
                 new BigDecimal("88.335"),
@@ -85,7 +85,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 미국_매도는_SEC_Fee_최소_1센트를_원화로_환산한다() {
-        OrderAmount result = calculator.calculate(
+        MarketOrderAmount result = calculator.calculate(
                 MarketCountry.US,
                 OrderSide.SELL,
                 new BigDecimal("88.33"),
@@ -103,7 +103,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 반올림_전_원시단가의_소수점은_제한하지_않고_정산단가를_검증한다() {
-        OrderAmount result = calculator.calculate(MarketCountry.US, OrderSide.BUY,
+        MarketOrderAmount result = calculator.calculate(MarketCountry.US, OrderSide.BUY,
                 new BigDecimal("88.335123456"), BigDecimal.ONE, new BigDecimal("1383.600001"));
         assertThat(result.executedPrice()).isEqualByComparingTo("88.34");
         assertThat(result.exchangeRate()).isEqualTo(new BigDecimal("1383.600001"));
@@ -111,7 +111,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 단가_저장_상한은_센트_반올림_후_확인한다() {
-        OrderAmount result = calculator.calculate(MarketCountry.US, OrderSide.BUY,
+        MarketOrderAmount result = calculator.calculate(MarketCountry.US, OrderSide.BUY,
                 new BigDecimal("999999999999999.994"), BigDecimal.ONE, new BigDecimal("0.000001"));
         assertThat(result.executedPrice()).isEqualByComparingTo("999999999999999.99");
         assertThatThrownBy(() -> calculator.calculate(MarketCountry.US, OrderSide.BUY,
@@ -149,14 +149,14 @@ class MarketOrderSettlementCalculatorTest {
     @ParameterizedTest
     @CsvSource({"0.01, 0", "0.001, -14"})
     void 소액_매도의_0이하_정산액은_기존_주문_거절정책에_전달한다(BigDecimal price, BigDecimal expectedNet) {
-        OrderAmount result = calculator.calculate(MarketCountry.US, OrderSide.SELL,
+        MarketOrderAmount result = calculator.calculate(MarketCountry.US, OrderSide.SELL,
                 price, BigDecimal.ONE, new BigDecimal("1400"));
         assertThat(result.netAmount()).isEqualByComparingTo(expectedNet);
     }
 
     @Test
     void 국내_단가의_기존_소수정밀도와_환율없는_정산을_유지한다() {
-        OrderAmount result = calculator.calculate(MarketCountry.KR, OrderSide.BUY,
+        MarketOrderAmount result = calculator.calculate(MarketCountry.KR, OrderSide.BUY,
                 new BigDecimal("10.1234"), new BigDecimal("10"), null);
         assertThat(result.executedPrice()).isEqualByComparingTo("10.1234");
         assertThat(result.exchangeRate()).isEqualByComparingTo("1");
@@ -165,7 +165,7 @@ class MarketOrderSettlementCalculatorTest {
 
     @Test
     void 미국_SEC_Fee가_최소금액을_넘으면_계산값을_센트로_반올림한다() {
-        OrderAmount result = calculator.calculate(
+        MarketOrderAmount result = calculator.calculate(
                 MarketCountry.US,
                 OrderSide.SELL,
                 new BigDecimal("1000"),

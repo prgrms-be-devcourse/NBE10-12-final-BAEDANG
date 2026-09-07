@@ -9,8 +9,8 @@ import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.OrderResponse;
-import com.baedang.trading.dto.PlaceOrderRequest;
+import com.baedang.trading.dto.MarketOrderRequest;
+import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderReceipt;
@@ -58,7 +58,7 @@ class MarketOrderServiceTest {
         var at = now.atOffset(ZoneOffset.UTC);
         var snapshot = new ExecutionExchangeRateSnapshot(new BigDecimal("1383.601234"),
                 at.minusSeconds(50), at.minusMinutes(1), at.plusSeconds(5));
-        var request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
+        var request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
         var command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(command);
@@ -69,7 +69,7 @@ class MarketOrderServiceTest {
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
         when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
         var service = new MarketOrderService(marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request)).isInstanceOf(BusinessException.class);
         var captor = ArgumentCaptor.forClass(MarketOrderExecutionContext.class);
@@ -82,7 +82,7 @@ class MarketOrderServiceTest {
 
     @Test
     void 거절결과를_업무예외와_새_ID_재시도_정책으로_변환한다() {
-        PlaceOrderRequest request = new PlaceOrderRequest(
+        MarketOrderRequest request = new MarketOrderRequest(
                 10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "10");
         MarketOrderCommand command = new MarketOrderCommand(
                 request.accountId(),
@@ -112,7 +112,7 @@ class MarketOrderServiceTest {
                 stockRepository,
                 marketSessionProvider,
                 exchangeRateProvider,
-                new OrderResponseAssembler(),
+                new MarketOrderResponseAssembler(),
                 clock);
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -137,7 +137,7 @@ class MarketOrderServiceTest {
 
     @Test
     void 멱등_재요청은_외부_시장정보를_조회하지_않는다() {
-        PlaceOrderRequest request = new PlaceOrderRequest(
+        MarketOrderRequest request = new MarketOrderRequest(
                 10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "10");
         MarketOrderCommand command = new MarketOrderCommand(
                 request.accountId(),
@@ -156,7 +156,7 @@ class MarketOrderServiceTest {
                 stockRepository,
                 marketSessionProvider,
                 exchangeRateProvider,
-                new OrderResponseAssembler(),
+                new MarketOrderResponseAssembler(),
                 Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -174,7 +174,7 @@ class MarketOrderServiceTest {
     void 요청이_null이면_INVALID_INPUT_예외를_던진다() {
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.systemUTC());
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
 
         assertThatThrownBy(() -> service.place(1L, null))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -185,7 +185,7 @@ class MarketOrderServiceTest {
 
     @Test
     void 종목이_존재하지_않으면_STOCK_NOT_FOUND_예외와_동일_ID_재시도_정책을_반환한다() {
-        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "UNKNOWN", "KR", "BUY", "1");
+        MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "UNKNOWN", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("UNKNOWN", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "UNKNOWN", "KR", "BUY", "1")).thenReturn(command);
@@ -194,7 +194,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.systemUTC());
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -206,7 +206,7 @@ class MarketOrderServiceTest {
 
     @Test
     void 정적_거절_조건에_걸리면_주문을_저장하지_않고_동일_ID_재시도_정책을_반환한다() {
-        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
@@ -217,7 +217,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.systemUTC());
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -230,7 +230,7 @@ class MarketOrderServiceTest {
     @Test
     void 미국_시장가_주문시_환율스냅샷이_null이면_EXCHANGE_RATE_NOT_FOUND를_던진다() {
         Instant now = Instant.parse("2026-09-04T01:00:00Z");
-        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
+        MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(command);
@@ -242,7 +242,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -254,7 +254,7 @@ class MarketOrderServiceTest {
     @Test
     void 외부_조회_중_세부메시지_없는_업무예외_발생시_동일_ID_재시도_정책을_부가한다() {
         Instant now = Instant.parse("2026-09-04T01:00:00Z");
-        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
@@ -266,7 +266,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -279,7 +279,7 @@ class MarketOrderServiceTest {
     @Test
     void 외부_조회_중_세부메시지와_기존데이터가_있는_업무예외_발생시_데이터를_보존하고_재시도_정책을_부가한다() {
         Instant now = Instant.parse("2026-09-04T01:00:00Z");
-        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
@@ -291,7 +291,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -307,7 +307,7 @@ class MarketOrderServiceTest {
     void 정상_체결_결과는_OrderResponse로_변환하여_반환한다() {
         Instant now = Instant.parse("2026-09-04T01:00:00Z");
         OffsetDateTime orderedAt = now.atOffset(ZoneOffset.UTC);
-        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
         when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
@@ -325,9 +325,9 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 marketOrderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
-        OrderResponse response = service.place(1L, request);
+        MarketOrderResponse response = service.place(1L, request);
         assertThat(response).isNotNull();
         assertThat(response.orderId()).isEqualTo(100L);
         assertThat(response.symbol()).isEqualTo("005930");
