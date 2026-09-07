@@ -6,6 +6,7 @@ import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.stock.entity.Stock;
 import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.global.formatter.FinancialDecimalFormatter;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -65,10 +66,14 @@ public class LedgerService {
                 || stock.getStockId() == null || !stock.getStockId().equals(order.getStockId())) {
             throw new IllegalArgumentException("체결 방향/종목이 원장 요청과 일치하지 않습니다");
         }
+        String charge = side == OrderSide.BUY
+                ? "(수수료 " + FinancialDecimalFormatter.krw(execution.getFeeKrw()) + "원 포함)"
+                : "(수수료 " + FinancialDecimalFormatter.krw(execution.getFeeKrw())
+                  + "원, 세금 " + FinancialDecimalFormatter.krw(execution.getTaxKrw()) + "원 포함)";
         String memo = stock.getName() + " "
-                + com.baedang.global.formatter.FinancialDecimalFormatter.plain(execution.getQuantity()) + "주 @ "
-                + com.baedang.global.formatter.FinancialDecimalFormatter.currency(execution.getPrice(), stock.getCurrency())
-                + " (수수료·세금 포함)";
+                + FinancialDecimalFormatter.plain(execution.getQuantity()) + "주 @ "
+                + FinancialDecimalFormatter.currency(execution.getPrice(), stock.getCurrency())
+                + " " + charge;
         if (memo.length() > MAX_MEMO_LENGTH) memo = memo.substring(0, MAX_MEMO_LENGTH);
         ledgerEntryRepository.save(LedgerEntry.execution(order, execution, balanceAfter, memo));
     }
