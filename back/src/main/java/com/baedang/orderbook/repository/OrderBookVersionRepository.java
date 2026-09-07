@@ -19,6 +19,21 @@ public interface OrderBookVersionRepository extends JpaRepository<OrderBookVersi
     @Query("select v from OrderBookVersion v where v.stockId = :stockId and v.isActive = true")
     Optional<OrderBookVersion> findActiveForUpdate(@Param("stockId") Long stockId);
 
+    /** consumer(#122)가 기대하는 활성 버전과 revision이 맞을 때만 비관적 락으로 조회한다 (설계서 §6). */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select v from OrderBookVersion v
+             where v.stockId = :stockId
+               and v.bookVersionId = :bookVersion
+               and v.revision = :revision
+               and v.isActive = true
+            """)
+    Optional<OrderBookVersion> findExpectedActiveForUpdate(
+            @Param("stockId") Long stockId,
+            @Param("bookVersion") Long bookVersion,
+            @Param("revision") Long revision
+    );
+
     Optional<OrderBookVersion> findByStockIdAndIsActiveTrue(Long stockId);
 
     long countByStockIdAndIsActiveTrue(Long stockId);

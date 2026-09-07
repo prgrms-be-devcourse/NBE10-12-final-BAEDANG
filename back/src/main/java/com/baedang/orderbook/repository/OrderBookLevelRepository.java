@@ -1,7 +1,9 @@
 package com.baedang.orderbook.repository;
 
 import com.baedang.orderbook.entity.OrderBookLevel;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -34,4 +36,22 @@ public interface OrderBookLevelRepository extends JpaRepository<OrderBookLevel, 
                       l.level_depth asc
             """, nativeQuery = true)
     List<OrderBookRowProjection> findActiveSnapshotRows(@Param("stockId") Long stockId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select l from OrderBookLevel l
+             where l.bookVersion.bookVersionId = :bookVersion
+               and l.side = com.baedang.orderbook.entity.OrderBookSide.ASK
+             order by l.price asc, l.levelDepth asc
+            """)
+    List<OrderBookLevel> findAskLevelsForUpdate(@Param("bookVersion") Long bookVersion);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select l from OrderBookLevel l
+             where l.bookVersion.bookVersionId = :bookVersion
+               and l.side = com.baedang.orderbook.entity.OrderBookSide.BID
+             order by l.price desc, l.levelDepth asc
+            """)
+    List<OrderBookLevel> findBidLevelsForUpdate(@Param("bookVersion") Long bookVersion);
 }
