@@ -13,6 +13,7 @@ import com.baedang.orderbook.entity.OrderBookLevel;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
@@ -75,6 +76,7 @@ class OrderBookQueryIntegrationTest {
             return clock;
         }
     }
+    @MockitoBean OrderBookRefreshScheduler scheduler;
 
     @MockitoBean MarketSessionProvider marketSessionProvider;
     @MockitoBean ExecutionExchangeRateProvider exchangeRateProvider;
