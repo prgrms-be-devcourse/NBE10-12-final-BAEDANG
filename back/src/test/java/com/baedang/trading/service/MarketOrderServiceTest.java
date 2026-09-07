@@ -9,9 +9,11 @@ import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.trading.dto.OrderResponse;
 import com.baedang.trading.dto.PlaceOrderRequest;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.OrderTerms;
@@ -25,7 +27,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -164,5 +168,169 @@ class MarketOrderServiceTest {
 
         verifyNoInteractions(stockRepository, marketSessionProvider, exchangeRateProvider);
         verify(transactionService, never()).execute(any(), any(), any());
+    }
+
+    @Test
+    void 요청이_null이면_INVALID_INPUT_예외를_던진다() {
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.systemUTC());
+
+        assertThatThrownBy(() -> service.place(1L, null))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
+                    assertThat(e.getData()).containsEntry("field", "request");
+                });
+    }
+
+    @Test
+    void 종목이_존재하지_않으면_STOCK_NOT_FOUND_예외와_동일_ID_재시도_정책을_반환한다() {
+        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "UNKNOWN", "KR", "BUY", "1");
+        MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("UNKNOWN", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "UNKNOWN", "KR", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("UNKNOWN", MarketCountry.KR)).thenReturn(Optional.empty());
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.systemUTC());
+
+        assertThatThrownBy(() -> service.place(1L, request))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.STOCK_NOT_FOUND);
+                    assertThat(e.getDetail()).isEqualTo("symbol=UNKNOWN");
+                    assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+    }
+
+    @Test
+    void 정적_거절_조건에_걸리면_주문을_저장하지_않고_동일_ID_재시도_정책을_반환한다() {
+        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketOrderPolicy.determineStaticRejection(stock)).thenReturn(ErrorCode.STOCK_SUSPENDED);
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.systemUTC());
+
+        assertThatThrownBy(() -> service.place(1L, request))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.STOCK_SUSPENDED);
+                    assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+        verifyNoInteractions(marketSessionProvider, exchangeRateProvider);
+    }
+
+    @Test
+    void 미국_시장가_주문시_환율스냅샷이_null이면_EXCHANGE_RATE_NOT_FOUND를_던진다() {
+        Instant now = Instant.parse("2026-09-04T01:00:00Z");
+        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
+        MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US))
+                .thenReturn(Optional.of(Stock.create("AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true)));
+        when(marketSessionProvider.currentSession(MarketCountry.US, now)).thenReturn(new MarketSessionStatus(true, Instant.MAX));
+        when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(null);
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> service.place(1L, request))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+                    assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+    }
+
+    @Test
+    void 외부_조회_중_세부메시지_없는_업무예외_발생시_동일_ID_재시도_정책을_부가한다() {
+        Instant now = Instant.parse("2026-09-04T01:00:00Z");
+        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketSessionProvider.currentSession(MarketCountry.KR, now))
+                .thenThrow(new BusinessException(ErrorCode.MARKET_CLOSED));
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> service.place(1L, request))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CLOSED);
+                    assertThat(e.getDetail()).isNull();
+                    assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+    }
+
+    @Test
+    void 외부_조회_중_세부메시지와_기존데이터가_있는_업무예외_발생시_데이터를_보존하고_재시도_정책을_부가한다() {
+        Instant now = Instant.parse("2026-09-04T01:00:00Z");
+        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketSessionProvider.currentSession(MarketCountry.KR, now))
+                .thenThrow(new BusinessException(ErrorCode.MARKET_CLOSED, "외부 장애", Map.of("reason", "timeout")));
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> service.place(1L, request))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CLOSED);
+                    assertThat(e.getDetail()).isEqualTo("외부 장애");
+                    assertThat(e.getData())
+                            .containsEntry("reason", "timeout")
+                            .containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+    }
+
+    @Test
+    void 정상_체결_결과는_OrderResponse로_변환하여_반환한다() {
+        Instant now = Instant.parse("2026-09-04T01:00:00Z");
+        OffsetDateTime orderedAt = now.atOffset(ZoneOffset.UTC);
+        PlaceOrderRequest request = new PlaceOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
+        MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
+        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
+        Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketSessionProvider.currentSession(MarketCountry.KR, now)).thenReturn(new MarketSessionStatus(true, Instant.MAX));
+
+        MarketOrderReceipt receipt = new MarketOrderReceipt(
+                100L, "FILLED", "005930", MarketCountry.KR, "BUY",
+                BigDecimal.ONE, new BigDecimal("70000"), BigDecimal.ONE,
+                new BigDecimal("70000"), new BigDecimal("10"), BigDecimal.ZERO, new BigDecimal("70010"),
+                orderedAt, orderedAt, new BigDecimal("1000000"));
+        when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.filled(receipt));
+
+        MarketOrderService service = new MarketOrderService(
+                marketOrderPolicy, transactionService, stockRepository,
+                marketSessionProvider, exchangeRateProvider, new OrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+
+        OrderResponse response = service.place(1L, request);
+        assertThat(response).isNotNull();
+        assertThat(response.orderId()).isEqualTo(100L);
+        assertThat(response.symbol()).isEqualTo("005930");
+        assertThat(response.status()).isEqualTo("FILLED");
     }
 }
