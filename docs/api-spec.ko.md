@@ -681,6 +681,8 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ```
 주문 응답의 `cashBalanceAfter`는 현재 조회 시점 잔액이 아니라 해당 주문의 최초 체결 원장에 기록된 **체결 직후 잔액**입니다. 멱등 재응답에서도 같은 감사 값을 반환합니다. 포트폴리오 평가와 현재 계좌 상태는 체결과 분리하며, 최신 값이 필요하면 `GET /accounts/me`를 조회합니다.
 
+시장가 멱등 응답은 주문 방향과 일치하고 `execution_id`가 있는 정상 원장을 조회합니다. 해당 원장이 없는 `FILLED` 주문은 `INTERNAL_ERROR`로 처리하며, 체결 연결 없는 과거 원장으로 응답하는 호환 처리는 지원하지 않습니다. 체결 존재·주문 연결은 DB 외래 키로 보장하므로 확인용 체결 추가 조회는 하지 않습니다.
+
 **서버 처리 순서**
 ```
 ① accountId 소유권 확인 및 clientOrderId 조회 — 동일 요청 재시도면 종료된 회차에서도 저장된 결과 즉시 반환
@@ -715,13 +717,17 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 | `INSUFFICIENT_QUANTITY` | 422 | `NEW_CLIENT_ORDER_ID` | 보유 수량이 부족해요 |
 | `STALE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 정보가 오래되었어요. 다시 시도해주세요 |
 | `FUTURE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
-| `INVALID_SETTLEMENT_AMOUNT` | 422 | `NEW_CLIENT_ORDER_ID` | 정산 금액이 올바르지 않아요 |
+| `INVALID_SETTLEMENT_AMOUNT` | 422 | 실제 경로의 `data.retryPolicy` 확인 | 정산 금액이 올바르지 않아요 |
 | `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
 | `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
 | `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
 | `ACCOUNT_ROUND_CHANGED` | 409 | `NOT_RETRYABLE` | 포트폴리오가 초기화됐어요. 계좌 정보를 새로고침한 후 다시 주문해주세요 |
 
 **`STALE_QUOTE`** 는 `trading.quote-max-staleness-seconds` 기준으로 `quote_at`이 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 외부 시장 데이터 준비 완료 후부터 계좌 락 획득까지의 컨텍스트 허용 시간은 별도 설정 `trading.execution-context-max-age-seconds`를 사용합니다.
+
+미국 시장가도 환율 스냅샷의 수신 시각·`validFrom`·`validUntil`을 트랜잭션과 체결 생성에 전달합니다. 신규 주문은 계좌 잠금 후 컨텍스트 신선도와 별개로 원본 유효기간 및 수신 후 60초 TTL을 재검증하며, 체결 생성 시에도 같은 검증 시각과 실제 정산 환율의 일치를 확인합니다. 환율 근거가 없거나 만료/미래이면 `EXCHANGE_RATE_NOT_FOUND`(404, `SAME_CLIENT_ORDER_ID`)로 종료하며 주문·체결·원장을 저장하거나 트랜잭션 안에서 외부 재조회하지 않습니다. 국내는 외부 환율 조회 없이 1을 사용합니다. 기존 주문의 멱등 응답은 이 검사보다 먼저 저장 결과를 반환하며, DB에는 사용 환율만 저장합니다.
+
+시장가 정산은 미국 단가를 센트 `HALF_UP`으로 반올림한 뒤 저장 범위를 검사합니다. 단가·정산 금액은 `NUMERIC(19,4)`, 수량·환율은 `NUMERIC(19,6)` 범위를 준수하며 환율 자체는 반올림하지 않습니다. 저장 범위 초과는 `INVALID_SETTLEMENT_AMOUNT` + `SAME_CLIENT_ORDER_ID`로 종료하고 주문·체결·원장을 남기지 않습니다. 계산 가능한 범위지만 최종 정산액이 0 이하인 경우는 기존대로 `REJECTED` 기록 후 `NEW_CLIENT_ORDER_ID`를 반환합니다.
 
 ---
 
@@ -949,6 +955,17 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 ---
 
 ## 2주차 이후 예정
+
+### 확정 LIMIT 정산 계약 (#119)
+
+계산기와 환율 스냅샷 계약을 제공하며 접수 API(#120), 공유 호가(#121), 엔진/워커/프리뷰(#122)는 별도 구현 단계입니다. 기존 계산기의 `MarketOrderSettlementCalculator` 이름 변경으로 MARKET 동작은 바뀌지 않습니다.
+
+- 정수 수량만 지원합니다. 지정가 × 전체 수량 × 접수 환율의 원화 반올림값에 수수료 반올림값을 합해 동결합니다. KR은 외부 환율 조회가 없으며 환율 상승 버퍼도 없습니다. 접수 환율은 체결 환율을 고정하지 않습니다.
+- 매수는 해당 주문의 `reservedCash`에서 이번 실제 net만 차감합니다. 누적 net을 다시 빼거나 수량 비례로 동결을 재산정하지 않고 자유 예수금도 사용하지 않습니다. 엔진이 가능한 정수 수량으로 축소하며 1주도 불가능하면 보류합니다. 활성 매수 잔량이 남으면 동결액도 양수여야 합니다.
+- 전량 체결은 결제 후 남은 동결까지 전부 해제합니다. 취소·만료는 기존 체결을 유지하며 잔여 동결만 해제합니다. 해제는 lockedCash 차감이지 cashBalance 증액이 아닙니다.
+- 호가별 체결의 `netAmountKrw > 0`을 요구합니다. 0/음수 후보는 체결/원장 기록과 물량 소비 없이 보류하며 다음 호가 합산이나 건너뛰기로 이 조건을 우회하지 않습니다.
+- 여러 유효 호가는 주문 누적 거래대금/수수료/세금의 순차 차액과 한 트랜잭션의 동일 환율을 사용합니다. 호가나 트랜잭션마다 SEC 최소액을 중복 부과하지 않으며 과거 체결에는 당시 환율을 유지합니다.
+- `LimitOrderSettlementCalculator`는 주어진 후보를 계산하고 #122가 호가/수량 선택과 금융/물량 상태의 원자적 반영을 담당합니다. 환율은 60초 TTL과 원본 유효기간을 함께 적용하며 잠금 후 재검증합니다.
 
 지정가 가격은 옵션 B(매수 지정가 이하 / 매도 지정가 이상 호가 체결), 만료는 접수한 정규 세션 종료 시각입니다. 모든 사용자가 동일한 가상 시장의 물량을 소비하지만, 사용자 주문끼리 직접 매칭하지는 않습니다. 한 사용자의 체결로 줄어든 공유 잔량은 다른 사용자의 체결에도 반영됩니다.
 

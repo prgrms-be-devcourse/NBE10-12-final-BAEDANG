@@ -82,7 +82,7 @@ class OrderControllerTest {
     }
 
     @Test
-    void 시장가_주문을_즉시_체결하고_금액을_문자열로_응답한다() throws Exception {
+    void 시장가_체결결과를_201과_문자열_금액의_JSON으로_응답한다() throws Exception {
         PlaceOrderRequest request = new PlaceOrderRequest(
                 10L, "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10");
         when(marketOrderService.place(1L, request)).thenReturn(new OrderResponse(

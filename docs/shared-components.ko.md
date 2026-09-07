@@ -17,7 +17,8 @@
 | BigDecimal을 API 응답 문자열로 변환 | `FinancialDecimalFormatter` | 정적 메서드 |
 | 국가 코드 파싱·시장별 시간대·기본 통화 | `MarketCountry` | 정적 메서드 / enum 메서드 |
 | 계좌·보유 종목 손익률 계산 | `ReturnRateCalculator` | 정적 메서드 |
-| 주문 거래대금·수수료·세금 계산 | `OrderAmountCalculator` | Spring 빈 주입 |
+| 주문 거래대금·수수료·세금 계산 | `MarketOrderSettlementCalculator` | Spring 빈 주입 |
+| 지정가 누적 정산 차액 계산 | `LimitOrderSettlementCalculator` | Spring 빈 주입 |
 | 보유 종목 평가 | `HoldingValuator` | Spring 빈 주입 |
 | 현재 시각·시장 현지 날짜 계산 | `TimeConfig`의 `Clock` | Clock 주입 |
 | 차트 조합·거래일·실시간 시세 판정 | 해당 도메인의 Policy / Resolver | Spring 빈 주입 |
@@ -164,9 +165,9 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - 백분율 변환을 하지 않습니다. `1 / 8`의 결과는 `0.1250`이며 12.5가 아닙니다.
 - 현재 `AccountService`와 `HoldingsResponse`가 사용합니다. 환율·주가 등락률의 6자리 계산이나 평단가·평균환율 계산을 이 함수로 교체하지 않습니다.
 
-### OrderAmountCalculator — 주문 계산
+### MarketOrderSettlementCalculator — 주문 계산
 
-소스: [OrderAmountCalculator.java](../back/src/main/java/com/baedang/trading/service/OrderAmountCalculator.java)
+소스: [MarketOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/MarketOrderSettlementCalculator.java)
 
 `calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
 설정된 수수료·세율을 쓰는 Spring 빈이므로 주입받아 사용합니다. 입력 유효성·거래 가능 여부는 주문 정책에서 검증합니다.
@@ -180,6 +181,48 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - 매수 순금액은 거래대금 + 수수료, 매도 순금액은 거래대금 − 수수료 − 세금입니다.
 - 결과에는 원화 반올림 전 거래대금도 있습니다. 원가 계산용 값과 정산 금액을 혼용하지 않습니다.
 - 이 클래스 내부의 `krw()` / `usd()`는 BigDecimal 계산용 private 메서드입니다. 같은 이름의 문자열 Formatter로 대체하지 않습니다.
+
+### LimitOrderSettlementCalculator — 지정가 누적 정산
+
+소스: [LimitOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/LimitOrderSettlementCalculator.java)
+
+호가 하나의 정산 차액을 주문의 누적 상태 대비 계산합니다. 수수료·세율은 `MarketOrderSettlementCalculator`와 같은 `.env` 설정을 공유하는 Spring 빈으로 주입받습니다. 순수 계산만 수행하며, 호가 탐색·수량 선택·외부 조회·DB 변경은 호출부(엔진/워커) 책임입니다.
+
+#### `calculate(country, side, price, quantity, exchangeRate, previous)` → `LimitOrderSettlementResult`
+
+이번 호가의 gross/fee/tax/net 차액을 누적 합계에서 이전 누적 합계를 빼서 산출합니다. 체결마다 독립 계산할 때 생기는 반올림 오차 누적을 원천 방지합니다.
+
+- 입력 `previous`는 `TradeExecutionRepository.summarizeByOrderId()`로 저장된 체결에서 복원한 `CumulativeSettlementState`이거나, 첫 체결이면 `CumulativeSettlementState.empty()`입니다.
+- KR 단가는 정수, US 단가는 센트(소수점 2자리) 단위로 표현 가능해야 합니다. 후행 0은 허용합니다.
+- 수량은 양의 정수이며 `maxOrderQuantity` 이하여야 합니다. 누적 수량(`previous.quantity + quantity`)도 동일하게 검증합니다.
+- KR은 전달된 환율을 무시하고 1을 사용합니다. US는 양수이며 소수점 6자리로 표현 가능한 환율이 필요합니다.
+- `validateState()`는 저장된 누적값과 고정 요율로 금액을 재도출합니다. 불일치 시 과거 금액을 덮어 맞추지 않고 `INTERNAL_ERROR`를 던집니다.
+- `netAmountKrw <= 0`이면 `isExecutable() == false`(amounts = null, 이전 상태 유지)를 반환합니다. 호출부는 체결·원장 기록·유동성 소비 없이 후보를 보류해야 합니다.
+- SEC Fee는 체결별 거래대금이 아닌 주문 누적 달러 거래대금 기준입니다. 최소액(\$0.01)은 전체 체결에 한 번만 적용합니다. 이번 체결의 SEC 증가분만 현재 환율로 원화 환산하며, 이전 체결의 SEC 비용은 당시 환율을 유지합니다.
+- 금액 상한 검증(`MONEY_LIMIT`)은 차액이 아닌 누적 합계 기준입니다.
+
+#### `initialReservedCash(country, limitPrice, quantity, exchangeRate)` → `BigDecimal`
+
+접수(Phase 1)용 매수 최초 동결액을 계산합니다. 내부적으로 `CumulativeSettlementState.empty()`와 `OrderSide.BUY`로 `calculate()`를 호출하여 net 금액을 반환합니다. 환율 버퍼가 없으며 KR은 외부 조회 없이 1을 사용합니다.
+
+#### `reserveAfterBuy(reservedCash, remainingQuantity, fillQuantity, netAmountKrw)` → `BuyReservationResult`
+
+매수 체결이 주문의 현재 `reservedCash` 안에서 가능한지 판단합니다. 자유 예수금은 사용하지 않습니다.
+
+- 전량 체결(`fillQuantity == remainingQuantity`): 체결 가능, 미사용 잔액(`reservedCash − netAmountKrw`) 해제.
+- 부분 체결(동결 잔액 있음): 체결 가능, 감소된 동결액 유지.
+- 부분 체결(동결 잔액 소진, `remainingCash == 0`): 체결 불가 — 활성 잔량에는 양수 동결액 필요.
+- `netAmountKrw <= 0` 또는 `remainingCash < 0`: 체결 불가, 동결액 변경 없음.
+- 구매 가능 수량을 탐색하지 않습니다. 호출부(엔진)가 수량을 줄인 뒤 이 메서드를 호출합니다.
+
+#### 관련 모델 타입
+
+| 타입 | 역할 |
+| --- | --- |
+| [`CumulativeSettlementState`](../back/src/main/java/com/baedang/trading/model/CumulativeSettlementState.java) | 누적 합계 8필드 레코드 (수량, 원시 거래대금, 반올림 전 원화 거래대금, SEC USD, 반올림 전 세금 원화, 확정 gross/fee/tax 원화). DB에서 `summarizeByOrderId()`로 복원 |
+| [`LimitOrderSettlementResult`](../back/src/main/java/com/baedang/trading/model/LimitOrderSettlementResult.java) | net 금액, nullable `ExecutionAmounts`, 다음 `CumulativeSettlementState`를 감싸는 결과. `isExecutable()`은 amounts != null 검사, `requireExecutionAmounts()`는 체결 불가 시 예외 |
+| [`ExecutionAmounts`](../back/src/main/java/com/baedang/trading/model/ExecutionAmounts.java) | 체결 1건의 정산 차액 (USD 거래대금, 반올림 전 원화 거래대금, SEC USD 차액, 확정 gross/fee/tax/net 원화). `TradeExecution.create()`와 공유 |
+| [`BuyReservationResult`](../back/src/main/java/com/baedang/trading/model/BuyReservationResult.java) | `executable`, `reservedCashAfter`, `releasedCash`. 엔진이 `TradeOrder.reservedCash`와 `Account.lockedCash`를 갱신하는 데 사용 |
 
 ## 7. 도메인 공용 기능
 

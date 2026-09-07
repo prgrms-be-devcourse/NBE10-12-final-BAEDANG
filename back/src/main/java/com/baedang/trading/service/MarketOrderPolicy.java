@@ -20,6 +20,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -126,10 +127,23 @@ public class MarketOrderPolicy {
     }
 
     public void validateExecutionContextFresh(MarketOrderExecutionContext context, Instant now) {
+        if (context == null || context.checkedAt() == null || now == null) {
+            throw new BusinessException(ErrorCode.MARKET_CONTEXT_EXPIRED,
+                    ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
         Duration age = Duration.between(context.checkedAt(), now);
         if (age.isNegative() || age.compareTo(executionContextMaxAge) > 0) {
             throw new BusinessException(
                     ErrorCode.MARKET_CONTEXT_EXPIRED,
+                    ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
+        // 컨텍스트 준비 시각과 환율의 원본 유효기간/수신 TTL은 서로 다릅니다.
+        // 잠금 후 신규 주문만 검사하며 만료 시 외부 재조회 없이 같은 ID 재시도를 안내합니다.
+        if (context.executionRateEvidence() == null
+                || !context.executionRateEvidence().isValidAt(now.atOffset(ZoneOffset.UTC))
+                || (context.marketCountry() == MarketCountry.KR
+                    && context.executionRate().compareTo(BigDecimal.ONE) != 0)) {
+            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND,
                     ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
         }
     }

@@ -17,7 +17,8 @@ This document describes existing behavior. Also consult the [API specification](
 | Convert BigDecimal values to API response strings | `FinancialDecimalFormatter` | Static methods |
 | Parse country codes; obtain market time zones and default currencies | `MarketCountry` | Static / enum methods |
 | Calculate account or holding return ratios | `ReturnRateCalculator` | Static method |
-| Calculate order gross amounts, fees, and taxes | `OrderAmountCalculator` | Inject a Spring bean |
+| Calculate order gross amounts, fees, and taxes | `MarketOrderSettlementCalculator` | Inject a Spring bean |
+| Calculate limit-order cumulative settlement deltas | `LimitOrderSettlementCalculator` | Inject a Spring bean |
 | Value holdings | `HoldingValuator` | Inject a Spring bean |
 | Obtain the current time or market-local date | `Clock` from `TimeConfig` | Inject Clock |
 | Validate chart combinations, resolve trading days, or classify realtime quotes | Domain Policy / Resolver | Inject a Spring bean |
@@ -164,9 +165,9 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - No percentage conversion is performed. `1 / 8` returns `0.1250`, not 12.5.
 - Current callers are `AccountService` and `HoldingsResponse`. Do not replace six-decimal exchange-rate / stock-price change ratios or average purchase price / exchange-rate calculations with this method.
 
-### OrderAmountCalculator — Order Calculations
+### MarketOrderSettlementCalculator — Order Calculations
 
-Source: [OrderAmountCalculator.java](../back/src/main/java/com/baedang/trading/service/OrderAmountCalculator.java)
+Source: [MarketOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/MarketOrderSettlementCalculator.java)
 
 `calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
 Inject this Spring bean so it uses the configured fee and tax rates. The order policy validates input and tradability.
@@ -180,6 +181,48 @@ Rates and the SEC minimum are project-fixed `.env` settings, not per-order snaps
 - Buy net amount is gross amount + fee. Sell net amount is gross amount − fee − tax.
 - The result also contains the KRW gross amount before rounding. Do not confuse cost-basis calculation values with settlement amounts.
 - The private `krw()` / `usd()` methods in this class return BigDecimal for calculations. Do not replace them with the identically named string Formatter methods.
+
+### LimitOrderSettlementCalculator — Limit-Order Cumulative Settlement
+
+Source: [LimitOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/LimitOrderSettlementCalculator.java)
+
+Calculates settlement deltas for one book level against the order's cumulative state. Inject this Spring bean; it shares fee/tax rates with `MarketOrderSettlementCalculator` via the same `.env` settings. The calculator performs pure computation — level selection, quantity search, external lookups, and DB writes are the caller's (engine/worker) responsibility.
+
+#### `calculate(country, side, price, quantity, exchangeRate, previous)` → `LimitOrderSettlementResult`
+
+Computes this level's gross/fee/tax/net deltas by subtracting the previous cumulative totals from the new cumulative totals. This eliminates rounding accumulation errors that arise when computing each fill independently.
+
+- Input `previous` is a `CumulativeSettlementState` reconstructed from stored executions via `TradeExecutionRepository.summarizeByOrderId()`, or `CumulativeSettlementState.empty()` for the first fill.
+- KR price must be a whole number; US price must be representable at two decimal places (cents). Trailing zeros are allowed.
+- Quantity must be a positive integer not exceeding `maxOrderQuantity`, and cumulative quantity (`previous.quantity + quantity`) is also validated.
+- KR ignores the supplied exchange rate and uses 1. US requires a positive rate representable at six decimal places.
+- `validateState()` re-derives cumulative amounts from stored values and the current fixed rates. If the stored state is inconsistent with the fixed rates, it throws `INTERNAL_ERROR` instead of silently overwriting past amounts.
+- Returns `isExecutable() == false` (amounts = null, previous state unchanged) when `netAmountKrw <= 0`. The caller must defer the candidate without recording a fill, ledger entry, or consuming liquidity.
+- SEC Fee uses the order-cumulative USD gross, not per-fill gross. The minimum ($0.01) applies once across all fills. Only the SEC delta for this fill is converted to KRW at the current exchange rate; earlier fills retain their original rate.
+- Money validation (`MONEY_LIMIT`) checks cumulative totals, not just deltas.
+
+#### `initialReservedCash(country, limitPrice, quantity, exchangeRate)` → `BigDecimal`
+
+Computes the initial KRW buy reserve for order acceptance (Phase 1). Internally calls `calculate()` with `CumulativeSettlementState.empty()` and `OrderSide.BUY`, returning the net amount. No exchange-rate buffer is applied; KR uses 1 without an external lookup.
+
+#### `reserveAfterBuy(reservedCash, remainingQuantity, fillQuantity, netAmountKrw)` → `BuyReservationResult`
+
+Determines whether a buy fill is affordable within the order's current `reservedCash`, without accessing free cash.
+
+- Full fill (`fillQuantity == remainingQuantity`): executable, releases unused reserve (`reservedCash − netAmountKrw`).
+- Partial fill with remaining reserve: executable, carries forward reduced reserve.
+- Partial fill exhausting reserve (`remainingCash == 0`): not executable — active remainder requires a positive reserve.
+- `netAmountKrw <= 0` or `remainingCash < 0`: not executable; reserve unchanged.
+- Does not search for affordable quantities. The caller (engine) reduces quantity before calling this method.
+
+#### Related model types
+
+| Type | Role |
+| --- | --- |
+| [`CumulativeSettlementState`](../back/src/main/java/com/baedang/trading/model/CumulativeSettlementState.java) | 8-field record of cumulative totals (quantity, native gross, unrounded KRW gross, SEC USD, unrounded tax KRW, rounded gross/fee/tax KRW). Reconstructed from DB via `summarizeByOrderId()` |
+| [`LimitOrderSettlementResult`](../back/src/main/java/com/baedang/trading/model/LimitOrderSettlementResult.java) | Wraps net amount, nullable `ExecutionAmounts`, and next `CumulativeSettlementState`. `isExecutable()` checks amounts != null; `requireExecutionAmounts()` throws on non-executable results |
+| [`ExecutionAmounts`](../back/src/main/java/com/baedang/trading/model/ExecutionAmounts.java) | Per-fill settlement deltas (USD gross, unrounded KRW gross, SEC USD delta, rounded gross/fee/tax/net KRW). Shared with `TradeExecution.create()` |
+| [`BuyReservationResult`](../back/src/main/java/com/baedang/trading/model/BuyReservationResult.java) | `executable`, `reservedCashAfter`, `releasedCash`. Used by the engine to update `TradeOrder.reservedCash` and `Account.lockedCash` |
 
 ## 7. Domain-Shared Components
 

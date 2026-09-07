@@ -1,5 +1,7 @@
 package com.baedang.trading.model;
 
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 
@@ -15,12 +17,21 @@ public record ExecutionRateEvidence(BigDecimal rate, OffsetDateTime fetchedAt,
         }
     }
 
-    public static ExecutionRateEvidence rateOnly(BigDecimal rate) {
-        return new ExecutionRateEvidence(rate, null, null, null);
+    public static ExecutionRateEvidence from(ExecutionExchangeRateSnapshot snapshot) {
+        if (snapshot == null) throw new IllegalArgumentException("환율 스냅샷이 필요합니다");
+        return new ExecutionRateEvidence(snapshot.rate(), snapshot.fetchedAt(), snapshot.validFrom(), snapshot.validUntil());
+    }
+
+    /** 국내는 외부 환율 조회 없이 준비 시각 기준의 환율 1 근거를 생성합니다. */
+    public static ExecutionRateEvidence krw(OffsetDateTime preparedAt) {
+        if (preparedAt == null) throw new IllegalArgumentException("준비 시각이 필요합니다");
+        return new ExecutionRateEvidence(BigDecimal.ONE, preparedAt, preparedAt,
+                preparedAt.plus(ExecutionExchangeRateSnapshot.MAX_AGE));
     }
 
     public boolean isValidAt(OffsetDateTime at) {
         return at != null && fetchedAt != null && !at.isBefore(fetchedAt)
-                && !at.isBefore(validFrom) && at.isBefore(validUntil);
+                && !at.isBefore(validFrom) && at.isBefore(validUntil)
+                && at.isBefore(fetchedAt.plus(ExecutionExchangeRateSnapshot.MAX_AGE));
     }
 }

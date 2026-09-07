@@ -5,6 +5,7 @@ import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.MarketCountry;
@@ -41,6 +42,7 @@ class LedgerServiceTest {
         LedgerEntry entry = captor.getValue();
         assertThat(entry.getAccountId()).isEqualTo(7L);
         assertThat(entry.getOrderId()).isNull();
+        assertThat(entry.getExecutionId()).isNull();
         assertThat(entry.getEntryType()).isEqualTo(EntryType.INITIAL_DEPOSIT);
         assertThat(entry.getAmount()).isEqualTo(amount);
         assertThat(entry.getBalanceAfter()).isEqualTo(amount);
@@ -66,7 +68,7 @@ class LedgerServiceTest {
     @EnumSource(OrderSide.class)
     void 매수매도_원장은_체결값과_잔액을_그대로_쓰고_부호만_적용한다(OrderSide side) {
         TradeOrder order = order(side);
-        TradeExecution execution = execution(order);
+        TradeExecution execution = execution(order, side);
         Stock stock = stock();
         if (side == OrderSide.BUY) service.recordBuy(order, execution, new BigDecimal("999"), stock);
         else service.recordSell(order, execution, new BigDecimal("999"), stock);
@@ -76,18 +78,21 @@ class LedgerServiceTest {
         assertThat(entry.getExecutionId()).isEqualTo(5L);
         assertThat(entry.getOrderId()).isEqualTo(4L);
         assertThat(entry.getAccountId()).isEqualTo(7L);
-        assertThat(entry.getAmount()).isEqualByComparingTo(side == OrderSide.BUY ? "-300" : "300");
+        assertThat(entry.getAmount()).isEqualByComparingTo(side == OrderSide.BUY ? "-303" : "291");
         assertThat(entry.getEntryType()).isEqualTo(side == OrderSide.BUY ? EntryType.BUY : EntryType.SELL);
         assertThat(entry.getBalanceAfter()).isEqualByComparingTo("999");
         assertThat(entry.getExchangeRate()).isEqualByComparingTo("1");
         assertThat(entry.getOccurredAt()).isEqualTo(OPENED_AT);
-        assertThat(entry.getMemo()).isEqualTo("테스트 3주 @ 100 (수수료·세금 포함)");
+        String expectedMemo = side == OrderSide.BUY
+                ? "테스트 3주 @ 100 (수수료 3원 포함)"
+                : "테스트 3주 @ 100 (수수료 3원, 세금 6원 포함)";
+        assertThat(entry.getMemo()).isEqualTo(expectedMemo);
     }
 
     @Test
     void 저장전_체결이나_다른방향과_음수잔액은_원장으로_기록하지_않는다() {
         TradeOrder order = order(OrderSide.BUY);
-        TradeExecution execution = execution(order);
+        TradeExecution execution = execution(order, OrderSide.BUY);
         assertThatThrownBy(() -> service.recordSell(order, execution, BigDecimal.ONE, stock())).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> service.recordBuy(order, execution, BigDecimal.ONE.negate(), stock())).isInstanceOf(IllegalArgumentException.class);
         ReflectionTestUtils.setField(execution, "executionId", null);
@@ -98,7 +103,7 @@ class LedgerServiceTest {
     @Test
     void 다른_주문이나_종목으로는_체결_원장을_만들_수_없다() {
         TradeOrder order = order(OrderSide.BUY);
-        TradeExecution execution = execution(order);
+        TradeExecution execution = execution(order, OrderSide.BUY);
         TradeOrder other = order(OrderSide.BUY);
         ReflectionTestUtils.setField(other, "orderId", 6L);
         assertThatThrownBy(() -> service.recordBuy(other, execution, BigDecimal.ONE, stock()))
@@ -113,17 +118,30 @@ class LedgerServiceTest {
     }
 
     private TradeOrder order(OrderSide side) {
+        // 매수: gross=300, fee=3, tax=0, net=303
+        // 매도: gross=300, fee=3, tax=6, net=291
+        BigDecimal fee = new BigDecimal("3");
+        BigDecimal tax = side == OrderSide.BUY ? BigDecimal.ZERO : new BigDecimal("6");
+        BigDecimal net = side == OrderSide.BUY
+                ? new BigDecimal("303")
+                : new BigDecimal("291");
         TradeOrder order = TradeOrder.filledMarketOrder(7L, 2L, UUID.randomUUID(), side,
                 new BigDecimal("3"), new BigDecimal("100"), OPENED_AT, BigDecimal.ONE,
-                new BigDecimal("300"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("300"), OPENED_AT);
+                new BigDecimal("300"), fee, tax, net, OPENED_AT);
         ReflectionTestUtils.setField(order, "orderId", 4L);
         return order;
     }
 
-    private TradeExecution execution(TradeOrder order) {
-        TradeExecution execution = TradeExecution.market(order, new OrderAmount(new BigDecimal("100"), BigDecimal.ONE,
-                BigDecimal.ZERO, new BigDecimal("300"), new BigDecimal("300"), BigDecimal.ZERO,
-                BigDecimal.ZERO, new BigDecimal("300"), BigDecimal.ZERO));
+    private TradeExecution execution(TradeOrder order, OrderSide side) {
+        BigDecimal fee = new BigDecimal("3");
+        BigDecimal tax = side == OrderSide.BUY ? BigDecimal.ZERO : new BigDecimal("6");
+        BigDecimal net = side == OrderSide.BUY
+                ? new BigDecimal("303")
+                : new BigDecimal("291");
+        TradeExecution execution = TradeExecution.market(order,
+                new OrderAmount(new BigDecimal("100"), BigDecimal.ONE,
+                        BigDecimal.ZERO, new BigDecimal("300"), new BigDecimal("300"), fee, tax, net, BigDecimal.ZERO),
+                ExecutionRateEvidence.krw(OPENED_AT), OPENED_AT);
         ReflectionTestUtils.setField(execution, "executionId", 5L);
         return execution;
     }

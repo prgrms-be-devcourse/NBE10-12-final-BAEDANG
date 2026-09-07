@@ -6,6 +6,7 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -42,6 +43,34 @@ class MarketOrderPolicyTest {
             new MarketOrderPolicy(15, 15, new BigDecimal("1000000"));
 
     @ParameterizedTest
+    @CsvSource({"0,-1,2,1,true", "0,-1,2,2,false", "-59,-100,3600,0,true",
+            "-59,-100,3600,1,false", "1,-100,3600,0,false", "0,1,3600,0,false"})
+    void 컨텍스트가_신선해도_환율의_유효구간과_TTL은_따로_검증한다(
+            long fetchedOffset, long fromOffset, long untilOffset, long nowOffset, boolean valid) {
+        var evidence = new ExecutionRateEvidence(new BigDecimal("1383.601234"),
+                QUOTE_AT.plusSeconds(fetchedOffset), QUOTE_AT.plusSeconds(fromOffset), QUOTE_AT.plusSeconds(untilOffset));
+        var context = new MarketOrderExecutionContext(MarketCountry.US, true, Instant.MAX, evidence, CHECKED_AT);
+        if (valid) {
+            policy.validateExecutionContextFresh(context, CHECKED_AT.plusSeconds(nowOffset));
+        } else {
+            assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, CHECKED_AT.plusSeconds(nowOffset)))
+                    .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+                        assertThat(exception.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                    });
+        }
+    }
+
+    @Test
+    void 시장가도_유효시각_없는_환율만으로_체결하지_않는다() {
+        var context = new MarketOrderExecutionContext(MarketCountry.US, true, Instant.MAX,
+                new ExecutionRateEvidence(new BigDecimal("1300"), null, null, null), CHECKED_AT);
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, CHECKED_AT))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+    }
+
+    @ParameterizedTest
     @CsvSource({"KR, KRW", "US, USD"})
     void 시장에_맞는_종목과_시세_통화면_유효하다(MarketCountry marketCountry, String currency) {
         Stock stock = Stock.create("TEST", marketCountry, "TEST", "테스트", null, currency, "STOCK", true);
@@ -68,7 +97,7 @@ class MarketOrderPolicyTest {
                 MarketCountry.KR,
                 true,
                 Instant.parse("2026-08-26T06:30:00Z"),
-                BigDecimal.ONE,
+                ExecutionRateEvidence.krw(CHECKED_AT.atOffset(ZoneOffset.UTC)),
                 CHECKED_AT);
 
         assertThat(context.isMarketOpenAt(Instant.parse("2026-08-26T06:29:59.999Z"))).isTrue();
@@ -76,27 +105,16 @@ class MarketOrderPolicyTest {
     }
 
     @Test
-    void 락_대기로_시장정보가_허용시간을_넘기면_재시도_가능_오류로_거절한다() {
+    void 시장정보_만료는_오류코드와_같은_ID_재시도_정책을_제공한다() {
         MarketOrderExecutionContext context = new MarketOrderExecutionContext(
-                MarketCountry.KR, true, Instant.MAX, BigDecimal.ONE, CHECKED_AT);
+                MarketCountry.KR, true, Instant.MAX, ExecutionRateEvidence.krw(QUOTE_AT), CHECKED_AT);
 
         assertThatThrownBy(() -> policy.validateExecutionContextFresh(
                 context, CHECKED_AT.plusSeconds(16)))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getErrorCode())
-                                .isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
-    }
-
-    @Test
-    void 시장정보_만료는_같은_clientOrderId_재시도_정책을_제공한다() {
-        MarketOrderExecutionContext context = new MarketOrderExecutionContext(
-                MarketCountry.KR, true, Instant.MAX, BigDecimal.ONE, CHECKED_AT);
-
-        assertThatThrownBy(() -> policy.validateExecutionContextFresh(
-                context, CHECKED_AT.plusSeconds(16)))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getData())
-                                .containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID"));
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED);
+                    assertThat(exception.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
     }
 
     @Test
@@ -117,5 +135,44 @@ class MarketOrderPolicyTest {
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getData())
                                 .containsEntry("retryPolicy", "NOT_RETRYABLE"));
+    }
+
+    @Test
+    void 잘못된_수량_입력은_INVALID_QUANTITY_예외를_던진다() {
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", null))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "0"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1000001"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1.5"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "abc"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+    }
+
+    @Test
+    void 잘못된_종목코드_방향_시장은_INVALID_INPUT_예외를_던진다() {
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), null, "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData()).containsEntry("field", "symbol"));
+        assertThatThrownBy(() -> policy.parseCommand(1L, null, "005930", "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData()).containsEntry("field", "clientOrderId"));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", null, "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData()).containsEntry("field", "marketCountry"));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "INVALID", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "UNKNOWN", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+    }
+
+    @Test
+    void 컨텍스트가_null이거나_시각이_역전되면_MARKET_CONTEXT_EXPIRED를_던진다() {
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(null, CHECKED_AT))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
+        var context = new MarketOrderExecutionContext(MarketCountry.KR, true, Instant.MAX, ExecutionRateEvidence.krw(QUOTE_AT), CHECKED_AT);
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, CHECKED_AT.minusSeconds(1)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, null))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
     }
 }

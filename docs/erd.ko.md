@@ -32,7 +32,7 @@
 | account → trade_order | 1:N |
 | trade_order → ledger_entry | 1:N |
 | trade_order → trade_execution | 1:N |
-| trade_execution → ledger_entry | 신규 정상 체결 1:1 (기존 이력/상쇄 정정은 execution_id NULL) |
+| trade_execution → ledger_entry | 정상 체결 1:1 (초기 지급/상쇄 정정은 execution_id NULL) |
 | trade_order → holding | 1:N |
 | account → ledger_entry | 1:N |
 | account → daily_account_snapshot | 1:N |
@@ -144,7 +144,7 @@ quote_snapshot.prev_close
 | `exchange_rate` | TOSS | 전부 `/exchange-rate`. `collected_at` 만 **자체**. |
 | `trade_order` | 자체 + TOSS | 주문 내용은 자체 생성, `executed_price`·`quote_at` 은 `quote_snapshot` 에서 복사(원천 `/prices`), `exchange_rate` 는 `/exchange-rate`. **토스에 주문을 보내지는 않음** — 체결은 우리 DB 안에서만. |
 | `holding` | 자체 | 원장에서 파생. `avg_exchange_rate` 만 토스 환율에서 유래. |
-| `ledger_entry` | 자체 | 체결/원장 서비스가 기록하며 개별 trade_execution의 환율을 그대로 사용. 기존 MARKET은 trade_order와 같은 값. append-only. |
+| `ledger_entry` | 자체 | 체결/원장 서비스가 기록하며 개별 trade_execution의 환율을 그대로 사용. append-only. |
 | `users` `account` `daily_account_snapshot` `stock_external_id` | 자체 | 외부 API 와 무관. **계정계는 전적으로 우리가 소유** — 이것이 이 프로젝트가 채널계가 아니라 계정계인 이유. |
 
 ### 배치 일정 (확정)
@@ -279,11 +279,11 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 `(execution_id, order_id)` → 체결, `(order_id, account_id)` → 주문의 두 복합 FK로 원장·체결·계좌 연결을 보장합니다.
 
 **예수금이 움직인 모든 사건을 기록합니다. UPDATE 와 DELETE 를 하지 않는 것이 이 테이블의 존재 이유입니다.** 잘못 기록했으면 수정하지 말고 반대 부호 항목을 넣어 상쇄합니다.
-**항목은 `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료·세금은 체결 원장 금액에 포함합니다. 신규 정상 체결 원장 한 줄은 `trade_execution.net_amount_krw`에 대응합니다. 주문당 여러 원장/상쇄 정정이 가능하며 기존 시장가 멱등 응답은 `(order_id, entry_id)`로 최초 원장 잔액을 조회합니다.
+**항목은 `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료·세금은 체결 원장 금액에 포함합니다. 정상 체결 원장 한 줄은 `trade_execution.net_amount_krw`에 대응합니다. 주문당 여러 원장/상쇄 정정이 가능하며 시장가 멱등 응답은 주문 방향과 일치하고 `execution_id`가 있는 최초 정상 원장의 잔액을 조회합니다. 해당 원장이 없으면 `INTERNAL_ERROR`입니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `entry_id` | BIGINT PK | 원장 번호. 시간순으로 증가. |
-| `execution_id` | BIGINT FK, NULL | 신규 정상 체결 연결. non-null 부분 UNIQUE. 초기 지급/기존 이력/독립 상쇄 정정은 NULL. `order_id`는 UNIQUE 아님. |
+| `execution_id` | BIGINT FK, NULL | 정상 체결 연결. non-null 부분 UNIQUE. 초기 지급/독립 상쇄 정정은 NULL. `order_id`는 UNIQUE 아님. |
 | `account_id` | BIGINT FK | 어느 계좌의 원장인지. |
 | `order_id` | BIGINT FK, NULL | 원인이 된 주문. **최초 지급·초기화는 NULL.** `(order_id, entry_id)` 인덱스로 주문별 원장을 시간순 조회. |
 | `entry_type` | VARCHAR(20) | **세 가지뿐.**
@@ -291,7 +291,7 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
   `BUY` — gross + fee 차감 (−)
   `SELL` — gross − fee − tax 입금 (+)
   **`RESET` 항목은 두지 않습니다.** 초기화는 새 계좌를 만드는 일이고, 새 계좌의 `INITIAL_DEPOSIT` 한 줄이 그 역할을 대신합니다. 이전 회차의 마감 시각은 `account.closed_at` 에 남습니다. |
-| `amount` | NUMERIC(19,4) | 신규 정상 체결은 `trade_execution.net_amount_krw`의 부호 있는 금액(매수 − / 매도 +). 기존 MARKET은 주문 netAmount와 대응. 계좌별 원장 합계는 cash_balance와 일치. |
+| `amount` | NUMERIC(19,4) | 정상 체결은 `trade_execution.net_amount_krw`의 부호 있는 금액(매수 − / 매도 +). 계좌별 원장 합계는 cash_balance와 일치. |
 | `balance_after` | NUMERIC(19,4) | 이 항목 반영 직후의 잔액. 엄밀히는 파생값이지만, **정합성이 깨진 지점을 즉시 찾아내는 용도**로 매우 유용. |
 | `exchange_rate` | NUMERIC(19,6) | 개별 체결의 환율 원본. KR은 1. 원장 감사 근거를 최신 환율로 재계산하지 않음. |
 | `memo` | VARCHAR(200) | 사람이 읽을 설명. 수수료를 별도 줄로 쪼개지 않으므로 **"삼성전자 10주 @ 241,500 (수수료 포함)"** 처럼 내역을 여기에 담습니다. 디버깅·CS 대응이 쉬워짐. |
@@ -459,6 +459,10 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 ### 지정가 주문 — 서로 다른 두 트랜잭션
 
 지정가 주문은 아래 두 단계를 사용합니다. Phase 1이 동결과 `PENDING`을 커밋하고 체결 Worker가 나중에 Phase 2를 반복 수행합니다. 외부 조회는 트랜잭션 밖에서 준비하며 취소·만료·복구도 같은 동결 정책을 따릅니다.
+
+매수 최초 동결액은 지정가 × 전체 정수 수량 × 접수 환율을 원 단위 HALF_UP한 거래대금과, 그 거래대금 × 수수료율을 원 단위 HALF_UP한 수수료의 합입니다. 환율 버퍼가 없고 KR은 외부 조회 없이 환율 1입니다. 부분 체결은 이번 net만 주문 동결액과 계좌 cash/lockedCash에서 차감합니다. 자유 예수금 추가 사용·수량 비례 재산정은 하지 않습니다. 매수 잔량이 남으면 동결액도 양수여야 하며 전량 체결은 미사용 잔액까지 해제합니다. 취소·만료는 잔여 동결 전부를 해제합니다.
+
+누적 정산 근거는 저장된 체결 단가·수량·환율·SEC USD·확정 금액으로 복원합니다. DB 컬럼·요율 스냅샷·최초 동결액·접수 환율 필드를 추가하지 않습니다. 정수 수량·저장 상한·누적 반올림·호가별 양수 net을 검증하며 0/음수 후보는 체결 저장 전에 보류합니다. 실제 DB 반영은 엔진 책임입니다.
 
 ### Phase 1 — 주문 접수 [동결]
 | 단계 | 동작 | 설명 |

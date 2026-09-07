@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -53,7 +54,7 @@ class OrderQuoteServiceTest {
 
     @BeforeEach
     void setUp() {
-        OrderAmountCalculator calculator = new OrderAmountCalculator(
+        MarketOrderSettlementCalculator calculator = new MarketOrderSettlementCalculator(
                 new BigDecimal("0.0001"),
                 new BigDecimal("0.002"),
                 new BigDecimal("0.0000206"),
@@ -74,7 +75,7 @@ class OrderQuoteServiceTest {
     }
 
     @Test
-    void 시장가_매수_견적을_조회하고_데이터를_변경하지_않는다() {
+    void 시장가_매수_견적의_금액과_실행가능_결과를_반환한다() {
         givenTradableKrStock(new BigDecimal("241500"), 5);
 
         OrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "buy", "10");
@@ -114,18 +115,6 @@ class OrderQuoteServiceTest {
     }
 
     @Test
-    void 미국_종목_견적의_환율이_null이면_명시적으로_거절한다() {
-        givenUsStock(new BigDecimal("100"));
-        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(null);
-
-        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getErrorCode())
-                                .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
-        verifyNoInteractions(marketSessionProvider);
-    }
-
-    @Test
     void 종목과_시세의_통화가_다르면_금액을_계산하지_않는다() {
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
                 .thenReturn(Optional.of(account));
@@ -150,10 +139,11 @@ class OrderQuoteServiceTest {
     }
 
     @ParameterizedTest
+    @NullSource
     @ValueSource(strings = {"0", "-1"})
-    void 미국_종목_견적의_환율이_0이하면_명시적으로_거절한다(String rate) {
+    void 미국_견적의_누락되거나_0이하인_환율은_거절한다(String rate) {
         givenUsStock(new BigDecimal("100"));
-        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(new BigDecimal(rate));
+        when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(rate == null ? null : new BigDecimal(rate));
 
         assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -163,7 +153,7 @@ class OrderQuoteServiceTest {
     }
 
     @Test
-    void 주문가능금액은_예수금에서_동결액을_뺀_값으로_판정한다() {
+    void 주문가능금액이_부족하면_실행불가_사유를_반환한다() {
         givenTradableKrStock(new BigDecimal("241500"), 5);
         when(account.availableCash()).thenReturn(new BigDecimal("1000000"));
 
@@ -222,25 +212,10 @@ class OrderQuoteServiceTest {
         verifyNoInteractions(marketSessionProvider);
     }
 
-    @Test
-    void 소수점_수량은_조회전에_거절한다() {
-        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "0.5"))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
-        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
-    }
-
-    @Test
-    void 백만주를_초과한_수량은_조회전에_거절한다() {
-        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1000001"))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
-        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
-    }
-
-    @Test
-    void 지수표기_수량은_조회전에_거절한다() {
-        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1e5000000"))
+    @ParameterizedTest
+    @ValueSource(strings = {"0.5", "1000001", "1e5000000"})
+    void 잘못된_수량은_조회전에_거절한다(String quantity) {
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", quantity))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
         verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);

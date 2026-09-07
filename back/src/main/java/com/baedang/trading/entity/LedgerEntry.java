@@ -18,10 +18,8 @@ import java.time.OffsetDateTime;
  * <p>검증식: {@code SUM(amount) = account.cash_balance} (계좌별).
  * 테스트로 만들어두면 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
  *
- * <p><b>정적 팩토리가 세 개인 이유</b> — 항목 종류마다 필요한 값이 다릅니다.
- * 초기 지급은 주문이 없고, 매수는 음수, 매도는 양수여야 합니다.
- * 범용 빌더 하나로 두면 {@code SELL} 인데 음수를 넣는 실수가 컴파일됩니다.
- * 팩토리로 나누면 <b>잘못된 조합을 애초에 만들 수 없습니다.</b>
+ * <p>초기 지급은 주문 없이 생성하고, 정상 매수·매도 원장은 저장된 체결로 생성합니다.
+ * 매수는 음수, 매도는 양수로 기록하며 방향은 해당 체결의 주문에서 결정합니다.
  */
 @Entity
 @Table(name = "ledger_entry")
@@ -39,7 +37,7 @@ public class LedgerEntry {
     @Column(name = "order_id")
     private Long orderId;
 
-    /** 개별 체결 근거. 초기 지급/기존 시장가 원장/독립 정정 기록은 null일 수 있습니다. */
+    /** 개별 체결 근거. 초기 지급/독립 정정 기록은 null이며 정상 체결 원장은 반드시 연결합니다. */
     @Column(name = "execution_id")
     private Long executionId;
 
@@ -78,12 +76,15 @@ public class LedgerEntry {
     private LedgerEntry(Long accountId, Long orderId, EntryType entryType, BigDecimal amount,
                         BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
                         OffsetDateTime occurredAt) {
+        if (exchangeRate == null || exchangeRate.signum() <= 0) {
+            throw new IllegalArgumentException("원장 환율은 필수이며 양수여야 합니다");
+        }
         this.accountId = accountId;
         this.orderId = orderId;
         this.entryType = entryType;
         this.amount = amount;
         this.balanceAfter = balanceAfter;
-        this.exchangeRate = exchangeRate != null ? exchangeRate : BigDecimal.ONE;
+        this.exchangeRate = exchangeRate;
         this.memo = memo;
         this.occurredAt = occurredAt;
     }
@@ -97,25 +98,6 @@ public class LedgerEntry {
     ) {
         return new LedgerEntry(accountId, null, EntryType.INITIAL_DEPOSIT,
                 amount, amount, BigDecimal.ONE, memo, occurredAt);
-    }
-
-    /**
-     * 매수. {@code netAmount}(gross + fee)를 <b>음수로 뒤집어</b> 넣습니다.
-     * 호출부는 양수를 넘기면 됩니다 — 부호를 헷갈릴 일이 없습니다.
-     */
-    public static LedgerEntry buy(Long accountId, Long orderId, BigDecimal netAmount,
-                                  BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
-                                  OffsetDateTime occurredAt) {
-        return new LedgerEntry(accountId, orderId, EntryType.BUY,
-                netAmount.negate(), balanceAfter, exchangeRate, memo, occurredAt);
-    }
-
-    /** 매도. {@code netAmount}(gross − fee − tax)가 그대로 양수로 들어갑니다. */
-    public static LedgerEntry sell(Long accountId, Long orderId, BigDecimal netAmount,
-                                   BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
-                                   OffsetDateTime occurredAt) {
-        return new LedgerEntry(accountId, orderId, EntryType.SELL,
-                netAmount, balanceAfter, exchangeRate, memo, occurredAt);
     }
 
     public Long getEntryId() { return entryId; }

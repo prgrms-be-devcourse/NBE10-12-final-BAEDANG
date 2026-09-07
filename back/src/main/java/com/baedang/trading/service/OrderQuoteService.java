@@ -29,7 +29,7 @@ public class OrderQuoteService {
     // 시장 데이터 모듈이 구현하는 포트입니다. 거래 모듈에서는 구현하지 않습니다.
     private final MarketSessionProvider marketSessionProvider;
     private final ExecutionExchangeRateProvider exchangeRateProvider;
-    private final OrderAmountCalculator amountCalculator;
+    private final MarketOrderSettlementCalculator amountCalculator;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
 
@@ -37,7 +37,7 @@ public class OrderQuoteService {
             OrderQuoteQueryService queryService,
             MarketSessionProvider marketSessionProvider,
             ExecutionExchangeRateProvider exchangeRateProvider,
-            OrderAmountCalculator amountCalculator,
+            MarketOrderSettlementCalculator amountCalculator,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
     ) {

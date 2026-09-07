@@ -10,6 +10,10 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.EntryType;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.TradeOrder;
+import com.baedang.trading.entity.TradeExecution;
+import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.repository.LedgerEntryRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
@@ -28,13 +32,13 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -78,12 +82,20 @@ class LedgerQueryServiceTest {
     @Test
     void 최신순_항목에_종목명을_조인하고_occurredAt_을_UTC_로_정규화한다() {
         givenActiveAccount();
-        LedgerEntry buy = withId(LedgerEntry.buy(1L, 1024L, new BigDecimal("2415242"),
-                new BigDecimal("47584758"), BigDecimal.ONE, "삼성전자 10주 @ 241,500 (수수료 포함)",
-                OffsetDateTime.of(2026, 8, 11, 12, 37, 2, 0, ZoneOffset.ofHours(9))), 3041L);
+        OffsetDateTime executedAt = OffsetDateTime.of(2026, 8, 11, 12, 37, 2, 0, ZoneOffset.ofHours(9));
+        var amount = new OrderAmount(new BigDecimal("241500"), BigDecimal.ONE, BigDecimal.ZERO,
+                new BigDecimal("2415000"), new BigDecimal("2415000"), new BigDecimal("242"),
+                BigDecimal.ZERO, new BigDecimal("2415242"), BigDecimal.ZERO);
+        TradeOrder buyOrder = TradeOrder.filledMarketOrder(1L, 101L, UUID.randomUUID(), OrderSide.BUY,
+                BigDecimal.TEN, amount.executedPrice(), executedAt, BigDecimal.ONE, amount.grossAmount(),
+                amount.fee(), amount.tax(), amount.netAmount(), executedAt);
+        ReflectionTestUtils.setField(buyOrder, "orderId", 1024L);
+        TradeExecution execution = TradeExecution.market(buyOrder, amount, ExecutionRateEvidence.krw(executedAt), executedAt);
+        ReflectionTestUtils.setField(execution, "executionId", 2041L);
+        LedgerEntry buy = withId(LedgerEntry.execution(buyOrder, execution,
+                new BigDecimal("47584758"), "삼성전자 10주 @ 241,500 (수수료 포함)"), 3041L);
         LedgerEntry deposit = withId(LedgerEntry.initialDeposit(1L, new BigDecimal("50000000"),
                 "모의투자금 지급", OffsetDateTime.of(2026, 8, 10, 9, 0, 0, 0, ZoneOffset.ofHours(9))), 3040L);
-        TradeOrder buyOrder = order(1024L, 101L);
         when(ledgerEntryRepository.findPage(eq(1L), isNull(), isNull(), any(Pageable.class)))
                 .thenReturn(List.of(buy, deposit));
         when(tradeOrderRepository.findByOrderIdIn(any())).thenReturn(List.of(buyOrder));
@@ -186,13 +198,6 @@ class LedgerQueryServiceTest {
     private LedgerEntry withId(LedgerEntry entry, long entryId) {
         ReflectionTestUtils.setField(entry, "entryId", entryId);
         return entry;
-    }
-
-    private TradeOrder order(Long orderId, Long stockId) {
-        TradeOrder order = mock(TradeOrder.class);
-        when(order.getOrderId()).thenReturn(orderId);
-        when(order.getStockId()).thenReturn(stockId);
-        return order;
     }
 
     private Stock stock(Long stockId, String symbol, String name) {
