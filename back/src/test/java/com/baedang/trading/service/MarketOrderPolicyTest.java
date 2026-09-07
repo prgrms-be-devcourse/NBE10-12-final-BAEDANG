@@ -62,9 +62,9 @@ class MarketOrderPolicyTest {
     }
 
     @Test
-    void 시장가도_유효시각_없는_환율만으로_체결하지_않는다() {
+    void 시장가도_환율근거가_누락되면_체결하지_않는다() {
         var context = new MarketOrderExecutionContext(MarketCountry.US, true, Instant.MAX,
-                new ExecutionRateEvidence(new BigDecimal("1300"), null, null, null), CHECKED_AT);
+                null, CHECKED_AT);
         assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, CHECKED_AT))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));

@@ -2,6 +2,8 @@ package com.baedang.trading.model;
 
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -54,5 +56,17 @@ class ExecutionRateEvidenceTest {
                 .isInstanceOf(IllegalArgumentException.class);
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT, AT))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1, 2, 3, 4, 5, 6})
+    void 시각이_하나라도_누락되면_생성하지_못한다(int present) {
+        OffsetDateTime fetchedAt = (present & 1) != 0 ? AT : null;
+        OffsetDateTime validFrom = (present & 2) != 0 ? AT : null;
+        OffsetDateTime validUntil = (present & 4) != 0 ? AT.plusSeconds(60) : null;
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> new ExecutionRateEvidence(BigDecimal.ONE, fetchedAt, validFrom, validUntil))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("환율 유효 근거는 모두 제공해야 합니다");
     }
 }

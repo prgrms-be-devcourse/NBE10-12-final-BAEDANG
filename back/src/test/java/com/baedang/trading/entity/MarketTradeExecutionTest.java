@@ -43,7 +43,7 @@ class MarketTradeExecutionTest {
     }
 
     static Stream<ExecutionRateEvidence> invalidEvidence() {
-        return Stream.of(null, new ExecutionRateEvidence(RATE, null, null, null),
+        return Stream.of(null,
                 new ExecutionRateEvidence(RATE, AT.minusSeconds(1), AT.minusSeconds(1), AT),
                 new ExecutionRateEvidence(RATE, AT.minusSeconds(60), AT.minusMinutes(5), AT.plusMinutes(5)),
                 new ExecutionRateEvidence(RATE, AT.plusNanos(1), AT, AT.plusSeconds(30)),

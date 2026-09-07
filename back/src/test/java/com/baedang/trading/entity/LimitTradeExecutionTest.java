@@ -194,7 +194,7 @@ class LimitTradeExecutionTest {
                 new BigDecimal("100"), RATE, amount, AT, AT.plusMinutes(1), 1L))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1, BigDecimal.ONE,
-                new BigDecimal("100"), new ExecutionRateEvidence(BigDecimal.ONE, null, null, null), amount,
+                new BigDecimal("100"), null, amount,
                 AT, AT.plusSeconds(1), 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1, BigDecimal.ONE,
                 new BigDecimal("100"), RATE, amount, AT, AT.plusSeconds(1), null))
