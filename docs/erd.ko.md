@@ -43,8 +43,11 @@
 | stock → daily_candle | 1:N |
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | 데이터 흐름 (`close_price` → `prev_close`) |
+| stock → order_book_version | 1:N (is_active=true는 종목당 최대 1개) |
+| order_book_version → order_book_level | 1:N (게시 완료 시 20개, CASCADE) |
+| trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
 
-### 테이블 맵 (12개)
+### 테이블 맵 (15개)
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
@@ -60,6 +63,8 @@
 | | `daily_candle` | 일봉 · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드 |
 | | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
+| **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
+| | `order_book_level` | 버전당 20개 레벨(BID 10 / ASK 10) 가격·수량 |
 
 ### MVP 동작 매트릭스 (확정)
 
@@ -271,7 +276,7 @@ quote_snapshot.prev_close
 
 LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세금은 `SUM(sec_fee_usd × exchange_rate)`로 복원하고, 이를 원 단위 `HALF_UP`으로 반올림한 값에서 기존 `SUM(tax_krw)`를 빼서 이번 체결 세금을 구합니다. 이전 체결의 SEC 비용에 새 환율을 다시 곱하거나 체결마다 SEC 최소액을 독립 부과하지 않습니다. KR 누적 세금은 누적 원화 거래대금과 프로젝트 고정 세율로 계산합니다. 별도 원본 세금/누적 USD 캐시 컬럼은 저장하지 않습니다.
 
-한 체결은 한 호가 레벨만 소비합니다. 같은 `book_level_id`를 여러 체결이 소비할 수 있으므로 UNIQUE가 아니며, 공유 잔량 차감은 체결과 같은 트랜잭션에서 보호합니다. 호가 레벨의 가격·버전 식별은 불변이고 ID는 재사용하지 않습니다. 체결의 `price`는 실제 체결 단가 스냅샷입니다. 현재 호가 테이블은 없으므로 `book_level_id`에 FK는 없으며, 호가 저장소 연결 시 FK와 참조된 레벨 보존 정책을 함께 적용합니다.
+한 체결은 한 호가 레벨만 소비합니다. 같은 `book_level_id`를 여러 체결이 소비할 수 있으므로 UNIQUE가 아니며, 공유 잔량 차감은 체결과 같은 트랜잭션에서 보호합니다. 호가 레벨의 가격·버전 식별은 불변이고 ID는 재사용하지 않습니다. 체결의 `price`는 실제 체결 단가 스냅샷입니다. `trade_execution.book_level_id`는 `order_book_level(level_id)`를 참조하는 외래키(`ON DELETE RESTRICT`)로 연결됩니다. 체결이 참조하는 호가 레벨과 해당 버전은 소비 근거이므로 삭제할 수 없으며, 미소비 정리 대상에서도 제외됩니다.
 
 지정가 체결 생성 시 `TradeExecution.limit(order, marketCountry, ...)`에 주문 종목의 시장을 전달합니다. KR은 환율 1·USD 거래대금 0·SEC 비용 0, US는 체결단가가 센트 단위로 표현 가능하고 USD 거래대금이 `price × quantity`인지 검증합니다. 후행 0은 허용하며 엔티티에서 단가를 반올림하지 않습니다. 시장은 검증 입력으로만 사용하며 체결 테이블에 중복 저장하지 않습니다.
 
@@ -422,6 +427,43 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 | `stock_id` + `source` | 복합 PK | MVP에서는 `source` 를 `TOSS` 로 사용하고, `DART` / `FINNHUB` 는 향후 연동용으로 예약합니다. |
 | `external_id` | VARCHAR(50) | 해당 소스 식별자. `(source, external_id)` 유니크로 **한 외부 ID 가 두 종목에 매핑되는 사고 방지**. |
 
+
+#### `order_book_version` — 가상 호가 버전
+현재가(`quote_snapshot`)를 기준으로 생성한 공유 가상 호가 세트의 버전 헤더입니다. 3초 주기로 새 공급 세트가 게시되며 종목당 활성 버전(`is_active = true`)은 최대 1개입니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `book_version_id` | BIGINT PK | 가상 호가 세트 고유 식별자. 새 버전 게시 시 증가. |
+| `stock_id` | BIGINT FK | 종목 ID. `stock(stock_id)` 참조. 부분 유니크 인덱스(`WHERE is_active = true`)로 종목당 활성 버전 1개 제한. |
+| `base_price` | NUMERIC(19,4) | 호가 생성의 기준이 된 현재가 (양수). |
+| `currency` | VARCHAR(3) | 통화 (`KRW` / `USD`). |
+| `quote_at` | TIMESTAMPTZ | 기준 시세의 거래소 시각. 덮어쓰지 않고 실제 시세 시각 보존. |
+| `generated_at` | TIMESTAMPTZ | 호가 버전 생성 시각. |
+| `policy_version` | VARCHAR(20) | 호가 생성 정책 버전 (`V1`). |
+| `seed` | BIGINT | 결정론적 수량 노이즈 재현용 난수 seed. |
+| `revision` | BIGINT | 잔량 변경 트랜잭션 커밋 횟수 (기본 0). #122 체결 트랜잭션당 1씩 증가. |
+| `is_active` | BOOLEAN | 현재 조회 및 소비 가능한 활성 버전 여부 (기본 true). |
+| `closed_at` | TIMESTAMPTZ | 새 버전 게시 또는 장 마감으로 종료된 시각. |
+
+#### `order_book_level` — 가상 호가 레벨
+버전당 매수 10개, 매도 10개 총 20개 행이 생성됩니다. `(book_version_id, side, level_depth)` 복합 유니크 제약이 걸려 있습니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `level_id` | BIGINT PK | 호가 레벨 고유 식별자. `trade_execution.book_level_id`가 참조. |
+| `book_version_id` | BIGINT FK | 버전 ID. `order_book_version(book_version_id)` 참조 (`ON DELETE CASCADE`). |
+| `side` | VARCHAR(4) | 호가 방향 (`BID` / `ASK`). |
+| `level_depth` | INT | 호가 깊이 (1~10). |
+| `price` | NUMERIC(19,4) | 해당 호가 가격 (양수). |
+| `initial_quantity` | NUMERIC(19,6) | 최초 공급 수량 (감사용, 양수). V1 공급 수량은 정수 주 단위. |
+| `remaining_quantity` | NUMERIC(19,6) | 현재 소비 가능한 잔여 수량 (`0 <= remaining_quantity <= initial_quantity`). |
+
+### 가상 호가 보존 및 정리 정책 (확정)
+
+- **활성 버전 보존**: `is_active = true`인 활성 버전은 절대 삭제하지 않습니다.
+- **소비된 버전 보존**: `revision > 0`인 종료 버전은 과거 체결 감사 근거이므로 영구 보존합니다.
+- **체결 참조 레벨/버전 보존**: `trade_execution`이 레벨을 참조하고 있으면 `revision = 0`이어도 삭제 대상에서 제외되며(`NOT EXISTS`), 직접 삭제 시도 시 `ON DELETE RESTRICT`로 차단됩니다.
+- **미소비 종료 버전 정리**: `is_active = false` AND `revision = 0` AND 종료 후 1분 경과 AND 체결 미참조인 버전만 백그라운드 스케줄러가 주기적으로 삭제합니다 (연관 20개 레벨은 `ON DELETE CASCADE`로 함께 정리).
 ---
 
 ## 종목 분류 모델
