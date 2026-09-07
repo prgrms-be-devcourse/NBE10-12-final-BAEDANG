@@ -184,5 +184,63 @@ class LimitOrderSettlementCalculatorTest {
         assertThat(result.amounts().secFeeUsd()).isEqualByComparingTo(sec);
     }
 
+    @Test
+    void 계산기_생성자의_요율과_상한_양수_불변식을_검증한다() {
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(null, d("0.002"), d("0.0000206"), d("0.01"), d("1000000")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(d("-0.0001"), d("0.002"), d("0.0000206"), d("0.01"), d("1000000")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(d("0.0001"), null, d("0.0000206"), d("0.01"), d("1000000")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(d("0.0001"), d("0.002"), d("-0.0000206"), d("0.01"), d("1000000")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(d("0.0001"), d("0.002"), d("0.0000206"), d("-0.01"), d("1000000")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(d("0.0001"), d("0.002"), d("0.0000206"), d("0.01"), null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementCalculator(d("0.0001"), d("0.002"), d("0.0000206"), d("0.01"), d("-1")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 동결계산_결과_모델_불변식을_검증한다() {
+        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, null, BigDecimal.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, BigDecimal.ZERO, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, BigDecimal.ONE.negate(), BigDecimal.ZERO))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, BigDecimal.ZERO, BigDecimal.ONE.negate()))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(false, BigDecimal.TEN, BigDecimal.ONE))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 누적정산상태_모델_불변식을_검증한다() {
+        assertThatThrownBy(() -> new CumulativeSettlementState(null, d("0"), d("0"), d("0"), d("0"), d("0"), d("0"), d("0")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CumulativeSettlementState(d("-1"), d("0"), d("0"), d("0"), d("0"), d("0"), d("0"), d("0")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new CumulativeSettlementState(d("0"), d("-1"), d("0"), d("0"), d("0"), d("0"), d("0"), d("0")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 지정가정산결과_모델_불변식을_검증한다() {
+        var empty = CumulativeSettlementState.empty();
+        var amounts = new com.baedang.trading.model.ExecutionAmounts(d("0"), d("100"), d("0"), d("100"), d("0"), d("0"), d("100"));
+        assertThatThrownBy(() -> new LimitOrderSettlementResult(null, amounts, empty))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementResult(d("100"), amounts, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementResult(d("100"), null, empty))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementResult(d("0"), amounts, empty))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LimitOrderSettlementResult(d("99"), amounts, empty))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     private static BigDecimal d(String value) { return new BigDecimal(value); }
 }

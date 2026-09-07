@@ -29,5 +29,30 @@ class ExecutionRateEvidenceTest {
         assertThat(evidence.rate()).isEqualByComparingTo("1");
         assertThat(evidence.isValidAt(AT)).isTrue();
         assertThat(evidence.isValidAt(AT.plusSeconds(60))).isFalse();
+        assertThat(evidence.isValidAt(null)).isFalse();
+    }
+
+    @Test
+    void 환율_양수_불변식과_팩토리_입력을_검증한다() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(null, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ZERO, null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE.negate(), null, null, null))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ExecutionRateEvidence.from(null))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ExecutionRateEvidence.krw(null))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void 불완전하거나_역전된_유효기간은_거절한다() {
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, null, AT.plusHours(1)))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT.plusHours(1), AT))
+                .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT, AT))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 }

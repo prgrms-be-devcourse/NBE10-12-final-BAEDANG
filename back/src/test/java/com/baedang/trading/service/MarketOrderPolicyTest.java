@@ -136,4 +136,43 @@ class MarketOrderPolicyTest {
                         exception -> assertThat(exception.getData())
                                 .containsEntry("retryPolicy", "NOT_RETRYABLE"));
     }
+
+    @Test
+    void 잘못된_수량_입력은_INVALID_QUANTITY_예외를_던진다() {
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", null))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "0"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1000001"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1.5"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "abc"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+    }
+
+    @Test
+    void 잘못된_종목코드_방향_시장은_INVALID_INPUT_예외를_던진다() {
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), null, "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData()).containsEntry("field", "symbol"));
+        assertThatThrownBy(() -> policy.parseCommand(1L, null, "005930", "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData()).containsEntry("field", "clientOrderId"));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", null, "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getData()).containsEntry("field", "marketCountry"));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "INVALID", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+        assertThatThrownBy(() -> policy.parseCommand(1L, UUID.randomUUID().toString(), "005930", "KR", "UNKNOWN", "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+    }
+
+    @Test
+    void 컨텍스트가_null이거나_시각이_역전되면_MARKET_CONTEXT_EXPIRED를_던진다() {
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(null, CHECKED_AT))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
+        var context = new MarketOrderExecutionContext(MarketCountry.KR, true, Instant.MAX, ExecutionRateEvidence.krw(QUOTE_AT), CHECKED_AT);
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, CHECKED_AT.minusSeconds(1)))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
+        assertThatThrownBy(() -> policy.validateExecutionContextFresh(context, null))
+                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
+    }
 }
