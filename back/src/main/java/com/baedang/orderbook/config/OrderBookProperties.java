@@ -1,6 +1,7 @@
 package com.baedang.orderbook.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -20,10 +21,34 @@ public record OrderBookProperties(
         BigDecimal maxQuantity,
         int noiseMinBps,
         int noiseMaxBps,
-        Duration unconsumedRetention
+        Duration unconsumedRetention,
+        Duration refreshInitialDelay,
+        Duration retentionInitialDelay
 ) {
+    public OrderBookProperties(
+            boolean enabled,
+            String policyVersion,
+            Duration refreshInterval,
+            int levelsPerSide,
+            int spreadStepsPerSide,
+            Duration maxQuoteAge,
+            BigDecimal krBaseNotional,
+            BigDecimal usBaseNotional,
+            BigDecimal minQuantity,
+            BigDecimal maxQuantity,
+            int noiseMinBps,
+            int noiseMaxBps,
+            Duration unconsumedRetention
+    ) {
+        this(enabled, policyVersion, refreshInterval, levelsPerSide, spreadStepsPerSide, maxQuoteAge,
+                krBaseNotional, usBaseNotional, minQuantity, maxQuantity, noiseMinBps, noiseMaxBps,
+                unconsumedRetention, Duration.ZERO, Duration.ZERO);
+    }
+    @ConstructorBinding
     public OrderBookProperties {
         if (!StringUtils.hasText(policyVersion)) throw new IllegalArgumentException("orderbook policy-version은 필수입니다");
+        if (refreshInitialDelay == null || refreshInitialDelay.isNegative()) throw new IllegalArgumentException("orderbook refresh-initial-delay는 0 이상이어야 합니다");
+        if (retentionInitialDelay == null || retentionInitialDelay.isNegative()) throw new IllegalArgumentException("orderbook retention-initial-delay는 0 이상이어야 합니다");
         if (refreshInterval == null || refreshInterval.isZero() || refreshInterval.isNegative()) throw new IllegalArgumentException("orderbook refresh-interval은 양수여야 합니다");
         if (levelsPerSide != 10) throw new IllegalArgumentException("V1 levels-per-side는 10이어야 합니다");
         if (spreadStepsPerSide != 1) throw new IllegalArgumentException("V1 spread-steps-per-side는 1이어야 합니다");

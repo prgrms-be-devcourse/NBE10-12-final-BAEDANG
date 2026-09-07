@@ -81,8 +81,8 @@ public class OrderBookRefreshScheduler {
     }
 
     @Scheduled(
-            fixedDelayString = "${trading.orderbook.refresh-interval:3s}",
-            initialDelayString = "${trading.orderbook.refresh-initial-delay:0s}"
+            fixedDelayString = "${trading.orderbook.refresh-interval}",
+            initialDelayString = "${trading.orderbook.refresh-initial-delay}"
     )
     @Transactional(propagation = Propagation.NEVER)
     public void refreshOrderBooks() {
@@ -96,8 +96,8 @@ public class OrderBookRefreshScheduler {
     }
 
     @Scheduled(
-            fixedDelayString = "${trading.orderbook.unconsumed-retention:1m}",
-            initialDelayString = "${trading.orderbook.retention-initial-delay:0s}"
+            fixedDelayString = "${trading.orderbook.unconsumed-retention}",
+            initialDelayString = "${trading.orderbook.retention-initial-delay}"
     )
     @Transactional(propagation = Propagation.NEVER)
     public void deleteExpiredUnconsumedVersions() {
