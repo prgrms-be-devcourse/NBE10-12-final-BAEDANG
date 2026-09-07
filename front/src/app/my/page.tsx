@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
@@ -10,10 +11,14 @@ import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import {
+  ApiError,
   getAccountSummary,
   getHoldings,
   getLedger,
   resetAccount,
+  updateNickname,
+  changeUserPassword,
+  withdrawAccount,
   type AccountSummary,
   type HoldingItem,
   type LedgerItem,
@@ -31,7 +36,8 @@ const VALUATION_POLL_INTERVAL_MS = 5000;
 // lastPrice는 최신 환율(rate)로 환산하는 게 맞다 — HoldingsResponse의 설계 의도 그대로다.
 
 export default function MyPage() {
-  const { isLoggedIn, user } = useAuth();
+  const router = useRouter();
+  const { isLoggedIn, user, setUser, logout } = useAuth();
   const { rate } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
@@ -45,6 +51,32 @@ export default function MyPage() {
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
 
+  // ── 계정 설정(닉네임·비밀번호·탈퇴) ──────────────────────────────────────────
+  const [nicknameInput, setNicknameInput] = useState(user?.nickname ?? "");
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+  const [nicknameError, setNicknameError] = useState<string | null>(null);
+  const [nicknameSaved, setNicknameSaved] = useState(false);
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSaved, setPasswordSaved] = useState(false);
+
+  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+  const [withdrawPassword, setWithdrawPassword] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [withdrawError, setWithdrawError] = useState<string | null>(null);
+
+  // user는 로그인 직후엔 없다가 localStorage 복원(AuthProvider의 마운트 effect)
+  // 후에야 채워질 수 있다 — 그때 닉네임 입력값의 초기값을 맞춰준다. 저장에 성공한
+  // 뒤에도 user.nickname이 방금 입력한 값과 같아지므로 다시 덮어써도 문제없다.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (user) setNicknameInput(user.nickname);
+  }, [user]);
+
   useEffect(() => {
     if (!isLoggedIn || !user) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -54,7 +86,7 @@ export default function MyPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError(false);
-    Promise.all([getAccountSummary(user.userId), getHoldings(user.userId), getLedger(user.userId)])
+    Promise.all([getAccountSummary(), getHoldings(), getLedger()])
       .then(([acc, holdingsRes, ledgerRes]) => {
         if (cancelled) return;
         setAccount(acc);
@@ -86,7 +118,7 @@ export default function MyPage() {
     () => {
       if (!user || valuationPollInFlightRef.current) return;
       valuationPollInFlightRef.current = true;
-      Promise.all([getAccountSummary(user.userId), getHoldings(user.userId)])
+      Promise.all([getAccountSummary(), getHoldings()])
         .then(([acc, holdingsRes]) => {
           setAccount(acc);
           setHoldings(holdingsRes.items);
@@ -105,11 +137,11 @@ export default function MyPage() {
     setResetting(true);
     setResetError(null);
     try {
-      await resetAccount(user.userId, account.accountId);
+      await resetAccount(account.accountId);
       const [freshAccount, freshHoldings, freshLedger] = await Promise.all([
-        getAccountSummary(user.userId),
-        getHoldings(user.userId),
-        getLedger(user.userId),
+        getAccountSummary(),
+        getHoldings(),
+        getLedger(),
       ]);
       setAccount(freshAccount);
       setHoldings(freshHoldings.items);
@@ -119,6 +151,67 @@ export default function MyPage() {
       setResetError("초기화에 실패했어요. 잠시 후 다시 시도해주세요.");
     } finally {
       setResetting(false);
+    }
+  }
+
+  async function handleChangeNickname(e: React.FormEvent) {
+    e.preventDefault();
+    if (!user || nicknameSaving) return;
+    const nextNickname = nicknameInput.trim();
+    setNicknameError(null);
+    setNicknameSaved(false);
+    if (nextNickname === user.nickname) return; // 바뀐 게 없으면 조용히 아무 것도 안 한다.
+    setNicknameSaving(true);
+    try {
+      const profile = await updateNickname(nextNickname);
+      // Nav 등 다른 화면도 user.nickname을 그대로 참조하니 여기서 같이 갱신한다.
+      setUser({ ...user, nickname: profile.nickname });
+      setNicknameSaved(true);
+    } catch (err) {
+      setNicknameError(err instanceof ApiError ? err.message : "닉네임 변경에 실패했어요.");
+    } finally {
+      setNicknameSaving(false);
+    }
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (passwordSaving) return;
+    setPasswordError(null);
+    setPasswordSaved(false);
+    if (newPassword !== newPasswordConfirm) {
+      setPasswordError("새 비밀번호가 서로 달라요.");
+      return;
+    }
+    setPasswordSaving(true);
+    try {
+      await changeUserPassword(currentPassword, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setNewPasswordConfirm("");
+      setPasswordSaved(true);
+    } catch (err) {
+      setPasswordError(err instanceof ApiError ? err.message : "비밀번호 변경에 실패했어요.");
+    } finally {
+      setPasswordSaving(false);
+    }
+  }
+
+  async function handleWithdraw() {
+    if (withdrawing) return;
+    setWithdrawError(null);
+    setWithdrawing(true);
+    try {
+      await withdrawAccount(withdrawPassword);
+      // 탈퇴는 서버 토큰을 무효화하지 않으므로(stateless JWT), 여기서 반드시
+      // 로컬 로그인 상태를 지워야 한다 — 안 그러면 이미 없는 계정으로 계속
+      // 요청을 보내다 에러만 반복해서 보게 된다.
+      logout();
+      router.push("/");
+    } catch (err) {
+      setWithdrawError(err instanceof ApiError ? err.message : "탈퇴 처리에 실패했어요.");
+    } finally {
+      setWithdrawing(false);
     }
   }
 
@@ -337,7 +430,108 @@ export default function MyPage() {
       )}
       </Reveal>
 
-      <Reveal delay={0.4} className="mt-7 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
+        <div className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }}>계정 설정</div>
+
+        <form onSubmit={handleChangeNickname} className="mb-6">
+          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
+          <div className="flex max-w-[360px] gap-2">
+            <input
+              type="text"
+              required
+              minLength={2}
+              maxLength={20}
+              value={nicknameInput}
+              onChange={(e) => {
+                setNicknameInput(e.target.value);
+                setNicknameError(null);
+                setNicknameSaved(false);
+              }}
+              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+            />
+            <button
+              type="submit"
+              disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
+              className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--accent)" }}
+            >
+              {nicknameSaving ? "변경 중…" : "변경"}
+            </button>
+          </div>
+          {nicknameError && (
+            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
+          )}
+          {nicknameSaved && (
+            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
+          )}
+        </form>
+
+        <div className="mb-5 h-px" style={{ background: "var(--line)" }} />
+
+        <form onSubmit={handleChangePassword}>
+          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
+          <div className="flex max-w-[320px] flex-col gap-2">
+            <input
+              type="password"
+              required
+              placeholder="현재 비밀번호"
+              value={currentPassword}
+              onChange={(e) => {
+                setCurrentPassword(e.target.value);
+                setPasswordError(null);
+                setPasswordSaved(false);
+              }}
+              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+            />
+            <input
+              type="password"
+              required
+              minLength={8}
+              maxLength={64}
+              placeholder="새 비밀번호 (8자 이상)"
+              value={newPassword}
+              onChange={(e) => {
+                setNewPassword(e.target.value);
+                setPasswordError(null);
+                setPasswordSaved(false);
+              }}
+              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+            />
+            <input
+              type="password"
+              required
+              placeholder="새 비밀번호 확인"
+              value={newPasswordConfirm}
+              onChange={(e) => {
+                setNewPasswordConfirm(e.target.value);
+                setPasswordError(null);
+                setPasswordSaved(false);
+              }}
+              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+            />
+            <button
+              type="submit"
+              disabled={passwordSaving}
+              className="cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--accent)" }}
+            >
+              {passwordSaving ? "변경 중…" : "비밀번호 변경"}
+            </button>
+          </div>
+          {passwordError && (
+            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
+          )}
+          {passwordSaved && (
+            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
+          )}
+        </form>
+      </Reveal>
+
+      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
             <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
@@ -348,13 +542,87 @@ export default function MyPage() {
           </div>
           <button
             onClick={() => setResetModalOpen(true)}
-            className="ml-auto rounded-xl px-5 py-3 text-[14px] font-bold"
+            className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
             style={{ background: "var(--card)", color: "var(--dangerText)" }}
           >
             포트폴리오 초기화
           </button>
         </div>
       </Reveal>
+
+      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+        <div className="flex flex-wrap items-center gap-5">
+          <div>
+            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>회원 탈퇴</div>
+            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
+              계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요.
+            </div>
+          </div>
+          <button
+            onClick={() => setWithdrawModalOpen(true)}
+            className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
+            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+          >
+            회원 탈퇴
+          </button>
+        </div>
+      </Reveal>
+
+      {withdrawModalOpen && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+          style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+          onClick={() => !withdrawing && setWithdrawModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-[420px] rounded-[24px] px-7.5 pt-8 pb-6.5 text-center"
+            style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-[18px] font-bold" style={{ color: "var(--ink)" }}>
+              정말 탈퇴할까요?
+            </h3>
+            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
+              계정과 보유 종목·체결 내역이 모두 사라져요.
+              <br />
+              되돌릴 수 없어요.
+            </p>
+            <input
+              type="password"
+              required
+              placeholder="현재 비밀번호"
+              value={withdrawPassword}
+              onChange={(e) => {
+                setWithdrawPassword(e.target.value);
+                setWithdrawError(null);
+              }}
+              className="mb-3 w-full rounded-xl px-4 py-3 text-[13.5px] outline-none"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+            />
+            {withdrawError && (
+              <p className="mb-3 text-[12.5px]" style={{ color: "var(--dangerText)" }}>
+                {withdrawError}
+              </p>
+            )}
+            <button
+              className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--dangerText)" }}
+              onClick={handleWithdraw}
+              disabled={withdrawing || !withdrawPassword}
+            >
+              {withdrawing ? "탈퇴 처리 중…" : "탈퇴할게요"}
+            </button>
+            <button
+              className="w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--fill)", color: "var(--ink)" }}
+              onClick={() => setWithdrawModalOpen(false)}
+              disabled={withdrawing}
+            >
+              취소
+            </button>
+          </div>
+        </div>
+      )}
 
       {resetModalOpen && (
         <div

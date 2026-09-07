@@ -69,9 +69,13 @@ function LoginForm() {
           </div>
 
           <div className="text-right">
-            <span className="cursor-default text-[12.5px] underline underline-offset-2" style={{ color: "var(--mut)" }}>
+            <Link
+              href="/forgot-password"
+              className="text-[12.5px] underline underline-offset-2"
+              style={{ color: "var(--mut)" }}
+            >
               비밀번호를 잊으셨나요?
-            </span>
+            </Link>
           </div>
 
           {error && (
