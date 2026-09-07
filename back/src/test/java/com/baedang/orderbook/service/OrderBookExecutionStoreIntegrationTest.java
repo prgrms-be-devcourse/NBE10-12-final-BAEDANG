@@ -29,6 +29,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -39,6 +40,7 @@ import org.testcontainers.utility.MountableFile;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -46,6 +48,7 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -97,6 +100,7 @@ class OrderBookExecutionStoreIntegrationTest {
     @Autowired OrderBookVersionRepository versionRepository;
     @Autowired OrderBookLevelRepository levelRepository;
     @Autowired OrderBookExecutionStore store;
+    @Autowired JdbcTemplate jdbcTemplate;
     @Autowired ClockTestConfig clockConfig;
     @Autowired PlatformTransactionManager transactionManager;
 
@@ -130,6 +134,25 @@ class OrderBookExecutionStoreIntegrationTest {
     private GeneratedOrderBook generatedBook(long seed) {
         Instant now = clock.instant();
         return generator.generate(properties, descriptor, new BigDecimal("70000"), now.minusSeconds(2), now, seed);
+    }
+
+    private void awaitDatabaseLockWait() {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            Integer waitingSessions = jdbcTemplate.queryForObject(
+                    """
+                    select count(*)
+                      from pg_stat_activity
+                     where datname = current_database()
+                       and pid <> pg_backend_pid()
+                       and wait_event_type = 'Lock'
+                    """,
+                    Integer.class
+            );
+            if (waitingSessions != null && waitingSessions > 0) return;
+            LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+        }
+        throw new AssertionError("5초 안에 PostgreSQL lock wait를 관측하지 못했습니다");
     }
 
     @Test
@@ -233,6 +256,32 @@ class OrderBookExecutionStoreIntegrationTest {
                 store.lockForExecution(krStock.getStockId(), bookVersion, 0L, null)))
                 .isInstanceOf(NullPointerException.class);
     }
+    @Test
+    void lock_only_트랜잭션은_revision과_잔량을_변경하지_않는다() {
+        Long bookVersion = publicationService.publish(generatedBook(42L), BASE.plusSeconds(3600)).orElseThrow();
+        BigDecimal initialRemaining = transactionTemplate.execute(status ->
+                levelRepository.findAskLevelsForUpdate(bookVersion).getFirst().getRemainingQuantity());
+
+        transactionTemplate.executeWithoutResult(status ->
+                assertThat(store.lockForExecution(krStock.getStockId(), bookVersion, 0L, OrderBookSide.ASK))
+                        .isPresent());
+
+        BigDecimal remainingAfterLock = transactionTemplate.execute(status ->
+                levelRepository.findAskLevelsForUpdate(bookVersion).getFirst().getRemainingQuantity());
+        assertThat(versionRepository.findById(bookVersion).orElseThrow().getRevision()).isZero();
+        assertThat(remainingAfterLock).isEqualByComparingTo(initialRemaining);
+    }
+
+    @Test
+    void 존재하지_않는_stock은_빈결과를_반환한다() {
+        Long bookVersion = publicationService.publish(generatedBook(42L), BASE.plusSeconds(3600)).orElseThrow();
+
+        Optional<LockedOrderBook> locked = transactionTemplate.execute(status ->
+                store.lockForExecution(krStock.getStockId() + 999_999L, bookVersion, 0L, OrderBookSide.ASK));
+
+        assertThat(locked).isEmpty();
+    }
+
 
     @Test
     void 한_트랜잭션에서_여러_레벨을_바꿔도_revision은_한번만_증가한다() {
@@ -345,8 +394,7 @@ class OrderBookExecutionStoreIntegrationTest {
                     publicationService.publish(generatedBook(42L), BASE.plusSeconds(3600))
             );
 
-            // 잠시 후 consumer 락 해제
-            Thread.sleep(100);
+            awaitDatabaseLockWait();
             releaseConsumer.countDown();
 
             assertThat(consumerFuture.get(5, TimeUnit.SECONDS)).isEqualTo(1L);
@@ -356,6 +404,41 @@ class OrderBookExecutionStoreIntegrationTest {
 
             // v1은 종료되었고 v2가 활성 상태임
             Order1VersionState(v1, v2.orElseThrow());
+        }
+    }
+
+    @Test
+    void publisher가_버전_락을_기다리는_동안_세션이_끝나면_신규_버전을_게시하지_않고_기존을_종료한다() throws Exception {
+        Long v1 = publicationService.publish(generatedBook(41L), BASE.plusSeconds(3600)).orElseThrow();
+        CountDownLatch consumerHoldingLock = new CountDownLatch(1);
+        CountDownLatch releaseConsumer = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Future<?> consumerFuture = executor.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                LockedOrderBook locked = store.lockForExecution(krStock.getStockId(), v1, 0L, OrderBookSide.ASK)
+                        .orElseThrow();
+                consumerHoldingLock.countDown();
+                try {
+                    assertThat(releaseConsumer.await(5, TimeUnit.SECONDS)).isTrue();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(exception);
+                }
+                locked.version().advanceRevision();
+            }));
+
+            assertThat(consumerHoldingLock.await(5, TimeUnit.SECONDS)).isTrue();
+            Future<Optional<Long>> publisherFuture = executor.submit(() ->
+                    publicationService.publish(generatedBook(42L), BASE.plusSeconds(5)));
+
+            awaitDatabaseLockWait();
+            clock.advance(Duration.ofSeconds(6));
+            releaseConsumer.countDown();
+
+            consumerFuture.get(5, TimeUnit.SECONDS);
+            assertThat(publisherFuture.get(5, TimeUnit.SECONDS)).isEmpty();
+            assertThat(versionRepository.findById(v1).orElseThrow().isActive()).isFalse();
+            assertThat(versionRepository.findByStockIdAndIsActiveTrue(krStock.getStockId())).isEmpty();
         }
     }
 
@@ -425,8 +508,7 @@ class OrderBookExecutionStoreIntegrationTest {
                             store.lockForExecution(krStock.getStockId(), v1, 0L, OrderBookSide.ASK))
             );
 
-            // 잠시 후 publisher 커밋
-            Thread.sleep(100);
+            awaitDatabaseLockWait();
             releasePublisher.countDown();
 
             Long v2Id = publisherFuture.get(5, TimeUnit.SECONDS);
