@@ -1,4 +1,11 @@
 package com.baedang.orderbook.service;
+import com.baedang.TradingApplication;
+import com.baedang.orderbook.config.OrderBookProperties;
+import com.baedang.orderbook.model.GeneratedOrderBook;
+import com.baedang.orderbook.model.StockDescriptor;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
+import org.springframework.context.ConfigurableApplicationContext;
 
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
@@ -39,10 +46,12 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.mock;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -256,30 +265,85 @@ class OrderBookLifecycleIntegrationTest {
     }
 
     @Test
-    void 재기동_시점에도_DB에_저장된_소비_잔량과_revision이_유지되고_새_갱신_주기에서_교체된다() {
-        scheduler.refreshOrderBooks();
-        Long v1 = activeVersion().orElseThrow().getBookVersionId();
+    void 재기동_후에도_별도_Spring_Context가_저장된_잔량과_revision을_읽고_다음_갱신에서_교체한다() {
+        String symbol;
+        Long firstVersion;
+        BigDecimal remainingAfterConsumption;
 
-        // 소비 트랜잭션: ASK 1 수량 5 감소 및 revision 1 증가
-        new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
-            OrderBookVersion version = versionRepository.findById(v1).orElseThrow();
-            OrderBookLevel ask1 = levelRepository.findAskLevelsForUpdate(v1).getFirst();
-            ask1.consume(new BigDecimal("5"));
-            version.advanceRevision();
-        });
+        try (ConfigurableApplicationContext contextA = restartContext()) {
+            StockRepository stocks = contextA.getBean(StockRepository.class);
+            QuoteSnapshotRepository quotes = contextA.getBean(QuoteSnapshotRepository.class);
+            OrderBookGenerator generator = contextA.getBean(OrderBookGenerator.class);
+            OrderBookProperties properties = contextA.getBean(OrderBookProperties.class);
+            OrderBookPublicationService publisher = contextA.getBean(OrderBookPublicationService.class);
+            OrderBookVersionRepository versions = contextA.getBean(OrderBookVersionRepository.class);
+            OrderBookLevelRepository levels = contextA.getBean(OrderBookLevelRepository.class);
+            PlatformTransactionManager txManager = contextA.getBean(PlatformTransactionManager.class);
 
-        // 새 요청(재기동 후 첫 조회와 동일)에서 잔량 감소와 revision 1이 그대로 조회된다
-        var response = queryService.getOrderBook(krStock.getSymbol(), "KR");
-        assertThat(response.bookVersion()).isEqualTo(v1);
-        assertThat(response.revision()).isEqualTo(1L);
+            Stock stock = stocks.saveAndFlush(tradableStock());
+            symbol = stock.getSymbol();
+            var at = BASE.minusSeconds(2).atOffset(ZoneOffset.UTC);
+            quotes.saveAndFlush(new QuoteSnapshot(stock.getStockId(), new BigDecimal("70000"), "KRW", at, at));
 
-        // 다음 스케줄 갱신 주기에서 refresh가 실행되면 이전 버전은 종료되고 새 버전(새 initial 공급량)이 발행된다
-        clock.advance(Duration.ofSeconds(3));
-        scheduler.refreshOrderBooks();
+            StockDescriptor descriptor = StockDescriptor.from(stock);
+            GeneratedOrderBook generated = generator.generate(
+                    properties, descriptor, new BigDecimal("70000"), BASE.minusSeconds(2), BASE, 41L);
+            firstVersion = publisher.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
 
-        var refreshed = queryService.getOrderBook(krStock.getSymbol(), "KR");
-        assertThat(refreshed.bookVersion()).isNotEqualTo(v1);
-        assertThat(refreshed.revision()).isZero();
+            AtomicReference<BigDecimal> remaining = new AtomicReference<>();
+            new TransactionTemplate(txManager).executeWithoutResult(status -> {
+                OrderBookVersion version = versions.findById(firstVersion).orElseThrow();
+                OrderBookLevel ask = levels.findAskLevelsForUpdate(firstVersion).getFirst();
+                ask.consume(new BigDecimal("5"));
+                version.advanceRevision();
+                remaining.set(ask.getRemainingQuantity());
+            });
+            remainingAfterConsumption = remaining.get();
+        }
+
+        try (ConfigurableApplicationContext contextB = restartContext()) {
+            OrderBookQueryService query = contextB.getBean(OrderBookQueryService.class);
+            OrderBookRefreshScheduler restartedScheduler = contextB.getBean(OrderBookRefreshScheduler.class);
+
+            var persisted = query.getOrderBook(symbol, "KR");
+            assertThat(persisted.bookVersion()).isEqualTo(firstVersion);
+            assertThat(persisted.revision()).isEqualTo(1L);
+            assertThat(new BigDecimal(persisted.asks().getFirst().quantity()))
+                    .isEqualByComparingTo(remainingAfterConsumption);
+
+            restartedScheduler.refreshOrderBooks();
+
+            var refreshed = query.getOrderBook(symbol, "KR");
+            assertThat(refreshed.bookVersion()).isNotEqualTo(firstVersion);
+            assertThat(refreshed.revision()).isZero();
+        }
+    }
+
+    private ConfigurableApplicationContext restartContext() {
+        return new SpringApplicationBuilder(TradingApplication.class, OrderBookRestartTestConfiguration.class)
+                .web(WebApplicationType.SERVLET)
+                .properties(
+                        "spring.datasource.url=" + postgres.getJdbcUrl(),
+                        "spring.datasource.username=" + postgres.getUsername(),
+                        "spring.datasource.password=" + postgres.getPassword(),
+                        "spring.jpa.hibernate.ddl-auto=validate",
+                        "spring.sql.init.mode=never",
+                        "toss.enabled=false",
+                        "trading.orderbook.enabled=true",
+                        "trading.orderbook.refresh-initial-delay=1h",
+                        "trading.orderbook.retention-initial-delay=1h",
+                        "server.port=0",
+                        "JWT_SECRET=ZGV2LXNlY3JldC1rZXktZm9yLXRlc3Rpbmctb25seQ=="
+                )
+                .run(
+                        "--spring.datasource.url=" + postgres.getJdbcUrl(),
+                        "--spring.datasource.username=" + postgres.getUsername(),
+                        "--spring.datasource.password=" + postgres.getPassword(),
+                        "--toss.enabled=false",
+                        "--trading.orderbook.enabled=true",
+                        "--trading.orderbook.refresh-initial-delay=1h",
+                        "--trading.orderbook.retention-initial-delay=1h"
+                );
     }
 
     @Test
@@ -288,5 +352,38 @@ class OrderBookLifecycleIntegrationTest {
                 .withUserConfiguration(OrderBookRefreshScheduler.class)
                 .withPropertyValues("trading.orderbook.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(OrderBookRefreshScheduler.class));
+    }
+}
+
+@TestConfiguration(proxyBeanMethods = false)
+class OrderBookRestartTestConfiguration {
+
+    private static final Instant BASE = Instant.parse("2026-09-03T01:00:00Z");
+
+    @Bean
+    @Primary
+    MutableClock restartClock() {
+        return new MutableClock(BASE);
+    }
+
+    @Bean
+    @Primary
+    MarketSessionProvider restartMarketSessionProvider() {
+        MarketSessionProvider provider = mock(MarketSessionProvider.class);
+        when(provider.currentSession(any(), any()))
+                .thenReturn(new MarketSessionStatus(true, BASE.plusSeconds(3600)));
+        return provider;
+    }
+
+    @Bean
+    @Primary
+    ExecutionExchangeRateProvider restartExchangeRateProvider() {
+        ExecutionExchangeRateProvider provider = mock(ExecutionExchangeRateProvider.class);
+        when(provider.currentUsdKrwRate()).thenReturn(new BigDecimal("1383.60"));
+        return provider;
+    }
+    @Bean(name = "marketCalendarDelegate")
+    MarketCalendarPort marketCalendarDelegate() {
+        return mock(MarketCalendarPort.class);
     }
 }
