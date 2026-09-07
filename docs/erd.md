@@ -511,6 +511,8 @@ Limit orders use two phases: Phase 1 commits PENDING/reservations; a worker repe
 
 ## LIMIT acceptance evidence (#120)
 
+Order history uses `ix_order_history (account_id, order_id DESC)` to match its account-scoped order-ID cursor. This changes the schema definition only; existing databases need the index change applied separately.
+
 Three immutable acceptance columns are added to trade_order:
 - requested_limit_price NUMERIC(19,4): original user-entered unit price; whole KRW or cent USD.
 - requested_limit_currency VARCHAR(3): KRW or USD; KR stocks permit KRW only.

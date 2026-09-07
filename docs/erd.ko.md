@@ -506,6 +506,8 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 
 ## 지정가 접수 근거 (#120)
 
+주문 이력은 계좌별 주문 ID 커서 조회에 맞춘 `ix_order_history (account_id, order_id DESC)`를 사용합니다. 스키마 정의 변경이며 기존 DB에는 인덱스 변경을 별도로 적용해야 합니다.
+
 trade_order에 접수 후 변경하지 않는 세 컬럼을 추가합니다.
 - requested_limit_price NUMERIC(19,4): 사용자 원본 단가. KRW 원 단위 또는 USD 센트 단위.
 - requested_limit_currency VARCHAR(3): KRW/USD. 국내 종목은 KRW만 허용.

@@ -749,7 +749,8 @@ CREATE TABLE trade_order (
     ordered_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
     CONSTRAINT uq_account_client_order UNIQUE (account_id, client_order_id)
 );
-CREATE INDEX ix_order_history ON trade_order (account_id, ordered_at DESC);
+-- 계좌별 주문 ID 내림차순 커서 조회와 동일한 키 순서입니다.
+CREATE INDEX ix_order_history ON trade_order (account_id, order_id DESC);
 CREATE INDEX ix_order_active ON trade_order (account_id, stock_id, side, order_id)
     WHERE status IN ('PENDING','PARTIALLY_FILLED');
 CREATE INDEX ix_order_expiry ON trade_order (expires_at, order_id)
