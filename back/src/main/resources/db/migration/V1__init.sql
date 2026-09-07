@@ -554,7 +554,7 @@ CREATE TABLE market_calendar (
 --     · 테이블 구조는 그대로 두고 채우는 방식만 바뀐다.
 --
 --   [TimescaleDB 를 쓴다면 명분은 연속 집계다]
---     · 1분봉에서 5분봉·15분봉을 테이블 추가 없이 뷰로 파생할 수 있다.
+--     · 1분봉에서 5분봉·10분봉을 테이블 추가 없이 뷰로 파생한다 (candle_5m · candle_10m).
 --     · 다만 일봉까지 여기서 만들려 하지 말 것. 액면분할 시 과거 일봉이 소급
 --       조정되는데 연속 집계는 그것을 반영하지 못한다. 일봉은 API 의
 --       adjusted=true 값을 그대로 쓰는 것이 맞다.
@@ -571,52 +571,23 @@ CREATE TABLE minute_candle (
     PRIMARY KEY (stock_id, candle_at)
 );
 
-COMMENT ON TABLE minute_candle IS '1주차는 상세 진입 시 온디맨드 적재 + 60초 캐시. 상시 수집은 2주차';
+COMMENT ON TABLE minute_candle IS 'TimescaleDB 하이퍼테이블(1일 청크). 5분봉·10분봉은 연속 집계로 파생한다';
 
 
--- ── minute_candle 하이퍼테이블 — 2주차 상시 적재를 시작할 때 켤 것 ──────────
+-- ── minute_candle 하이퍼테이블 — timescale.sql 에서 켠다 ────────────────────
 --
---   1주차에는 온디맨드 캐시라 데이터가 얼마 없다. 상시 적재로 전환하면
---   연 977만 행이 되므로 그때 아래를 실행한다.
---   확장은 daily_candle 쪽에서 이미 만들었으므로 다시 만들 필요가 없다.
+--   상시 적재로 전환하면 연 977만 행이 되므로 하이퍼테이블로 둔다.
+--   실제 DDL 은 timescale.sql 3번에 있다 — 하이퍼테이블(1일 청크) 전환과
+--   candle_5m · candle_10m 연속 집계가 거기 함께 있다. 여기 중복해 두지 않는다.
+--   PK 가 이미 (stock_id, candle_at) 이라 표 구조는 바꿀 게 없다.
 --
 --   주의 1) 하이퍼테이블은 "다른 테이블에서 FK 로 참조받을 수 없다".
 --           (하이퍼테이블이 다른 테이블을 참조하는 것은 가능하므로 위 stock 참조는 OK)
 --   주의 2) 압축·연속집계는 Apache 판이 아니라 TSL 라이선스 기능이다.
 --           학습·포트폴리오 용도는 무관하지만 서비스화 시 조항 확인이 필요하다.
 --   주의 3) 관리형 DB(AWS RDS 등)는 대체로 미지원이라 배포 방식에 영향이 있다.
---
--- -- 하루 단위 청크로 분할 (일봉은 1년, 분봉은 1일. 행 수가 200배 차이 난다)
--- SELECT create_hypertable('minute_candle', 'candle_at',
---                          chunk_time_interval => INTERVAL '1 day');
---
--- -- 7일 지난 청크는 컬럼 압축 (90% 이상 축소)
--- ALTER TABLE minute_candle SET (
---     timescaledb.compress,
---     timescaledb.compress_segmentby = 'stock_id',
---     timescaledb.compress_orderby   = 'candle_at DESC'
--- );
--- SELECT add_compression_policy('minute_candle', INTERVAL '7 days');
---
--- -- 1년 지난 데이터는 삭제 (일봉이 남아 있으므로 손실 없음)
--- SELECT add_retention_policy('minute_candle', INTERVAL '1 year');
---
--- -- 5분봉 자동 파생 — 1분봉만 쌓으면 나머지는 뷰로 해결된다
--- CREATE MATERIALIZED VIEW candle_5m WITH (timescaledb.continuous) AS
--- SELECT stock_id,
---        time_bucket('5 minutes', candle_at)      AS bucket,
---        first(open_price, candle_at)             AS open_price,
---        max(high_price)                          AS high_price,
---        min(low_price)                           AS low_price,
---        last(close_price, candle_at)             AS close_price,
---        sum(volume)                              AS volume
---   FROM minute_candle
---  GROUP BY stock_id, bucket;
---
--- SELECT add_continuous_aggregate_policy('candle_5m',
---        start_offset => INTERVAL '1 day',
---        end_offset   => INTERVAL '1 minute',
---        schedule_interval => INTERVAL '1 minute');
+--   주의 4) timescale.sql 을 건너뛰면 5m/10m/1w interval 조회가 동작하지 않는다.
+--           (1m/1d 는 그대로 동작한다)
 
 
 -- ────────────────────────────────────────────────────────────────────────────
