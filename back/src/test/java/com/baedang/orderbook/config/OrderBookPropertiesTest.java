@@ -70,5 +70,30 @@ class OrderBookPropertiesTest {
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 BigDecimal.ONE, new BigDecimal("1000000"), 12000, 8000, Duration.ofMinutes(1)
         )).isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> new OrderBookProperties(
+                false, "V1", Duration.ofSeconds(3), 10, 1, Duration.ofSeconds(15),
+                new BigDecimal("20000000"), new BigDecimal("15000"),
+                new BigDecimal("0.5"), new BigDecimal("1000000"), 8000, 12000, Duration.ofMinutes(1)
+        )).isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> new OrderBookProperties(
+                false, "V1", Duration.ofSeconds(3), 10, 1, Duration.ofSeconds(15),
+                new BigDecimal("20000000"), new BigDecimal("15000"),
+                new BigDecimal("1.5"), new BigDecimal("1.5"), 8000, 12000, Duration.ofMinutes(1)
+        )).isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> new OrderBookProperties(
+                false, "V1", Duration.ofSeconds(3), 10, 1, Duration.ofSeconds(15),
+                new BigDecimal("20000000"), new BigDecimal("15000"),
+                BigDecimal.ONE, new BigDecimal("10000000000000"), 8000, 12000, Duration.ofMinutes(1)
+        )).isInstanceOf(IllegalArgumentException.class);
+
+        // 1.000000처럼 정수지만 소수점 0이 붙은 형태는 정상 허용된다
+        assertThat(new OrderBookProperties(
+                false, "V1", Duration.ofSeconds(3), 10, 1, Duration.ofSeconds(15),
+                new BigDecimal("20000000"), new BigDecimal("15000"),
+                new BigDecimal("1.000000"), new BigDecimal("1000000.00"), 8000, 12000, Duration.ofMinutes(1)
+        )).isNotNull();
     }
 }

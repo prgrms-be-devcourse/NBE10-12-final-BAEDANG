@@ -112,8 +112,8 @@ public class OrderBookVersion {
         if (!Boolean.TRUE.equals(this.isActive)) {
             throw new IllegalStateException("이미 종료된 호가 버전입니다");
         }
-        this.isActive = false;
         this.closedAt = Objects.requireNonNull(closedAt, "closedAt은 필수입니다").atOffset(ZoneOffset.UTC);
+        this.isActive = false;
     }
 
     public void advanceRevision() {

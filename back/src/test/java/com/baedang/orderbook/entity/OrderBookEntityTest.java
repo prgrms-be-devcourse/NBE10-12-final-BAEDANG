@@ -39,6 +39,25 @@ class OrderBookEntityTest {
     }
 
     @Test
+    void closedAt이_null이면_active_상태를_변경하지_않고_예외를_던진다() {
+        Instant generatedAt = Instant.parse("2026-09-03T01:00:00Z");
+        OrderBookVersion version = OrderBookVersion.open(
+                1L,
+                new BigDecimal("70000"),
+                "KRW",
+                generatedAt.minusSeconds(2),
+                generatedAt,
+                "V1",
+                42L
+        );
+
+        assertThatThrownBy(() -> version.close(null))
+                .isInstanceOf(NullPointerException.class);
+        assertThat(version.isActive()).isTrue();
+        assertThat(version.getClosedAt()).isNull();
+    }
+
+    @Test
     void revision은_활성_버전에서만_증가한다() {
         Instant generatedAt = Instant.parse("2026-09-03T01:00:00Z");
         OrderBookVersion version = OrderBookVersion.open(

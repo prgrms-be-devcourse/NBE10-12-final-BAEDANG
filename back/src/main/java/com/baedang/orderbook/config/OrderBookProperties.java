@@ -30,8 +30,11 @@ public record OrderBookProperties(
         if (maxQuoteAge == null || maxQuoteAge.isZero() || maxQuoteAge.isNegative()) throw new IllegalArgumentException("orderbook max-quote-age는 양수여야 합니다");
         if (krBaseNotional == null || krBaseNotional.signum() <= 0) throw new IllegalArgumentException("orderbook kr-base-notional은 양수여야 합니다");
         if (usBaseNotional == null || usBaseNotional.signum() <= 0) throw new IllegalArgumentException("orderbook us-base-notional은 양수여야 합니다");
-        if (minQuantity == null || minQuantity.signum() <= 0) throw new IllegalArgumentException("orderbook min-quantity는 양수여야 합니다");
-        if (maxQuantity == null || maxQuantity.compareTo(minQuantity) < 0) throw new IllegalArgumentException("orderbook max-quantity는 min-quantity 이상이어야 합니다");
+        if (minQuantity == null || minQuantity.compareTo(BigDecimal.ONE) < 0
+                || minQuantity.stripTrailingZeros().scale() > 0) throw new IllegalArgumentException("orderbook min-quantity는 1 이상의 정수여야 합니다");
+        if (maxQuantity == null || maxQuantity.compareTo(minQuantity) < 0
+                || maxQuantity.stripTrailingZeros().scale() > 0
+                || maxQuantity.compareTo(new BigDecimal("10000000000000")) >= 0) throw new IllegalArgumentException("orderbook max-quantity는 min 이상이며 NUMERIC(19,6)에 저장 가능한 정수여야 합니다");
         if (noiseMinBps <= 0 || noiseMaxBps < noiseMinBps) throw new IllegalArgumentException("orderbook noise 범위가 올바르지 않습니다");
         if (unconsumedRetention == null || unconsumedRetention.isZero() || unconsumedRetention.isNegative()) throw new IllegalArgumentException("orderbook unconsumed-retention은 양수여야 합니다");
     }
