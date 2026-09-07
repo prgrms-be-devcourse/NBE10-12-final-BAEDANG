@@ -26,7 +26,7 @@ import java.util.Objects;
 @Component
 public class TickSizePolicy {
 
-    private static final BigDecimal HUNDRED_MILLION = new BigDecimal("100000000");
+    private static final BigDecimal MAX_PRICE = new BigDecimal("999999999999999.9999");
 
     /** 국내 일반주·우선주 — 2023-01-25 KRX 기준. */
     private static final List<PriceGrid> KR_STOCK_GRIDS = List.of(
@@ -110,8 +110,8 @@ public class TickSizePolicy {
     /**
      * 유효 가격 구간. {@code upperExclusive}가 null이면 상한 없음.
      *
-     * <p>DB 저장 정밀도(NUMERIC(19,4))를 넘어가는 가격이 나오지 않도록 결과에
-     * {@code HUNDRED_MILLION} 상한을 둔다.
+     * <p>DB 저장 정밀도(NUMERIC(19,4))를 넘어가는 가격이 나오지 않도록
+     * {@code MAX_PRICE} (999999999999999.9999) 상한을 둔다.
      */
     private record PriceGrid(BigDecimal lowerInclusive, BigDecimal upperExclusive, BigDecimal tickSize) {
 
@@ -139,7 +139,8 @@ public class TickSizePolicy {
         }
 
         private boolean withinUpper(BigDecimal value) {
-            return upperExclusive == null || value.compareTo(upperExclusive) < 0;
+            return (upperExclusive == null || value.compareTo(upperExclusive) < 0)
+                    && value.compareTo(MAX_PRICE) <= 0;
         }
 
         private BigDecimal belowQuotient(BigDecimal price) {
@@ -147,7 +148,7 @@ public class TickSizePolicy {
         }
 
         private BigDecimal cap(BigDecimal value) {
-            return value.compareTo(HUNDRED_MILLION) > 0 ? null : value;
+            return value.compareTo(MAX_PRICE) > 0 ? null : value;
         }
     }
 }

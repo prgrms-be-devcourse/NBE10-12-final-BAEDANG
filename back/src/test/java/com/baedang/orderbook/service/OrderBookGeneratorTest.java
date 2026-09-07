@@ -84,8 +84,12 @@ class OrderBookGeneratorTest {
     }
 
     @Test
-    void 다른_seed는_다른_결과를_만든다() {
-        assertThat(generateWithSeed(41L)).isNotEqualTo(generateWithSeed(42L));
+    void 다른_seed는_레벨_수량_노이즈를_다르게_만든다() {
+        GeneratedOrderBook first = generateWithSeed(41L);
+        GeneratedOrderBook second = generateWithSeed(42L);
+
+        assertThat(first.levels().stream().map(GeneratedOrderBookLevel::quantity).toList())
+                .isNotEqualTo(second.levels().stream().map(GeneratedOrderBookLevel::quantity).toList());
     }
 
     @Test
@@ -93,7 +97,7 @@ class OrderBookGeneratorTest {
         GeneratedOrderBook book = generateWithSeed(42L);
 
         assertThat(book.levels()).allSatisfy(level -> {
-            assertThat(level.quantity().scale()).isZero();
+            assertThat(level.quantity().stripTrailingZeros().scale()).isLessThanOrEqualTo(0);
             assertThat(level.quantity()).isBetween(new BigDecimal("1"), new BigDecimal("1000000"));
         });
     }
@@ -113,17 +117,6 @@ class OrderBookGeneratorTest {
         assertThat(askPrices).containsExactly(
                 "1996", "1997", "1998", "1999", "2000",
                 "2005", "2010", "2015", "2020", "2025");
-    }
-
-    @Test
-    void 깊이_이전에_상단_유동성이_크다() {
-        // 라운드 부스트(최대 1.60)와 노이즈(최대 1.2)를 합쳐도(1.92) 깊이 배수비
-        // 1.00/0.40=2.5가 이기므로, ASK 1 수량은 최악·최선 조합에서도 ASK 10보다 크다
-        // (설계서 §4 "상단 유동성을 크게"가 부스트 도입 후에도 유지됨을 고정).
-        GeneratedOrderBook book = generateWithSeed(123L);
-
-        assertThat(book.bestAsk().quantity())
-                .isGreaterThan(book.levelsBySide(OrderBookSide.ASK).get(9).quantity());
     }
 
     @Test

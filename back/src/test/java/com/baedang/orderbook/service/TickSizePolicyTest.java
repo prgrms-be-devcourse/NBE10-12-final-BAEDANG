@@ -141,4 +141,26 @@ class TickSizePolicyTest {
         assertThatThrownBy(() -> policy.previousValidPriceBelow(krIndividual(), BigDecimal.ONE))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void 일억원_이상의_가격도_정상적으로_다음_이전_유효_가격을_계산한다() {
+        StockDescriptor stock = krIndividual();
+        BigDecimal oneHundredMillion = new BigDecimal("100000000");
+
+        assertThat(policy.isValidPrice(stock, oneHundredMillion)).isTrue();
+        assertThat(policy.nextValidPriceAbove(stock, oneHundredMillion))
+                .isEqualByComparingTo("100001000");
+        assertThat(policy.previousValidPriceBelow(stock, oneHundredMillion))
+                .isEqualByComparingTo("99999000");
+    }
+
+    @Test
+    void NUMERIC_19_4_최대범위를_초과하는_가격은_유효하지_않고_다음_호가_계산시_거절한다() {
+        StockDescriptor stock = krIndividual();
+        BigDecimal overMax = new BigDecimal("1000000000000000"); // 10^15
+
+        assertThat(policy.isValidPrice(stock, overMax)).isFalse();
+        assertThatThrownBy(() -> policy.nextValidPriceAbove(stock, overMax))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
 }
