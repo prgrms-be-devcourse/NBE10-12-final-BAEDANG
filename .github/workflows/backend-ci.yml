@@ -9,6 +9,10 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   test:
     name: Backend Test & Build
@@ -37,6 +41,17 @@ jobs:
       - name: Run Backend Tests with Gradle
         run: ./gradlew test --warn --build-cache --parallel
         working-directory: back
+
+      - name: Add coverage report to PR
+        if: github.event_name == 'pull_request'
+        id: jacoco
+        uses: madrapps/jacoco-report@v1.2
+        with:
+          title: 📝 테스트 커버리지 리포트입니다
+          paths: ${{ github.workspace }}/back/build/reports/jacoco/test/jacocoTestReport.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-coverage-overall: 50
+          min-coverage-changed-files: 50
 
       - name: Upload Test Report
         if: always()
