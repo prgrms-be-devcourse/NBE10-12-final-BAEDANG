@@ -8,8 +8,8 @@ import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.OrderResponse;
-import com.baedang.trading.dto.PlaceOrderRequest;
+import com.baedang.trading.dto.MarketOrderRequest;
+import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderResult;
@@ -22,8 +22,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Optional;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /** 입력 검증과 트랜잭션 결과의 HTTP 오류 변환을 담당하는 시장가 주문 진입점입니다. */
 @Service
@@ -34,7 +35,7 @@ public class MarketOrderService {
     private final StockRepository stockRepository;
     private final MarketSessionProvider marketSessionProvider;
     private final ExecutionExchangeRateProvider exchangeRateProvider;
-    private final OrderResponseAssembler responseAssembler;
+    private final MarketOrderResponseAssembler responseAssembler;
     private final Clock clock;
 
     public MarketOrderService(
@@ -43,7 +44,7 @@ public class MarketOrderService {
             StockRepository stockRepository,
             MarketSessionProvider marketSessionProvider,
             ExecutionExchangeRateProvider exchangeRateProvider,
-            OrderResponseAssembler responseAssembler,
+            MarketOrderResponseAssembler responseAssembler,
             Clock clock
     ) {
         this.marketOrderPolicy = marketOrderPolicy;
@@ -57,7 +58,7 @@ public class MarketOrderService {
 
     /** 주문은 다른 업무 트랜잭션에 참여하지 않고 반드시 최상위 유스케이스로 실행합니다. */
     @Transactional(propagation = Propagation.NEVER)
-    public OrderResponse place(Long userId, PlaceOrderRequest request) {
+    public MarketOrderResponse place(Long userId, MarketOrderRequest request) {
         if (request == null) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", "request"));
         }
@@ -75,7 +76,7 @@ public class MarketOrderService {
         return unwrap(result);
     }
 
-    private OrderResponse unwrap(MarketOrderResult result) {
+    private MarketOrderResponse unwrap(MarketOrderResult result) {
         if (result.rejected()) {
             // 트랜잭션 서비스가 REJECTED 행을 커밋한 뒤 예외로 변환합니다.
             throw new BusinessException(
@@ -125,7 +126,7 @@ public class MarketOrderService {
             BusinessException exception,
             ClientOrderRetryPolicy retryPolicy
     ) {
-        Map<String, Object> data = new java.util.LinkedHashMap<>();
+        Map<String, Object> data = new LinkedHashMap<>();
         if (exception.getData() != null) data.putAll(exception.getData());
         data.putAll(retryPolicy.asData());
         if (exception.getDetail() == null) {

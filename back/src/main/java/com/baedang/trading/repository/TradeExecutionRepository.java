@@ -7,6 +7,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.Repository;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -17,6 +18,8 @@ public interface TradeExecutionRepository extends Repository<TradeExecution, Lon
     Optional<TradeExecution> findByOrderIdAndExecutionKey(Long orderId, UUID executionKey);
     Page<TradeExecution> findByOrderIdOrderBySequenceNoAsc(Long orderId, Pageable pageable);
     long countByOrderId(Long orderId);
+    List<TradeExecution> findByOrderIdAndSequenceNoGreaterThanOrderBySequenceNoAsc(
+            Long orderId, int sequenceNo, Pageable page);
 
     /**
      * 주문별 누적 근거를 한 쿼리로 복원합니다. 실제 체결은 계좌 잠금 후 읽고, 후속 후보는 메모리에서 누적합니다.

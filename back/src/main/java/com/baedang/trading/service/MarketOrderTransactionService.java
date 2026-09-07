@@ -21,7 +21,7 @@ import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
@@ -119,29 +119,30 @@ public class MarketOrderTransactionService {
         Account account = accountRepository.findByAccountIdAndUserIdForUpdate(command.accountId(), userId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.ACCOUNT_NOT_FOUND, "accountId=" + command.accountId()));
-        rejectChangedRound(account);
         Instant now = clock.instant();
 
         OrderTerms terms = command.terms();
-        Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(
-                        terms.symbol(), terms.marketCountry())
-                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
-        if (stock.getMarketCountry() != executionContext.marketCountry()) {
-            throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
-        }
-
         TradeOrder existing = tradeOrderRepository
                 .findByAccountIdAndClientOrderId(account.getAccountId(), command.clientOrderId())
                 .orElse(null);
         if (existing != null) {
+            Stock stock = stockRepository.findById(existing.getStockId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
             verifySameRequest(existing, account, stock, terms);
             log.info("시장가 주문 동시 멱등 응답: orderId={}, accountId={}, status={}",
                     existing.getOrderId(), account.getAccountId(), existing.getStatus());
             return existingResult(existing, stock);
         }
 
+        rejectChangedRound(account);
         // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
         marketOrderPolicy.validateExecutionContextFresh(executionContext, now);
+
+        Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(terms.symbol(), terms.marketCountry())
+                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
+        if (stock.getMarketCountry() != executionContext.marketCountry()) {
+            throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
+        }
 
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
                 .orElseThrow(() -> new BusinessException(
@@ -158,7 +159,7 @@ public class MarketOrderTransactionService {
         BigDecimal executionRate = stock.getMarketCountry() == MarketCountry.KR
                 ? BigDecimal.ONE
                 : executionContext.executionRate();
-        OrderAmount amount;
+        MarketOrderAmount amount;
         try {
             amount = amountCalculator.calculate(
                     stock.getMarketCountry(), terms.side(), quote.getLastPrice(), terms.quantity(), executionRate);

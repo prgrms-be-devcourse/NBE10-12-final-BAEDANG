@@ -10,6 +10,7 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -48,10 +49,25 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, fields));
     }
 
-    /** 필수 헤더/파라미터 누락과 읽을 수 없는 JSON은 서버 장애가 아니라 잘못된 요청입니다. */
+    /** 필수 파라미터 누락 시 누락된 필드명을 data 에 담아 400 응답합니다. */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException e) {
+        log.warn("[INVALID_INPUT] {}", e.getMessage());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, Map.of("field", e.getParameterName())));
+    }
+
+    /** 경로/쿼리 파라미터의 타입 변환 실패는 문제 필드명만 제공하고 원본 입력은 노출하지 않습니다. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("[INVALID_INPUT] field={}", e.getName());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, Map.of("field", e.getName())));
+    }
+
+    /** 필수 헤더 누락과 읽을 수 없는 JSON은 서버 장애가 아니라 잘못된 요청입니다. */
     @ExceptionHandler({
             MissingRequestHeaderException.class,
-            MissingServletRequestParameterException.class,
             HttpMessageNotReadableException.class
     })
     public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception e) {

@@ -11,7 +11,7 @@ import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderExecutionContext;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.user.entity.Account;
 import org.springframework.beans.factory.annotation.Value;
@@ -97,7 +97,7 @@ public class MarketOrderPolicy {
             QuoteSnapshot quote,
             OrderSide side,
             BigDecimal quantity,
-            OrderAmount amount,
+            MarketOrderAmount amount,
             BigDecimal availableQuantity,
             BooleanSupplier marketOpen,
             Instant now
@@ -156,7 +156,7 @@ public class MarketOrderPolicy {
                 && expectedCurrency.equalsIgnoreCase(quote.getCurrency().trim());
     }
 
-    private ErrorCode validateQuoteTime(QuoteSnapshot quote, Instant now) {
+    public ErrorCode validateQuoteTime(QuoteSnapshot quote, Instant now) {
         Duration age = Duration.between(quote.getQuoteAt().toInstant(), now);
         if (age.isNegative()) return ErrorCode.FUTURE_QUOTE;
         if (age.compareTo(quoteMaxStaleness) > 0) return ErrorCode.STALE_QUOTE;

@@ -712,6 +712,9 @@ CREATE TABLE trade_order (
     net_amount      NUMERIC(19,4),            -- 실제 예수금 증감액
 
     limit_price NUMERIC(19,4),
+    requested_limit_price NUMERIC(19,4),       -- 원본 입력 단가: 멱등 비교/입력 의도 보존
+    requested_limit_currency VARCHAR(3),     -- 원본 입력 통화: KRW/USD
+    acceptance_exchange_rate NUMERIC(19,6),  -- 접수 시 환산 근거: 이후 체결 환율과 별개
     filled_quantity NUMERIC(19,6) NOT NULL DEFAULT 0,
     execution_count INTEGER NOT NULL DEFAULT 0,
     last_executed_at TIMESTAMPTZ,
@@ -733,10 +736,16 @@ CREATE TABLE trade_order (
     CONSTRAINT ck_order_closed_time CHECK (closed_at IS NULL OR (closed_at >= ordered_at
         AND (last_executed_at IS NULL OR closed_at >= last_executed_at))),
     CONSTRAINT ck_order_limit_terms CHECK (order_type <> 'LIMIT' OR (
-        limit_price IS NOT NULL AND limit_price > 0 AND expires_at IS NOT NULL AND expires_at > ordered_at
+        limit_price IS NOT NULL AND limit_price > 0
+        AND requested_limit_price IS NOT NULL AND requested_limit_price > 0
+        AND requested_limit_currency IS NOT NULL AND requested_limit_currency IN ('KRW','USD')
+        AND requested_limit_price = round(requested_limit_price, CASE WHEN requested_limit_currency = 'KRW' THEN 0 ELSE 2 END)
+        AND acceptance_exchange_rate IS NOT NULL AND acceptance_exchange_rate > 0
+        AND (status = 'REJECTED' OR (expires_at IS NOT NULL AND expires_at > ordered_at))
         AND (side <> 'BUY' OR status NOT IN ('PENDING','PARTIALLY_FILLED') OR reserved_cash > 0))),
     CONSTRAINT ck_order_market_terms CHECK (order_type <> 'MARKET' OR (
-        status IN ('FILLED','REJECTED') AND limit_price IS NULL AND reserved_cash = 0)),
+        status IN ('FILLED','REJECTED') AND limit_price IS NULL AND reserved_cash = 0
+        AND requested_limit_price IS NULL AND requested_limit_currency IS NULL AND acceptance_exchange_rate IS NULL)),
     ordered_at      TIMESTAMPTZ   NOT NULL DEFAULT now(),
     CONSTRAINT uq_account_client_order UNIQUE (account_id, client_order_id)
 );

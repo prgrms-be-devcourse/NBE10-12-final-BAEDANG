@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -14,6 +15,7 @@ import java.util.Optional;
 public interface LedgerEntryRepository extends Repository<LedgerEntry, Long> {
 
     LedgerEntry save(LedgerEntry ledgerEntry);
+    List<LedgerEntry> findByExecutionIdIn(Collection<Long> ids);
 
     Optional<LedgerEntry> findFirstByOrderIdOrderByEntryIdAsc(Long orderId);
 

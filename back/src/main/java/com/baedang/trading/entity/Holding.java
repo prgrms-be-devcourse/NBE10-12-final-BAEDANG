@@ -1,10 +1,18 @@
 package com.baedang.trading.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 /**
  * 보유 종목. 원장에서 파생되는 집계이고, 계좌+종목당 한 행입니다.
@@ -190,6 +198,36 @@ public class Holding {
         }
         return amount.multiply(remainingQuantity)
                 .divide(previousQuantity, scale, RoundingMode.HALF_UP);
+    }
+
+    public void reserveQuantity(BigDecimal amount, OffsetDateTime at) {
+        requirePositive(amount, "동결 수량");
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("동결 수량은 정수여야 합니다");
+        }
+        if (at == null) {
+            throw new IllegalArgumentException("변경 시각은 필수입니다");
+        }
+        if (availableQuantity().compareTo(amount) < 0) {
+            throw new IllegalStateException("매도 가능 수량이 부족합니다");
+        }
+        lockedQuantity = lockedQuantity.add(amount);
+        updatedAt = at;
+    }
+
+    public void releaseQuantity(BigDecimal amount, OffsetDateTime at) {
+        requirePositive(amount, "해제 수량");
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("해제 수량은 정수여야 합니다");
+        }
+        if (at == null) {
+            throw new IllegalArgumentException("변경 시각은 필수입니다");
+        }
+        if (lockedQuantity.compareTo(amount) < 0) {
+            throw new IllegalStateException("동결 수량보다 많이 해제할 수 없습니다");
+        }
+        lockedQuantity = lockedQuantity.subtract(amount);
+        updatedAt = at;
     }
 
     public Long getHoldingId() { return holdingId; }

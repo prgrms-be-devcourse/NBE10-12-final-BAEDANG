@@ -4,7 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -43,7 +43,7 @@ public class MarketOrderSettlementCalculator {
     }
 
     /** 시장가 주문의 현재가 기준 예상 금액을 계산합니다. */
-    public OrderAmount calculate(
+    public MarketOrderAmount calculate(
             MarketCountry marketCountry,
             OrderSide side,
             BigDecimal executedPrice,
@@ -66,7 +66,7 @@ public class MarketOrderSettlementCalculator {
                 || exchangeRate.compareTo(RATE_LIMIT) >= 0 || !isRepresentableAtScale(exchangeRate, 6))) {
             throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
         }
-        OrderAmount amount = switch (marketCountry) {
+        MarketOrderAmount amount = switch (marketCountry) {
             case KR -> calculateKr(side, price, quantity);
             case US -> calculateUs(side, price, quantity, exchangeRate);
         };
@@ -74,7 +74,7 @@ public class MarketOrderSettlementCalculator {
         return amount;
     }
 
-    private OrderAmount calculateKr(OrderSide side, BigDecimal priceKrw, BigDecimal quantity) {
+    private MarketOrderAmount calculateKr(OrderSide side, BigDecimal priceKrw, BigDecimal quantity) {
         BigDecimal unroundedGrossAmountKrw = priceKrw.multiply(quantity);
         BigDecimal grossAmountKrw = krw(unroundedGrossAmountKrw);
         BigDecimal tradingFeeKrw = krw(grossAmountKrw.multiply(feeRate));
@@ -83,7 +83,7 @@ public class MarketOrderSettlementCalculator {
                 : BigDecimal.ZERO;
         BigDecimal netAmountKrw = netAmount(side, grossAmountKrw, tradingFeeKrw, sellChargeKrw);
 
-        return new OrderAmount(
+        return new MarketOrderAmount(
                 priceKrw,
                 BigDecimal.ONE,
                 BigDecimal.ZERO,
@@ -96,7 +96,7 @@ public class MarketOrderSettlementCalculator {
         );
     }
 
-    private OrderAmount calculateUs(
+    private MarketOrderAmount calculateUs(
             OrderSide side,
             BigDecimal priceUsd,
             BigDecimal quantity,
@@ -115,7 +115,7 @@ public class MarketOrderSettlementCalculator {
         BigDecimal secFeeKrw = krw(secFeeUsd.multiply(exchangeRate));
         BigDecimal netAmountKrw = netAmount(side, grossAmountKrw, tradingFeeKrw, secFeeKrw);
 
-        return new OrderAmount(
+        return new MarketOrderAmount(
                 priceUsd,
                 exchangeRate,
                 grossAmountUsd,
