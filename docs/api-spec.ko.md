@@ -984,3 +984,29 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 
 ---
 > 모의 주식 트레이딩 서비스 · 현재 API 명세서 · `erd.md` · `wireframe.md` 와 함께 보세요
+
+## 지정가 주문 생애주기 (#120)
+
+주문 상세·목록·지정가 접수·취소 응답에는 `symbol`, `name`, `marketCountry`를 제공합니다. 체결 목록 응답은 `{orderId, stock: {symbol, name, marketCountry}, items, nextCursor, hasNext}` 구조입니다. 종목 정보는 개별 체결 항목이 아닌 페이지 상위에 한 번 제공하며, 빈 목록에도 orderId와 stock을 반환합니다. 페이지네이션과 체결 정렬은 유지합니다. `currency` 필드는 반환하지 않으며 지정가·체결 단가는 KR이면 KRW, US이면 USD입니다. 원본 입력 통화는 `requestedLimitCurrency`로 구분합니다. 지정가 견적을 포함하여 가격 문자열은 KRW 원 단위, USD 소수점 두 자리로 통일합니다. 환율 정밀도와 정산 계산은 변경하지 않으며 gross/fee/tax/net/reservedCash/balanceAfter는 계속 KRW입니다. 경로·쿼리 파라미터 타입 변환 실패는 HTTP 400 `INVALID_INPUT` 및 문제 파라미터명을 담은 `data.field`로 응답하며 원본 입력값은 노출하지 않습니다.
+
+주문 유형에 따라 엔드포인트를 분리합니다: 시장가는 `POST /orders/market` 및 `GET /orders/quote/market`, 지정가는 `POST /orders/limit` 및 `GET /orders/quote/limit`을 사용합니다. 요청 바디의 orderType은 받지 않으며 URL 경로로 주문 유형을 확정합니다. MARKET의 limitPrice/limitCurrency는 입력 오류입니다. 기존 시장가 응답은 유지하며 프론트 요청 수정은 별도 담당 범위입니다.
+
+LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW 원 단위, 미국은 KRW 원 단위 또는 USD 센트 단위를 허용합니다. 후행 0은 허용하지만 초과 자릿수·지수 표기는 거절합니다. 미국 원화 입력은 접수 환율로 나누어 HALF_UP 센트 반올림한 USD 지정가를 고정 저장합니다. 0달러가 되거나 저장 범위를 초과하면 거절합니다. 이후 원화 가격 한도를 계속 추적하는 주문은 아닙니다.
+
+매수 동결액은 원본 입력을 기준으로 합니다. 원화는 입력 단가 × 전체 수량 + 원 단위 수수료, 달러는 단가 × 전체 수량 × 환율의 원 단위 반올림액 + 수수료입니다. 센트 환산 가격을 원화로 역산하지 않습니다. 매도는 수량만 동결합니다. 미국 접수는 매수/매도 모두 검증된 체결용 환율 스냅샷을 사용하여 접수 환율을 보존하고 원화 입력을 환산합니다. 실제 체결 환율은 별개입니다. 센트 환산 반올림만으로도 동결액이 부족해 일부 수량만 체결되거나 보류될 수 있습니다.
+
+접수 성공은 `POST /orders/limit` 기준 201 OrderDetailResponse: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, 누적 grossAmount/fee/tax/netAmount, rejectReason, orderedAt/expiresAt/closedAt입니다. activeRemainingQuantity는 활성 잔여 수량으로 종료 후 0입니다. 멱등 비교는 원본 가격의 수치와 입력 통화를 사용하고 새 환율로 재환산하지 않습니다. 현재 저장 상태를 반환하며 종료 주문을 재활성화하지 않습니다. 저장된 REJECTED는 같은 오류를 재생합니다. 기존 주문 조회는 신규 접수 플래그보다 먼저, 잠금 후 회차 검사보다 먼저 수행합니다.
+
+견적은 acceptable/reason, availableCash/availableQuantity, expiresAt, 원본·환산 지정가, acceptanceExchangeRate, limitEstimate(grossAmount/fee/tax/netAmount/reservedCash), executionPreview(status=UNSUPPORTED)를 제공합니다. 환산 지정가에 전량 한 번 체결하는 가정이며 원화 원본으로 계산한 동결액과 다를 수 있습니다. 동결·물량 소비는 하지 않습니다. 미지원은 예상 체결 0주가 아닙니다. 예상 매도 순금액이 0 이하라는 이유만으로 접수를 막지는 않습니다.
+
+- GET /orders/{orderId}: 본인 주문 상세, CLOSED 회차 포함.
+- GET /accounts/me/orders: 현재 ACTIVE 회차, orderId 내림차순. size 기본 20/최대 100, 계좌 범위가 포함된 불투명 커서.
+- GET /orders/{orderId}/executions: sequenceNo 오름차순, 동일 size 상한과 주문별 커서. 체결별 단가·환율·정산액·executedAt·원장 balanceAfter를 반환. 정상 원장 누락은 INTERNAL_ERROR.
+- PATCH /orders/{orderId}: 정확히 {"status":"CANCELED"}만 허용. 추가 필드·다른 상태는 INVALID_INPUT. 반복 취소는 이중 해제 없이 성공. FILLED/REJECTED/EXPIRED는 orderId/status가 포함된 409 ORDER_STATE_CONFLICT. 마감 이후 취소는 EXPIRED와 동결 해제를 먼저 커밋한 후 409를 반환.
+- 없는 주문과 타인 주문은 동일하게 404 ORDER_NOT_FOUND.
+
+지정가(LIMIT) 주문 접수는 상시 활성화되어 동작합니다. 기존 주문 재생·조회·취소·만료가 지원됩니다. 정적 사전 검증 실패는 저장하지 않습니다. 트랜잭션에서 확정한 업무 거절은 원본 조건·환율과 LIMIT REJECTED를 저장하고 NEW_CLIENT_ORDER_ID를 반환하며 동결·체결·원장은 생성하지 않습니다. 저장 전 컨텍스트/환율/시세/통화/계산 오류는 SAME_CLIENT_ORDER_ID입니다.
+
+만료는 저장된 expiresAt 기준 30초 주기 및 시작 시 복구를 수행합니다. 계좌 우선 잠금의 주문별 트랜잭션이며 실패 건은 다음 주기에 재시도합니다. 외부 캘린더·환율 조회는 없습니다. 취소·만료는 동결만 해제하며 이미 체결된 금액·보유·원장을 되돌리지 않습니다.
+
+레거시 보정·데이터 백필은 제공하지 않습니다. 스키마 적용을 위한 DB 재생성 등은 별도 명시적 승인이 필요합니다.

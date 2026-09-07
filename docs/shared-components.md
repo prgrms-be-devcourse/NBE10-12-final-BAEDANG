@@ -169,7 +169,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 Source: [MarketOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/MarketOrderSettlementCalculator.java)
 
-`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
+`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `MarketOrderAmount`.
 Inject this Spring bean so it uses the configured fee and tax rates. The order policy validates input and tradability.
 
 Rates and the SEC minimum are project-fixed `.env` settings, not per-order snapshots. Keep them unchanged across restarts/deployments while orders are active.
@@ -299,3 +299,13 @@ API and exchange-rate lookup modules are HTTP clients, not pure helpers. Reuse t
 - Preserve existing tests first. If a refactoring breaks a test, first check whether it changed a service-specific policy.
 - Add boundary tests for new public methods, and update method names, examples, and caveats in both language versions of this guide.
 - Reference tests: [normalization](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizerTest.java), [service contracts](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizationContractTest.java), [market information](../back/src/test/java/com/baedang/stock/entity/MarketCountryTest.java), [return ratios](../back/src/test/java/com/baedang/account/support/ReturnRateCalculatorTest.java), [frontend helpers](../front/src/lib/__tests__).
+
+## LIMIT lifecycle components (#120)
+
+- LimitOrderRequestPolicy: supported input currency and lossless input-price validation. Not a rounding helper.
+- LimitOrderPricing: inject; converts US KRW limits to fixed USD cents and computes original-input reserve through LimitOrderSettlementCalculator. One-fill indicative amounts reuse MarketOrderSettlementCalculator; never use these to settle partial fills.
+- LimitOrderService: NEVER entry point for acceptance, quote and cancellation. Performs external preparation before DB mutation. The disabled acceptance flag does not block existing-order replay or cancellation.
+- LimitOrderTransactionService: REQUIRED account-first acceptance/closure; no external calls or ledger inserts. Returns closure results so an expiration conflict can be converted to an HTTP error after commit.
+- OrderReadService: read-only ownership checks, current-round order cursor and per-order execution cursor; executed balances come from linked ledger entries.
+- LimitOrderExpirationService: NEVER startup/30-second scan, no external market calls, independent per-order closure transactions and retry on failure.
+- Account.reserveCash/releaseCash and Holding.reserveQuantity/releaseQuantity: mutate reservation only; caller must hold the account lock and, for holdings, the holding lock. Holding methods take explicit UTC change time.

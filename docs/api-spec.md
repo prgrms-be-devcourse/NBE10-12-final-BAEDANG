@@ -985,3 +985,29 @@ Not built yet, but the URL design reserves the slots so nothing collides.
 
 ---
 > Mock Stock Trading Service · Current API Spec · see also `erd.md` · `wireframe.md`
+
+## LIMIT order lifecycle (#120)
+
+Order detail, list, LIMIT acceptance and cancellation responses include `symbol`, `name`, and `marketCountry`. Execution list responses provide `{orderId, stock: {symbol, name, marketCountry}, items, nextCursor, hasNext}`. Stock fields appear once at page level, not in each execution item; orderId and stock are also returned for empty pages. Pagination and execution ordering are unchanged. No `currency` field is returned: limit/execution prices use KRW for KR and USD for US; `requestedLimitCurrency` identifies the original input currency. Price strings use whole won for KRW and exactly two decimal places for USD, including LIMIT quotes. FX precision and settlement calculations are unchanged; gross/fee/tax/net/reservedCash/balanceAfter remain KRW. Invalid path/query parameter types return HTTP 400 `INVALID_INPUT` with `data.field` identifying the parameter (e.g. `orderId` or `size`), without echoing the input value.
+
+Endpoints are separated by order type: `POST /orders/market` & `GET /orders/quote/market` for market orders, `POST /orders/limit` & `GET /orders/quote/limit` for limit orders. Neither request body accepts `orderType`; the URL path defines the order type. MARKET rejects limitPrice/limitCurrency. Existing MARKET response fields are unchanged. Frontend request updates are owned separately.
+
+LIMIT requires string limitPrice and limitCurrency. KR accepts KRW whole-won prices only. US accepts KRW whole-won or USD cent prices. Trailing zeros are allowed; excess precision and exponent notation are rejected, never silently rounded. For US KRW input, the backend stores HALF_UP(requestedLimitPrice / acceptanceExchangeRate, 2) as the fixed USD limitPrice. A result of zero or a storage overflow is rejected. The order does not continue tracking a KRW price ceiling/floor as FX changes.
+
+BUY reserve is computed from the original input: KRW input × full quantity + rounded trading fee; USD input × full quantity × acceptance FX rounded to KRW, plus rounded trading fee. Do not reconvert the cent-rounded USD limit back to KRW to calculate reserve. SELL reserves quantity only. US acceptance uses the validated execution FX snapshot for both directions; this also preserves acceptance FX and supports KRW input conversion. Actual execution rates remain independent. Partial fills may need to reduce quantity or defer even when only cent conversion rounding causes reserve insufficiency.
+
+POST /orders/limit returns 201 with OrderDetailResponse for accepted LIMIT orders: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, cumulative grossAmount/fee/tax/netAmount, rejectReason and orderedAt/expiresAt/closedAt. activeRemainingQuantity is active remainder (zero after closure). Repeated requests compare original price numerically and input currency, never reconvert with new FX, and return current stored state without reactivation. Stored REJECTED results replay the same error. Existing orders are checked before the new-acceptance flag and after locking before the round check.
+
+LIMIT quote returns acceptable/reason, availableCash/availableQuantity, expiresAt, original and converted prices, acceptanceExchangeRate, limitEstimate {grossAmount, fee, tax, netAmount, reservedCash}, and executionPreview {status: "UNSUPPORTED"}. The estimate assumes one fill at the converted limit; reserve can differ because KRW input is preserved. No resources are reserved or consumed. Unsupported preview is not a zero-fill prediction; non-positive estimated sell proceeds do not by themselves prevent acceptance.
+
+- GET /orders/{orderId}: owning user's order, including closed rounds.
+- GET /accounts/me/orders: current ACTIVE round only, descending orderId; size defaults to 20, range 1..100; opaque account-scoped cursor.
+- GET /orders/{orderId}/executions: ascending sequenceNo, same size limits; opaque order-scoped cursor. Each execution includes its own price, FX, settlement amounts, executedAt and ledger balanceAfter. Missing normal ledger evidence is INTERNAL_ERROR.
+- PATCH /orders/{orderId}: exactly {"status":"CANCELED"}; extra fields and other values are INVALID_INPUT. Repeated CANCELED is successful without another release. FILLED/REJECTED/EXPIRED produce 409 ORDER_STATE_CONFLICT with orderId/status. At or after expiresAt an active order is expired and released in a committed transaction before the 409 response.
+- Missing or other-user order IDs return 404 ORDER_NOT_FOUND.
+
+LIMIT order acceptance is always enabled. Existing-order replay, queries, cancellation and expiration are supported. Static preflight failures are not persisted. Validated transactional business rejections are stored as LIMIT REJECTED with original terms and FX, no reservation, execution or ledger, and return NEW_CLIENT_ORDER_ID. Pre-insert context/FX/quote/currency/calculation failures keep SAME_CLIENT_ORDER_ID.
+
+Expiration scans stored expiresAt every 30 seconds, plus startup recovery. Each order closes in its own account-first transaction. Failures are logged and retried on later scans; no calendar/FX calls are made. Cancellation/expiration only release locked resources; settled cash/holdings/ledger are not reversed.
+
+No historical data backfill or legacy correction is provided. Schema changes require an explicitly authorized database recreation or deployment schema procedure.

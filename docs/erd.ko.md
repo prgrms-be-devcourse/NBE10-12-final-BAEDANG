@@ -503,3 +503,14 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 
 ---
 > 모의 주식 트레이딩 서비스 · 현재 ERD · `schema.sql` 과 함께 보세요
+
+## 지정가 접수 근거 (#120)
+
+trade_order에 접수 후 변경하지 않는 세 컬럼을 추가합니다.
+- requested_limit_price NUMERIC(19,4): 사용자 원본 단가. KRW 원 단위 또는 USD 센트 단위.
+- requested_limit_currency VARCHAR(3): KRW/USD. 국내 종목은 KRW만 허용.
+- acceptance_exchange_rate NUMERIC(19,6): 검증한 접수 환율, 국내는 1. 취소·만료 후에도 보존하며 이후 체결 환율을 고정하지 않음.
+
+MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 통화의 고정 지정가로 유지합니다. 미국 원화 입력은 접수 환율로 나눈 뒤 HALF_UP 센트 반올림합니다. 멱등 비교는 환산 결과가 아닌 원본 입력을 사용합니다. initial_reserved_cash는 추가하지 않습니다. 최초 동결은 원본 입력으로 계산하고 reserved_cash는 현재 잔여 동결액만 저장합니다.
+
+지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 기존 활성 주문·만료 인덱스를 재사용합니다. 과거 행 보정·마이그레이션은 포함하지 않습니다.

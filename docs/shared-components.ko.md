@@ -169,7 +169,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 소스: [MarketOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/MarketOrderSettlementCalculator.java)
 
-`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
+`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `MarketOrderAmount`.
 설정된 수수료·세율을 쓰는 Spring 빈이므로 주입받아 사용합니다. 입력 유효성·거래 가능 여부는 주문 정책에서 검증합니다.
 
 요율·SEC 최소액은 주문별 스냅샷이 아닌 프로젝트 고정 `.env` 설정입니다. 활성 주문이 있는 동안 재시작·재배포에도 동일한 값을 유지합니다.
@@ -299,3 +299,13 @@ API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 �
 - 기존 테스트를 먼저 유지합니다. 리팩터링 후 실패하면 서비스 고유 정책을 바꿨는지 먼저 점검합니다.
 - 새 공개 메서드는 경계값 테스트를 추가하고 양쪽 언어 문서의 메서드명·사용 예·주의점을 함께 갱신합니다.
 - 기준 테스트: [정규화](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizerTest.java), [서비스별 계약](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizationContractTest.java), [시장 정보](../back/src/test/java/com/baedang/stock/entity/MarketCountryTest.java), [손익률](../back/src/test/java/com/baedang/account/support/ReturnRateCalculatorTest.java), [프론트 헬퍼](../front/src/lib/__tests__).
+
+## 지정가 생애주기 구성요소 (#120)
+
+- LimitOrderRequestPolicy: 지원 입력 통화 및 무손실 가격 자릿수 검증. 반올림 도구가 아닙니다.
+- LimitOrderPricing: 주입하여 미국 원화 입력을 고정 USD 센트 지정가로 환산하고 LimitOrderSettlementCalculator로 원본 입력 동결액 계산. 단일 체결 가정 견적은 MarketOrderSettlementCalculator를 재사용하며 부분 체결 정산에는 사용하지 않습니다.
+- LimitOrderService: 접수·견적·취소 NEVER 진입점. 외부 정보를 DB 변경 전에 준비합니다. 접수 비활성화는 기존 주문 재생·취소를 차단하지 않습니다.
+- LimitOrderTransactionService: REQUIRED 계좌 우선 잠금 접수·종료. 외부 호출·원장 INSERT 없음. 만료 경합 결과를 값으로 반환하여 커밋 후 HTTP 오류로 변환합니다.
+- OrderReadService: 읽기 전용 소유권 검증, 현재 회차 주문 커서·주문별 체결 커서. 체결 직후 잔액은 연결 원장에서 조회합니다.
+- LimitOrderExpirationService: NEVER 시작 시/30초 스캔, 외부 시장 호출 없음, 주문별 독립 종료 트랜잭션과 실패 재시도.
+- Account.reserveCash/releaseCash, Holding.reserveQuantity/releaseQuantity: 동결 상태만 변경. 호출부는 계좌 잠금 및 필요한 보유 잠금을 획득해야 합니다. 보유 메서드는 명시적 UTC 변경 시각을 받습니다.
