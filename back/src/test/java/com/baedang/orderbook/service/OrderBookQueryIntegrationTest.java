@@ -10,6 +10,7 @@ import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.dto.OrderBookLevelResponse;
 import com.baedang.orderbook.dto.OrderBookResponse;
 import com.baedang.orderbook.entity.OrderBookLevel;
+import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
@@ -29,6 +30,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -36,8 +40,13 @@ import org.testcontainers.utility.MountableFile;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.time.ZoneOffset;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,6 +92,8 @@ class OrderBookQueryIntegrationTest {
     @MockitoBean MarketCalendarPort marketCalendarPort;
 
     @Autowired OrderBookPublicationService publicationService;
+    @Autowired JdbcTemplate jdbcTemplate;
+    @Autowired PlatformTransactionManager transactionManager;
     @Autowired OrderBookGenerator generator;
     @Autowired OrderBookProperties properties;
     @Autowired StockRepository stockRepository;
@@ -269,4 +280,135 @@ class OrderBookQueryIntegrationTest {
         assertThat(versionRepository.findById(versionId).orElseThrow().getRevision()).isZero();
         assertThat(levelRepository.countByBookVersion_BookVersionId(versionId)).isEqualTo(20);
     }
+    @Test
+    void 미커밋_잔량과_revision_변경_중_reader는_이전_스냅샷을_읽고_commit_후_새_스냅샷을_읽는다() throws Exception {
+        Long versionId = publicationService.publish(
+                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
+        OrderBookResponse initial = queryService.getOrderBook(krStock.getSymbol(), "KR");
+        BigDecimal initialAskQuantity = new BigDecimal(initial.asks().getFirst().quantity());
+
+        CountDownLatch writerReady = new CountDownLatch(1);
+        CountDownLatch releaseWriter = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            var writer = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        OrderBookVersion version = versionRepository.findById(versionId).orElseThrow();
+                        OrderBookLevel ask = levelRepository.findAskLevelsForUpdate(versionId).getFirst();
+                        ask.consume(BigDecimal.ONE);
+                        version.advanceRevision();
+                        writerReady.countDown();
+                        try {
+                            assertThat(releaseWriter.await(5, TimeUnit.SECONDS)).isTrue();
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(exception);
+                        }
+                    }));
+
+            assertThat(writerReady.await(5, TimeUnit.SECONDS)).isTrue();
+
+            OrderBookResponse beforeCommit = queryService.getOrderBook(krStock.getSymbol(), "KR");
+            assertThat(beforeCommit.bookVersion()).isEqualTo(versionId);
+            assertThat(beforeCommit.revision()).isZero();
+            assertThat(new BigDecimal(beforeCommit.asks().getFirst().quantity()))
+                    .isEqualByComparingTo(initialAskQuantity);
+
+            releaseWriter.countDown();
+            writer.get(5, TimeUnit.SECONDS);
+
+            OrderBookResponse afterCommit = queryService.getOrderBook(krStock.getSymbol(), "KR");
+            assertThat(afterCommit.bookVersion()).isEqualTo(versionId);
+            assertThat(afterCommit.revision()).isEqualTo(1L);
+            assertThat(new BigDecimal(afterCommit.asks().getFirst().quantity()))
+                    .isEqualByComparingTo(initialAskQuantity.subtract(BigDecimal.ONE));
+        }
+    }
+
+    @Test
+    void publication_close_insert_경계에서도_reader는_이전_또는_신규_전체_세트만_읽는다() throws Exception {
+        Long previousVersion = publicationService.publish(
+                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
+        GeneratedOrderBook next = generatedBook(43L, BASE.minusSeconds(2));
+        CountDownLatch writerReady = new CountDownLatch(1);
+        CountDownLatch releaseWriter = new CountDownLatch(1);
+
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            var writer = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        stockRepository.findByIdForUpdate(krStock.getStockId()).orElseThrow();
+                        OrderBookVersion active = versionRepository.findActiveForUpdate(krStock.getStockId())
+                                .orElseThrow();
+                        active.close(clock.instant());
+                        versionRepository.flush();
+                        writerReady.countDown();
+                        try {
+                            assertThat(releaseWriter.await(5, TimeUnit.SECONDS)).isTrue();
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(exception);
+                        }
+                        OrderBookVersion replacement = versionRepository.saveAndFlush(OrderBookVersion.open(next));
+                        levelRepository.saveAll(OrderBookLevel.from(replacement, next.levels()));
+                    }));
+
+            assertThat(writerReady.await(5, TimeUnit.SECONDS)).isTrue();
+            OrderBookResponse beforeCommit = queryService.getOrderBook(krStock.getSymbol(), "KR");
+            assertThat(beforeCommit.bookVersion()).isEqualTo(previousVersion);
+            assertThat(beforeCommit.asks()).hasSize(10);
+            assertThat(beforeCommit.bids()).hasSize(10);
+
+            releaseWriter.countDown();
+            writer.get(5, TimeUnit.SECONDS);
+
+            OrderBookResponse afterCommit = queryService.getOrderBook(krStock.getSymbol(), "KR");
+            assertThat(afterCommit.bookVersion()).isNotEqualTo(previousVersion);
+            assertThat(afterCommit.asks()).hasSize(10);
+            assertThat(afterCommit.bids()).hasSize(10);
+        }
+    }
+
+    @Test
+    void future_quote_조회는_503이고_오류_GET은_DB_상태를_변경하지_않는다() {
+        Long versionId = publicationService.publish(
+                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
+        long levelCount = levelRepository.countByBookVersion_BookVersionId(versionId);
+        long revision = versionRepository.findById(versionId).orElseThrow().getRevision();
+        jdbcTemplate.update(
+                "update order_book_version set quote_at = ? where book_version_id = ?",
+                BASE.plusSeconds(1).atOffset(ZoneOffset.UTC), versionId);
+
+        assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
+        assertThat(levelRepository.countByBookVersion_BookVersionId(versionId)).isEqualTo(levelCount);
+        assertThat(versionRepository.findById(versionId).orElseThrow().getRevision()).isEqualTo(revision);
+    }
+
+    @Test
+    void 통화가_불일치하는_활성_호가는_503이다() {
+        Long versionId = publicationService.publish(
+                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
+        jdbcTemplate.update("update order_book_version set currency = 'USD' where book_version_id = ?", versionId);
+
+        assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
+    }
+
+    @Test
+    void 레벨이_20개보다_적은_활성_호가는_503이다() {
+        Long versionId = publicationService.publish(
+                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
+        jdbcTemplate.update(
+                "delete from order_book_level where book_version_id = ? and side = 'ASK' and level_depth = 10",
+                versionId);
+
+        assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
+    }
+
 }
