@@ -2,6 +2,7 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.16'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
 }
 
 group = 'com.baedang'
@@ -24,6 +25,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
     implementation 'org.springframework.boot:spring-boot-starter-security'
+
+    // Swagger / OpenAPI 문서 (springdoc). Swagger UI + /v3/api-docs 자동 생성.
+    //   Spring Boot 3.5 은 springdoc 2.8.x 계열과 호환된다.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.9'
 
     // Spring Boot Actuator
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
@@ -53,6 +58,22 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
     systemProperty 'spring.profiles.active', 'test'
+    // 테스트가 끝나면 커버리지 리포트를 이어서 생성한다.
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+// 커버리지 리포트(HTML: 사람이 열람 / XML: CI·뱃지 연동용). 초기엔 report-only —
+// 커버리지 강제(jacocoTestCoverageVerification threshold)는 후속 이슈에서 팀 합의 후 추가.
+tasks.named('jacocoTestReport') {
+    dependsOn test
+    reports {
+        html.required = true
+        xml.required = true
+    }
 }
 
 tasks.named('jar') {
