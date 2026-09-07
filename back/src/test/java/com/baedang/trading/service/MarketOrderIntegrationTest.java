@@ -1066,6 +1066,7 @@ class MarketOrderIntegrationTest {
     }
 
 
+
     private Account activeAccount(Long userId) {
         return accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE).orElseThrow();
     }

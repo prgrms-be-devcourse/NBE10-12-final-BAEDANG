@@ -18,6 +18,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -44,6 +46,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 /**
@@ -99,6 +102,7 @@ class OrderBookPublicationIntegrationTest {
     @Autowired OrderBookLevelRepository levelRepository;
     @Autowired ClockTestConfig clockConfig;
     @Autowired PlatformTransactionManager transactionManager;
+    @Autowired JdbcTemplate jdbcTemplate;
 
     private MutableClock clock;
     private Stock krStock;
@@ -265,5 +269,79 @@ class OrderBookPublicationIntegrationTest {
         assertThat(versionRepository.findById(v1)).isPresent(); // revision > 0 → 감사 근거 보존
         assertThat(versionRepository.findById(v2)).isEmpty();   // closed + revision 0 + retention 초과 → 삭제
         assertThat(versionRepository.findById(v3)).isPresent(); // closed_at이 cutoff 이후 → 아직 보존
+    }
+
+    @Test
+    void 신규_레벨_저장에_실패하면_이전_활성_종료까지_전체_롤백된다() {
+        Long initialVersionId = publicationService.publish(generatedBook(41L), BASE.plusSeconds(600)).orElseThrow();
+
+        GeneratedOrderBook valid = generatedBook(42L);
+        var invalidLevels = new java.util.ArrayList<>(valid.levels());
+        // level_depth 1 중복을 추가하여 uq_order_book_level 유니크 제약 위반 유발
+        invalidLevels.add(new com.baedang.orderbook.model.GeneratedOrderBookLevel(
+                com.baedang.orderbook.entity.OrderBookSide.ASK, 1, new BigDecimal("70100"), BigDecimal.TEN));
+        GeneratedOrderBook corrupt = new GeneratedOrderBook(
+                valid.stockId(), valid.basePrice(), valid.currency(), valid.quoteAt(), valid.generatedAt(),
+                valid.policyVersion(), valid.seed(), invalidLevels);
+
+        assertThatThrownBy(() ->
+                publicationService.publish(corrupt, BASE.plusSeconds(600)))
+                .isInstanceOf(Exception.class);
+
+        // 롤백 확인: 이전 활성 버전이 계속 활성 상태(isActive = true, closedAt = null)여야 한다
+        OrderBookVersion rolledBack = versionRepository.findById(initialVersionId).orElseThrow();
+        assertThat(rolledBack.isActive()).isTrue();
+        assertThat(rolledBack.getClosedAt()).isNull();
+        assertThat(versionRepository.findByStockIdAndIsActiveTrue(krStock.getStockId()))
+                .map(OrderBookVersion::getBookVersionId)
+                .contains(initialVersionId);
+    }
+
+    @Test
+    void 체결이_참조하는_호가_레벨과_버전은_revision이_0이어도_retention으로_삭제되지_않고_직접_삭제도_RESTRICT된다() {
+        Long v1 = publicationService.publish(generatedBook(41L), BASE.plusSeconds(600)).orElseThrow();
+        Long levelId = levelRepository.findAll().stream()
+                .filter(l -> l.getBookVersion().getBookVersionId().equals(v1))
+                .findFirst().orElseThrow().getLevelId();
+
+        // v1을 종료시키되 revision은 0으로 유지한다
+        publicationService.closeActive(krStock.getStockId());
+
+        // trade_execution이 levelId를 참조하도록 연관 데이터 생성
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        long userId = jdbcTemplate.queryForObject(
+                "insert into users (email, password_hash, nickname) values (?, 'pwd', ?) returning user_id",
+                Long.class, "retention-" + suffix + "@example.com", "user-" + suffix);
+        long accountId = jdbcTemplate.queryForObject(
+                "insert into account (user_id, round_no, initial_cash, cash_balance, locked_cash, status, opened_at) values (?, 1, 1000000, 1000000, 0, 'ACTIVE', now()) returning account_id",
+                Long.class, userId);
+        long orderId = jdbcTemplate.queryForObject(
+                """
+                insert into trade_order (account_id, stock_id, client_order_id, order_type, side,
+                                         quantity, filled_quantity, limit_price, reserved_cash,
+                                         status, ordered_at, closed_at, expires_at)
+                values (?, ?, gen_random_uuid(), 'LIMIT', 'BUY', 1, 1, 70100, 0, 'FILLED', now(), now(), now() + interval '1 hour')
+                returning order_id
+                """, Long.class, accountId, krStock.getStockId());
+        jdbcTemplate.update(
+                """
+                insert into trade_execution (order_id, sequence_no, execution_key, quantity, price,
+                                             exchange_rate, sec_fee_usd, gross_amount_krw, fee_krw, tax_krw,
+                                             net_amount_krw, quote_at, executed_at, book_level_id)
+                values (?, 1, gen_random_uuid(), 1, 70100, 1.0, 0, 70100, 0, 0, 70100, now(), now(), ?)
+                """, orderId, levelId);
+
+        // 2분 경과 후 retention 실행
+        clock.advance(Duration.ofMinutes(2));
+        retentionService.deleteExpiredUnconsumed();
+
+        // revision = 0이고 retention 시간이 초과했음에도 execution이 참조하므로 삭제되지 않고 보존된다
+        assertThat(versionRepository.findById(v1)).isPresent();
+
+        // 직접 레벨 삭제 및 버전 삭제 시도 시 RESTRICT 위반으로 실패해야 한다
+        assertThatThrownBy(() -> jdbcTemplate.update("delete from order_book_level where level_id = ?", levelId))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update("delete from order_book_version where book_version_id = ?", v1))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 }
