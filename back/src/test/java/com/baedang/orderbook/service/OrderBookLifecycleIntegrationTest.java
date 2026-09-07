@@ -51,6 +51,8 @@ import static org.mockito.Mockito.when;
         "spring.sql.init.mode=never",
         "toss.enabled=false",
         "trading.orderbook.enabled=true",
+        "trading.orderbook.refresh-initial-delay=1h",
+        "trading.orderbook.retention-initial-delay=1h",
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookLifecycleIntegrationTest {
