@@ -16,6 +16,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -37,6 +38,8 @@ import org.testcontainers.utility.MountableFile;
 
 import java.math.BigDecimal;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -139,6 +142,119 @@ class LimitOrderLifecycleIntegrationTest {
 
     BigDecimal locked() {
         return jdbc.queryForObject("SELECT locked_cash FROM account WHERE account_id=?", BigDecimal.class, account);
+    }
+
+    private void assertNoOrderEffects() {
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, account)).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ledger_entry WHERE account_id=?", Long.class, account)).isZero();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"NOT_IN_UNIVERSE,BUY", "STOCK_SUSPENDED,BUY", "MARKET_CLOSED,BUY",
+            "QUOTE_CURRENCY_MISMATCH,BUY", "STALE_QUOTE,BUY", "FUTURE_QUOTE,BUY",
+            "INSUFFICIENT_CASH,BUY", "INSUFFICIENT_QUANTITY,SELL"})
+    void 실행불가_견적은_사유와_추정액을_반환하되_자원을_변경하지_않는다(ErrorCode expected, String side) {
+        switch (expected) {
+            case NOT_IN_UNIVERSE -> jdbc.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", stock);
+            case STOCK_SUSPENDED -> jdbc.update("UPDATE stock SET is_suspended=true WHERE stock_id=?", stock);
+            case MARKET_CLOSED -> when(sessions.currentSession(any(), any())).thenReturn(new MarketSessionStatus(false, null));
+            case QUOTE_CURRENCY_MISMATCH -> jdbc.update("UPDATE quote_snapshot SET currency='KRW' WHERE stock_id=?", stock);
+            case STALE_QUOTE -> jdbc.update("UPDATE quote_snapshot SET quote_at=? WHERE stock_id=?", NOW.minusSeconds(60).atOffset(ZoneOffset.UTC), stock);
+            case FUTURE_QUOTE -> jdbc.update("UPDATE quote_snapshot SET quote_at=? WHERE stock_id=?", NOW.plusSeconds(1).atOffset(ZoneOffset.UTC), stock);
+            case INSUFFICIENT_CASH -> jdbc.update("UPDATE account SET cash_balance=1 WHERE account_id=?", account);
+            case INSUFFICIENT_QUANTITY -> { }
+            default -> throw new IllegalArgumentException("Unexpected scenario");
+        }
+        BigDecimal cashBefore = jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account);
+        var quote = service.quote(user, symbol, "US", side, "1", "100", "USD");
+        assertThat(quote.acceptable()).isFalse();
+        assertThat(quote.reason()).isEqualTo(expected);
+        assertThat(quote.limitPrice()).isEqualTo("100.00");
+        assertThat(quote.limitEstimate().grossAmount()).isEqualTo("140000");
+        assertThat(quote.limitEstimate().netAmount()).isEqualTo("BUY".equals(side) ? "140014" : "139972");
+        assertThat(quote.executionPreview()).containsEntry("status", "UNSUPPORTED");
+        if (expected == ErrorCode.MARKET_CLOSED) assertThat(quote.expiresAt()).isNull();
+        assertNoOrderEffects();
+        assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account))
+                .isEqualByComparingTo(cashBefore);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"calendar", "rate", "missing-rate"})
+    void 외부조회_실패는_같은ID_재시도를_허용하고_복구후_한번만_동결한다(String failure) {
+        var request = request("BUY", "1", "100", "USD");
+        if (failure.equals("calendar")) {
+            when(sessions.currentSession(any(), any())).thenThrow(new BusinessException(ErrorCode.TOSS_API_ERROR));
+        } else if (failure.equals("rate")) {
+            when(rates.currentUsdKrwSnapshot()).thenThrow(new BusinessException(ErrorCode.TOSS_API_ERROR));
+        } else {
+            when(rates.currentUsdKrwSnapshot()).thenReturn(null);
+        }
+        assertThatThrownBy(() -> service.place(user, request)).isInstanceOfSatisfying(BusinessException.class, e -> {
+            assertThat(e.getErrorCode()).isEqualTo(failure.equals("missing-rate") ? ErrorCode.EXCHANGE_RATE_NOT_FOUND : ErrorCode.TOSS_API_ERROR);
+            assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+        });
+        assertNoOrderEffects();
+        org.mockito.Mockito.doReturn(new MarketSessionStatus(true, NOW.plusSeconds(3600))).when(sessions).currentSession(any(), any());
+        org.mockito.Mockito.doReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
+                NOW.atOffset(ZoneOffset.UTC), NOW.atOffset(ZoneOffset.UTC), NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)))
+                .when(rates).currentUsdKrwSnapshot();
+        var accepted = service.place(user, request);
+        assertThat(accepted.status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(service.place(user, request)).isEqualTo(accepted);
+        assertThat(locked()).isEqualByComparingTo("140014");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, account)).isEqualTo(1L);
+    }
+
+    @Test
+    void 정적_거절은_외부호출과_주문저장없이_같은ID_재시도를_안내한다() {
+        jdbc.update("UPDATE stock SET is_suspended=true WHERE stock_id=?", stock);
+        clearInvocations(sessions, rates);
+        var request = request("BUY", "1", "100", "USD");
+        assertThatThrownBy(() -> service.place(user, request)).isInstanceOfSatisfying(BusinessException.class, e -> {
+            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.STOCK_SUSPENDED);
+            assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+        });
+        verifyNoInteractions(sessions, rates);
+        assertNoOrderEffects();
+        jdbc.update("UPDATE stock SET is_suspended=false WHERE stock_id=?", stock);
+        assertThat(service.place(user, request).status()).isEqualTo(OrderStatus.PENDING);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"KRW,1", "USD,999999999999999"})
+    void 센트환산_0이나_정산범위초과는_주문을_저장하지_않는다(String currency, String price) {
+        var invalid = request("BUY", "1", price, currency);
+        assertThatThrownBy(() -> service.place(user, invalid)).isInstanceOfSatisfying(BusinessException.class, e -> {
+            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_SETTLEMENT_AMOUNT);
+            assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+        });
+        assertNoOrderEffects();
+        var corrected = new LimitOrderRequest(account, invalid.clientOrderId(), symbol, "US", "BUY", "1", "100", "USD");
+        assertThat(service.place(user, corrected).status()).isEqualTo(OrderStatus.PENDING);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {-1, 0, 101})
+    void 주문과_체결목록은_페이지크기_범위밖을_거절한다(int size) {
+        var order = service.place(user, request("BUY", "1", "100", "USD"));
+        assertThatThrownBy(() -> reads.list(user, null, size)).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+        assertThatThrownBy(() -> reads.executions(user, order.orderId(), null, size)).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"too-long", "zero", "negative", "other-scope", "sequence-overflow"})
+    void 잘못된_커서의_범위와_식별자를_거절한다(String scenario) {
+        var order = service.place(user, request("BUY", "1", "100", "USD"));
+        String value = switch (scenario) { case "zero" -> "0"; case "negative" -> "-1"; default -> "2147483648"; };
+        String scope = scenario.equals("other-scope") ? "orders:" + account : "executions:" + order.orderId();
+        String cursor = scenario.equals("too-long") ? "x".repeat(129)
+                : Base64.getUrlEncoder().withoutPadding().encodeToString((scope + ":" + value).getBytes(StandardCharsets.UTF_8));
+        assertThatThrownBy(() -> reads.executions(user, order.orderId(), cursor, 20)).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_CURSOR));
     }
 
     @ParameterizedTest
@@ -325,11 +441,7 @@ class LimitOrderLifecycleIntegrationTest {
         // 조회 전용 픽스처: 1주씩 3번 체결된 이력과 각 체결 직후 원장을 적재합니다.
         for (int sequence = 1; sequence <= 3; sequence++) {
             var at = NOW.plusSeconds(sequence).atOffset(ZoneOffset.UTC);
-            long execution = jdbc.queryForObject("""
-                    INSERT INTO trade_execution(order_id,execution_key,sequence_no,quantity,price,exchange_rate,
-                    sec_fee_usd,gross_amount_krw,fee_krw,tax_krw,net_amount_krw,quote_at,executed_at,book_level_id)
-                    VALUES (?,?,?,1,100,1400,0,140000,14,0,140014,?,?,1) RETURNING execution_id
-                    """, Long.class, order.orderId(), UUID.randomUUID(), sequence, at, at);
+            long execution = insertExecution(order.orderId(), sequence);
             jdbc.update("""
                     INSERT INTO ledger_entry(account_id,order_id,execution_id,entry_type,amount,balance_after,exchange_rate,occurred_at)
                     VALUES (?,?,?,'BUY',-140014,?,1400,?)
@@ -366,6 +478,24 @@ class LimitOrderLifecycleIntegrationTest {
         assertThat(executionPage.nextCursor()).isNull();
         assertThatThrownBy(() -> reads.list(user, "invalid", 20))
                 .isInstanceOf(BusinessException.class);
+    }
+
+    private long insertExecution(long orderId, int sequence) {
+        var at = NOW.plusSeconds(sequence).atOffset(ZoneOffset.UTC);
+        return jdbc.queryForObject("""
+                INSERT INTO trade_execution(order_id,execution_key,sequence_no,quantity,price,exchange_rate,
+                sec_fee_usd,gross_amount_krw,fee_krw,tax_krw,net_amount_krw,quote_at,executed_at,book_level_id)
+                VALUES (?,?,?,1,100,1400,0,140000,14,0,140014,?,?,1) RETURNING execution_id
+                """, Long.class, orderId, UUID.randomUUID(), sequence, at, at);
+    }
+
+    @Test
+    void 체결원장이_누락되면_현재잔액으로_대체하지_않고_오류를_반환한다() {
+        var order = service.place(user, request("BUY", "1", "100", "USD"));
+        insertExecution(order.orderId(), 1);
+        assertThatThrownBy(() -> reads.executions(user, order.orderId(), null, 20))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
     }
 
     @Test
