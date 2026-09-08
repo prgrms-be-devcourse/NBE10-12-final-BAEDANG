@@ -3,6 +3,8 @@ package com.baedang.orderbook.dto;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.global.formatter.FinancialDecimalFormatter;
+import com.baedang.orderbook.entity.OrderBookSide;
+import com.baedang.orderbook.model.OrderBookPriceOrderValidator;
 import com.baedang.orderbook.repository.OrderBookRowProjection;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -39,39 +41,35 @@ public record OrderBookResponse(
         Long bookVersion = header.getBookVersion();
         Long revision = header.getRevision();
 
-        List<OrderBookLevelResponse> asks = new ArrayList<>(10);
-        List<OrderBookLevelResponse> bids = new ArrayList<>(10);
+        List<OrderBookRowProjection> asks = new ArrayList<>(10);
+        List<OrderBookRowProjection> bids = new ArrayList<>(10);
 
         for (OrderBookRowProjection row : rows) {
             if (!bookVersion.equals(row.getBookVersion()) || !revision.equals(row.getRevision())) {
                 throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
             }
             if ("ASK".equals(row.getSide())) {
-                asks.add(new OrderBookLevelResponse(
-                        row.getLevelDepth(),
-                        FinancialDecimalFormatter.currency(row.getPrice(), header.getCurrency()),
-                        FinancialDecimalFormatter.plain(row.getRemainingQuantity())
-                ));
+                asks.add(row);
             } else if ("BID".equals(row.getSide())) {
-                bids.add(new OrderBookLevelResponse(
-                        row.getLevelDepth(),
-                        FinancialDecimalFormatter.currency(row.getPrice(), header.getCurrency()),
-                        FinancialDecimalFormatter.plain(row.getRemainingQuantity())
-                ));
+                bids.add(row);
             } else {
                 throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
             }
         }
 
-        asks.sort(Comparator.comparingInt(OrderBookLevelResponse::level));
-        bids.sort(Comparator.comparingInt(OrderBookLevelResponse::level));
+        asks.sort(Comparator.comparingInt(OrderBookRowProjection::getLevelDepth));
+        bids.sort(Comparator.comparingInt(OrderBookRowProjection::getLevelDepth));
         boolean usStock = stock.getMarketCountry() == MarketCountry.US;
         boolean validBidDepth = bids.size() == 10
                 || (usStock && !bids.isEmpty() && bids.size() < 10
-                    && new BigDecimal(bids.getLast().price()).compareTo(MIN_US_ORDER_BOOK_PRICE) == 0);
+                    && bids.getLast().getPrice().compareTo(MIN_US_ORDER_BOOK_PRICE) == 0);
         if (asks.size() != 10 || !validBidDepth
                 || !hasSequentialLevels(asks)
-                || !hasSequentialLevels(bids)) {
+                || !hasSequentialLevels(bids)
+                || !OrderBookPriceOrderValidator.isStrict(
+                        asks, OrderBookRowProjection::getPrice, OrderBookSide.ASK)
+                || !OrderBookPriceOrderValidator.isStrict(
+                        bids, OrderBookRowProjection::getPrice, OrderBookSide.BID)) {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
         }
 
@@ -86,15 +84,28 @@ public record OrderBookResponse(
                 header.getGeneratedAt(),
                 true,
                 VIRTUAL_DESCRIPTION,
-                List.copyOf(asks),
-                List.copyOf(bids)
+                toLevelResponses(asks, header.getCurrency()),
+                toLevelResponses(bids, header.getCurrency())
         );
     }
 
-    private static boolean hasSequentialLevels(List<OrderBookLevelResponse> levels) {
+    private static boolean hasSequentialLevels(List<OrderBookRowProjection> levels) {
         for (int i = 0; i < levels.size(); i++) {
-            if (levels.get(i).level() != i + 1) return false;
+            if (levels.get(i).getLevelDepth() != i + 1) return false;
         }
         return true;
+    }
+
+    private static List<OrderBookLevelResponse> toLevelResponses(
+            List<OrderBookRowProjection> rows,
+            String currency
+    ) {
+        return rows.stream()
+                .map(row -> new OrderBookLevelResponse(
+                        row.getLevelDepth(),
+                        FinancialDecimalFormatter.currency(row.getPrice(), currency),
+                        FinancialDecimalFormatter.plain(row.getRemainingQuantity())
+                ))
+                .toList();
     }
 }

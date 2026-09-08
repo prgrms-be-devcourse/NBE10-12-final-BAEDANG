@@ -4,6 +4,7 @@ import com.baedang.orderbook.entity.OrderBookLevel;
 import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.LockedOrderBook;
+import com.baedang.orderbook.model.OrderBookPriceOrderValidator;
 import com.baedang.orderbook.port.OrderBookExecutionStore;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
@@ -58,7 +59,8 @@ public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
                 || (side == OrderBookSide.BID && "USD".equals(activeVersion.getCurrency())
                     && !levels.isEmpty() && levels.size() < 10
                     && levels.getLast().getPrice().compareTo(MIN_US_ORDER_BOOK_PRICE) == 0);
-        if (!validDepth || !hasSequentialDepths(levels) || !hasStrictPriceOrder(levels, side)) {
+        if (!validDepth || !hasSequentialDepths(levels)
+                || !OrderBookPriceOrderValidator.isStrict(levels, OrderBookLevel::getPrice, side)) {
             throw new IllegalStateException("활성 호가 버전의 레벨 깊이 또는 가격 순서가 올바르지 않습니다");
         }
 
@@ -72,11 +74,4 @@ public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
         return true;
     }
 
-    private boolean hasStrictPriceOrder(List<OrderBookLevel> levels, OrderBookSide side) {
-        for (int i = 1; i < levels.size(); i++) {
-            int comparison = levels.get(i - 1).getPrice().compareTo(levels.get(i).getPrice());
-            if (side == OrderBookSide.ASK ? comparison >= 0 : comparison <= 0) return false;
-        }
-        return true;
-    }
 }

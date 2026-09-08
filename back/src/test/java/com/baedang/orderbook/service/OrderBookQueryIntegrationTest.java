@@ -10,6 +10,7 @@ import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.dto.OrderBookLevelResponse;
 import com.baedang.orderbook.dto.OrderBookResponse;
 import com.baedang.orderbook.entity.OrderBookLevel;
+import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.StockDescriptor;
@@ -22,6 +23,8 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -194,6 +197,30 @@ class OrderBookQueryIntegrationTest {
         assertThat(response.bids()).extracting(OrderBookLevelResponse::level)
                 .containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
         assertThat(response.bids().getLast().price()).isEqualTo("0.01");
+    }
+
+    @ParameterizedTest
+    @EnumSource(OrderBookSide.class)
+    void 같은_가격의_인접_레벨이_있으면_조회는_503이다(OrderBookSide side) {
+        Long versionId = publicationService.publish(
+                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
+        jdbcTemplate.update("""
+                        update order_book_level target
+                           set price = source.price
+                          from order_book_level source
+                         where target.book_version_id = ?
+                           and target.side = ?
+                           and target.level_depth = 2
+                           and source.book_version_id = target.book_version_id
+                           and source.side = target.side
+                           and source.level_depth = 1
+                        """,
+                versionId, side.name());
+
+        assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
     }
 
     @Test
