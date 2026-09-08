@@ -1007,4 +1007,8 @@ LIMIT order acceptance is always enabled. Existing-order replay, queries, cancel
 
 Expiration scans stored expiresAt on a dedicated single-thread scheduler, 30 seconds after the previous scan completes, plus asynchronous startup recovery. Each expiration transaction sets PostgreSQL SET LOCAL lock_timeout to 2 seconds; lock failures roll back and are retried on the next scan. Each order closes in its own account-first transaction. Failures are logged and retried on later scans; no calendar/FX calls are made. Cancellation/expiration only release locked resources; settled cash/holdings/ledger are not reversed.
 
+Order closure and reservation release commit atomically. Any failure rolls back both, preserving state and reservations while the ID cursor advances to subsequent orders. Failed orders are never forced to EXPIRED or excluded from retry. Data-integrity failures are logged at ERROR and retried on subsequent scans after the cause is repaired.
+
+Invalid limit-order input preserves SAME_CLIENT_ORDER_ID and includes data.field as limitPrice or limitCurrency.
+
 No historical data backfill or legacy correction is provided. Schema changes require an explicitly authorized database recreation or deployment schema procedure.
