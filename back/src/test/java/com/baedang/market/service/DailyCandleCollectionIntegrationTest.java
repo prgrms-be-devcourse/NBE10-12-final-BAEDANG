@@ -19,10 +19,9 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -47,11 +46,9 @@ class DailyCandleCollectionIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
-            .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
-                            .toAbsolutePath().normalize()),
-                    "/docker-entrypoint-initdb.d/01-schema.sql");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
 
     // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort
     // 의존을 목(mock)으로 채워 넣어야 컨텍스트가 뜬다(다른 서비스가 직접 주입받는다).

@@ -46,10 +46,13 @@ cd infra/local
 docker compose up -d
 ```
 
-PostgreSQL + TimescaleDB 가 뜨고 `schema.sql` · `timescale.sql` 이 자동 실행됩니다.
+PostgreSQL + TimescaleDB 가 빈 상태로 뜹니다.
 **PostgreSQL 을 따로 설치하지 않아도 됩니다.**
 
-스키마까지 들어갔는지 확인:
+스키마는 백엔드를 기동할 때 Flyway 가 만듭니다
+(`back/src/main/resources/db/migration/V1__init.sql`).
+
+기동 후 스키마가 들어갔는지 확인:
 
 ```bash
 docker exec -it trading-db psql -U trading -d trading -c "\dt"

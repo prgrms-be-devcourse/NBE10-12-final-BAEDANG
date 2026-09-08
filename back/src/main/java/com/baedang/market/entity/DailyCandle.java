@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.Objects;
 
 /**
- * 일봉. <b>TimescaleDB 하이퍼테이블</b>입니다 (infra/timescale.sql).
+ * 일봉. <b>TimescaleDB 하이퍼테이블</b>입니다 (db/migration/V1__init.sql).
  *
  * <p>용도가 둘입니다 — 일봉 차트, 그리고 {@code prev_close} 의 원천.
  * 장 마감 10분 후 수집합니다 (국내 15:40 / 미국 05:10).

@@ -9,7 +9,7 @@ import java.time.OffsetDateTime;
  * 특정 날짜의 정규장 운영 정보. {@link MarketCalendarPort#fetchKrMarketCalendar}/
  * {@link MarketCalendarPort#fetchUsMarketCalendar} 의 공통 반환 타입입니다.
  *
- * <p>KR/US 를 굳이 별도 타입으로 나누지 않았습니다 — {@code infra/schema.sql} 의
+ * <p>KR/US 를 굳이 별도 타입으로 나누지 않았습니다 — {@code db/migration/V1__init.sql} 의
  * {@code market_calendar} 테이블도 두 시장을 {@code market_country} 컬럼 하나로
  * 구분할 뿐 컬럼 구조는 동일합니다.
  *

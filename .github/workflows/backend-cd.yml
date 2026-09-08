@@ -12,8 +12,8 @@ on:
 
 env:
   IMAGE_NAME: nbe10-12-final-baedang
-  CONTAINER_1_NAME: back_1
-  CONTAINER_2_NAME: back_2
+  CONTAINER_1_NAME: trading-back-1
+  CONTAINER_2_NAME: trading-back-2
   APPLICATION_PORT: 8080
   DOCKERFILE_DIR: back
   INSTANCE_TAG_NAME: baedang-ec2-1
@@ -181,14 +181,14 @@ jobs:
           SCRIPT=$(cat <<DEPLOY
           docker pull $IMAGE
 
-          docker stop back_1 || true
-          docker rm back_1 || true
+          docker stop trading-back-1 || true
+          docker rm trading-back-1 || true
 
           docker run -d \
-            --name back_1 \
+            --name trading-back-1 \
             --network common \
             --restart unless-stopped \
-            --env-file /.env \
+            --env-file /opt/baedang/.env \
             -p 8080:8080 \
             $IMAGE
 
@@ -224,4 +224,3 @@ jobs:
           if [ "$STATUS" != "Success" ]; then
             exit 1
           fi
-
