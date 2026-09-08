@@ -1,5 +1,5 @@
 --flyway:executeInTransaction=false
--- V3__minute_candle_hypertable.sql
+-- V4__minute_candle_hypertable.sql
 -- 분봉 상시 적재 전환 (#128): minute_candle 하이퍼테이블화 + 5분봉·10분봉 연속 집계
 --
 -- !! executeInTransaction=false 는 필수입니다.
