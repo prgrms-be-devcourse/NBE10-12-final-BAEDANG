@@ -42,4 +42,3 @@ public enum KisWhitelist {
         return null;
     }
 }
-

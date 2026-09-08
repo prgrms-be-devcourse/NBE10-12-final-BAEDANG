@@ -10,4 +10,3 @@ public record KisApiResponse(
         @JsonProperty("msg1") String message
 ) {
 }
-
