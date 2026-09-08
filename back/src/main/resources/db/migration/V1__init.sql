@@ -1,6 +1,6 @@
 --flyway:executeInTransaction=false
 -- ============================================================================
---  V1 — 초기 스키마 (infra/schema.sql + infra/timescale.sql 을 합친 것)
+--  V1 — 초기 스키마
 --
 --  !! 이 파일은 적용된 뒤로는 절대 수정하지 마세요.
 --     Flyway 가 체크섬을 저장하므로 한 글자만 고쳐도 다음 기동이 실패합니다.
@@ -23,7 +23,7 @@
 --   3) 거래 원장(ledger_entry)은 append-only. UPDATE / DELETE 하지 않는다.
 --   4) 포트폴리오 초기화는 삭제가 아니라 '새 회차 계좌 개설'이다.
 --
---  실행:  psql -U trading -d trading -f schema.sql
+--  실행은 Flyway 가 합니다. 앱 기동 시 자동으로 적용됩니다.
 -- ============================================================================
 
 BEGIN;
@@ -474,20 +474,20 @@ CREATE TABLE daily_candle (
 
 COMMENT ON TABLE daily_candle IS 'TimescaleDB 하이퍼테이블. 주봉·월봉은 연속 집계로 파생한다';
 
--- ── TimescaleDB 하이퍼테이블 지정은 별도 파일에서 한다 ─────────────────────
+-- ── TimescaleDB 하이퍼테이블 지정은 이 파일 뒤쪽에서 한다 ──────────────────
 --
---   timescale.sql 을 이 파일 다음에 실행하세요.
---     docker compose 가 01-schema.sql → 02-timescale.sql 순서로 돌려줍니다.
+--   아래 COMMIT 다음의 "TimescaleDB 설정" 절에서 처리합니다.
 --
---   !! 여기에 넣을 수 없는 이유
---      이 파일은 BEGIN ... COMMIT 으로 감싸여 있는데,
+--   !! 여기(BEGIN ... COMMIT 안)에 넣을 수 없는 이유
 --      CREATE EXTENSION timescaledb 는 트랜잭션 블록 안에서 실행할 수 없습니다.
 --      (다른 확장과 달리 백그라운드 워커를 띄우기 때문)
 --      여기 넣으면 스키마 생성 전체가 통째로 실패합니다.
+--      파일 첫 줄의 --flyway:executeInTransaction=false 가 이래서 필요합니다.
 --
---   !! 확장이 없는 환경(관리형 DB 등)에서는 timescale.sql 을 그냥 건너뛰세요.
---      daily_candle 이 일반 테이블로 남을 뿐 나머지 기능은 전부 그대로 동작합니다.
---      PK 가 이미 (stock_id, trade_date) 라 나중에 언제든 전환할 수 있습니다.
+--   !! 확장이 없는 환경(관리형 DB 등)으로 가려면 그 절을 뺀 마이그레이션이
+--      따로 필요합니다. daily_candle 이 일반 테이블로 남을 뿐 나머지 기능은
+--      전부 그대로 동작하고, PK 가 이미 (stock_id, trade_date) 라
+--      나중에 언제든 전환할 수 있습니다.
 
 
 
@@ -1005,25 +1005,15 @@ COMMIT;
 -- ============================================================================
 --  모의 주식 트레이딩 서비스 — TimescaleDB 설정
 --
---  schema.sql 다음에 실행합니다.
---    docker compose 가 01-schema.sql → 02-timescale.sql 순서로 돌립니다.
---    수동 실행:  psql -U trading -d trading -f timescale.sql
---
---  !! 이 파일을 schema.sql 에 합치지 마세요.
---     CREATE EXTENSION timescaledb 는 트랜잭션 블록 안에서 실행할 수 없습니다.
---     (백그라운드 워커를 띄우기 때문에 다른 확장과 다릅니다)
---     schema.sql 은 BEGIN ... COMMIT 으로 감싸여 있으므로 여기 넣으면
---     스키마 생성 전체가 통째로 실패합니다. 그래서 파일을 나눴습니다.
---
---  !! 이 파일은 건너뛸 수 있습니다.
---     실행하지 않으면 daily_candle 이 일반 테이블로 남을 뿐,
---     나머지 기능은 전부 그대로 동작합니다.
---     PK 가 이미 (stock_id, trade_date) 라 나중에 언제든 전환할 수 있습니다.
+--  위 BEGIN ... COMMIT 밖에서 실행합니다.
+--    CREATE EXTENSION timescaledb 는 트랜잭션 블록 안에서 실행할 수 없습니다.
+--    (백그라운드 워커를 띄우기 때문에 다른 확장과 다릅니다)
+--    파일 첫 줄의 --flyway:executeInTransaction=false 가 이래서 필요합니다.
 --
 --  !! 이미지 확인
---     postgres:18-alpine 에는 TimescaleDB 가 들어 있지 않습니다.
---     docker-compose.yml 의 image 를 timescale/timescaledb 계열로 바꾸거나,
---     이 파일을 빼고 일반 PostgreSQL 로 가세요.
+--     postgres:18-alpine 에는 TimescaleDB 가 들어 있지 않아 이 절에서 실패합니다.
+--     로컬(infra/local/docker-compose.yml)·dev(infra/development/compose.yaml)·
+--     통합 테스트 모두 timescale/timescaledb 계열 이미지를 씁니다.
 -- ============================================================================
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;

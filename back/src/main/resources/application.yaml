@@ -31,11 +31,11 @@ spring:
   jpa:
     hibernate:
       # !! create / update 로 바꾸지 마세요.
-      #    스키마의 진실은 infra/schema.sql 하나입니다.
+      #    스키마의 진실은 Flyway 마이그레이션(db/migration/) 하나입니다.
       #    validate 는 "엔티티와 실제 테이블이 어긋나면 기동을 거부"합니다.
       #    update 로 두면 Hibernate 가 조용히 컬럼을 만들어버려서,
       #    내 PC 에서만 되는 상태가 됩니다.
-      #    스키마를 바꿨다면 infra/local 에서 docker compose down -v && up -d
+      #    스키마를 바꿨다면 db/migration 에 V2, V3 ... 새 파일을 추가하세요.
       ddl-auto: validate
     properties:
       hibernate:

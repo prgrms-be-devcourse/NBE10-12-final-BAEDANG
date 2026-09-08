@@ -129,7 +129,7 @@ quote_snapshot.prev_close
 | `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **20 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 2주차에는 지정가 체결 판정과 5m·10m 집계를 추가합니다. |
 | `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS                  | **1주차 미사용** · 필요 시 08:00 배치 | `stock.is_warned`. 정리매매·단기과열·투자경고/위험·VI 발동. **단건 조회라 100종목이면 100콜, 약 20초.** **확정 스케줄에는 넣지 않았습니다** — 랭킹 API 의 `excludeInvestmentCaution=true` 로 이미 대부분 걸러지기 때문. |
 | `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS            | 이력 적재: **매시 정각** / 현재 환율: 1분 TTL 캐시 | **두 경로가 다릅니다.** 그래프용 이력은 매시 정각 `exchange_rate` 로 적재(하루 24콜), 체결용 현재 환율은 **1분 TTL 메모리 캐시**. 응답의 `validFrom` 을 `rate_at` 으로, `ON CONFLICT DO NOTHING` 으로 **주말 중복 자동 차단**. |
-| `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS            | 앱 기동 시 + 매일 1회 | **메모리 캐시로 충분**(이력을 남기고 싶으면 `schema.sql` 의 `market_calendar` 테이블 선택). 세 곳에 쓰임 — **① 주문 가능 시간 판정, ② 시세 수집 스케줄러 on/off, ③ 화면 "실시간/종가" 분기**. 서머타임·수능일·임시휴장 때문에 **절대 하드코딩 금지**. |
+| `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS            | 앱 기동 시 + 매일 1회 | **메모리 캐시로 충분**(이력을 남기고 싶으면 `V1__init.sql` 의 `market_calendar` 테이블 선택). 세 곳에 쓰임 — **① 주문 가능 시간 판정, ② 시세 수집 스케줄러 on/off, ③ 화면 "실시간/종가" 분기**. 서머타임·수능일·임시휴장 때문에 **절대 하드코딩 금지**. |
 | `wss://openapi-ws/ws/v1` | 구독 100건 / 연결 2개          | **2주차 개선 과제** | **실시간 체결·호가 웹소켓.** 연결당 구독 100건, 계정당 연결 2개라 **국내 100 + 미국 100 = 정확히 200종목**. 도입하면 폴링이 사라지고 진짜 실시간. 재연결·재구독, 60초 PING, full-replace 구독 관리 필요, 시세는 **LOSSY 보장**이라 프레임 유실 감안. **1주차에는 폴링**. |
 | `POST /api/v1/orders` 등 | —                              | 사용 안 함 | **주문 API 는 절대 호출하지 않습니다** — 실제 계좌에 실주문이 나갑니다. `TossSecuritiesClient` 등 외부 API 클라이언트에서 호출 가능 경로를 화이트리스트로 고정하세요. |
 
@@ -502,4 +502,4 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 > 🧪 **검증 테스트로 만들면 좋은 것** — 모든 거래 후 `매수 시 net_amount = gross_amount + fee`, `매도 시 net_amount = gross_amount − fee − tax` 가 항상 성립하는지, 그리고 `ledger_entry.amount`(수수료 포함) 의 누적 합이 `account.cash_balance` 와 일치하는지 확인하는 테스트를 두세요. 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
 
 ---
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `schema.sql` 과 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql` 과 함께 보세요
