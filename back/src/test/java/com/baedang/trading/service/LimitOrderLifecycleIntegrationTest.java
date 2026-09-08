@@ -344,6 +344,37 @@ class LimitOrderLifecycleIntegrationTest {
     }
 
     @Test
+    void 매도_동결해제_실패는_종료를_롤백하고_복구후_한번만_해제한다() {
+        jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount) VALUES (?,?,3,100,1400,300,420000)", account, stock);
+        com.baedang.trading.dto.OrderDetailResponse first = service.place(user, request("SELL", "2", "100", "USD"));
+        com.baedang.trading.dto.OrderDetailResponse second = service.place(user, request("SELL", "1", "100", "USD"));
+        jdbc.update("UPDATE holding SET locked_quantity=1 WHERE account_id=? AND stock_id=?", account, stock);
+        time.set(NOW.plusSeconds(3601));
+
+        expiration.expireDue();
+
+        com.baedang.trading.dto.OrderDetailResponse failed = reads.detail(user, first.orderId());
+        assertThat(failed.status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(failed.activeRemainingQuantity()).isEqualTo("2");
+        assertThat(failed.closedAt()).isNull();
+        assertThat(reads.detail(user, second.orderId()).status()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(jdbc.queryForObject("SELECT locked_quantity FROM holding WHERE account_id=? AND stock_id=?", BigDecimal.class, account, stock)).isZero();
+        jdbc.update("UPDATE holding SET locked_quantity=2 WHERE account_id=? AND stock_id=?", account, stock);
+
+        expiration.expireDue();
+        expiration.expireDue();
+
+        assertThat(reads.detail(user, first.orderId()).status()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(jdbc.queryForObject("SELECT locked_quantity FROM holding WHERE account_id=? AND stock_id=?", BigDecimal.class, account, stock)).isZero();
+        assertThat(jdbc.queryForObject("SELECT quantity FROM holding WHERE account_id=? AND stock_id=?", BigDecimal.class, account, stock)).isEqualByComparingTo("3");
+        assertThat(jdbc.queryForObject("SELECT usd_purchase_amount FROM holding WHERE account_id=? AND stock_id=?", BigDecimal.class, account, stock)).isEqualByComparingTo("300");
+        assertThat(jdbc.queryForObject("SELECT krw_purchase_amount FROM holding WHERE account_id=? AND stock_id=?", BigDecimal.class, account, stock)).isEqualByComparingTo("420000");
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account)).isEqualByComparingTo("50000000");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ledger_entry WHERE account_id=?", Long.class, account)).isZero();
+    }
+
+    @Test
     void 만료스캔은_중단시간동안_지난주문도_복구하고_반복해제하지_않는다() {
         var result = service.place(user, request("BUY", "1", "100", "USD"));
         time.set(NOW.plusSeconds(86400));
