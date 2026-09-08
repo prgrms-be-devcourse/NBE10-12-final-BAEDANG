@@ -582,7 +582,7 @@ minute_candle 에 60초 이내 데이터가 있나?
 | `marketCountry` (쿼리 파라미터) | O | 시장 국가 (`KR` / `US`, 대소문자 무관). 누락 또는 미지원 시 400 |
 | 없음 | - | `depth`, `page`, `cursor` 파라미터는 받지 않으며, 서버는 ASK 10개와 시장별 가능한 BID 전부를 반환합니다 (KR: 10개, US: 1~10개) |
 
-**Response 200** — 가격과 수량은 `FinancialDecimalFormatter.plain()` 규칙의 문자열입니다. `initialQuantity`는 내부 감사용이며 공개 API에는 노출하지 않습니다.
+**Response 200** — `basePrice`와 레벨 `price`는 통화별 문자열입니다. KRW는 소수점 없는 원 단위, USD는 정확히 소수점 둘째 자리까지 표현합니다. 레벨 `quantity`는 `FinancialDecimalFormatter.plain()` 규칙의 문자열입니다. `initialQuantity`는 내부 감사용이며 공개 API에는 노출하지 않습니다.
 ```json
 {
   "symbol": "005930",

@@ -49,13 +49,13 @@ public record OrderBookResponse(
             if ("ASK".equals(row.getSide())) {
                 asks.add(new OrderBookLevelResponse(
                         row.getLevelDepth(),
-                        FinancialDecimalFormatter.plain(row.getPrice()),
+                        FinancialDecimalFormatter.currency(row.getPrice(), header.getCurrency()),
                         FinancialDecimalFormatter.plain(row.getRemainingQuantity())
                 ));
             } else if ("BID".equals(row.getSide())) {
                 bids.add(new OrderBookLevelResponse(
                         row.getLevelDepth(),
-                        FinancialDecimalFormatter.plain(row.getPrice()),
+                        FinancialDecimalFormatter.currency(row.getPrice(), header.getCurrency()),
                         FinancialDecimalFormatter.plain(row.getRemainingQuantity())
                 ));
             } else {
@@ -80,7 +80,7 @@ public record OrderBookResponse(
                 stock.getMarketCountry().name(),
                 bookVersion,
                 revision,
-                FinancialDecimalFormatter.plain(header.getBasePrice()),
+                FinancialDecimalFormatter.currency(header.getBasePrice(), header.getCurrency()),
                 header.getCurrency(),
                 header.getQuoteAt(),
                 header.getGeneratedAt(),

@@ -583,7 +583,7 @@ All users share the same synthetic order book snapshot. A single request returns
 | `marketCountry` (query parameter) | Y | Market country (`KR` / `US`, case-insensitive). Returns 400 if missing or unsupported |
 | none | - | `depth`, `page`, and `cursor` parameters are not accepted; the server returns 10 asks and all available bids (10 for KR, 1–10 for US) |
 
-**Response 200** — Price and quantity fields are strings formatted via `FinancialDecimalFormatter.plain()`. `initialQuantity` is an internal audit value and is not exposed in the public API.
+**Response 200** — `basePrice` and level `price` values are strings formatted by currency: KRW uses whole won with no decimal places, and USD uses exactly two decimal places. Level `quantity` is a string formatted via `FinancialDecimalFormatter.plain()`. `initialQuantity` is an internal audit value and is not exposed in the public API.
 ```json
 {
   "symbol": "005930",

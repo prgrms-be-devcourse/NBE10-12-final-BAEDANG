@@ -186,6 +186,9 @@ class OrderBookQueryIntegrationTest {
 
         OrderBookResponse response = queryService.getOrderBook(usStock.getSymbol(), "US");
 
+        assertThat(response.basePrice()).isEqualTo("0.10");
+        assertThat(response.asks()).allSatisfy(level -> assertThat(level.price()).matches("\\d+\\.\\d{2}"));
+        assertThat(response.bids()).allSatisfy(level -> assertThat(level.price()).matches("\\d+\\.\\d{2}"));
         assertThat(response.asks()).hasSize(10);
         assertThat(response.bids()).hasSize(9);
         assertThat(response.bids()).extracting(OrderBookLevelResponse::level)
