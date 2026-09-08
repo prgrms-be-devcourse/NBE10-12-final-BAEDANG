@@ -283,7 +283,7 @@ FX uses NUMERIC(19,6), based on the project premise that Toss supplies at most s
 
 LIMIT cumulative settlement is unchanged. Reconstruct US raw cumulative tax as `SUM(sec_fee_usd × exchange_rate)`, round the total to whole won with `HALF_UP`, then subtract the previous `SUM(tax_krw)` to obtain this fill's tax. Do not reconvert earlier SEC fee deltas at a new rate or charge the minimum independently for each fill. KR cumulative tax uses cumulative KRW gross and the project-fixed tax rate. No separate raw-tax or cumulative-USD cache columns are stored.
 
-Each execution consumes exactly one book level. Multiple executions may consume the same `book_level_id`, so it is not unique; protect shared liquidity debits within the execution transaction. A level's price/version identity is immutable and IDs must not be reused. Execution `price` is the actual fill-price snapshot. `trade_execution.book_level_id` is a foreign key referencing `order_book_level(level_id)` with `ON DELETE RESTRICT`. Book levels referenced by executions and their parent versions serve as execution evidence; they cannot be deleted and are excluded from unconsumed cleanup.
+Each execution consumes exactly one book level. Multiple executions may record the same `book_level_id`, so it is not unique; protect shared liquidity debits within the execution transaction. Execution `price` is the permanently retained actual fill-price snapshot. `book_level_id` is a non-FK trace value identifying the level at consumption time; after closed-version retention, the original level is no longer queryable.
 
 When creating a LIMIT fill, pass the order stock's market to `TradeExecution.limit(order, marketCountry, ...)`. KR requires FX 1, USD gross 0 and SEC fee 0; US requires a cent-representable execution price and USD gross equal to `price × quantity`. Trailing zeros are allowed; the entity does not round the price. The market is a validation input only, not another execution column.
 
@@ -468,10 +468,10 @@ Up to 20 rows are generated per version: 10 ASK rows and 1–10 BID rows (KR alw
 
 ### Synthetic Order Book Retention and Cleanup Policy (Confirmed)
 
-- **Active versions preserved**: Active versions (`is_active = true`) are never deleted.
-- **Consumed versions preserved**: Closed versions with `revision > 0` are permanently preserved as historical execution audit evidence.
-- **Execution-referenced levels/versions preserved**: Versions with levels referenced by `trade_execution` are preserved even if `revision = 0` (`NOT EXISTS`), and direct deletion attempts are blocked by `ON DELETE RESTRICT`.
-- **Unconsumed closed version cleanup**: Closed versions (`is_active = false` AND `revision = 0` AND closed for more than 1 minute AND unreferenced by executions) are periodically cleaned up by the background scheduler (their up to 20 levels are purged together via `ON DELETE CASCADE`).
+- **Active versions preserved**: Active versions (`is_active = true`) are not deleted.
+- **Closed versions cleaned up**: Closed versions older than one minute are deleted regardless of consumption or execution references.
+- **Level cascade cleanup**: Deleting a closed version removes its up to 20 levels via `ON DELETE CASCADE`.
+- **Executions preserved**: Execution price, quantity, FX, and settlement amounts remain permanent; `book_level_id` remains a non-FK trace value captured at consumption time.
 ---
 
 ## Stock Classification Model

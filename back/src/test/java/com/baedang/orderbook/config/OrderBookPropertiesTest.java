@@ -35,7 +35,7 @@ class OrderBookPropertiesTest {
             assertThat(properties.maxQuantity()).isEqualByComparingTo(new BigDecimal("1000000"));
             assertThat(properties.noiseMinBps()).isEqualTo(8000);
             assertThat(properties.noiseMaxBps()).isEqualTo(12000);
-            assertThat(properties.unconsumedRetention()).isEqualTo(Duration.ofMinutes(1));
+            assertThat(properties.closedVersionRetention()).isEqualTo(Duration.ofMinutes(1));
             assertThat(properties.retentionInitialDelay()).isEqualTo(Duration.ZERO);
         });
     }
@@ -72,7 +72,7 @@ class OrderBookPropertiesTest {
                 .getMethod("refreshOrderBooks")
                 .getAnnotation(Scheduled.class);
         Scheduled retention = OrderBookRefreshScheduler.class
-                .getMethod("deleteExpiredUnconsumedVersions")
+                .getMethod("deleteExpiredClosedVersions")
                 .getAnnotation(Scheduled.class);
 
         assertThat(refresh.initialDelayString())

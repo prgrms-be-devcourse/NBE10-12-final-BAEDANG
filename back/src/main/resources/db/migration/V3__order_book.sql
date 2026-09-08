@@ -30,7 +30,7 @@ CREATE INDEX ix_order_book_stock_generated
 
 CREATE INDEX ix_order_book_cleanup
     ON order_book_version (closed_at)
-    WHERE is_active = FALSE AND revision = 0;
+    WHERE is_active = FALSE;
 
 -- ASK는 10개, KRW 종목 BID는 10개, 미국 종목 BID는 가능한 1~10개 행이다.
 CREATE TABLE order_book_level (
@@ -50,12 +50,8 @@ CREATE TABLE order_book_level (
     )
 );
 
-ALTER TABLE trade_execution
-    ADD CONSTRAINT fk_trade_execution_book_level
-    FOREIGN KEY (book_level_id)
-    REFERENCES order_book_level(level_id)
-    ON DELETE RESTRICT;
 
+-- 체결 행에는 소비 당시 level_id를 추적 값으로 남기되, 종료 호가의 수명과 분리해 FK는 두지 않는다.
 CREATE INDEX ix_trade_execution_book_level
     ON trade_execution (book_level_id)
     WHERE book_level_id IS NOT NULL;

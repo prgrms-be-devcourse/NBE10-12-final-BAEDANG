@@ -265,7 +265,7 @@ class OrderBookQueryIntegrationTest {
                 false, properties.policyVersion(), properties.refreshInterval(), properties.maxQuoteAge(),
                 properties.krBaseNotional(), properties.usBaseNotional(), properties.minQuantity(),
                 properties.maxQuantity(), properties.noiseMinBps(), properties.noiseMaxBps(),
-                properties.unconsumedRetention()
+                properties.closedVersionRetention()
         );
         OrderBookQueryService disabledService = new OrderBookQueryService(
                 stockRepository, levelRepository, marketSessionProvider, disabled, clock);

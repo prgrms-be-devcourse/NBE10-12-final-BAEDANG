@@ -19,7 +19,7 @@ public record OrderBookProperties(
         BigDecimal maxQuantity,
         int noiseMinBps,
         int noiseMaxBps,
-        Duration unconsumedRetention,
+        Duration closedVersionRetention,
         Duration refreshInitialDelay,
         Duration retentionInitialDelay
 ) {
@@ -34,10 +34,10 @@ public record OrderBookProperties(
             BigDecimal maxQuantity,
             int noiseMinBps,
             int noiseMaxBps,
-            Duration unconsumedRetention
+            Duration closedVersionRetention
     ) {
         this(enabled, policyVersion, refreshInterval, maxQuoteAge, krBaseNotional, usBaseNotional,
-                minQuantity, maxQuantity, noiseMinBps, noiseMaxBps, unconsumedRetention,
+                minQuantity, maxQuantity, noiseMinBps, noiseMaxBps, closedVersionRetention,
                 Duration.ZERO, Duration.ZERO);
     }
     @ConstructorBinding
@@ -55,6 +55,6 @@ public record OrderBookProperties(
                 || maxQuantity.stripTrailingZeros().scale() > 0
                 || maxQuantity.compareTo(new BigDecimal("10000000000000")) >= 0) throw new IllegalArgumentException("orderbook max-quantity는 min 이상이며 NUMERIC(19,6)에 저장 가능한 정수여야 합니다");
         if (noiseMinBps <= 0 || noiseMaxBps < noiseMinBps) throw new IllegalArgumentException("orderbook noise 범위가 올바르지 않습니다");
-        if (unconsumedRetention == null || unconsumedRetention.isZero() || unconsumedRetention.isNegative()) throw new IllegalArgumentException("orderbook unconsumed-retention은 양수여야 합니다");
+        if (closedVersionRetention == null || closedVersionRetention.isZero() || closedVersionRetention.isNegative()) throw new IllegalArgumentException("orderbook closed-version-retention은 양수여야 합니다");
     }
 }

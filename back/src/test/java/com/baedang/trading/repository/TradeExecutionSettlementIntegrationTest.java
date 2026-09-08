@@ -180,7 +180,7 @@ class TradeExecutionSettlementIntegrationTest {
                 country == MarketCountry.KR ? BigDecimal.ONE : new BigDecimal("1500")));
     }
 
-    /** LIMIT 체결 fixture도 운영 FK와 동일하게 실제 호가 레벨을 참조한다. */
+    /** LIMIT 체결 fixture가 소비 당시의 실제 호가 레벨 ID를 추적 값으로 기록한다. */
     private Long insertBookLevel(TradeOrder order, BigDecimal price, int depth) {
         Long versionId = jdbc.query("""
                         SELECT book_version_id

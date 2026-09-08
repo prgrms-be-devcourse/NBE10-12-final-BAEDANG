@@ -231,7 +231,7 @@ class OrderBookLifecycleIntegrationTest {
     }
 
     @Test
-    void deleteExpiredUnconsumedVersions_스케줄_실행으로_미소비_종료버전을_정리한다() {
+    void deleteExpiredClosedVersions_스케줄_실행으로_종료버전을_정리한다() {
         scheduler.refreshOrderBooks();
         Long v1 = activeVersion().orElseThrow().getBookVersionId();
 
@@ -251,11 +251,10 @@ class OrderBookLifecycleIntegrationTest {
 
         // 2분 경과 후 retention 스케줄 실행
         clock.advance(Duration.ofMinutes(2));
-        scheduler.deleteExpiredUnconsumedVersions();
+        scheduler.deleteExpiredClosedVersions();
 
-        // v1: revision > 0 -> 보존
-        assertThat(versionRepository.findById(v1)).isPresent();
-        // v2: revision 0 + retention 초과 -> 정리됨
+        // retention을 지난 종료 버전은 소비 여부와 무관하게 정리된다.
+        assertThat(versionRepository.findById(v1)).isEmpty();
         assertThat(versionRepository.findById(v2)).isEmpty();
         // v3: 활성 버전 -> 보존
         assertThat(versionRepository.findById(v3)).isPresent();

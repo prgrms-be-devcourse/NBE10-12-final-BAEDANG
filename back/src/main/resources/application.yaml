@@ -148,7 +148,7 @@ trading:
     max-quantity: 1000000
     noise-min-bps: 8000
     noise-max-bps: 12000
-    unconsumed-retention: 1m
+    closed-version-retention: 1m
     retention-initial-delay: ${ORDERBOOK_RETENTION_INITIAL_DELAY:0s}
 
 auth:

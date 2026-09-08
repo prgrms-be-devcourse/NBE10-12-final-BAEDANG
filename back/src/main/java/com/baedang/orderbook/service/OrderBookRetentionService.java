@@ -9,12 +9,11 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 
 /**
- * 미소비 종료 호가 버전 정리 (설계서 §3.3).
+ * 종료 후 retention이 지난 호가 버전을 정리한다.
  *
- * <p>{@code revision = 0}이고 종료 후 {@code unconsumedRetention}이 지난 버전만
- * 삭제 대상이다. 활성 버전과 소비된({@code revision > 0}) 종료 버전은 감사 근거라
- * 건드리지 않고, 체결이 참조하는 레벨은 FK {@code ON DELETE RESTRICT}가 원천
- * 차단한다. 3초 갱신이 만드는 미사용 이력을 유한하게 유지하는 게 목적.
+ * <p>활성 버전은 보존하고, 비활성 버전은 소비 여부와 무관하게 삭제한다. 체결 가격·수량·
+ * 정산 금액은 {@code trade_execution}이 영구 보존하며 {@code book_level_id}는 FK 없는
+ * 추적 값이다. 버전 삭제 시 산하 레벨은 함께 삭제된다.
  */
 @Service
 public class OrderBookRetentionService {
@@ -34,10 +33,10 @@ public class OrderBookRetentionService {
     }
 
     @Transactional
-    public int deleteExpiredUnconsumed() {
+    public int deleteExpiredClosed() {
         var cutoff = clock.instant()
-                .minus(properties.unconsumedRetention())
+                .minus(properties.closedVersionRetention())
                 .atOffset(ZoneOffset.UTC);
-        return versionRepository.deleteExpiredUnconsumed(cutoff);
+        return versionRepository.deleteExpiredClosed(cutoff);
     }
 }

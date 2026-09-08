@@ -19,7 +19,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -247,11 +246,8 @@ class OrderBookPublicationIntegrationTest {
     }
 
     @Test
-    void 미소비_종료버전만_retention으로_삭제된다() {
-        // v1: 소비(revision > 0) → 종료. v2: 미소비 종료 + retention 경과.
-        // v3: 종료했지만 retention 미경과 → 보존.
-        // v1을 활성 상태에서 소비(revision > 0)시키고 교체한다 — advanceRevision은
-        // 활성 버전에서만 허용되므로 종료 전에 호출해야 한다.
+    void retention을_지난_종료버전은_소비여부와_무관하게_삭제된다() {
+        // v1: 소비(revision > 0) 후 종료. v2: 미소비 종료. v3: 종료했지만 retention 미경과.
         Long v1 = publicationService.publish(generatedBook(41L), BASE.plusSeconds(600)).orElseThrow();
         new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 versionRepository.findById(v1).orElseThrow().advanceRevision());
@@ -261,13 +257,12 @@ class OrderBookPublicationIntegrationTest {
         clock.advance(Duration.ofMinutes(2));
         publicationService.closeActive(krStock.getStockId()); // v3 종료 시각 = 지금 → retention 미경과
 
-        retentionService.deleteExpiredUnconsumed();
+        retentionService.deleteExpiredClosed();
 
-        // deleted 건수는 다른 테스트의 커밋 잔여(이 클래스는 롤백하지 않음)에 따라
-        // 달라지므로, 특정 행의 보존/삭제 결과만 단언한다.
-        assertThat(versionRepository.findById(v1)).isPresent(); // revision > 0 → 감사 근거 보존
-        assertThat(versionRepository.findById(v2)).isEmpty();   // closed + revision 0 + retention 초과 → 삭제
-        assertThat(versionRepository.findById(v3)).isPresent(); // closed_at이 cutoff 이후 → 아직 보존
+        // deleted 건수는 다른 테스트의 커밋 잔여에 따라 달라질 수 있어 특정 행만 단언한다.
+        assertThat(versionRepository.findById(v1)).isEmpty();
+        assertThat(versionRepository.findById(v2)).isEmpty();
+        assertThat(versionRepository.findById(v3)).isPresent();
     }
 
     @Test
@@ -297,16 +292,13 @@ class OrderBookPublicationIntegrationTest {
     }
 
     @Test
-    void 체결이_참조하는_호가_레벨과_버전은_revision이_0이어도_retention으로_삭제되지_않고_직접_삭제도_RESTRICT된다() {
+    void 체결의_bookLevelId는_호가_삭제후에도_추적값으로_남는다() {
         Long v1 = publicationService.publish(generatedBook(41L), BASE.plusSeconds(600)).orElseThrow();
         Long levelId = levelRepository.findAll().stream()
                 .filter(l -> l.getBookVersion().getBookVersionId().equals(v1))
                 .findFirst().orElseThrow().getLevelId();
-
-        // v1을 종료시키되 revision은 0으로 유지한다
         publicationService.closeActive(krStock.getStockId());
 
-        // trade_execution이 levelId를 참조하도록 연관 데이터 생성
         String suffix = UUID.randomUUID().toString().substring(0, 8);
         long userId = jdbcTemplate.queryForObject(
                 "insert into users (email, password_hash, nickname) values (?, 'pwd', ?) returning user_id",
@@ -332,17 +324,12 @@ class OrderBookPublicationIntegrationTest {
                 values (?, 1, gen_random_uuid(), 1, 70100, 1.0, 0, 70100, 0, 0, 70100, now(), now(), ?)
                 """, orderId, levelId);
 
-        // 2분 경과 후 retention 실행
         clock.advance(Duration.ofMinutes(2));
-        retentionService.deleteExpiredUnconsumed();
+        retentionService.deleteExpiredClosed();
 
-        // revision = 0이고 retention 시간이 초과했음에도 execution이 참조하므로 삭제되지 않고 보존된다
-        assertThat(versionRepository.findById(v1)).isPresent();
-
-        // 직접 레벨 삭제 및 버전 삭제 시도 시 RESTRICT 위반으로 실패해야 한다
-        assertThatThrownBy(() -> jdbcTemplate.update("delete from order_book_level where level_id = ?", levelId))
-                .isInstanceOf(DataIntegrityViolationException.class);
-        assertThatThrownBy(() -> jdbcTemplate.update("delete from order_book_version where book_version_id = ?", v1))
-                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(versionRepository.findById(v1)).isEmpty();
+        assertThat(jdbcTemplate.queryForObject(
+                "select book_level_id from trade_execution where order_id = ?", Long.class, orderId))
+                .isEqualTo(levelId);
     }
 }

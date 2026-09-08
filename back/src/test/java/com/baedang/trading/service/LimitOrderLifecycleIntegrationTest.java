@@ -543,7 +543,7 @@ class LimitOrderLifecycleIntegrationTest {
                 """, Long.class, orderId, UUID.randomUUID(), sequence, at, at, bookLevelId);
     }
 
-    /** LIMIT 체결 fixture도 운영 FK와 동일하게 실제 ASK 레벨을 참조한다. */
+    /** LIMIT 체결 fixture가 소비 당시의 실제 ASK 레벨 ID를 추적 값으로 기록한다. */
     private long insertBookLevel(long orderId, int depth) {
         Long stockId = jdbc.queryForObject(
                 "SELECT stock_id FROM trade_order WHERE order_id = ?", Long.class, orderId);

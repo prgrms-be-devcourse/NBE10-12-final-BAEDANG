@@ -32,7 +32,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 정규장 중 주기적인 가상 호가 갱신과 미소비 종료 버전 정리를 조율하는 스케줄러 (설계서 §5).
+ * 정규장 중 주기적인 가상 호가 갱신과 종료 버전 정리를 조율하는 스케줄러 (설계서 §5).
  *
  * <p>GET·주문·견적 요청은 호가를 생성하지 않으며, 이 스케줄러만이 생성을 트리거한다.
  * 시장별 전체 루프 트랜잭션은 사용하지 않고({@code Propagation.NEVER}), 종목별
@@ -96,15 +96,15 @@ public class OrderBookRefreshScheduler {
     }
 
     @Scheduled(
-            fixedDelayString = "${trading.orderbook.unconsumed-retention}",
+            fixedDelayString = "${trading.orderbook.closed-version-retention}",
             initialDelayString = "${trading.orderbook.retention-initial-delay}"
     )
     @Transactional(propagation = Propagation.NEVER)
-    public void deleteExpiredUnconsumedVersions() {
+    public void deleteExpiredClosedVersions() {
         try {
-            retentionService.deleteExpiredUnconsumed();
+            retentionService.deleteExpiredClosed();
         } catch (RuntimeException exception) {
-            log.error("가상 호가 미소비 버전 정리 실패", exception);
+            log.error("가상 호가 종료 버전 정리 실패", exception);
         }
     }
 
