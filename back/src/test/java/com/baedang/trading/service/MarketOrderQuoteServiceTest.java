@@ -60,6 +60,7 @@ class MarketOrderQuoteServiceTest {
                 new BigDecimal("0.0000206"),
                 new BigDecimal("0.01")
         );
+        OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"));
         service = new MarketOrderQuoteService(
                 new OrderQuoteQueryService(
                         accountRepository,
@@ -69,7 +70,8 @@ class MarketOrderQuoteServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 calculator,
-                new MarketOrderPolicy(15, 15, new BigDecimal("1000000")),
+                orderPolicy,
+                new MarketOrderPolicy(orderPolicy),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }

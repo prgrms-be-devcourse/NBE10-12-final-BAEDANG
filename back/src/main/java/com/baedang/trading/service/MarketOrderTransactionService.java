@@ -17,7 +17,7 @@ import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
@@ -57,6 +57,7 @@ public class MarketOrderTransactionService {
     private final TradeExecutionRepository tradeExecutionRepository;
     private final LedgerService ledgerService;
     private final MarketOrderSettlementCalculator amountCalculator;
+    private final OrderPolicy orderPolicy;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
 
@@ -70,6 +71,7 @@ public class MarketOrderTransactionService {
             TradeExecutionRepository tradeExecutionRepository,
             LedgerService ledgerService,
             MarketOrderSettlementCalculator amountCalculator,
+            OrderPolicy orderPolicy,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
     ) {
@@ -82,6 +84,7 @@ public class MarketOrderTransactionService {
         this.tradeExecutionRepository = tradeExecutionRepository;
         this.ledgerService = ledgerService;
         this.amountCalculator = amountCalculator;
+        this.orderPolicy = orderPolicy;
         this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
     }
@@ -113,7 +116,7 @@ public class MarketOrderTransactionService {
     public MarketOrderResult execute(
             Long userId,
             MarketOrderCommand command,
-            MarketOrderExecutionContext executionContext
+            OrderMarketContext executionContext
     ) {
         // 거래 트랜잭션의 첫 DB 접근은 계좌 행 잠금입니다.
         Account account = accountRepository.findByAccountIdAndUserIdForUpdate(command.accountId(), userId)
@@ -136,7 +139,7 @@ public class MarketOrderTransactionService {
 
         rejectChangedRound(account);
         // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
-        marketOrderPolicy.validateExecutionContextFresh(executionContext, now);
+        orderPolicy.validateExecutionContextFresh(executionContext, now);
 
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(terms.symbol(), terms.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
@@ -149,7 +152,7 @@ public class MarketOrderTransactionService {
                         ErrorCode.QUOTE_NOT_FOUND,
                         "stockId=" + stock.getStockId(),
                         ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
-        if (!marketOrderPolicy.hasValidCurrencyForMarket(stock, quote)) {
+        if (!orderPolicy.hasValidCurrencyForMarket(stock, quote)) {
             throw new BusinessException(
                     ErrorCode.QUOTE_CURRENCY_MISMATCH,
                     "stockCurrency=" + stock.getCurrency() + ", quoteCurrency=" + quote.getCurrency(),

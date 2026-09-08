@@ -30,6 +30,7 @@ public class MarketOrderQuoteService {
     private final MarketSessionProvider marketSessionProvider;
     private final ExecutionExchangeRateProvider exchangeRateProvider;
     private final MarketOrderSettlementCalculator amountCalculator;
+    private final OrderPolicy orderPolicy;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
 
@@ -38,6 +39,7 @@ public class MarketOrderQuoteService {
             MarketSessionProvider marketSessionProvider,
             ExecutionExchangeRateProvider exchangeRateProvider,
             MarketOrderSettlementCalculator amountCalculator,
+            OrderPolicy orderPolicy,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
     ) {
@@ -45,6 +47,7 @@ public class MarketOrderQuoteService {
         this.marketSessionProvider = marketSessionProvider;
         this.exchangeRateProvider = exchangeRateProvider;
         this.amountCalculator = amountCalculator;
+        this.orderPolicy = orderPolicy;
         this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
     }
@@ -57,13 +60,13 @@ public class MarketOrderQuoteService {
             String sideValue,
             String quantityValue
     ) {
-        OrderTerms terms = marketOrderPolicy.parseTerms(
+        OrderTerms terms = orderPolicy.parseTerms(
                 symbolValue, marketCountryValue, sideValue, quantityValue);
 
         OrderQuoteQueryContext queryContext = queryService.load(userId, terms);
         Account account = queryContext.account();
         Stock stock = queryContext.stock();
-        if (!marketOrderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
+        if (!orderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
             throw new BusinessException(
                     ErrorCode.QUOTE_CURRENCY_MISMATCH,
                     "stockCurrency=" + stock.getCurrency()

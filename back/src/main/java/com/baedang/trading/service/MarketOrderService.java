@@ -11,7 +11,7 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
@@ -30,7 +30,7 @@ import java.util.Optional;
 @Service
 public class MarketOrderService {
 
-    private final MarketOrderPolicy marketOrderPolicy;
+    private final OrderPolicy orderPolicy;
     private final MarketOrderTransactionService transactionService;
     private final StockRepository stockRepository;
     private final MarketSessionProvider marketSessionProvider;
@@ -39,7 +39,7 @@ public class MarketOrderService {
     private final Clock clock;
 
     public MarketOrderService(
-            MarketOrderPolicy marketOrderPolicy,
+            OrderPolicy orderPolicy,
             MarketOrderTransactionService transactionService,
             StockRepository stockRepository,
             MarketSessionProvider marketSessionProvider,
@@ -47,7 +47,7 @@ public class MarketOrderService {
             MarketOrderResponseAssembler responseAssembler,
             Clock clock
     ) {
-        this.marketOrderPolicy = marketOrderPolicy;
+        this.orderPolicy = orderPolicy;
         this.transactionService = transactionService;
         this.stockRepository = stockRepository;
         this.marketSessionProvider = marketSessionProvider;
@@ -62,16 +62,18 @@ public class MarketOrderService {
         if (request == null) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", "request"));
         }
-        MarketOrderCommand command = marketOrderPolicy.parseCommand(
+        var input = orderPolicy.parseInput(
                 request.accountId(), request.clientOrderId(), request.symbol(), request.marketCountry(),
                 request.side(), request.quantity());
+
+        MarketOrderCommand command = new MarketOrderCommand(input.accountId(), input.clientOrderId(), input.terms());
 
         Optional<MarketOrderResult> existing = transactionService.findExisting(userId, command);
         if (existing.isPresent()) {
             return unwrap(existing.get());
         }
 
-        MarketOrderExecutionContext executionContext = prepareExecutionContext(command);
+        OrderMarketContext executionContext = prepareExecutionContext(command);
         MarketOrderResult result = transactionService.execute(userId, command, executionContext);
         return unwrap(result);
     }
@@ -85,7 +87,7 @@ public class MarketOrderService {
         return responseAssembler.assemble(result.receipt());
     }
 
-    private MarketOrderExecutionContext prepareExecutionContext(MarketOrderCommand command) {
+    private OrderMarketContext prepareExecutionContext(MarketOrderCommand command) {
         Stock stock = stockRepository
                 .findBySymbolIgnoreCaseAndMarketCountry(
                         command.terms().symbol(), command.terms().marketCountry())
@@ -93,7 +95,7 @@ public class MarketOrderService {
                         ErrorCode.STOCK_NOT_FOUND,
                         "symbol=" + command.terms().symbol(),
                         ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
-        ErrorCode staticRejection = marketOrderPolicy.determineStaticRejection(stock);
+        ErrorCode staticRejection = orderPolicy.determineStaticRejection(stock);
         if (staticRejection != null) {
             // 외부 조회와 주문 저장 전이므로 조건이 바뀐 뒤 같은 clientOrderId로 재시도할 수 있습니다.
             throw new BusinessException(
@@ -118,7 +120,7 @@ public class MarketOrderService {
         if (stock.getMarketCountry() == MarketCountry.KR) {
             rateEvidence = ExecutionRateEvidence.krw(checkedAt.atOffset(ZoneOffset.UTC));
         }
-        return new MarketOrderExecutionContext(
+        return new OrderMarketContext(
                 stock.getMarketCountry(), session.open(), session.validUntil(), rateEvidence, checkedAt);
     }
 

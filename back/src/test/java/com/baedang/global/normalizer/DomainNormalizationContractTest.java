@@ -10,7 +10,7 @@ import com.baedang.stock.service.CandleQueryPolicy;
 import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.StockDetailService;
 import com.baedang.stock.service.StockSearchService;
-import com.baedang.trading.service.MarketOrderPolicy;
+import com.baedang.trading.service.OrderPolicy;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
@@ -31,14 +31,14 @@ import static org.mockito.Mockito.when;
 /** 공통 정규화 도입 후에도 서비스별 검증·오류 응답 계약이 유지되는지 검증합니다. */
 class DomainNormalizationContractTest {
 
-    private final MarketOrderPolicy orderPolicy = new MarketOrderPolicy(15, 15, new BigDecimal("1000000"));
+    private final OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"));
     private final CandleQueryPolicy candlePolicy = new CandleQueryPolicy();
 
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"", " "})
     void 같은_누락값도_주문과_차트의_오류_정보가_다르다(String market) {
-        assertThatThrownBy(() -> orderPolicy.parseCommand(
+        assertThatThrownBy(() -> orderPolicy.parseInput(
                 1L, UUID.randomUUID().toString(), "005930", market, "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
@@ -57,7 +57,7 @@ class DomainNormalizationContractTest {
 
     @Test
     void 미지원_시장코드는_원문과_주문_재시도_정책을_유지한다() {
-        assertThatThrownBy(() -> orderPolicy.parseCommand(
+        assertThatThrownBy(() -> orderPolicy.parseInput(
                 1L, UUID.randomUUID().toString(), "005930", " jp ", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getDetail()).isEqualTo("marketCountry= jp ");

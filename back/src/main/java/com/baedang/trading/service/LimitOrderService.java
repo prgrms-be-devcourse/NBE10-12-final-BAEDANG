@@ -14,7 +14,7 @@ import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.LimitOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -36,7 +36,7 @@ import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 @Transactional(propagation = Propagation.NEVER)
 public class LimitOrderService {
 
-    private final MarketOrderPolicy policy;
+    private final OrderPolicy policy;
     private final LimitOrderTransactionService transactions;
     private final LimitOrderPricing pricing;
     private final MarketSessionProvider sessions;
@@ -47,7 +47,7 @@ public class LimitOrderService {
     private final Clock clock;
 
     public LimitOrderService(
-            MarketOrderPolicy policy,
+            OrderPolicy policy,
             LimitOrderTransactionService transactions,
             LimitOrderPricing pricing,
             MarketSessionProvider sessions,
@@ -69,7 +69,7 @@ public class LimitOrderService {
     }
 
     public OrderDetailResponse place(Long userId, LimitOrderRequest request) {
-        var base = policy.parseCommand(
+        var base = policy.parseInput(
                 request.accountId(),
                 request.clientOrderId(),
                 request.symbol(),
@@ -97,7 +97,7 @@ public class LimitOrderService {
             throw retry(reason);
         }
 
-        MarketOrderExecutionContext context = prepare(base.terms().marketCountry());
+        OrderMarketContext context = prepare(base.terms().marketCountry());
         LimitOrderPricing.Price price;
         try {
             price = pricing.calculate(command, context.executionRate());
@@ -107,7 +107,7 @@ public class LimitOrderService {
         return unwrap(transactions.accept(userId, command, context, price));
     }
 
-    private MarketOrderExecutionContext prepare(MarketCountry country) {
+    private OrderMarketContext prepare(MarketCountry country) {
         try {
             var session = sessions.currentSession(country, clock.instant());
             ExecutionRateEvidence evidence;
@@ -120,7 +120,7 @@ public class LimitOrderService {
                 }
                 evidence = ExecutionRateEvidence.from(snapshot);
             }
-            return new MarketOrderExecutionContext(country, session.open(), session.validUntil(), evidence, clock.instant());
+            return new OrderMarketContext(country, session.open(), session.validUntil(), evidence, clock.instant());
         } catch (BusinessException e) {
             throw retry(e.getErrorCode());
         }

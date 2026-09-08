@@ -12,7 +12,8 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderInput;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.ExecutionRateEvidence;
@@ -46,7 +47,7 @@ import static org.mockito.Mockito.mock;
 @ExtendWith(MockitoExtension.class)
 class MarketOrderServiceTest {
 
-    @Mock MarketOrderPolicy marketOrderPolicy;
+    @Mock OrderPolicy orderPolicy;
     @Mock MarketOrderTransactionService transactionService;
     @Mock StockRepository stockRepository;
     @Mock MarketSessionProvider marketSessionProvider;
@@ -61,18 +62,18 @@ class MarketOrderServiceTest {
         var request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
         var command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US))
                 .thenReturn(Optional.of(Stock.create("AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true)));
         when(marketSessionProvider.currentSession(MarketCountry.US, now)).thenReturn(new MarketSessionStatus(true, Instant.MAX));
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
         when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
-        var service = new MarketOrderService(marketOrderPolicy, transactionService, stockRepository,
+        var service = new MarketOrderService(orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request)).isInstanceOf(BusinessException.class);
-        var captor = ArgumentCaptor.forClass(MarketOrderExecutionContext.class);
+        var captor = ArgumentCaptor.forClass(OrderMarketContext.class);
         verify(transactionService).execute(eq(1L), eq(command), captor.capture());
         assertThat(captor.getValue().executionRateEvidence()).isEqualTo(ExecutionRateEvidence.from(snapshot));
         assertThat(captor.getValue().checkedAt()).isEqualTo(now);
@@ -88,10 +89,10 @@ class MarketOrderServiceTest {
                 request.accountId(),
                 UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, new BigDecimal("10")));
-        when(marketOrderPolicy.parseCommand(
+        when(orderPolicy.parseInput(
                 request.accountId(), request.clientOrderId(), request.symbol(), request.marketCountry(),
                 request.side(), request.quantity()))
-                .thenReturn(command);
+                .thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
@@ -99,7 +100,7 @@ class MarketOrderServiceTest {
         when(marketSessionProvider.currentSession(eq(MarketCountry.KR), any()))
                 .thenReturn(new MarketSessionStatus(
                         true, Instant.parse("2026-08-26T02:00:00Z")));
-        when(transactionService.execute(eq(1L), eq(command), any(MarketOrderExecutionContext.class)))
+        when(transactionService.execute(eq(1L), eq(command), any(OrderMarketContext.class)))
                 .thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
 
         Instant sessionLookupAt = Instant.parse("2026-08-26T01:00:00Z");
@@ -107,7 +108,7 @@ class MarketOrderServiceTest {
         Clock clock = mock(Clock.class);
         when(clock.instant()).thenReturn(sessionLookupAt, contextCheckedAt);
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy,
+                orderPolicy,
                 transactionService,
                 stockRepository,
                 marketSessionProvider,
@@ -122,10 +123,10 @@ class MarketOrderServiceTest {
                             .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
                 });
 
-        ArgumentCaptor<MarketOrderExecutionContext> contextCaptor =
-                ArgumentCaptor.forClass(MarketOrderExecutionContext.class);
+        ArgumentCaptor<OrderMarketContext> contextCaptor =
+                ArgumentCaptor.forClass(OrderMarketContext.class);
         verify(transactionService).execute(eq(1L), eq(command), contextCaptor.capture());
-        assertThat(contextCaptor.getValue()).isEqualTo(new MarketOrderExecutionContext(
+        assertThat(contextCaptor.getValue()).isEqualTo(new OrderMarketContext(
                 MarketCountry.KR,
                 true,
                 Instant.parse("2026-08-26T02:00:00Z"),
@@ -143,15 +144,15 @@ class MarketOrderServiceTest {
                 request.accountId(),
                 UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, new BigDecimal("10")));
-        when(marketOrderPolicy.parseCommand(
+        when(orderPolicy.parseInput(
                 request.accountId(), request.clientOrderId(), request.symbol(), request.marketCountry(),
                 request.side(), request.quantity()))
-                .thenReturn(command);
+                .thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command))
                 .thenReturn(Optional.of(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH)));
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy,
+                orderPolicy,
                 transactionService,
                 stockRepository,
                 marketSessionProvider,
@@ -173,7 +174,7 @@ class MarketOrderServiceTest {
     @Test
     void 요청이_null이면_INVALID_INPUT_예외를_던진다() {
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
 
         assertThatThrownBy(() -> service.place(1L, null))
@@ -188,12 +189,12 @@ class MarketOrderServiceTest {
         MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "UNKNOWN", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("UNKNOWN", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "UNKNOWN", "KR", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "UNKNOWN", "KR", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("UNKNOWN", MarketCountry.KR)).thenReturn(Optional.empty());
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -209,14 +210,14 @@ class MarketOrderServiceTest {
         MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
-        when(marketOrderPolicy.determineStaticRejection(stock)).thenReturn(ErrorCode.STOCK_SUSPENDED);
+        when(orderPolicy.determineStaticRejection(stock)).thenReturn(ErrorCode.STOCK_SUSPENDED);
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -233,7 +234,7 @@ class MarketOrderServiceTest {
         MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "AAPL", "US", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "AAPL", "US", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US))
                 .thenReturn(Optional.of(Stock.create("AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true)));
@@ -241,7 +242,7 @@ class MarketOrderServiceTest {
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(null);
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -257,7 +258,7 @@ class MarketOrderServiceTest {
         MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
@@ -265,7 +266,7 @@ class MarketOrderServiceTest {
                 .thenThrow(new BusinessException(ErrorCode.MARKET_CLOSED));
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -282,7 +283,7 @@ class MarketOrderServiceTest {
         MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
@@ -290,7 +291,7 @@ class MarketOrderServiceTest {
                 .thenThrow(new BusinessException(ErrorCode.MARKET_CLOSED, "외부 장애", Map.of("reason", "timeout")));
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         assertThatThrownBy(() -> service.place(1L, request))
@@ -310,7 +311,7 @@ class MarketOrderServiceTest {
         MarketOrderRequest request = new MarketOrderRequest(10L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1");
         MarketOrderCommand command = new MarketOrderCommand(10L, UUID.fromString(request.clientOrderId()),
                 new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE));
-        when(marketOrderPolicy.parseCommand(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(command);
+        when(orderPolicy.parseInput(10L, request.clientOrderId(), "005930", "KR", "BUY", "1")).thenReturn(new OrderInput(command.accountId(), command.clientOrderId(), command.terms()));
         when(transactionService.findExisting(1L, command)).thenReturn(Optional.empty());
         Stock stock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
@@ -324,7 +325,7 @@ class MarketOrderServiceTest {
         when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.filled(receipt));
 
         MarketOrderService service = new MarketOrderService(
-                marketOrderPolicy, transactionService, stockRepository,
+                orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
 
         MarketOrderResponse response = service.place(1L, request);

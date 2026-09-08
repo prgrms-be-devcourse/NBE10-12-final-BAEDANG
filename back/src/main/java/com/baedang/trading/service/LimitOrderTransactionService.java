@@ -13,7 +13,7 @@ import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.LimitOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderClosureResult;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
@@ -44,7 +44,7 @@ public class LimitOrderTransactionService {
     private final HoldingRepository holdings;
     private final StockRepository stocks;
     private final QuoteSnapshotRepository quotes;
-    private final MarketOrderPolicy policy;
+    private final OrderPolicy policy;
     private final Clock clock;
 
     public LimitOrderTransactionService(
@@ -53,7 +53,7 @@ public class LimitOrderTransactionService {
             HoldingRepository holdings,
             StockRepository stocks,
             QuoteSnapshotRepository quotes,
-            MarketOrderPolicy policy,
+            OrderPolicy policy,
             Clock clock
     ) {
         this.accounts = accounts;
@@ -97,7 +97,7 @@ public class LimitOrderTransactionService {
     public OrderDetailResponse accept(
             Long userId,
             LimitOrderCommand c,
-            MarketOrderExecutionContext context,
+            OrderMarketContext context,
             LimitOrderPricing.Price price
     ) {
         Account account = accounts.findByAccountIdAndUserIdForUpdate(c.accountId(), userId)

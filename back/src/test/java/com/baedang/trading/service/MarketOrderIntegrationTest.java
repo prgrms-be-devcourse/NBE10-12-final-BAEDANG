@@ -16,7 +16,7 @@ import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderQuoteResponse;
 import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.entity.EntryType;
@@ -827,7 +827,7 @@ class MarketOrderIntegrationTest {
         var evidence = new ExecutionRateEvidence(new BigDecimal("1300"),
                 at.minusSeconds(expiry.equals("ttl") ? 60 : 10), at.minusMinutes(2),
                 expiry.equals("source") ? at.minusSeconds(1) : at.plusHours(1));
-        var context = new MarketOrderExecutionContext(MarketCountry.US, true, Instant.MAX, evidence, now);
+        var context = new OrderMarketContext(MarketCountry.US, true, Instant.MAX, evidence, now);
         clearInvocations(exchangeRateProvider, marketSessionProvider);
 
         assertThatThrownBy(() -> marketOrderTransactionService.execute(fixture.userId(), command, context))
