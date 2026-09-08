@@ -272,7 +272,7 @@ The virtual order book module (`com.baedang.orderbook`) supplies a shared synthe
 #### 2. Matching Engine (#122) Integration Contracts
 - **Port Invocation**: `OrderBookExecutionStore.lockForExecution(...)` requires `Propagation.MANDATORY` and must be invoked within the existing transaction where #122 already acquired `account → trade_order` locks.
 - **Side Mapping**: Order BUY consumes synthetic ASK liquidity, and order SELL consumes synthetic BID liquidity (`BUY → ASK`, `SELL → BID`).
-- **Level Order**: Locks are acquired via `FOR UPDATE` in price order: ASK uses `price ASC, levelDepth ASC`, and BID uses `price DESC, levelDepth ASC`.
+- **Level Order**: Locks are acquired via `FOR UPDATE` in price order: ASK uses `price ASC, levelDepth ASC`, and BID uses `price DESC, levelDepth ASC`. The store rejects a locked side whose depths are non-sequential or whose prices are not strictly ascending (ASK) or descending (BID).
 - **Mismatch Handling**: If the expected `bookVersion` or `revision` does not match, or if the version is already closed, it returns `Optional.empty()`. Handling this result via retry or holding is #122's responsibility; do not blanket-map it to HTTP `SAME_CLIENT_ORDER_ID`.
 - **State Transition Primitive**: Even when consuming multiple levels in a single transaction, call `OrderBookVersion.advanceRevision()` exactly once per transaction.
 

@@ -272,7 +272,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 #### 2. 체결 엔진(#122) 연동 계약
 - **포트 호출**: `OrderBookExecutionStore.lockForExecution(...)`는 `Propagation.MANDATORY`로 실행되며, 호출 전 #122가 `account → trade_order`를 잠근 동일 트랜잭션 안에서 호출해야 합니다.
 - **방향 매핑**: 주문 BUY는 가상 공급 ASK를 소비하고, 주문 SELL은 가상 공급 BID를 소비합니다 (`BUY → ASK`, `SELL → BID`).
-- **레벨 정렬 순서**: ASK는 `price ASC, levelDepth ASC`, BID는 `price DESC, levelDepth ASC`로 비관적 락(`FOR UPDATE`)을 획득합니다.
+- **레벨 정렬 순서**: ASK는 `price ASC, levelDepth ASC`, BID는 `price DESC, levelDepth ASC`로 비관적 락(`FOR UPDATE`)을 획득합니다. 잠근 방향의 깊이가 연속적이지 않거나 가격이 ASK 엄격 오름차순·BID 엄격 내림차순이 아니면 거절합니다.
 - **불일치 처리**: 기대하는 `bookVersion`이나 `revision`이 일치하지 않거나 이미 종료된 버전이면 `Optional.empty()`를 반환합니다. 이 결과에 대한 재시도/보류 처리는 #122의 책임이며, HTTP 접수용 `SAME_CLIENT_ORDER_ID`로 일괄 매핑하지 않습니다.
 - **상태 전이 primitive**: 한 트랜잭션에서 여러 레벨을 소비하더라도 `OrderBookVersion.advanceRevision()`은 트랜잭션당 1회만 호출합니다.
 

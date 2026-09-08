@@ -21,6 +21,8 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -238,6 +240,29 @@ class OrderBookExecutionStoreIntegrationTest {
 
         assertThatThrownBy(() -> transactionTemplate.execute(status ->
                 store.lockForExecution(usStock.getStockId(), bookVersion, 0L, OrderBookSide.BID)))
+                .isInstanceOf(InvalidDataAccessApiUsageException.class)
+                .hasRootCauseInstanceOf(IllegalStateException.class);
+    }
+
+    @ParameterizedTest
+    @EnumSource(OrderBookSide.class)
+    void 같은_가격의_인접_레벨이_있으면_잠금을_거절한다(OrderBookSide side) {
+        Long bookVersion = publicationService.publish(generatedBook(42L), BASE.plusSeconds(3600)).orElseThrow();
+        jdbcTemplate.update("""
+                        update order_book_level target
+                           set price = source.price
+                          from order_book_level source
+                         where target.book_version_id = ?
+                           and target.side = ?
+                           and target.level_depth = 2
+                           and source.book_version_id = target.book_version_id
+                           and source.side = target.side
+                           and source.level_depth = 1
+                        """,
+                bookVersion, side.name());
+
+        assertThatThrownBy(() -> transactionTemplate.execute(status ->
+                store.lockForExecution(krStock.getStockId(), bookVersion, 0L, side)))
                 .isInstanceOf(InvalidDataAccessApiUsageException.class)
                 .hasRootCauseInstanceOf(IllegalStateException.class);
     }
