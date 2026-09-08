@@ -25,6 +25,7 @@ import com.baedang.user.repository.AccountRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -185,6 +186,23 @@ public class LimitOrderTransactionService {
             holding.releaseQuantity(release.releasedQuantity(), now);
         }
         return response(order);
+    }
+
+    /**
+     * 계좌/보유주식 데이터 누락 등 영구 결함으로 정상 만료가 불가능한 주문을 격리합니다.
+     * 스케줄러 큐의 무한 반복 정체(Poison Pill)를 방지하기 위해 단독 트랜잭션으로 만료 처리합니다.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void isolateCorruptedOrder(Long orderId) {
+        TradeOrder order = orders.findForUpdate(orderId).orElse(null);
+        if (order == null || !order.isActive()) {
+            return;
+        }
+        OffsetDateTime now = clock.instant().truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        if (order.getExpiresAt() != null && now.isBefore(order.getExpiresAt())) {
+            now = order.getExpiresAt();
+        }
+        order.expire(now);
     }
 
     private OrderDetailResponse response(TradeOrder order) {

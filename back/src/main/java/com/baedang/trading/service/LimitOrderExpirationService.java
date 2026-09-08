@@ -6,6 +6,8 @@ import com.baedang.user.entity.Account;
 import com.baedang.user.repository.AccountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -59,7 +61,16 @@ public class LimitOrderExpirationService {
                         Account account = accounts.findById(order.getAccountId()).orElseThrow();
                         transactions.close(account.getUserId(), account.getAccountId(), order.getOrderId(), true);
                     } catch (RuntimeException e) {
-                        log.warn("지정가 만료 실패: orderId={}", order.getOrderId(), e);
+                        if (isTransientLockFailure(e)) {
+                            log.warn("지정가 만료 락 획득 대기 초과 (다음 주기에 재시도): orderId={}", order.getOrderId(), e);
+                        } else {
+                            log.error("지정가 만료 영구 실패 대상 격리: orderId={}", order.getOrderId(), e);
+                            try {
+                                transactions.isolateCorruptedOrder(order.getOrderId());
+                            } catch (RuntimeException isolateEx) {
+                                log.error("지정가 만료 영구 실패 주문 격리 실패: orderId={}", order.getOrderId(), isolateEx);
+                            }
+                        }
                     }
                 }
                 after = batch.getLast().getOrderId();
@@ -70,5 +81,19 @@ public class LimitOrderExpirationService {
         } finally {
             running.set(false);
         }
+    }
+
+    private boolean isTransientLockFailure(Throwable t) {
+        while (t != null) {
+            if (t instanceof ConcurrencyFailureException || t instanceof QueryTimeoutException) {
+                return true;
+            }
+            String msg = t.getMessage();
+            if (msg != null && (msg.contains("lock timeout") || msg.contains("canceling statement due to lock timeout"))) {
+                return true;
+            }
+            t = t.getCause();
+        }
+        return false;
     }
 }

@@ -12,9 +12,10 @@ import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.service.LimitOrderService;
 import com.baedang.trading.service.MarketOrderService;
+import com.baedang.trading.dto.CancelOrderRequest;
 import com.baedang.trading.service.MarketOrderQuoteService;
 import com.baedang.trading.service.OrderReadService;
-import com.fasterxml.jackson.databind.JsonNode;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -105,12 +106,11 @@ public class OrderController {
     }
 
     @PatchMapping("/{orderId}")
-    public OrderDetailResponse cancel(@AuthenticationPrincipal Long userId, @PathVariable Long orderId,
-            @RequestBody JsonNode request) {
-        if (!request.isObject() || request.size() != 1 || !request.path("status").isTextual()
-                || !"CANCELED".equals(request.path("status").textValue())) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT);
-        }
+    public OrderDetailResponse cancel(
+            @AuthenticationPrincipal Long userId,
+            @PathVariable Long orderId,
+            @Valid @RequestBody CancelOrderRequest request
+    ) {
         return limitOrderService.cancel(userId, orderId);
     }
 }

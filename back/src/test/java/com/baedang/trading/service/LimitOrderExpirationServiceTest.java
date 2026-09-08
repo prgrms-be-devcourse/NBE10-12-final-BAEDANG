@@ -1,14 +1,19 @@
 package com.baedang.trading.service;
 
+import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.TradeOrderRepository;
+import com.baedang.user.entity.Account;
 import com.baedang.user.repository.AccountRepository;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.dao.CannotAcquireLockException;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -18,6 +23,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class LimitOrderExpirationServiceTest {
@@ -51,5 +58,45 @@ class LimitOrderExpirationServiceTest {
         }
         service.expireDue();
         assertThat(queries.get()).isEqualTo(2);
+    }
+
+    @Test
+    void 계좌조회_영구실패_주문은_격리_만료처리한다() {
+        TradeOrderRepository orders = mock(TradeOrderRepository.class);
+        AccountRepository accounts = mock(AccountRepository.class);
+        LimitOrderTransactionService transactions = mock(LimitOrderTransactionService.class);
+        TradeOrder order = mock(TradeOrder.class);
+        when(order.getOrderId()).thenReturn(100L);
+        when(order.getAccountId()).thenReturn(50L);
+        when(orders.expired(any(), anyLong(), any())).thenReturn(List.of(order), List.of());
+        when(accounts.findById(50L)).thenReturn(Optional.empty());
+
+        LimitOrderExpirationService service = new LimitOrderExpirationService(orders, accounts,
+                transactions, Clock.fixed(Instant.parse("2026-09-07T07:00:00Z"), ZoneOffset.UTC));
+        service.expireDue();
+
+        verify(transactions).isolateCorruptedOrder(100L);
+    }
+
+    @Test
+    void 락경합_타임아웃은_격리하지_않고_다음스캔을_위해_건너뛴다() {
+        TradeOrderRepository orders = mock(TradeOrderRepository.class);
+        AccountRepository accounts = mock(AccountRepository.class);
+        LimitOrderTransactionService transactions = mock(LimitOrderTransactionService.class);
+        TradeOrder order = mock(TradeOrder.class);
+        when(order.getOrderId()).thenReturn(101L);
+        when(order.getAccountId()).thenReturn(51L);
+        Account account = mock(Account.class);
+        when(account.getUserId()).thenReturn(1L);
+        when(account.getAccountId()).thenReturn(51L);
+        when(orders.expired(any(), anyLong(), any())).thenReturn(List.of(order), List.of());
+        when(accounts.findById(51L)).thenReturn(Optional.of(account));
+        when(transactions.close(1L, 51L, 101L, true)).thenThrow(new CannotAcquireLockException("lock timeout"));
+
+        LimitOrderExpirationService service = new LimitOrderExpirationService(orders, accounts,
+                transactions, Clock.fixed(Instant.parse("2026-09-07T07:00:00Z"), ZoneOffset.UTC));
+        service.expireDue();
+
+        verify(transactions, never()).isolateCorruptedOrder(101L);
     }
 }

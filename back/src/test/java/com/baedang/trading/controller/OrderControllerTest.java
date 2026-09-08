@@ -71,6 +71,30 @@ class OrderControllerTest {
     }
 
     @Test
+    void 유효한_취소_요청은_성공_응답을_반환한다() throws Exception {
+        when(limitOrderService.cancel(1L, 10L)).thenReturn(new OrderDetailResponse(
+                10L, 1L, 100L,
+                "005930", "삼성전자", MarketCountry.KR,
+                OrderType.LIMIT, OrderSide.BUY, OrderStatus.CANCELED,
+                "10", "0", "0",
+                "240000", "KRW", "240000", "1", "0",
+                "0", "0", "0", "0", null,
+                OffsetDateTime.parse("2026-08-11T10:00:00+09:00"),
+                OffsetDateTime.parse("2026-08-11T15:30:00+09:00"),
+                OffsetDateTime.parse("2026-08-11T11:00:00+09:00")
+        ));
+
+        mockMvc.perform(patch("/api/orders/10")
+                        .with(authenticatedUser(1L))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"status\":\"CANCELED\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.orderId").value(10))
+                .andExpect(jsonPath("$.status").value("CANCELED"));
+        verify(limitOrderService).cancel(1L, 10L);
+    }
+
+    @Test
     void 시장가_주문_견적의_금액과_수량을_JSON_문자열로_응답한다() throws Exception {
         when(marketOrderQuoteService.getQuote(1L, "005930", "KR", "BUY", "10"))
                 .thenReturn(new MarketOrderQuoteResponse(
