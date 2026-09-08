@@ -85,9 +85,9 @@ public class LimitOrderSettlementCalculator {
                 side == OrderSide.BUY ? totalGross.add(totalFee) : totalGross.subtract(totalFee).subtract(totalTax));
         if (net.signum() <= 0) return new LimitOrderSettlementResult(net, null, previous);
 
-        var amounts = new ExecutionAmounts(country == MarketCountry.US ? nativeGross : BigDecimal.ZERO,
+        ExecutionAmounts amounts = new ExecutionAmounts(country == MarketCountry.US ? nativeGross : BigDecimal.ZERO,
                 rawKrw, secDelta, gross, fee, tax, net);
-        var next = new CumulativeSettlementState(previous.quantity().add(quantity), totalNative, totalRawKrw,
+        CumulativeSettlementState next = new CumulativeSettlementState(previous.quantity().add(quantity), totalNative, totalRawKrw,
                 totalSec, totalRawTax, totalGross, totalFee, totalTax);
         return new LimitOrderSettlementResult(net, amounts, next);
     }

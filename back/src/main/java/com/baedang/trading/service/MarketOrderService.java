@@ -3,6 +3,7 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
@@ -10,11 +11,12 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
-import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.OrderMarketContext;
-import com.baedang.trading.model.MarketOrderResult;
-import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
+import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.MarketOrderCommand;
+import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.model.OrderInput;
+import com.baedang.trading.model.OrderMarketContext;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,7 +64,7 @@ public class MarketOrderService {
         if (request == null) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", "request"));
         }
-        var input = orderPolicy.parseInput(
+        OrderInput input = orderPolicy.parseInput(
                 request.accountId(), request.clientOrderId(), request.symbol(), request.marketCountry(),
                 request.side(), request.quantity());
 
@@ -107,7 +109,7 @@ public class MarketOrderService {
         try {
             session = marketSessionProvider.currentSession(stock.getMarketCountry(), sessionLookupAt);
             if (stock.getMarketCountry() == MarketCountry.US) {
-                var snapshot = exchangeRateProvider.currentUsdKrwSnapshot();
+                ExecutionExchangeRateSnapshot snapshot = exchangeRateProvider.currentUsdKrwSnapshot();
                 if (snapshot == null) {
                     throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
                 }

@@ -1,6 +1,8 @@
 package com.baedang.trading.service;
 
+import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.TradeOrderRepository;
+import com.baedang.user.entity.Account;
 import com.baedang.user.repository.AccountRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -12,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 저장된 만료 시각으로 주문을 순차 복구하며 실패 건은 다음 스캔에서 재시도합니다. */
@@ -47,13 +50,13 @@ public class LimitOrderExpirationService {
             OffsetDateTime now = clock.instant().atOffset(ZoneOffset.UTC);
             long after = 0;
             while (true) {
-                var batch = orders.expired(now, after, PageRequest.of(0, 100));
+                List<TradeOrder> batch = orders.expired(now, after, PageRequest.of(0, 100));
                 if (batch.isEmpty()) {
                     break;
                 }
-                for (var order : batch) {
+                for (TradeOrder order : batch) {
                     try {
-                        var account = accounts.findById(order.getAccountId()).orElseThrow();
+                        Account account = accounts.findById(order.getAccountId()).orElseThrow();
                         transactions.close(account.getUserId(), account.getAccountId(), order.getOrderId(), true);
                     } catch (RuntimeException e) {
                         log.warn("지정가 만료 실패: orderId={}", order.getOrderId(), e);

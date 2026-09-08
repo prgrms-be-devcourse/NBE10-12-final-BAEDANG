@@ -73,15 +73,15 @@ public class OrderReadService {
         validateSize(size);
         Long accountId = accounts.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND)).getAccountId();
-        var rows = orders.history(accountId, decode(cursor, "orders:" + accountId, Long.MAX_VALUE), PageRequest.of(0, size + 1));
+        List<TradeOrder> rows = orders.history(accountId, decode(cursor, "orders:" + accountId, Long.MAX_VALUE), PageRequest.of(0, size + 1));
         boolean more = rows.size() > size;
-        var selected = rows.stream().limit(size).toList();
+        List<TradeOrder> selected = rows.stream().limit(size).toList();
         Map<Long, Stock> byStock = new HashMap<>();
         if (!selected.isEmpty()) {
             stocks.findByStockIdIn(selected.stream().map(TradeOrder::getStockId).distinct().toList())
                     .forEach(s -> byStock.put(s.getStockId(), s));
         }
-        var items = selected.stream().map(o -> {
+        List<OrderDetailResponse> items = selected.stream().map(o -> {
             Stock stock = byStock.get(o.getStockId());
             if (stock == null) throw new BusinessException(ErrorCode.INTERNAL_ERROR);
             return OrderDetailResponse.from(o, stock);
@@ -97,8 +97,8 @@ public class OrderReadService {
         if (after > Integer.MAX_VALUE) {
             throw new BusinessException(ErrorCode.INVALID_CURSOR);
         }
-        var rows = executions.findByOrderIdAndSequenceNoGreaterThanOrderBySequenceNoAsc(id, (int) after, PageRequest.of(0, size + 1));
-        var selected = rows.stream().limit(size).toList();
+        List<TradeExecution> rows = executions.findByOrderIdAndSequenceNoGreaterThanOrderBySequenceNoAsc(id, (int) after, PageRequest.of(0, size + 1));
+        List<TradeExecution> selected = rows.stream().limit(size).toList();
         Map<Long, LedgerEntry> byExecution = new HashMap<>();
         if (!selected.isEmpty()) {
             ledgers.findByExecutionIdIn(selected.stream().map(TradeExecution::getExecutionId).toList())

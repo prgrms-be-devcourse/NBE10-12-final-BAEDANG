@@ -3,18 +3,26 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.LimitOrderQuoteResponse;
 import com.baedang.trading.dto.LimitOrderRequest;
 import com.baedang.trading.dto.OrderDetailResponse;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
+import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.LimitOrderCommand;
+import com.baedang.trading.model.MarketOrderAmount;
+import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.model.OrderQuoteQueryContext;
+import com.baedang.trading.model.OrderTerms;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,9 +35,9 @@ import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
-import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
 @Service
@@ -69,7 +77,7 @@ public class LimitOrderService {
     }
 
     public OrderDetailResponse place(Long userId, LimitOrderRequest request) {
-        var base = policy.parseInput(
+        OrderInput base = policy.parseInput(
                 request.accountId(),
                 request.clientOrderId(),
                 request.symbol(),
@@ -78,7 +86,7 @@ public class LimitOrderService {
                 request.quantity()
         );
         String currency = LimitOrderRequestPolicy.currency(request.limitCurrency(), base.terms().marketCountry());
-        var command = new LimitOrderCommand(
+        LimitOrderCommand command = new LimitOrderCommand(
                 base.accountId(),
                 base.clientOrderId(),
                 base.terms(),
@@ -90,7 +98,7 @@ public class LimitOrderService {
             return unwrap(existing.get());
         }
 
-        var stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(base.terms().symbol(), base.terms().marketCountry())
+        Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(base.terms().symbol(), base.terms().marketCountry())
                 .orElseThrow(() -> retry(ErrorCode.STOCK_NOT_FOUND));
         ErrorCode reason = policy.determineStaticRejection(stock);
         if (reason != null) {
@@ -109,12 +117,12 @@ public class LimitOrderService {
 
     private OrderMarketContext prepare(MarketCountry country) {
         try {
-            var session = sessions.currentSession(country, clock.instant());
+            MarketSessionStatus session = sessions.currentSession(country, clock.instant());
             ExecutionRateEvidence evidence;
             if (country == MarketCountry.KR) {
                 evidence = ExecutionRateEvidence.krw(clock.instant().atOffset(ZoneOffset.UTC));
             } else {
-                var snapshot = rates.currentUsdKrwSnapshot();
+                ExecutionExchangeRateSnapshot snapshot = rates.currentUsdKrwSnapshot();
                 if (snapshot == null) {
                     throw retry(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
                 }
@@ -135,8 +143,8 @@ public class LimitOrderService {
     }
 
     public OrderDetailResponse cancel(Long userId, Long orderId) {
-        var order = reads.owned(userId, orderId);
-        var result = transactions.close(userId, order.getAccountId(), orderId, false);
+        TradeOrder order = reads.owned(userId, orderId);
+        OrderDetailResponse result = transactions.close(userId, order.getAccountId(), orderId, false);
         if (result.status() != OrderStatus.CANCELED) {
             throw new BusinessException(ErrorCode.ORDER_STATE_CONFLICT,
                     Map.of("orderId", result.orderId(), "status", result.status().name()));
@@ -153,12 +161,12 @@ public class LimitOrderService {
             String price,
             String currency
     ) {
-        var terms = policy.parseTerms(symbol, country, side, quantity);
+        OrderTerms terms = policy.parseTerms(symbol, country, side, quantity);
         String normalizedCurrency = LimitOrderRequestPolicy.currency(currency, terms.marketCountry());
         BigDecimal requested = LimitOrderRequestPolicy.price(price, normalizedCurrency);
-        var db = quoteReads.load(userId, terms);
-        var context = prepare(terms.marketCountry());
-        var p = pricing.calculate(
+        OrderQuoteQueryContext db = quoteReads.load(userId, terms);
+        OrderMarketContext context = prepare(terms.marketCountry());
+        LimitOrderPricing.Price p = pricing.calculate(
                 new LimitOrderCommand(db.account().getAccountId(), null, terms, requested, normalizedCurrency),
                 context.executionRate()
         );
@@ -180,7 +188,7 @@ public class LimitOrderService {
         if (reason == null && terms.side() == OrderSide.SELL && db.availableQuantity().compareTo(terms.quantity()) < 0) {
             reason = ErrorCode.INSUFFICIENT_QUANTITY;
         }
-        var a = p.estimate();
+        MarketOrderAmount a = p.estimate();
         return new LimitOrderQuoteResponse(
                 currency(requested, normalizedCurrency),
                 normalizedCurrency,

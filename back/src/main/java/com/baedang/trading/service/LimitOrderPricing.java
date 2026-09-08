@@ -6,6 +6,7 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.MarketOrderAmount;
+import com.baedang.trading.model.OrderTerms;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -31,7 +32,7 @@ public class LimitOrderPricing {
     public record Price(BigDecimal limitPrice, BigDecimal reserve, MarketOrderAmount estimate) {}
 
     public Price calculate(LimitOrderCommand command, BigDecimal rate) {
-        var terms = command.terms();
+        OrderTerms terms = command.terms();
         boolean krwInput = "KRW".equals(command.currency());
         BigDecimal price = terms.marketCountry() == MarketCountry.US && krwInput
                 ? command.requestedPrice().divide(rate, 2, RoundingMode.HALF_UP)

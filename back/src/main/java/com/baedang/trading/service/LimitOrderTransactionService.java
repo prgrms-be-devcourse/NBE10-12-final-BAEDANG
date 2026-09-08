@@ -2,6 +2,7 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -13,17 +14,18 @@ import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.LimitOrderCommand;
-import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderClosureResult;
+import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -69,7 +71,7 @@ public class LimitOrderTransactionService {
     public Optional<OrderDetailResponse> existing(Long userId, LimitOrderCommand c) {
         Account account = accounts.findByAccountIdAndUserId(c.accountId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
-        var existing = orders.findByAccountIdAndClientOrderId(account.getAccountId(), c.clientOrderId());
+        Optional<TradeOrder> existing = orders.findByAccountIdAndClientOrderId(account.getAccountId(), c.clientOrderId());
         if (existing.isPresent()) {
             return Optional.of(replay(existing.get(), c));
         }
@@ -80,7 +82,7 @@ public class LimitOrderTransactionService {
     private OrderDetailResponse replay(TradeOrder order, LimitOrderCommand c) {
         Stock stock = stocks.findById(order.getStockId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
-        var t = c.terms();
+        OrderTerms t = c.terms();
         if (order.getOrderType() != OrderType.LIMIT
                 || order.getSide() != t.side()
                 || order.getQuantity().compareTo(t.quantity()) != 0
@@ -102,17 +104,17 @@ public class LimitOrderTransactionService {
     ) {
         Account account = accounts.findByAccountIdAndUserIdForUpdate(c.accountId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
-        var existing = orders.findByAccountIdAndClientOrderId(account.getAccountId(), c.clientOrderId());
+        Optional<TradeOrder> existing = orders.findByAccountIdAndClientOrderId(account.getAccountId(), c.clientOrderId());
         if (existing.isPresent()) {
             return replay(existing.get(), c);
         }
         requireActive(account);
         Instant now = clock.instant();
         policy.validateExecutionContextFresh(context, now);
-        var t = c.terms();
+        OrderTerms t = c.terms();
         Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(t.symbol(), t.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
-        var quote = quotes.findById(stock.getStockId()).orElseThrow(() ->
+        QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElseThrow(() ->
                 new BusinessException(ErrorCode.QUOTE_NOT_FOUND, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
         if (!policy.hasValidCurrencyForMarket(stock, quote)) {
             throw new BusinessException(ErrorCode.QUOTE_CURRENCY_MISMATCH, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
