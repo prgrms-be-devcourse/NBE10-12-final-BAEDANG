@@ -36,10 +36,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.ZoneOffset;
 import java.time.Duration;
 import java.time.Instant;
@@ -69,11 +68,9 @@ class OrderBookQueryIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
-            .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
-                            .toAbsolutePath().normalize()),
-                    "/docker-entrypoint-initdb.d/01-schema.sql");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @TestConfiguration
     static class ClockTestConfig {
@@ -133,7 +130,7 @@ class OrderBookQueryIntegrationTest {
     }
 
     @Test
-    void 활성_호가_20개를_단일_SQL_스냅샷으로_조회한다() {
+    void 국내_활성_호가_20개를_단일_SQL_스냅샷으로_조회한다() {
         Long versionId = publicationService.publish(
                 generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
 
@@ -172,6 +169,49 @@ class OrderBookQueryIntegrationTest {
         // 최우선 매수(BID 1) < 최우선 매도(ASK 1)
         assertThat(new BigDecimal(response.bids().getFirst().price()))
                 .isLessThan(new BigDecimal(response.asks().getFirst().price()));
+    }
+
+    @Test
+    void 미국_저가_호가는_가능한_BID_깊이만_조회한다() {
+        Stock usStock = stockRepository.save(Stock.create(
+                "U" + UUID.randomUUID().toString().substring(0, 5).toUpperCase(),
+                MarketCountry.US, "NASDAQ", "저가 조회 테스트 종목", null, "USD", "STOCK", true));
+        usStock.applyRanking(1, new BigDecimal("1000000"));
+        stockRepository.save(usStock);
+        StockDescriptor usDescriptor = StockDescriptor.from(usStock);
+        GeneratedOrderBook generated = generator.generate(
+                properties, usDescriptor, new BigDecimal("0.10"),
+                BASE.minusSeconds(2), BASE, 42L);
+        publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
+
+        OrderBookResponse response = queryService.getOrderBook(usStock.getSymbol(), "US");
+
+        assertThat(response.asks()).hasSize(10);
+        assertThat(response.bids()).hasSize(9);
+        assertThat(response.bids()).extracting(OrderBookLevelResponse::level)
+                .containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
+        assertThat(response.bids().getLast().price()).isEqualTo("0.01");
+    }
+
+    @Test
+    void 미국_일반가격_호가에서_BID_레벨이_누락되면_503이다() {
+        Stock usStock = stockRepository.save(Stock.create(
+                "U" + UUID.randomUUID().toString().substring(0, 5).toUpperCase(),
+                MarketCountry.US, "NASDAQ", "불완전 조회 테스트 종목", null, "USD", "STOCK", true));
+        usStock.applyRanking(1, new BigDecimal("1000000"));
+        stockRepository.save(usStock);
+        GeneratedOrderBook generated = generator.generate(
+                properties, StockDescriptor.from(usStock), new BigDecimal("100.00"),
+                BASE.minusSeconds(2), BASE, 42L);
+        Long versionId = publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
+        jdbcTemplate.update(
+                "delete from order_book_level where book_version_id = ? and side = 'BID' and level_depth = 10",
+                versionId);
+
+        assertThatThrownBy(() -> queryService.getOrderBook(usStock.getSymbol(), "US"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
     }
 
     @Test
@@ -410,7 +450,7 @@ class OrderBookQueryIntegrationTest {
     }
 
     @Test
-    void 레벨이_20개보다_적은_활성_호가는_503이다() {
+    void 국내_호가에서_ASK_레벨이_누락되면_503이다() {
         Long versionId = publicationService.publish(
                 generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
         jdbcTemplate.update(

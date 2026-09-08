@@ -62,7 +62,7 @@ public class OrderBookQueryService {
         }
 
         List<OrderBookRowProjection> rows = levelRepository.findActiveSnapshotRows(stock.getStockId());
-        if (rows.size() != 20) {
+        if (rows == null || rows.isEmpty()) {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
         }
 

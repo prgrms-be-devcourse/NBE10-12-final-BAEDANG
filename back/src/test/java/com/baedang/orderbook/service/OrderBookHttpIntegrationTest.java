@@ -30,14 +30,13 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -65,11 +64,9 @@ class OrderBookHttpIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
-            .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
-                            .toAbsolutePath().normalize()),
-                    "/docker-entrypoint-initdb.d/01-schema.sql");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @TestConfiguration
     static class ClockTestConfig {

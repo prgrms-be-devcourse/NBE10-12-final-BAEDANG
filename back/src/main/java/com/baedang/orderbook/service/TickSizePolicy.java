@@ -9,6 +9,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * 시장·상품별 유효 호가 가격 단위 정책 (설계서 §4.2).
@@ -16,8 +17,8 @@ import java.util.Objects;
  * <p>단순히 "현재가의 단위"를 반환하는 데 그치지 않고, 가격 구간 경계를 넘는
  * 이전·다음 유효 가격을 계산한다. 설계서 §4.3의 요구사항대로 기준가를 한 번
  * HALF_UP 정렬한 뒤 같은 tick을 반복 가감하는 방식은 쓰지 않는다 — 그렇게 하면
- * 구간 경계(2,000 / 5,000 / 20,000 / 50,000 / 200,000 / 500,000원, $1.00)에서
- * 새 구간의 규칙이 다시 적용되지 않아 비유효 가격이 나온다.
+ * 구간 경계(2,000 / 5,000 / 20,000 / 50,000 / 200,000 / 500,000원)에서는
+ * 새 구간의 규칙이 다시 적용되고, 미국은 모든 양수 가격에 $0.01 tick을 적용한다.
  *
  * <p>모든 연산은 구간 자체를 무대로 삼는다: 후보는 반드시 그 구간의
  * {@code [lowerInclusive, upperExclusive)} 안에 있어야 한다. 구간을 벗어나는
@@ -45,10 +46,9 @@ public class TickSizePolicy {
             new PriceGrid(new BigDecimal("2000"), null, new BigDecimal("5"))
     );
 
-    /** 미국 주식 — 프로젝트 V1 정책 (Rule 612 하프페니 규정이 바뀌면 V2로 추가한다). */
+    /** 미국 주식 — 프로젝트 MVP 정책: 전 구간 1센트 단위. */
     private static final List<PriceGrid> US_GRIDS = List.of(
-            new PriceGrid(BigDecimal.ZERO, new BigDecimal("1.00"), new BigDecimal("0.0001")),
-            new PriceGrid(new BigDecimal("1.00"), null, new BigDecimal("0.01"))
+            new PriceGrid(BigDecimal.ZERO, null, new BigDecimal("0.01"))
     );
 
     public BigDecimal nextValidPriceAbove(StockDescriptor stock, BigDecimal price) {
@@ -61,14 +61,22 @@ public class TickSizePolicy {
     }
 
     public BigDecimal previousValidPriceBelow(StockDescriptor stock, BigDecimal price) {
-        requirePositive(price);
-        BigDecimal result = gridsFor(stock).stream()
-                .map(grid -> grid.lastValidStrictlyBelow(price))
-                .filter(Objects::nonNull)
-                .max(BigDecimal::compareTo)
-            .orElseThrow(() -> new IllegalArgumentException("이전 유효 호가를 계산할 수 없습니다"));
+        BigDecimal result = findPreviousValidPriceBelow(stock, price)
+                .orElseThrow(() -> new IllegalArgumentException("이전 유효 호가를 계산할 수 없습니다"));
         if (result.signum() <= 0) throw new IllegalArgumentException("이전 유효 호가는 양수여야 합니다");
         return result;
+    }
+
+    /**
+     * 생성기가 미국 저가 BID를 마지막 양수 센트에서 정상 종료할 수 있도록
+     * 이전 유효 가격이 없을 때 empty를 반환한다. 외부 정책 호출은 위의 예외 계약을 사용한다.
+     */
+    Optional<BigDecimal> findPreviousValidPriceBelow(StockDescriptor stock, BigDecimal price) {
+        requirePositive(price);
+        return gridsFor(stock).stream()
+                .map(grid -> grid.lastValidStrictlyBelow(price))
+                .filter(Objects::nonNull)
+                .max(BigDecimal::compareTo);
     }
 
     public boolean isValidPrice(StockDescriptor stock, BigDecimal price) {
@@ -77,9 +85,9 @@ public class TickSizePolicy {
     }
 
     /**
-     * 해당 가격이 속한 구간의 호가 단위. 유효성 판정과 독립적으로 구간 범위로만 찾는다 —
-     * 기준가는 실제 시세라 현행 단위표에 안 맞는 값(미국 하프페니 등)일 수 있고,
-     * 그때도 라운드 넘버 판정은 그 구간 단위를 기준으로 해야 하기 때문이다.
+     * 해당 가격이 속한 구간의 호가 단위. 유효성 판정과 독립적으로 구간 범위로만 찾는다.
+     * 기준가는 실제 시세라 현행 단위표에 안 맞는 값일 수 있고, 그때도 라운드 넘버
+     * 판정은 해당 가격 구간의 단위를 기준으로 해야 하기 때문이다.
      */
     public BigDecimal tickSizeAt(StockDescriptor stock, BigDecimal price) {
         requirePositive(price);

@@ -21,6 +21,7 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -36,10 +37,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -71,11 +71,9 @@ class OrderBookExecutionStoreIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
-            .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
-                            .toAbsolutePath().normalize()),
-                    "/docker-entrypoint-initdb.d/01-schema.sql");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @TestConfiguration
     static class ClockTestConfig {
@@ -106,7 +104,9 @@ class OrderBookExecutionStoreIntegrationTest {
 
     private MutableClock clock;
     private Stock krStock;
+    private Stock usStock;
     private StockDescriptor descriptor;
+    private StockDescriptor usDescriptor;
     private TransactionTemplate transactionTemplate;
 
     @BeforeEach
@@ -120,6 +120,8 @@ class OrderBookExecutionStoreIntegrationTest {
 
         krStock = stockRepository.save(tradableStock());
         descriptor = StockDescriptor.from(krStock);
+        usStock = stockRepository.save(tradableUsStock());
+        usDescriptor = StockDescriptor.from(usStock);
         transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -131,9 +133,22 @@ class OrderBookExecutionStoreIntegrationTest {
         return stock;
     }
 
+    private static Stock tradableUsStock() {
+        Stock stock = Stock.create(
+                "U" + UUID.randomUUID().toString().substring(0, 5).toUpperCase(),
+                MarketCountry.US, "NASDAQ", "저가 잠금 테스트 종목", null, "USD", "STOCK", true);
+        stock.applyRanking(1, new BigDecimal("1000000"));
+        return stock;
+    }
+
     private GeneratedOrderBook generatedBook(long seed) {
         Instant now = clock.instant();
         return generator.generate(properties, descriptor, new BigDecimal("70000"), now.minusSeconds(2), now, seed);
+    }
+
+    private GeneratedOrderBook generatedUsLowBook(long seed) {
+        Instant now = clock.instant();
+        return generator.generate(properties, usDescriptor, new BigDecimal("0.10"), now.minusSeconds(2), now, seed);
     }
 
     private void awaitDatabaseLockWait() {
@@ -195,6 +210,36 @@ class OrderBookExecutionStoreIntegrationTest {
                     .isGreaterThan(book.levels().get(i + 1).getPrice());
             assertThat(book.levels().get(i).getLevelDepth()).isEqualTo(i + 1);
         }
+    }
+
+    @Test
+    void 미국_저가_종목의_BID_잠금은_가능한_레벨만_반환한다() {
+        Long bookVersion = publicationService.publish(generatedUsLowBook(42L), BASE.plusSeconds(3600)).orElseThrow();
+
+        Optional<LockedOrderBook> locked = transactionTemplate.execute(status ->
+                store.lockForExecution(usStock.getStockId(), bookVersion, 0L, OrderBookSide.BID));
+
+        assertThat(locked).isPresent();
+        assertThat(locked.orElseThrow().levels()).hasSize(9);
+        assertThat(locked.orElseThrow().levels())
+                .extracting(OrderBookLevel::getLevelDepth)
+                .containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
+    }
+
+    @Test
+    void 미국_일반가격_호가에서_BID_레벨이_누락되면_잠금을_거절한다() {
+        Instant now = clock.instant();
+        GeneratedOrderBook generated = generator.generate(
+                properties, usDescriptor, new BigDecimal("100.00"), now.minusSeconds(2), now, 42L);
+        Long bookVersion = publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
+        jdbcTemplate.update(
+                "delete from order_book_level where book_version_id = ? and side = 'BID' and level_depth = 10",
+                bookVersion);
+
+        assertThatThrownBy(() -> transactionTemplate.execute(status ->
+                store.lockForExecution(usStock.getStockId(), bookVersion, 0L, OrderBookSide.BID)))
+                .isInstanceOf(InvalidDataAccessApiUsageException.class)
+                .hasRootCauseInstanceOf(IllegalStateException.class);
     }
 
     @Test

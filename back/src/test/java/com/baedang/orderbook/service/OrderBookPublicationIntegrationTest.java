@@ -32,10 +32,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -53,7 +52,7 @@ import static org.mockito.Mockito.when;
 /**
  * 버전 교체는 partial unique index가 최종 방어선인 원자적 트랜잭션이다.
  * 목 리포지토리로는 "실제 커밋된 활성 버전 수"와 "락 경합 후의 상태"를 검증할
- * 수 없어서 실제 PostgreSQL 18(Testcontainers) + infra/schema.sql 위에서 실행한다.
+ * 수 없어서 실제 PostgreSQL 18(Testcontainers) + Flyway V1→V3 마이그레이션 위에서 실행한다.
  *
  * <p>클래스를 {@code @Transactional}로 감싸지 않는 이유는 일부 테스트가 진짜
  * 커밋(스레드 간 경합)을 요구하기 때문이다. 대신 테스트마다 새 종목을 만들어
@@ -73,11 +72,9 @@ class OrderBookPublicationIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
-            .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
-                            .toAbsolutePath().normalize()),
-                    "/docker-entrypoint-initdb.d/01-schema.sql");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @TestConfiguration
     static class ClockTestConfig {

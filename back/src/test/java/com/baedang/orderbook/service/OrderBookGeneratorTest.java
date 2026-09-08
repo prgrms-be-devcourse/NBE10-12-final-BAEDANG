@@ -148,6 +148,32 @@ class OrderBookGeneratorTest {
     }
 
     @Test
+    void 미국_저가_종목은_가능한_양수_BID만_생성한다() {
+        GeneratedOrderBook book = generator.generate(
+                v1(), usIndividual(), new BigDecimal("0.10"),
+                Instant.parse("2026-09-03T01:00:00Z"),
+                Instant.parse("2026-09-03T01:00:03Z"), 42L
+        );
+
+        assertThat(book.levelsBySide(OrderBookSide.ASK)).hasSize(10);
+        assertThat(book.levelsBySide(OrderBookSide.BID)).hasSize(9);
+        assertThat(book.levelsBySide(OrderBookSide.BID))
+                .extracting(GeneratedOrderBookLevel::levelDepth)
+                .containsExactly(1, 2, 3, 4, 5, 6, 7, 8, 9);
+        assertThat(book.levelsBySide(OrderBookSide.BID).getLast().price())
+                .isEqualByComparingTo("0.01");
+    }
+
+    @Test
+    void 미국_센트_최저가에서는_BID가_없어_생성을_거절한다() {
+        assertThatThrownBy(() -> generator.generate(
+                v1(), usIndividual(), new BigDecimal("0.01"),
+                Instant.parse("2026-09-03T01:00:00Z"),
+                Instant.parse("2026-09-03T01:00:03Z"), 42L))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void 라운드_가격은_인접_호가보다_두껍다() {
         // 기준가 69,900 → ASK 1 = 70,000(tick 100원, 700 steps = ×100 → 1.60 부스트),
         // ASK 2 = 70,100(701 steps → 부스트 없음). 깊이 배수 1.00/0.96을 합쳐도

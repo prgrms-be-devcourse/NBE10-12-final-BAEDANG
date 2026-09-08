@@ -9,12 +9,15 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 @Repository
 public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
+
+    private static final BigDecimal MIN_US_ORDER_BOOK_PRICE = new BigDecimal("0.01");
 
     private final OrderBookVersionRepository versionRepository;
     private final OrderBookLevelRepository levelRepository;
@@ -46,14 +49,26 @@ public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
             return Optional.empty();
         }
 
+        OrderBookVersion activeVersion = version.orElseThrow();
         List<OrderBookLevel> levels = side == OrderBookSide.ASK
                 ? levelRepository.findAskLevelsForUpdate(expectedBookVersion)
                 : levelRepository.findBidLevelsForUpdate(expectedBookVersion);
 
-        if (levels.size() != 10) {
-            throw new IllegalStateException("활성 호가 버전은 방향별 10개 레벨이어야 합니다");
+        boolean validDepth = levels.size() == 10
+                || (side == OrderBookSide.BID && "USD".equals(activeVersion.getCurrency())
+                    && !levels.isEmpty() && levels.size() < 10
+                    && levels.getLast().getPrice().compareTo(MIN_US_ORDER_BOOK_PRICE) == 0);
+        if (!validDepth || !hasSequentialDepths(levels)) {
+            throw new IllegalStateException("활성 호가 버전의 레벨 깊이가 올바르지 않습니다");
         }
 
-        return Optional.of(new LockedOrderBook(version.orElseThrow(), levels));
+        return Optional.of(new LockedOrderBook(activeVersion, levels));
+    }
+
+    private boolean hasSequentialDepths(List<OrderBookLevel> levels) {
+        for (int i = 0; i < levels.size(); i++) {
+            if (levels.get(i).getLevelDepth() != i + 1) return false;
+        }
+        return true;
     }
 }

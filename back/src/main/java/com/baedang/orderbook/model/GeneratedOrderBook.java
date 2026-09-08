@@ -9,9 +9,10 @@ import java.util.Objects;
 
 /**
  * 생성기가 만든 호가 세트 전체. publisher가 이를 {@code OrderBookVersion}과
- * 20개 {@code OrderBookLevel} 엔티티로 변환해 게시한다.
+ * 최대 20개 {@code OrderBookLevel} 엔티티로 변환해 게시한다(ASK 10개, BID는
+ * 국내 10개·미국 1~10개).
  *
- * <p>레벨은 ASK 1..10 → BID 1..10 순서로 담겨 있다.
+ * <p>레벨은 ASK 1..10 → BID 1..N 순서로 담겨 있다.
  */
 public record GeneratedOrderBook(
         Long stockId,

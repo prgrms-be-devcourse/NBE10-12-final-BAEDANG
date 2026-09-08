@@ -575,13 +575,13 @@ The ranked-universe collector runs once per minute, sequentially in 20-stock gro
 ### `GET /stocks/{symbol}/orderbook?marketCountry={KR|US}`
 Synthetic order book and depth query based on latest market price
 
-All users share the same synthetic order book snapshot. A single request returns 10 asks and 10 bids at once. Query requests never generate new order books; they read from the database using a single SQL snapshot of the current active version.
+All users share the same synthetic order book snapshot. A single request returns 10 asks and all available bids: KR stocks always have 10 bids, while US stocks may have 1 to 10 bids for low-priced symbols. Query requests never generate new order books; they read from the database using a single SQL snapshot of the current active version.
 
 | Field | Required | Description |
 |---|---|---|
 | `symbol` (path parameter) | Y | Stock symbol (e.g., `005930`, `NVDA`) |
 | `marketCountry` (query parameter) | Y | Market country (`KR` / `US`, case-insensitive). Returns 400 if missing or unsupported |
-| none | - | `depth`, `page`, and `cursor` parameters are not accepted; the server always returns all 10 asks and 10 bids |
+| none | - | `depth`, `page`, and `cursor` parameters are not accepted; the server returns 10 asks and all available bids (10 for KR, 1–10 for US) |
 
 **Response 200** — Price and quantity fields are strings formatted via `FinancialDecimalFormatter.plain()`. `initialQuantity` is an internal audit value and is not exposed in the public API.
 ```json
@@ -624,7 +624,7 @@ All users share the same synthetic order book snapshot. A single request returns
 ```
 
 - `asks`: sell quotes (10 levels in ascending price order, starting with best ask ASK 1).
-- `bids`: buy quotes (10 levels in descending price order, starting with best bid BID 1).
+- `bids`: buy quotes in descending price order, starting with best bid BID 1. KR returns 10 levels; US returns 1–10 available levels, and a partial US depth must end at the minimum valid price of `$0.01`.
 - `bookVersion`, `revision`, and levels come from a single database statement snapshot, guaranteeing consistency.
 
 **Errors**

@@ -23,7 +23,7 @@ import java.util.Optional;
  * <p>한 종목 = 한 {@code REQUIRED} 트랜잭션이며, 락 순서는 {@code stock →
  * order_book_version}로 고정한다(consumer의 {@code account → trade_order →
  * version → level → holding}과 순환 대기가 없다 — publisher는 account·주문·
- * 보유를 절대 잠그지 않는다). 기존 활성 종료와 새 버전·레벨 20개 INSERT가
+ * 보유를 절대 잠그지 않는다). 기존 활성 종료와 새 버전·최대 20개 레벨 INSERT가
  * 한 커밋에 함께 살아야 조회 중 "활성 버전 있는데 레벨 없음"이 생기지 않는다.
  *
  * <p>생성(pure generator)은 이 트랜잭션 <b>밖</b>에서 끝난 상태로 받아야 하며,

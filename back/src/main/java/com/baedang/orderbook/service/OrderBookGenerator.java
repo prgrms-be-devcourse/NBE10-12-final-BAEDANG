@@ -5,6 +5,7 @@ import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import com.baedang.orderbook.model.StockDescriptor;
+import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -12,6 +13,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.Random;
 
 /**
@@ -24,8 +26,8 @@ import java.util.Random;
  * <p>V1 가격 배열: ASK 1은 basePrice보다 큰 첫 유효 가격, BID 1은 basePrice보다
  * 작은 첫 유효 가격이고, 이후 각 레벨은 직전 레벨의 다음/이전 유효 가격이다.
  * 구간 경계를 지날 때 새 구간의 규칙이 다시 적용되므로 {@link TickSizePolicy}에
- * 위임한다. BID 10을 양수 유효 가격으로 만들 수 없는 저가 종목은 예외를 던진다 —
- * 같은 가격 반복이나 1원 강제 치환은 하지 않는다.
+ * 위임한다. ASK는 항상 설정된 깊이만큼 만들고, 미국 BID는 양수 유효 가격이
+ * 남아 있는 깊이(1~10개)까지만 만든다. 같은 가격 반복이나 강제 치환은 하지 않는다.
  */
 @Component
 public class OrderBookGenerator {
@@ -89,9 +91,18 @@ public class OrderBookGenerator {
         List<GeneratedOrderBookLevel> levels = new ArrayList<>(policy.levelsPerSide());
         BigDecimal price = basePrice;
         for (int depth = 1; depth <= policy.levelsPerSide(); depth++) {
-            price = side == OrderBookSide.ASK
-                    ? tickSizePolicy.nextValidPriceAbove(stock, price)
-                    : tickSizePolicy.previousValidPriceBelow(stock, price);
+            Optional<BigDecimal> nextPrice = side == OrderBookSide.ASK
+                    ? Optional.of(tickSizePolicy.nextValidPriceAbove(stock, price))
+                    : tickSizePolicy.findPreviousValidPriceBelow(stock, price);
+            if (nextPrice.isEmpty()) {
+                if (side == OrderBookSide.BID
+                        && stock.marketCountry() == MarketCountry.US
+                        && !levels.isEmpty()) {
+                    break;
+                }
+                throw new IllegalArgumentException("이전 유효 호가를 계산할 수 없습니다");
+            }
+            price = nextPrice.orElseThrow();
             levels.add(new GeneratedOrderBookLevel(
                     side, depth, price, quantity(stock, price, baseNotional, depth, policy, random)));
         }

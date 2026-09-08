@@ -44,7 +44,7 @@
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | 데이터 흐름 (`close_price` → `prev_close`) |
 | stock → order_book_version | 1:N (is_active=true는 종목당 최대 1개) |
-| order_book_version → order_book_level | 1:N (게시 완료 시 20개, CASCADE) |
+| order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: ASK 10, KR BID 10, US BID 1~10, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
 
 ### 테이블 맵 (15개)
@@ -64,7 +64,7 @@
 | | `minute_candle` | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드 |
 | | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
 | **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
-| | `order_book_level` | 버전당 20개 레벨(BID 10 / ASK 10) 가격·수량 |
+| | `order_book_level` | 버전당 최대 20개 레벨(ASK 10 / KR BID 10 / US BID 1~10) 가격·수량 |
 
 ### MVP 동작 매트릭스 (확정)
 
@@ -446,7 +446,7 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 | `closed_at` | TIMESTAMPTZ | 새 버전 게시 또는 장 마감으로 종료된 시각. |
 
 #### `order_book_level` — 가상 호가 레벨
-버전당 매수 10개, 매도 10개 총 20개 행이 생성됩니다. `(book_version_id, side, level_depth)` 복합 유니크 제약이 걸려 있습니다.
+버전당 ASK 10개와 BID 1~10개(국내는 항상 10개)까지 생성됩니다. `(book_version_id, side, level_depth)` 복합 유니크 제약이 걸려 있습니다.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
@@ -463,7 +463,7 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 - **활성 버전 보존**: `is_active = true`인 활성 버전은 절대 삭제하지 않습니다.
 - **소비된 버전 보존**: `revision > 0`인 종료 버전은 과거 체결 감사 근거이므로 영구 보존합니다.
 - **체결 참조 레벨/버전 보존**: `trade_execution`이 레벨을 참조하고 있으면 `revision = 0`이어도 삭제 대상에서 제외되며(`NOT EXISTS`), 직접 삭제 시도 시 `ON DELETE RESTRICT`로 차단됩니다.
-- **미소비 종료 버전 정리**: `is_active = false` AND `revision = 0` AND 종료 후 1분 경과 AND 체결 미참조인 버전만 백그라운드 스케줄러가 주기적으로 삭제합니다 (연관 20개 레벨은 `ON DELETE CASCADE`로 함께 정리).
+- **미소비 종료 버전 정리**: `is_active = false` AND `revision = 0` AND 종료 후 1분 경과 AND 체결 미참조인 버전만 백그라운드 스케줄러가 주기적으로 삭제합니다 (연관 최대 20개 레벨은 `ON DELETE CASCADE`로 함께 정리).
 ---
 
 ## 종목 분류 모델
@@ -543,8 +543,6 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 
 > 🧪 **검증 테스트로 만들면 좋은 것** — 모든 거래 후 `매수 시 net_amount = gross_amount + fee`, `매도 시 net_amount = gross_amount − fee − tax` 가 항상 성립하는지, 그리고 `ledger_entry.amount`(수수료 포함) 의 누적 합이 `account.cash_balance` 와 일치하는지 확인하는 테스트를 두세요. 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
 
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql` 및 `db/migration/V2__limit_order_lifecycle.sql` 과 함께 보세요
-
 ## 지정가 접수 근거 (#120)
 
 주문 이력은 계좌별 주문 ID 커서 조회에 맞춘 `ix_order_history (account_id, order_id DESC)`를 사용합니다 (`db/migration/V2__limit_order_lifecycle.sql` 적용).
@@ -557,3 +555,6 @@ trade_order에 접수 후 변경하지 않는 세 컬럼을 추가합니다.
 MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 통화의 고정 지정가로 유지합니다. 미국 원화 입력은 접수 환율로 나눈 뒤 HALF_UP 센트 반올림합니다. 멱등 비교는 환산 결과가 아닌 원본 입력을 사용합니다. initial_reserved_cash는 추가하지 않습니다. 최초 동결은 원본 입력으로 계산하고 reserved_cash는 현재 잔여 동결액만 저장합니다.
 
 지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 기존 활성 주문·만료 인덱스를 재사용합니다. 과거 행 보정·마이그레이션은 포함하지 않습니다.
+
+---
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, `V3__order_book.sql`과 함께 보세요

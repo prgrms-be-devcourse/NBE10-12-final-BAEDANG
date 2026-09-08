@@ -67,11 +67,13 @@ class TickSizePolicyTest {
     }
 
     @Test
-    void 미국_1달러_경계를_계산한다() {
+    void 미국은_전구간_1센트_단위를_사용한다() {
         StockDescriptor stock = usIndividual();
-        assertThat(policy.nextValidPriceAbove(stock, new BigDecimal("0.9999"))).isEqualByComparingTo("1.0000");
-        assertThat(policy.previousValidPriceBelow(stock, new BigDecimal("1.0000"))).isEqualByComparingTo("0.9999");
-        assertThat(policy.nextValidPriceAbove(stock, new BigDecimal("1.0000"))).isEqualByComparingTo("1.0100");
+        assertThat(policy.nextValidPriceAbove(stock, new BigDecimal("0.9999"))).isEqualByComparingTo("1.00");
+        assertThat(policy.previousValidPriceBelow(stock, new BigDecimal("1.00"))).isEqualByComparingTo("0.99");
+        assertThat(policy.nextValidPriceAbove(stock, new BigDecimal("1.00"))).isEqualByComparingTo("1.01");
+        assertThat(policy.nextValidPriceAbove(stock, new BigDecimal("0.105"))).isEqualByComparingTo("0.11");
+        assertThat(policy.previousValidPriceBelow(stock, new BigDecimal("0.105"))).isEqualByComparingTo("0.10");
     }
 
     @ParameterizedTest
@@ -81,9 +83,10 @@ class TickSizePolicyTest {
             "KR_ETF,2003",
             // 1,500원 미만 구간은 1원 단위라 소수 가격은 유효하지 않다.
             "KR_개인,1500.5",
-            // 미국 1달러 미만 구간은 0.0001 단위 — 다섯째 자리 가격은 유효하지 않다.
+            // 미국은 전 구간 1센트 단위 — 센트 미만 가격은 유효하지 않다.
+            "US,0.9999",
             "US,0.99995"
-    })
+        })
     void 유효하지_않은_가격을_감별한다(String kind, String price) {
         StockDescriptor stock = switch (kind) {
             case "KR_개인" -> krIndividual();

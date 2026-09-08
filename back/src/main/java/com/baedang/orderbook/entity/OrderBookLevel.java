@@ -80,7 +80,7 @@ public class OrderBookLevel {
         return new OrderBookLevel(bookVersion, side, levelDepth, price, quantity);
     }
 
-    /** publisher가 생성 결과 20개 레벨을 새 버전 산하 엔티티로 변환한다. */
+    /** publisher가 생성 결과(ASK 10개, 국내 BID 10개, 미국 BID 1~10개)를 새 버전 산하 엔티티로 변환한다. */
     public static List<OrderBookLevel> from(OrderBookVersion bookVersion, List<GeneratedOrderBookLevel> generated) {
         return generated.stream()
                 .map(level -> create(

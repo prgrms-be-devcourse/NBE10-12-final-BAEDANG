@@ -44,7 +44,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | data flow (`close_price` → `prev_close`) |
 | stock → order_book_version | 1:N (max 1 active per stock: is_active=true) |
-| order_book_version → order_book_level | 1:N (20 levels upon publication, CASCADE) |
+| order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
 
 ### Table Map (15)
@@ -64,7 +64,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `minute_candle` | minute time-series · top-100 scheduler + off-universe on-demand |
 | | `exchange_rate` | FX history · regular table · no FK relations |
 | **Synthetic Order Book** | `order_book_version` | synthetic order book set header refreshed every 3s based on current price |
-| | `order_book_level` | 20 levels per version (10 BID / 10 ASK) with prices and quantities |
+| | `order_book_level` | Up to 20 levels per version (10 ASK / 10 KR BID / 1–10 US BID) with prices and quantities |
 
 ### MVP Behavior Matrix (confirmed)
 
@@ -454,7 +454,7 @@ Header of the shared synthetic order book set generated from the current price (
 | `closed_at` | TIMESTAMPTZ | Timestamp when closed upon new publication or market close. |
 
 #### `order_book_level` — synthetic order book level
-Exactly 20 rows are generated per version (10 BID / 10 ASK). Enforced by composite unique constraint `(book_version_id, side, level_depth)`.
+Up to 20 rows are generated per version: 10 ASK rows and 1–10 BID rows (KR always has 10 BID rows). The composite unique constraint `(book_version_id, side, level_depth)` is enforced.
 
 | Column | Type | Description |
 |---|---|---|
@@ -471,7 +471,7 @@ Exactly 20 rows are generated per version (10 BID / 10 ASK). Enforced by composi
 - **Active versions preserved**: Active versions (`is_active = true`) are never deleted.
 - **Consumed versions preserved**: Closed versions with `revision > 0` are permanently preserved as historical execution audit evidence.
 - **Execution-referenced levels/versions preserved**: Versions with levels referenced by `trade_execution` are preserved even if `revision = 0` (`NOT EXISTS`), and direct deletion attempts are blocked by `ON DELETE RESTRICT`.
-- **Unconsumed closed version cleanup**: Closed versions (`is_active = false` AND `revision = 0` AND closed for more than 1 minute AND unreferenced by executions) are periodically cleaned up by the background scheduler (their 20 levels are purged together via `ON DELETE CASCADE`).
+- **Unconsumed closed version cleanup**: Closed versions (`is_active = false` AND `revision = 0` AND closed for more than 1 minute AND unreferenced by executions) are periodically cleaned up by the background scheduler (their up to 20 levels are purged together via `ON DELETE CASCADE`).
 ---
 
 ## Stock Classification Model
@@ -548,8 +548,6 @@ Limit orders use two phases: Phase 1 commits PENDING/reservations; a worker repe
 
 > 🧪 **Good verification tests** — after every trade, check `buy: net_amount = gross_amount + fee` and `sell: net_amount = gross_amount − fee − tax` always hold, and the cumulative sum of `ledger_entry.amount` (fee included) equals `account.cash_balance`. The surest proof you understand the ledger.
 
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` and `db/migration/V2__limit_order_lifecycle.sql`
-
 ## LIMIT acceptance evidence (#120)
 
 Order history uses `ix_order_history (account_id, order_id DESC)` to match its account-scoped order-ID cursor (applied via `db/migration/V2__limit_order_lifecycle.sql`).
@@ -562,3 +560,6 @@ Three immutable acceptance columns are added to trade_order:
 All three are NULL for MARKET and required for LIMIT. limit_price remains the fixed stock-currency price (USD for US); US KRW input is divided by acceptance FX and rounded to cents HALF_UP. Original inputs, not converted prices, are the idempotency comparison basis. No initial_reserved_cash column is added. Initial reserve comes from original input; reserved_cash continues to represent only current remainder.
 
 Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. Existing active-order and expiry indexes are reused. No legacy row corrections or migrations are included.
+
+---
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, and `V3__order_book.sql`
