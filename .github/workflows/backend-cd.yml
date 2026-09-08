@@ -188,7 +188,7 @@ jobs:
             --name trading-back-1 \
             --network common \
             --restart unless-stopped \
-            --env-file /.env \
+            --env-file /opt/baedang/.env \
             -p 8080:8080 \
             $IMAGE
 
@@ -224,4 +224,3 @@ jobs:
           if [ "$STATUS" != "Success" ]; then
             exit 1
           fi
-

@@ -247,6 +247,7 @@ locals {
   s3_asset_keys = [
     "compose.yaml",
     "prometheus.yml",
+    ".env",
   ]
 
   s3_dump_keys = [
@@ -340,7 +341,7 @@ locals {
 
   echo "=============== 6. Docker Compose ================"
   cd /opt/${var.prefix}
-  
+
   docker compose up -d
   echo "=================================================="
 
