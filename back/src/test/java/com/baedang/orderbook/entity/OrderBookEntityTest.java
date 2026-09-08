@@ -104,5 +104,11 @@ class OrderBookEntityTest {
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> level.consume(new BigDecimal("-1")))
                 .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> level.consume(new BigDecimal("0.5")))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThat(level.getRemainingQuantity()).isEqualByComparingTo("30");
+
+        level.consume(new BigDecimal("1.000000"));
+        assertThat(level.getRemainingQuantity()).isEqualByComparingTo("29");
     }
 }

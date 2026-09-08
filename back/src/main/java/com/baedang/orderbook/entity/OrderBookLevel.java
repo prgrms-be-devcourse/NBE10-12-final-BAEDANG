@@ -93,8 +93,8 @@ public class OrderBookLevel {
     }
 
     public void consume(BigDecimal quantity) {
-        if (quantity == null || quantity.signum() <= 0) {
-            throw new IllegalArgumentException("소비 수량은 양수여야 합니다: " + quantity);
+        if (quantity == null || quantity.signum() <= 0 || quantity.stripTrailingZeros().scale() > 0) {
+            throw new IllegalArgumentException("소비 수량은 1주 이상의 정수여야 합니다: " + quantity);
         }
         if (quantity.compareTo(this.remainingQuantity) > 0) {
             throw new IllegalArgumentException("잔여 수량을 초과하여 소비할 수 없습니다: 잔여="
