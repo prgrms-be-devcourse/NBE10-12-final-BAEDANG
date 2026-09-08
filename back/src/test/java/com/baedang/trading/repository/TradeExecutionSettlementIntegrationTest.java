@@ -171,7 +171,7 @@ class TradeExecutionSettlementIntegrationTest {
         return orders.saveAndFlush(TradeOrder.pendingLimitOrder(account, stock, UUID.randomUUID(), side,
                 new BigDecimal("3"), new BigDecimal(side == OrderSide.BUY ? "1000" : "1"),
                 side == OrderSide.BUY ? calculator().initialReservedCash(country, new BigDecimal("1000"),
-                        new BigDecimal("3"), new BigDecimal("1500")) : BigDecimal.ZERO, AT, AT.plusHours(6)));
+                        new BigDecimal("3"), new BigDecimal("1500")) : BigDecimal.ZERO, AT, AT.plusHours(6), new BigDecimal(side == OrderSide.BUY ? "1000" : "1"), "USD", BigDecimal.ONE));
     }
 
     private LimitOrderSettlementCalculator calculator() {

@@ -4,7 +4,7 @@ import com.baedang.trading.entity.EntryType;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.TradeOrder;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.stock.entity.Stock;
@@ -139,7 +139,7 @@ class LedgerServiceTest {
                 ? new BigDecimal("303")
                 : new BigDecimal("291");
         TradeExecution execution = TradeExecution.market(order,
-                new OrderAmount(new BigDecimal("100"), BigDecimal.ONE,
+                new MarketOrderAmount(new BigDecimal("100"), BigDecimal.ONE,
                         BigDecimal.ZERO, new BigDecimal("300"), new BigDecimal("300"), fee, tax, net, BigDecimal.ZERO),
                 ExecutionRateEvidence.krw(OPENED_AT), OPENED_AT);
         ReflectionTestUtils.setField(execution, "executionId", 5L);

@@ -1,9 +1,19 @@
 package com.baedang.user.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 /**
  * 모의 투자 계좌. <b>회차(round_no)당 한 개</b>입니다.
@@ -108,6 +118,29 @@ public class Account {
     public void creditMarketSell(BigDecimal amount) {
         requirePositive(amount);
         this.cashBalance = this.cashBalance.add(amount);
+    }
+
+    public void reserveCash(BigDecimal amount) {
+        requirePositive(amount);
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("동결액은 원 단위여야 합니다");
+        }
+        if (status != AccountStatus.ACTIVE || availableCash().compareTo(amount) < 0) {
+            throw new IllegalStateException("예수금을 동결할 수 없습니다");
+        }
+        lockedCash = lockedCash.add(amount);
+    }
+
+    /** 동결 해제는 예수금 증가가 아닙니다. */
+    public void releaseCash(BigDecimal amount) {
+        requirePositive(amount);
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("해제액은 원 단위여야 합니다");
+        }
+        if (lockedCash.compareTo(amount) < 0) {
+            throw new IllegalStateException("동결액보다 많이 해제할 수 없습니다");
+        }
+        lockedCash = lockedCash.subtract(amount);
     }
 
     private void requirePositive(BigDecimal amount) {

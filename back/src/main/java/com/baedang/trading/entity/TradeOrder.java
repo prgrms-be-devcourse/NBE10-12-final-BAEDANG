@@ -1,13 +1,22 @@
 package com.baedang.trading.entity;
 
-import jakarta.persistence.*;
 import com.baedang.trading.model.OrderClosureResult;
-
-import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Objects;
 import java.util.UUID;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 /**
  * 주문 + 체결. {@code order} 는 SQL 예약어라 테이블명이 {@code trade_order} 입니다.
@@ -107,6 +116,14 @@ public class TradeOrder {
 
     @Column(name = "limit_price", precision = 19, scale = 4)
     private BigDecimal limitPrice;
+    /** 접수 시 사용자가 입력한 통화와 단가. 멱등 비교는 환산 가격이 아닌 이 값으로 합니다. */
+    @Column(name = "requested_limit_price", precision = 19, scale = 4)
+    private BigDecimal requestedLimitPrice;
+    @Column(name = "requested_limit_currency", length = 3)
+    private String requestedLimitCurrency;
+    /** 지정가 환산 및 최초 동결의 근거. 이후 체결 환율을 고정하지 않습니다. */
+    @Column(name = "acceptance_exchange_rate", precision = 19, scale = 6)
+    private BigDecimal acceptanceExchangeRate;
     @Column(name = "filled_quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal filledQuantity = BigDecimal.ZERO;
     @Column(name = "execution_count", nullable = false)
@@ -181,7 +198,10 @@ public class TradeOrder {
                                                OrderSide side, BigDecimal quantity, BigDecimal limitPrice,
                                                BigDecimal reservedCash,
                                                OffsetDateTime orderedAt,
-                                               OffsetDateTime expiresAt) {
+                                               OffsetDateTime expiresAt,
+                                               BigDecimal requestedLimitPrice, String requestedLimitCurrency,
+                                               BigDecimal acceptanceExchangeRate) {
+        validateAcceptance(requestedLimitPrice, requestedLimitCurrency, acceptanceExchangeRate);
         if (accountId == null || accountId <= 0 || stockId == null || stockId <= 0 || clientOrderId == null
                 || side == null || quantity == null || quantity.signum() <= 0 || limitPrice == null || limitPrice.signum() <= 0
                 || reservedCash == null || reservedCash.signum() < 0 || (side == OrderSide.SELL && reservedCash.signum() != 0)
@@ -194,6 +214,9 @@ public class TradeOrder {
         TradeOrder order = new TradeOrder(accountId, stockId, clientOrderId, side, quantity, OrderStatus.PENDING, orderedAt);
         order.orderType = OrderType.LIMIT;
         order.limitPrice = limitPrice;
+        order.requestedLimitPrice = requestedLimitPrice;
+        order.requestedLimitCurrency = requestedLimitCurrency;
+        order.acceptanceExchangeRate = acceptanceExchangeRate;
         order.reservedCash = reservedCash;
         order.expiresAt = expiresAt;
         order.grossAmount = BigDecimal.ZERO;
@@ -202,6 +225,37 @@ public class TradeOrder {
         order.netAmount = BigDecimal.ZERO;
         return order;
     }
+
+    public static TradeOrder rejectedLimitOrder(Long accountId, Long stockId, UUID clientOrderId,
+            OrderSide side, BigDecimal quantity, BigDecimal limitPrice, BigDecimal requestedPrice,
+            String requestedCurrency, BigDecimal rate, String reason, OffsetDateTime at) {
+        validateAcceptance(requestedPrice, requestedCurrency, rate);
+        TradeOrder order = new TradeOrder(accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, at);
+        order.orderType = OrderType.LIMIT;
+        order.limitPrice = limitPrice;
+        order.requestedLimitPrice = requestedPrice;
+        order.requestedLimitCurrency = requestedCurrency;
+        order.acceptanceExchangeRate = rate;
+        order.rejectReason = reason;
+        order.closedAt = at;
+        order.grossAmount = BigDecimal.ZERO;
+        order.fee = BigDecimal.ZERO;
+        order.tax = BigDecimal.ZERO;
+        order.netAmount = BigDecimal.ZERO;
+        return order;
+    }
+
+    private static void validateAcceptance(BigDecimal price, String currency, BigDecimal rate) {
+        if (price == null || price.signum() <= 0 || !("KRW".equals(currency) || "USD".equals(currency))
+                || !isRepresentableAtScale(price, "KRW".equals(currency) ? 0 : 2)
+                || rate == null || rate.signum() <= 0 || !isRepresentableAtScale(rate, 6)) {
+            throw new IllegalArgumentException("지정가 원본 입력과 접수 환율이 올바르지 않습니다");
+        }
+    }
+
+    public BigDecimal getRequestedLimitPrice() { return requestedLimitPrice; }
+    public String getRequestedLimitCurrency() { return requestedLimitCurrency; }
+    public BigDecimal getAcceptanceExchangeRate() { return acceptanceExchangeRate; }
 
     public boolean isActive() {
         return status == OrderStatus.PENDING || status == OrderStatus.PARTIALLY_FILLED;
@@ -218,7 +272,7 @@ public class TradeOrder {
      */
     public void applyExecution(TradeExecution execution, BigDecimal nextReservedCash) {
         if (orderType != OrderType.LIMIT || !isActive() || execution == null || execution.getExecutionId() == null
-                || !java.util.Objects.equals(orderId, execution.getOrderId())
+                || !Objects.equals(orderId, execution.getOrderId())
                 || execution.getSequenceNo() != executionCount + 1
                 || execution.getExecutedAt().isBefore(orderedAt) || !execution.getExecutedAt().isBefore(expiresAt)
                 || (lastExecutedAt != null && execution.getExecutedAt().isBefore(lastExecutedAt))

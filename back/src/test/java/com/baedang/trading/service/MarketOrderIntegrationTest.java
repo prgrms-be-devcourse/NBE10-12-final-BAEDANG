@@ -12,21 +12,23 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.OrderQuoteResponse;
-import com.baedang.trading.dto.OrderResponse;
-import com.baedang.trading.dto.PlaceOrderRequest;
+import com.baedang.trading.dto.MarketOrderRequest;
+import com.baedang.trading.dto.MarketOrderQuoteResponse;
+import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.entity.EntryType;
 import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.LedgerEntry;
-import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.entity.OrderStatus;
+import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
@@ -36,10 +38,12 @@ import com.baedang.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -53,9 +57,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -92,8 +99,9 @@ class MarketOrderIntegrationTest {
     @MockitoBean MarketCalendarPort marketCalendarPort;
 
     @Autowired MarketOrderService marketOrderService;
+    @Autowired OrderReadService orderReadService;
     @Autowired MarketOrderTransactionService marketOrderTransactionService;
-    @Autowired OrderQuoteService orderQuoteService;
+    @Autowired MarketOrderQuoteService marketOrderQuoteService;
     @Autowired UserRepository userRepository;
     @Autowired AccountRepository accountRepository;
     @Autowired StockRepository stockRepository;
@@ -101,7 +109,7 @@ class MarketOrderIntegrationTest {
     @Autowired HoldingRepository holdingRepository;
     @Autowired TradeOrderRepository tradeOrderRepository;
     @Autowired LedgerEntryRepository ledgerEntryRepository;
-    @Autowired com.baedang.trading.repository.TradeExecutionRepository tradeExecutionRepository;
+    @Autowired TradeExecutionRepository tradeExecutionRepository;
     @Autowired MarketOrderSettlementCalculator amountCalculator;
     @Autowired LedgerService ledgerService;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -119,9 +127,9 @@ class MarketOrderIntegrationTest {
     @Test
     void 시장가_매수는_주문_잔액_보유수량_원장을_한번에_확정한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "2");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
 
-        OrderResponse response = marketOrderService.place(fixture.userId(), request);
+        MarketOrderResponse response = marketOrderService.place(fixture.userId(), request);
 
         Account account = activeAccount(fixture.userId());
         Holding holding = holdingRepository
@@ -154,7 +162,7 @@ class MarketOrderIntegrationTest {
         accountRepository.saveAndFlush(oldAccount);
         Account nextAccount = accountRepository.save(Account.open(
                 fixture.userId(), 2, new BigDecimal("50000"), OffsetDateTime.now(ZoneOffset.UTC)));
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderRequest request = request(fixture, "BUY", "1");
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
@@ -172,8 +180,8 @@ class MarketOrderIntegrationTest {
     @Test
     void 초기화_전에_체결된_주문의_멱등_재요청은_기존_결과를_반환한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
-        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        MarketOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
         Account oldAccount = accountRepository.findById(fixture.accountId()).orElseThrow();
         oldAccount.close(OffsetDateTime.now(ZoneOffset.UTC));
         accountRepository.saveAndFlush(oldAccount);
@@ -181,7 +189,7 @@ class MarketOrderIntegrationTest {
                 fixture.userId(), 2, new BigDecimal("50000"), OffsetDateTime.now(ZoneOffset.UTC)));
         clearInvocations(marketSessionProvider, exchangeRateProvider);
 
-        OrderResponse retried = marketOrderService.place(fixture.userId(), request);
+        MarketOrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         assertThat(retried.orderId()).isEqualTo(first.orderId());
         assertThat(retried.status()).isEqualTo(first.status());
@@ -194,8 +202,8 @@ class MarketOrderIntegrationTest {
     @Test
     void 탈퇴한_회원의_기존_주문_멱등_재요청은_기존_결과를_반환한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
-        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        MarketOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
 
         User user = userRepository.findById(fixture.userId()).orElseThrow();
         user.withdraw();
@@ -204,7 +212,7 @@ class MarketOrderIntegrationTest {
         account.close(OffsetDateTime.now(ZoneOffset.UTC));
         accountRepository.saveAndFlush(account);
 
-        OrderResponse retried = marketOrderService.place(fixture.userId(), request);
+        MarketOrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         assertThat(retried.orderId()).isEqualTo(first.orderId());
         assertThat(retried.status()).isEqualTo(first.status());
@@ -221,9 +229,9 @@ class MarketOrderIntegrationTest {
                 new BigDecimal("1000000"), new BigDecimal("10"),
                 MarketCountry.US, "NASDAQ", "USD", symbol);
 
-        OrderResponse response = marketOrderService.place(
+        MarketOrderResponse response = marketOrderService.place(
                 usFixture.userId(),
-                new PlaceOrderRequest(
+                new MarketOrderRequest(
                         usFixture.accountId(), UUID.randomUUID().toString(), symbol.toLowerCase(),
                         MarketCountry.US.name(), "BUY", "1"));
 
@@ -241,7 +249,7 @@ class MarketOrderIntegrationTest {
                 BigDecimal.ZERO, new BigDecimal("40000"),
                 OffsetDateTime.now(ZoneOffset.UTC)));
 
-        OrderResponse response = marketOrderService.place(
+        MarketOrderResponse response = marketOrderService.place(
                 fixture.userId(), request(fixture, "SELL", "2"));
 
         Account updated = activeAccount(fixture.userId());
@@ -265,7 +273,7 @@ class MarketOrderIntegrationTest {
     @Test
     void 업무_검증_실패는_REJECTED로_기록하고_잔액과_원장을_변경하지_않는다() {
         Fixture fixture = createKrFixture(new BigDecimal("10000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "2");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOf(BusinessException.class)
@@ -292,7 +300,13 @@ class MarketOrderIntegrationTest {
         when(exchangeRateProvider.currentUsdKrwSnapshot())
                 .thenReturn(snapshot(new BigDecimal("1300")), snapshot(new BigDecimal("1400")));
 
-        marketOrderService.place(fixture.userId(), request(fixture, "BUY", "10"));
+        var first = marketOrderService.place(fixture.userId(), request(fixture, "BUY", "10"));
+        var executionPage = orderReadService.executions(fixture.userId(), first.orderId(), null, 20);
+        assertThat(executionPage.orderId()).isEqualTo(first.orderId());
+        assertThat(executionPage.stock().symbol()).isEqualTo(fixture.symbol());
+        assertThat(executionPage.stock().marketCountry()).isEqualTo(MarketCountry.US);
+        var execution = executionPage.items().getFirst();
+        assertThat(execution.price()).isEqualTo("100.00");
         QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
         OffsetDateTime collectedAt = OffsetDateTime.now(ZoneOffset.UTC);
         quote.updatePrice(new BigDecimal("200"), quote.getCurrency(), collectedAt, collectedAt);
@@ -338,13 +352,13 @@ class MarketOrderIntegrationTest {
 
             BigDecimal unroundedGrossKrw = price.multiply(rate);
             BigDecimal grossKrw = unroundedGrossKrw.setScale(
-                    0, java.math.RoundingMode.HALF_UP);
+                    0, RoundingMode.HALF_UP);
             expectedUsdPurchaseAmount = expectedUsdPurchaseAmount.add(price);
             expectedKrwPurchaseAmount = expectedKrwPurchaseAmount.add(unroundedGrossKrw);
             expectedGrossAmountKrw = expectedGrossAmountKrw.add(grossKrw);
             expectedFee = expectedFee.add(
                     grossKrw.multiply(new BigDecimal("0.0001"))
-                            .setScale(0, java.math.RoundingMode.HALF_UP));
+                            .setScale(0, RoundingMode.HALF_UP));
         }
 
         Holding holding = holdingRepository
@@ -359,10 +373,10 @@ class MarketOrderIntegrationTest {
         assertThat(holding.getUsdPurchaseAmount()).isEqualByComparingTo(expectedUsdPurchaseAmount);
         assertThat(holding.getKrwPurchaseAmount()).isEqualByComparingTo(expectedKrwPurchaseAmount);
         assertThat(holding.getAvgBuyPrice()).isEqualByComparingTo(
-                expectedUsdPurchaseAmount.divide(new BigDecimal("10"), 4, java.math.RoundingMode.HALF_UP));
+                expectedUsdPurchaseAmount.divide(new BigDecimal("10"), 4, RoundingMode.HALF_UP));
         assertThat(holding.getAvgExchangeRate()).isEqualByComparingTo(
                 expectedKrwPurchaseAmount.divide(
-                        expectedUsdPurchaseAmount, 6, java.math.RoundingMode.HALF_UP));
+                        expectedUsdPurchaseAmount, 6, RoundingMode.HALF_UP));
         assertThat(ledgerDebit)
                 .isEqualByComparingTo(expectedGrossAmountKrw.add(expectedFee));
     }
@@ -398,11 +412,11 @@ class MarketOrderIntegrationTest {
     @Test
     void 동일한_clientOrderId_재시도는_한번만_체결한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderRequest request = request(fixture, "BUY", "1");
 
-        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
         clearInvocations(marketSessionProvider, exchangeRateProvider);
-        OrderResponse retried = marketOrderService.place(fixture.userId(), request);
+        MarketOrderResponse retried = marketOrderService.place(fixture.userId(), request);
 
         Account account = activeAccount(fixture.userId());
         assertThat(retried).isEqualTo(first);
@@ -416,13 +430,13 @@ class MarketOrderIntegrationTest {
     @Test
     void 멱등_재시도는_후속_주문과_무관하게_최초_체결_직후_잔액을_반환한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest firstRequest = request(fixture, "BUY", "1");
+        MarketOrderRequest firstRequest = request(fixture, "BUY", "1");
 
-        OrderResponse first = marketOrderService.place(fixture.userId(), firstRequest);
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), firstRequest);
         marketOrderService.place(fixture.userId(),
-                new PlaceOrderRequest(fixture.accountId(), UUID.randomUUID().toString(), fixture.symbol(),
+                new MarketOrderRequest(fixture.accountId(), UUID.randomUUID().toString(), fixture.symbol(),
                         fixture.marketCountry().name(), "BUY", "1"));
-        OrderResponse retried = marketOrderService.place(fixture.userId(), firstRequest);
+        MarketOrderResponse retried = marketOrderService.place(fixture.userId(), firstRequest);
 
         assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("29998");
         assertThat(retried.orderId()).isEqualTo(first.orderId());
@@ -441,7 +455,7 @@ class MarketOrderIntegrationTest {
                 new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ZERO,
                 new BigDecimal("10001"), now));
 
-        PlaceOrderRequest request = new PlaceOrderRequest(
+        MarketOrderRequest request = new MarketOrderRequest(
                 fixture.accountId(), clientOrderId.toString(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "1");
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
@@ -466,7 +480,7 @@ class MarketOrderIntegrationTest {
         OffsetDateTime collectedAt = OffsetDateTime.now(ZoneOffset.UTC);
         quoteSnapshotRepository.save(new QuoteSnapshot(
                 fixture.stockId(), new BigDecimal("10000"), "USD", collectedAt, collectedAt));
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderRequest request = request(fixture, "BUY", "1");
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
@@ -491,7 +505,7 @@ class MarketOrderIntegrationTest {
             return true;
         });
 
-        OrderQuoteResponse response = orderQuoteService.getQuote(
+        MarketOrderQuoteResponse response = marketOrderQuoteService.getQuote(
                 fixture.userId(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "1");
 
         assertThat(response.executable()).isTrue();
@@ -501,7 +515,7 @@ class MarketOrderIntegrationTest {
     @Test
     void 주문_유스케이스는_외부_트랜잭션_안에서_실행할_수_없다() {
         TransactionTemplate outerTransaction = new TransactionTemplate(transactionManager);
-        PlaceOrderRequest request = request("005930", MarketCountry.KR, "BUY", "1");
+        MarketOrderRequest request = request("005930", MarketCountry.KR, "BUY", "1");
 
         assertThatThrownBy(() -> outerTransaction.executeWithoutResult(
                 status -> marketOrderService.place(1L, request)))
@@ -533,7 +547,7 @@ class MarketOrderIntegrationTest {
         Stock suspendedStock = stockRepository.findById(suspended.stockId()).orElseThrow();
         suspendedStock.updateFlags(true, false, false);
         stockRepository.save(suspendedStock);
-        PlaceOrderRequest request = request(suspended, "BUY", "1");
+        MarketOrderRequest request = request(suspended, "BUY", "1");
         clearInvocations(marketSessionProvider, exchangeRateProvider);
 
         assertThatThrownBy(() -> marketOrderService.place(suspended.userId(), request))
@@ -546,7 +560,7 @@ class MarketOrderIntegrationTest {
 
         suspendedStock.updateFlags(false, false, false);
         stockRepository.save(suspendedStock);
-        OrderResponse retried = marketOrderService.place(suspended.userId(), request);
+        MarketOrderResponse retried = marketOrderService.place(suspended.userId(), request);
 
         assertThat(retried.status()).isEqualTo("FILLED");
     }
@@ -557,7 +571,7 @@ class MarketOrderIntegrationTest {
         Stock liquidationStock = stockRepository.findById(liquidation.stockId()).orElseThrow();
         liquidationStock.updateFlags(false, true, false);
         stockRepository.save(liquidationStock);
-        PlaceOrderRequest liquidationRequest = request(liquidation, "BUY", "1");
+        MarketOrderRequest liquidationRequest = request(liquidation, "BUY", "1");
         assertThatThrownBy(() -> marketOrderService.place(liquidation.userId(), liquidationRequest))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode())
@@ -567,7 +581,7 @@ class MarketOrderIntegrationTest {
         Stock outsideStock = stockRepository.findById(outsideUniverse.stockId()).orElseThrow();
         outsideStock.clearRanking();
         stockRepository.save(outsideStock);
-        PlaceOrderRequest outsideRequest = request(outsideUniverse, "BUY", "1");
+        MarketOrderRequest outsideRequest = request(outsideUniverse, "BUY", "1");
         assertThatThrownBy(() -> marketOrderService.place(outsideUniverse.userId(), outsideRequest))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode())
@@ -601,7 +615,7 @@ class MarketOrderIntegrationTest {
     @Test
     void 저장범위_초과는_금융상태를_변경하지_않고_같은_ID로_재시도할_수_있다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("500000000000000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "2");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_SETTLEMENT_AMOUNT);
@@ -614,10 +628,10 @@ class MarketOrderIntegrationTest {
         assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("50000");
 
         QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
-        OffsetDateTime at = java.time.Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime at = Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
         quote.updatePrice(new BigDecimal("10000"), quote.getCurrency(), at, at);
         quoteSnapshotRepository.save(quote);
-        OrderResponse result = marketOrderService.place(fixture.userId(), request);
+        MarketOrderResponse result = marketOrderService.place(fixture.userId(), request);
         assertThat(tradeExecutionRepository.countByOrderId(result.orderId())).isEqualTo(1);
         assertThat(marketOrderService.place(fixture.userId(), request)).isEqualTo(result);
     }
@@ -642,10 +656,10 @@ class MarketOrderIntegrationTest {
         String clientOrderId = UUID.randomUUID().toString();
 
         marketOrderService.place(first.userId(),
-                new PlaceOrderRequest(first.accountId(), clientOrderId, first.symbol(),
+                new MarketOrderRequest(first.accountId(), clientOrderId, first.symbol(),
                         first.marketCountry().name(), "BUY", "1"));
         marketOrderService.place(second.userId(),
-                new PlaceOrderRequest(second.accountId(), clientOrderId, second.symbol(),
+                new MarketOrderRequest(second.accountId(), clientOrderId, second.symbol(),
                         second.marketCountry().name(), "BUY", "1"));
 
         TradeOrder firstOrder = tradeOrderRepository.findByAccountIdAndClientOrderId(
@@ -662,7 +676,7 @@ class MarketOrderIntegrationTest {
                 fixture.accountId(), new BigDecimal("50000"), "모의투자금 지급",
                 OffsetDateTime.now(ZoneOffset.UTC)));
 
-        OrderResponse response = marketOrderService.place(
+        MarketOrderResponse response = marketOrderService.place(
                 fixture.userId(), request(fixture, "BUY", "2"));
 
         Account account = activeAccount(fixture.userId());
@@ -680,8 +694,8 @@ class MarketOrderIntegrationTest {
     @Test
     void 같은_clientOrderId에_다른_주문내용을_보내면_충돌로_거절한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest first = request(fixture, "BUY", "1");
-        PlaceOrderRequest changed = new PlaceOrderRequest(
+        MarketOrderRequest first = request(fixture, "BUY", "1");
+        MarketOrderRequest changed = new MarketOrderRequest(
                 fixture.accountId(), first.clientOrderId(), fixture.symbol(), fixture.marketCountry().name(), "BUY", "2");
 
         marketOrderService.place(fixture.userId(), first);
@@ -700,8 +714,8 @@ class MarketOrderIntegrationTest {
     @Test
     void 같은_clientOrderId에_다른_심볼을_보내면_외부조회없이_충돌로_거절한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest first = request(fixture, "BUY", "1");
-        PlaceOrderRequest changed = new PlaceOrderRequest(
+        MarketOrderRequest first = request(fixture, "BUY", "1");
+        MarketOrderRequest changed = new MarketOrderRequest(
                 fixture.accountId(), first.clientOrderId(), "OTHER", fixture.marketCountry().name(), "BUY", "1");
         marketOrderService.place(fixture.userId(), first);
         clearInvocations(marketSessionProvider, exchangeRateProvider);
@@ -720,8 +734,8 @@ class MarketOrderIntegrationTest {
     @Test
     void 동시_매수는_계좌_락으로_이중_차감을_방지한다() throws Exception {
         Fixture fixture = createKrFixture(new BigDecimal("15000"), new BigDecimal("10000"));
-        PlaceOrderRequest first = request(fixture, "BUY", "1");
-        PlaceOrderRequest second = request(fixture, "BUY", "1");
+        MarketOrderRequest first = request(fixture, "BUY", "1");
+        MarketOrderRequest second = request(fixture, "BUY", "1");
         CountDownLatch start = new CountDownLatch(1);
 
         try (var executor = Executors.newFixedThreadPool(2)) {
@@ -731,9 +745,9 @@ class MarketOrderIntegrationTest {
 
             Object a = firstResult.get();
             Object b = secondResult.get();
-            assertThat(java.util.List.of(a, b).stream().filter(OrderResponse.class::isInstance).count())
+            assertThat(List.of(a, b).stream().filter(MarketOrderResponse.class::isInstance).count())
                     .isEqualTo(1);
-            assertThat(java.util.List.of(a, b).stream()
+            assertThat(List.of(a, b).stream()
                     .filter(BusinessException.class::isInstance)
                     .map(BusinessException.class::cast)
                     .map(BusinessException::getErrorCode))
@@ -750,7 +764,7 @@ class MarketOrderIntegrationTest {
     @Test
     void 락_대기중_같은_clientOrderId가_체결되면_만료검사보다_저장결과를_먼저_반환한다() throws Exception {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderRequest request = request(fixture, "BUY", "1");
         UUID clientOrderId = UUID.fromString(request.clientOrderId());
         CountDownLatch accountLocked = new CountDownLatch(1);
         CountDownLatch contextPrepared = new CountDownLatch(1);
@@ -768,7 +782,7 @@ class MarketOrderIntegrationTest {
                         await(contextPrepared);
                         pauseForContextExpiry();
 
-                        OffsetDateTime orderedAt = java.time.Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
+                        OffsetDateTime orderedAt = Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
                         TradeOrder order = tradeOrderRepository.save(TradeOrder.filledMarketOrder(
                                 fixture.accountId(), fixture.stockId(), clientOrderId, OrderSide.BUY,
                                 BigDecimal.ONE, new BigDecimal("10000"), orderedAt, BigDecimal.ONE,
@@ -780,7 +794,7 @@ class MarketOrderIntegrationTest {
                                 BigDecimal.ZERO, new BigDecimal("10000"), orderedAt));
                         var amount = amountCalculator.calculate(MarketCountry.KR, OrderSide.BUY,
                                 new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ONE);
-                        var execution = tradeExecutionRepository.save(com.baedang.trading.entity.TradeExecution.market(
+                        var execution = tradeExecutionRepository.save(TradeExecution.market(
                                 order, amount, ExecutionRateEvidence.krw(orderedAt), orderedAt));
                         ledgerEntryRepository.save(LedgerEntry.execution(
                                 order, execution, account.getCashBalance(), "동시 멱등 테스트"));
@@ -788,7 +802,7 @@ class MarketOrderIntegrationTest {
                     }));
 
             assertThat(accountLocked.await(5, TimeUnit.SECONDS)).isTrue();
-            Future<OrderResponse> retry = executor.submit(
+            Future<MarketOrderResponse> retry = executor.submit(
                     () -> marketOrderService.place(fixture.userId(), request));
 
             assertThat(retry.get().orderId()).isEqualTo(firstOrderId.get());
@@ -805,12 +819,12 @@ class MarketOrderIntegrationTest {
         var request = request(fixture, "BUY", "1");
         var command = new MarketOrderCommand(fixture.accountId(), UUID.fromString(request.clientOrderId()),
                 new OrderTerms(fixture.symbol(), MarketCountry.US, OrderSide.BUY, BigDecimal.ONE));
-        var now = java.time.Clock.systemUTC().instant();
+        var now = Clock.systemUTC().instant();
         var at = now.atOffset(ZoneOffset.UTC);
         var evidence = new ExecutionRateEvidence(new BigDecimal("1300"),
                 at.minusSeconds(expiry.equals("ttl") ? 60 : 10), at.minusMinutes(2),
                 expiry.equals("source") ? at.minusSeconds(1) : at.plusHours(1));
-        var context = new MarketOrderExecutionContext(MarketCountry.US, true, Instant.MAX, evidence, now);
+        var context = new OrderMarketContext(MarketCountry.US, true, Instant.MAX, evidence, now);
         clearInvocations(exchangeRateProvider, marketSessionProvider);
 
         assertThatThrownBy(() -> marketOrderTransactionService.execute(fixture.userId(), command, context))
@@ -830,7 +844,7 @@ class MarketOrderIntegrationTest {
         clearInvocations(exchangeRateProvider, marketSessionProvider);
         // 동시 멱등 경로도 저장 결과를 환율 재검증보다 먼저 반환합니다.
         var replay = marketOrderTransactionService.execute(fixture.userId(), command, context);
-        assertThat(new OrderResponseAssembler().assemble(replay.receipt())).isEqualTo(response);
+        assertThat(new MarketOrderResponseAssembler().assemble(replay.receipt())).isEqualTo(response);
         verifyNoInteractions(exchangeRateProvider, marketSessionProvider);
     }
 
@@ -850,7 +864,7 @@ class MarketOrderIntegrationTest {
     }
 
     private ExecutionExchangeRateSnapshot snapshot(BigDecimal rate) {
-        var at = java.time.Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
+        var at = Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
         return new ExecutionExchangeRateSnapshot(rate, at, at, at.plusMinutes(1));
     }
 
@@ -874,7 +888,7 @@ class MarketOrderIntegrationTest {
         }
     }
 
-    private Object invokeAfter(CountDownLatch start, Long userId, PlaceOrderRequest request) {
+    private Object invokeAfter(CountDownLatch start, Long userId, MarketOrderRequest request) {
         try {
             start.await();
             return marketOrderService.place(userId, request);
@@ -951,17 +965,17 @@ class MarketOrderIntegrationTest {
     @Test
     void 같은_체결과_정상원장을_두번_기록할_수_없다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, "BUY", "2");
-        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        MarketOrderRequest request = request(fixture, "BUY", "2");
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
         TradeOrder order = tradeOrderRepository.findById(first.orderId()).orElseThrow();
         var amount = amountCalculator.calculate(MarketCountry.KR, OrderSide.BUY, new BigDecimal("10000"), new BigDecimal("2"), BigDecimal.ONE);
-        assertThatThrownBy(() -> tradeExecutionRepository.save(com.baedang.trading.entity.TradeExecution.market(
+        assertThatThrownBy(() -> tradeExecutionRepository.save(TradeExecution.market(
                 order, amount, ExecutionRateEvidence.krw(order.getOrderedAt()), order.getOrderedAt())))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class);
         var execution = tradeExecutionRepository.findByOrderIdAndExecutionKey(order.getOrderId(), order.getClientOrderId()).orElseThrow();
         assertThatThrownBy(() -> new TransactionTemplate(transactionManager).executeWithoutResult(status ->
                 ledgerService.recordBuy(order, execution, new BigDecimal("29998"), stockRepository.findById(fixture.stockId()).orElseThrow())))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(tradeExecutionRepository.countByOrderId(order.getOrderId())).isEqualTo(1);
         assertThat(marketOrderService.place(fixture.userId(), request)).isEqualTo(first);
         assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
@@ -979,29 +993,29 @@ class MarketOrderIntegrationTest {
                 new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ZERO, new BigDecimal("10001"), at));
         var amounts = amountCalculator.calculate(MarketCountry.KR, OrderSide.BUY,
                 new BigDecimal("10000"), BigDecimal.ONE, BigDecimal.ONE);
-        var execution = tradeExecutionRepository.save(com.baedang.trading.entity.TradeExecution.market(
+        var execution = tradeExecutionRepository.save(TradeExecution.market(
                 order, amounts, ExecutionRateEvidence.krw(at), at));
-        OrderResponse otherOrder = marketOrderService.place(other.userId(), request(other, "BUY", "1"));
+        MarketOrderResponse otherOrder = marketOrderService.place(other.userId(), request(other, "BUY", "1"));
         String insert = """
                 INSERT INTO ledger_entry (account_id, order_id, execution_id, entry_type, amount, balance_after,
                                           exchange_rate, occurred_at)
                 VALUES (?, ?, ?, 'BUY', -10001, 39999, 1, ?)
                 """;
         assertThatThrownBy(() -> jdbcTemplate.update(insert, other.accountId(), order.getOrderId(), execution.getExecutionId(), at))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("fk_ledger_order_account");
         assertThatThrownBy(() -> jdbcTemplate.update(insert, other.accountId(), otherOrder.orderId(), execution.getExecutionId(), at))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("fk_ledger_execution_order");
         assertThat(jdbcTemplate.update(insert, owner.accountId(), order.getOrderId(), execution.getExecutionId(), at)).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(owner.accountId())).isEqualTo(1);
     }
 
     @ParameterizedTest
-    @org.junit.jupiter.params.provider.EnumSource(OrderSide.class)
+    @EnumSource(OrderSide.class)
     void 체결_연결이_없는_원장만으로는_시장가_멱등_응답을_만들지_않는다(OrderSide side) {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        PlaceOrderRequest request = request(fixture, side.name(), "2");
+        MarketOrderRequest request = request(fixture, side.name(), "2");
         OffsetDateTime at = Instant.parse("2026-09-01T00:00:00Z").atOffset(ZoneOffset.UTC);
         var amount = amountCalculator.calculate(MarketCountry.KR, side, new BigDecimal("10000"),
                 new BigDecimal("2"), BigDecimal.ONE);
@@ -1033,8 +1047,8 @@ class MarketOrderIntegrationTest {
         BigDecimal rate = new BigDecimal(rateText);
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot(rate));
         Fixture fixture = createFixture(new BigDecimal("500000"), new BigDecimal("88.33"), MarketCountry.US, "NASDAQ", "USD");
-        PlaceOrderRequest request = request(fixture, "BUY", "1");
-        OrderResponse first = marketOrderService.place(fixture.userId(), request);
+        MarketOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
         var execution = tradeExecutionRepository.findByOrderIdAndExecutionKey(first.orderId(), UUID.fromString(request.clientOrderId())).orElseThrow();
         assertThat(tradeOrderRepository.findById(first.orderId()).orElseThrow().getExchangeRate()).isEqualByComparingTo(rate);
         assertThat(execution.getExchangeRate()).isEqualByComparingTo(rate);
@@ -1055,7 +1069,7 @@ class MarketOrderIntegrationTest {
         return accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE).orElseThrow();
     }
 
-    private TradeOrder assertRejected(Fixture fixture, PlaceOrderRequest request, ErrorCode expected) {
+    private TradeOrder assertRejected(Fixture fixture, MarketOrderRequest request, ErrorCode expected) {
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
@@ -1071,19 +1085,19 @@ class MarketOrderIntegrationTest {
         return rejected;
     }
 
-    private PlaceOrderRequest request(Fixture fixture, String side, String quantity) {
-        return new PlaceOrderRequest(
+    private MarketOrderRequest request(Fixture fixture, String side, String quantity) {
+        return new MarketOrderRequest(
                 fixture.accountId(), UUID.randomUUID().toString(), fixture.symbol(),
                 fixture.marketCountry().name(), side, quantity);
     }
 
-    private PlaceOrderRequest request(
+    private MarketOrderRequest request(
             String symbol,
             MarketCountry marketCountry,
             String side,
             String quantity
     ) {
-        return new PlaceOrderRequest(
+        return new MarketOrderRequest(
                 1L, UUID.randomUUID().toString(), symbol, marketCountry.name(), side, quantity);
     }
 

@@ -2,7 +2,7 @@ package com.baedang.trading.entity;
 
 import com.baedang.trading.model.ExecutionAmounts;
 import com.baedang.trading.model.ExecutionRateEvidence;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.stock.entity.MarketCountry;
 import jakarta.persistence.*;
 
@@ -56,7 +56,7 @@ public class TradeExecution {
     protected TradeExecution() { }
 
     /** 검증 시각은 DB 저장용 마이크로초 절삭 전 시각입니다. 환율 유효기간을 늘리거나 축소하지 않습니다. */
-    public static TradeExecution market(TradeOrder order, OrderAmount amount,
+    public static TradeExecution market(TradeOrder order, MarketOrderAmount amount,
                                         ExecutionRateEvidence rate, OffsetDateTime validatedAt) {
         if (order == null || amount == null || order.getOrderType() != OrderType.MARKET || order.getStatus() != OrderStatus.FILLED
                 || order.getExecutedPrice().compareTo(amount.executedPrice()) != 0

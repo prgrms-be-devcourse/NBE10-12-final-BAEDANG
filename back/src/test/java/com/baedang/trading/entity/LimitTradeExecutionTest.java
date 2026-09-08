@@ -9,11 +9,12 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import static org.assertj.core.api.Assertions.*;
 
-class TradeOrderExecutionTest {
+class LimitTradeExecutionTest {
     private static final OffsetDateTime AT = OffsetDateTime.parse("2026-09-03T01:00:00Z");
     private static final ExecutionRateEvidence RATE = new ExecutionRateEvidence(
             BigDecimal.ONE, AT, AT, AT.plusMinutes(1));
@@ -22,7 +23,7 @@ class TradeOrderExecutionTest {
     void 지정가_접수시각이_없으면_입력검증_예외로_거절한다() {
         assertThatThrownBy(() -> TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(),
                 OrderSide.BUY, BigDecimal.ONE, new BigDecimal("100"), new BigDecimal("100"),
-                null, AT.plusHours(6)))
+                null, AT.plusHours(6), new BigDecimal("100"), "USD", BigDecimal.ONE))
                 .isExactlyInstanceOf(IllegalArgumentException.class)
                 .hasMessage("지정가 접수 근거가 올바르지 않습니다");
     }
@@ -80,9 +81,9 @@ class TradeOrderExecutionTest {
             BigDecimal price, BigDecimal grossUsd, boolean valid) {
         BigDecimal quantity = new BigDecimal("10");
         TradeOrder order = TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.BUY,
-                quantity, new BigDecimal("100"), new BigDecimal("1000"), AT, AT.plusHours(6));
+                quantity, new BigDecimal("100"), new BigDecimal("1000"), AT, AT.plusHours(6), new BigDecimal("100"), "USD", BigDecimal.ONE);
         ReflectionTestUtils.setField(order, "orderId", 3L);
-        BigDecimal grossKrw = grossUsd.setScale(0, java.math.RoundingMode.HALF_UP);
+        BigDecimal grossKrw = grossUsd.setScale(0, RoundingMode.HALF_UP);
         var amounts = new ExecutionAmounts(grossUsd, price.multiply(quantity), BigDecimal.ZERO,
                 grossKrw, BigDecimal.ZERO, BigDecimal.ZERO, grossKrw);
 
@@ -114,7 +115,7 @@ class TradeOrderExecutionTest {
         TradeOrder order = order(OrderSide.BUY);
         TradeExecution first = execution(order, "1", "90");
         assertThat(order.getReservedCash()).isEqualByComparingTo("300");
-        assertThat(first.grossAmountUsd(com.baedang.stock.entity.MarketCountry.KR)).isZero();
+        assertThat(first.grossAmountUsd(MarketCountry.KR)).isZero();
         assertThat(first.unroundedGrossAmountKrw()).isEqualByComparingTo("90");
         order.applyExecution(first, new BigDecimal("210"));
         assertThat(order.getReservedCash()).isEqualByComparingTo("210");
@@ -193,7 +194,7 @@ class TradeOrderExecutionTest {
                 new BigDecimal("100"), RATE, amount, AT, AT.plusMinutes(1), 1L))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1, BigDecimal.ONE,
-                new BigDecimal("100"), new ExecutionRateEvidence(BigDecimal.ONE, null, null, null), amount,
+                new BigDecimal("100"), null, amount,
                 AT, AT.plusSeconds(1), 1L)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1, BigDecimal.ONE,
                 new BigDecimal("100"), RATE, amount, AT, AT.plusSeconds(1), null))
@@ -243,7 +244,7 @@ class TradeOrderExecutionTest {
     void 환율이_다른_체결의_누적세금은_SEC차액과_각_적용환율로_복원한다() {
         TradeOrder order = TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.SELL,
                 new BigDecimal("2"), new BigDecimal("1000"), BigDecimal.ZERO,
-                AT, AT.plusHours(6));
+                AT, AT.plusHours(6), new BigDecimal("1000"), "USD", BigDecimal.ONE);
         ReflectionTestUtils.setField(order, "orderId", 3L);
         var firstRate = new ExecutionRateEvidence(new BigDecimal("1324.6"), AT, AT, AT.plusMinutes(1));
         var secondRate = new ExecutionRateEvidence(new BigDecimal("1424.6"), AT.plusMinutes(2),
@@ -267,7 +268,7 @@ class TradeOrderExecutionTest {
         BigDecimal rawTaxKrw = first.getSecFeeUsd().multiply(first.getExchangeRate())
                 .add(second.getSecFeeUsd().multiply(second.getExchangeRate()));
         assertThat(rawTaxKrw).isEqualByComparingTo("54.984");
-        assertThat(rawTaxKrw.setScale(0, java.math.RoundingMode.HALF_UP)).isEqualByComparingTo(order.getTax());
+        assertThat(rawTaxKrw.setScale(0, RoundingMode.HALF_UP)).isEqualByComparingTo(order.getTax());
         assertThat(order.getTax()).isEqualByComparingTo("55");
         assertThat(first.getExchangeRate()).isEqualByComparingTo("1324.6");
         assertThat(second.getExchangeRate()).isEqualByComparingTo("1424.6");
@@ -312,7 +313,7 @@ class TradeOrderExecutionTest {
     @CsvSource({"1.0000001, 100, 300", "1, 100.00001, 300", "1, 100, 300.01"})
     void 접수의_초과_소수자릿수는_입력검증_예외다(BigDecimal qty, BigDecimal price, BigDecimal reserve) {
         assertThatThrownBy(() -> TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.BUY,
-                qty, price, reserve, AT, AT.plusHours(6))).isExactlyInstanceOf(IllegalArgumentException.class);
+                qty, price, reserve, AT, AT.plusHours(6), price, "USD", BigDecimal.ONE)).isExactlyInstanceOf(IllegalArgumentException.class);
     }
 
     @ParameterizedTest
@@ -339,7 +340,7 @@ class TradeOrderExecutionTest {
                 .isExactlyInstanceOf(IllegalArgumentException.class);
         BigDecimal original = new BigDecimal("100.0000000");
         var order = TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), OrderSide.BUY,
-                new BigDecimal("1.0000000"), original, original, AT, AT.plusHours(6));
+                new BigDecimal("1.0000000"), original, original, AT, AT.plusHours(6), original, "USD", BigDecimal.ONE);
         assertThat(order.getLimitPrice()).isEqualTo(original);
         assertThat(order.getReservedCash()).isEqualTo(original);
         var amounts = new ExecutionAmounts(BigDecimal.ZERO, original, new BigDecimal("0.0100"),
@@ -353,7 +354,7 @@ class TradeOrderExecutionTest {
     private TradeOrder order(OrderSide side) {
         TradeOrder order = TradeOrder.pendingLimitOrder(1L, 2L, UUID.randomUUID(), side, new BigDecimal("3"),
                 new BigDecimal("100"), side == OrderSide.BUY ? new BigDecimal("300") : BigDecimal.ZERO,
-                AT, AT.plusHours(6));
+                AT, AT.plusHours(6), new BigDecimal("100"), "USD", BigDecimal.ONE);
         ReflectionTestUtils.setField(order, "orderId", 3L);
         return order;
     }

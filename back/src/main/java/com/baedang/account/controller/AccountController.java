@@ -8,6 +8,8 @@ import com.baedang.account.dto.LedgerResponse;
 import com.baedang.account.service.AccountResetService;
 import com.baedang.account.service.AccountService;
 import com.baedang.account.service.LedgerQueryService;
+import com.baedang.trading.dto.OrderPageResponse;
+import com.baedang.trading.service.OrderReadService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.http.ResponseEntity;
@@ -26,13 +28,16 @@ public class AccountController {
     private final AccountService accountService;
     private final AccountResetService accountResetService;
     private final LedgerQueryService ledgerQueryService;
+    private final OrderReadService orderReadService;
 
     public AccountController(AccountService accountService,
                              AccountResetService accountResetService,
-                             LedgerQueryService ledgerQueryService) {
+                             LedgerQueryService ledgerQueryService,
+                             OrderReadService orderReadService) {
         this.accountService = accountService;
         this.accountResetService = accountResetService;
         this.ledgerQueryService = ledgerQueryService;
+        this.orderReadService = orderReadService;
     }
 
     @GetMapping("/me")
@@ -66,6 +71,15 @@ public class AccountController {
     ) {
         return ResponseEntity.ok(
                 ledgerQueryService.getLedger(userId, cursor, size, entryType));
+    }
+
+    @GetMapping("/me/orders")
+    public ResponseEntity<OrderPageResponse> getOrders(
+            @AuthenticationPrincipal Long userId,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        return ResponseEntity.ok(orderReadService.list(userId, cursor, size));
     }
 
 }

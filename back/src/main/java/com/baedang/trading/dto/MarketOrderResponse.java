@@ -9,7 +9,7 @@ import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
-public record OrderResponse(
+public record MarketOrderResponse(
         Long orderId,
         String status,
         String symbol,
@@ -27,8 +27,8 @@ public record OrderResponse(
         AccountSummary account
 ) {
 
-    public static OrderResponse from(MarketOrderReceipt receipt) {
-        return new OrderResponse(
+    public static MarketOrderResponse from(MarketOrderReceipt receipt) {
+        return new MarketOrderResponse(
                 receipt.orderId(),
                 receipt.status(),
                 receipt.symbol(),

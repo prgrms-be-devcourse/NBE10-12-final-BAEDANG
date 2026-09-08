@@ -36,7 +36,7 @@
 | [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | `PasswordEncoder` 빈 주입 후 `encode(raw)`, `matches(raw, encoded)` 사용 | 현재 BCrypt 사용. 직접 해시 함수를 만들거나 인코더를 반복 생성하지 않음 |
 | [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | JPA Auditing과 `auditingDateTimeProvider` 자동 적용 | 현재 제공자는 `OffsetDateTime.now(ZoneOffset.UTC)`를 직접 사용하므로 주입 Clock을 고정해도 감사 시각은 고정되지 않음 |
 | [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | 상속으로 `createdAt`, `updatedAt` 자동 기록 | 실제 테이블에 `created_at`, `updated_at` 두 컬럼이 있는 경우만 상속. 계좌의 `openedAt`·원장의 `occurredAt`을 대체하지 않음 |
-| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 스케줄링 활성화 및 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 일봉 전용 실행기: 스레드 1개, 큐 10개, 종료 대기 최대 30초. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 공용 `taskScheduler`, 만료 전용 `limitOrderTaskScheduler`, 일봉 전용 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 일봉 전용 실행기: 스레드 1개, 큐 10개, 종료 대기 최대 30초. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
 | [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | `/api/**`에 자동 적용. 허용 출처는 `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS`로 설정 | 직접 호출할 필요 없음. CORS 허용은 인증·인가를 대신하지 않음 |
 
 ### 오류 처리·외부 통신
@@ -169,7 +169,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 소스: [MarketOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/MarketOrderSettlementCalculator.java)
 
-`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
+`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `MarketOrderAmount`.
 설정된 수수료·세율을 쓰는 Spring 빈이므로 주입받아 사용합니다. 입력 유효성·거래 가능 여부는 주문 정책에서 검증합니다.
 
 요율·SEC 최소액은 주문별 스냅샷이 아닌 프로젝트 고정 `.env` 설정입니다. 활성 주문이 있는 동안 재시작·재배포에도 동일한 값을 유지합니다.
@@ -235,7 +235,10 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [LedgerCursor](../back/src/main/java/com/baedang/account/support/LedgerCursor.java) | 정적 `encode(entryId)`, `decode(cursor)` | 원장 전용 Base64URL 커서. 디코딩 오류는 `INVALID_CURSOR`. 랭킹 커서와 형식이 다름 |
 | [StockCategory](../back/src/main/java/com/baedang/stock/entity/StockCategory.java) | 정적 `from(securityType, isCommonShare)` | ETF / ETN 우선, 보통주 여부가 false면 PREFERRED, 나머지 INDIVIDUAL |
 | [CandleQueryPolicy](../back/src/main/java/com/baedang/stock/service/CandleQueryPolicy.java) | `parse(interval, range)`, `parseMarketCountry(value)` | 현재 `1m/1D=200`, `1d/1M=22`, `1d/6M=130`, `1d/1Y=250` 요청. 실제 반환 개수 보장이나 백필 개수 설정은 아님 |
-| [MarketOrderPolicy](../back/src/main/java/com/baedang/trading/service/MarketOrderPolicy.java) | `parseCommand`, `parseTerms`, `determineRejection`, `determineStaticRejection`, `validateExecutionContextFresh`, `hasValidCurrencyForMarket` | 주문 입력·거래 가능·시세/컨텍스트 신선도·시장 통화 검증. 검증 순서와 재시도 오류 데이터를 유지 |
+| [OrderPolicy](../back/src/main/java/com/baedang/trading/service/OrderPolicy.java) | `parseInput`, `parseTerms`, `determineStaticRejection`, `validateQuoteTime`, `validateExecutionContextFresh`, `hasValidCurrencyForMarket` | 시장가·지정가 공통 입력·종목·시세/컨텍스트 신선도·시장 통화 검증. 검증 순서와 재시도 오류 데이터를 유지 |
+| [MarketOrderPolicy](../back/src/main/java/com/baedang/trading/service/MarketOrderPolicy.java) | `determineRejection` | OrderPolicy를 주입받아 공통 검증을 재사용하고 시장가 순정산액·매수 가능 금액·매도 가능 수량 및 거절 우선순위를 검증. 지정가 접수에는 사용하지 않음 |
+| [OrderInput](../back/src/main/java/com/baedang/trading/model/OrderInput.java) | `accountId`, `clientOrderId`, `terms` | parseInput의 공통 검증 결과. 각 유스케이스가 MarketOrderCommand 또는 LimitOrderCommand를 직접 생성 |
+| [OrderMarketContext](../back/src/main/java/com/baedang/trading/model/OrderMarketContext.java) | `executionRate()`, `isMarketOpenAt(now)` | 시장가 체결·지정가 접수의 공통 외부 시장 스냅샷. 트랜잭션 전에 준비하고 계좌 잠금 후 유효성을 재검증 |
 | [ClientOrderRetryPolicy](../back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java) | `asData()` | `retryPolicy` 키를 담은 Map. SAME_CLIENT_ORDER_ID / NEW_CLIENT_ORDER_ID / NOT_RETRYABLE 계약 |
 | [QuoteRealtimePolicy](../back/src/main/java/com/baedang/stock/service/QuoteRealtimePolicy.java) | `isRealtime(country, quote)`, `isMarketOpen(country)` | 현재·시세 시점 세션을 이용한 판정. 캘린더 조회가 발생할 수 있어 순수 계산 함수가 아님 |
 | [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
@@ -299,3 +302,13 @@ API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 �
 - 기존 테스트를 먼저 유지합니다. 리팩터링 후 실패하면 서비스 고유 정책을 바꿨는지 먼저 점검합니다.
 - 새 공개 메서드는 경계값 테스트를 추가하고 양쪽 언어 문서의 메서드명·사용 예·주의점을 함께 갱신합니다.
 - 기준 테스트: [정규화](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizerTest.java), [서비스별 계약](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizationContractTest.java), [시장 정보](../back/src/test/java/com/baedang/stock/entity/MarketCountryTest.java), [손익률](../back/src/test/java/com/baedang/account/support/ReturnRateCalculatorTest.java), [프론트 헬퍼](../front/src/lib/__tests__).
+
+## 지정가 생애주기 구성요소 (#120)
+
+- LimitOrderRequestPolicy: 지원 입력 통화 및 무손실 가격 자릿수 검증. 반올림 도구가 아닙니다.
+- LimitOrderPricing: 주입하여 미국 원화 입력을 고정 USD 센트 지정가로 환산하고 LimitOrderSettlementCalculator로 원본 입력 동결액 계산. 단일 체결 가정 견적은 MarketOrderSettlementCalculator를 재사용하며 부분 체결 정산에는 사용하지 않습니다.
+- LimitOrderService: 접수·견적·취소 NEVER 진입점. 외부 정보를 DB 변경 전에 준비합니다. 접수 비활성화는 기존 주문 재생·취소를 차단하지 않습니다.
+- LimitOrderTransactionService: REQUIRED 계좌 우선 잠금 접수·종료. 외부 호출·원장 INSERT 없음. 만료 경합 결과를 값으로 반환하여 커밋 후 HTTP 오류로 변환합니다.
+- OrderReadService: 읽기 전용 소유권 검증, 현재 회차 주문 커서·주문별 체결 커서. 체결 직후 잔액은 연결 원장에서 조회합니다.
+- LimitOrderExpirationService: NEVER 스캔, 외부 시장 호출 없음. 주문별 종료 트랜잭션에 2초 잠금 대기 제한을 적용하고 실패 건은 다음 스캔에서 재시도합니다. LimitOrderExpirationScheduler가 전용 단일 스레드 limitOrderTaskScheduler에서 시작 시 비동기 복구 및 완료 후 30초 간격 실행을 담당합니다.
+- Account.reserveCash/releaseCash, Holding.reserveQuantity/releaseQuantity: 동결 상태만 변경. 호출부는 계좌 잠금 및 필요한 보유 잠금을 획득해야 합니다. 보유 메서드는 명시적 UTC 변경 시각을 받습니다.

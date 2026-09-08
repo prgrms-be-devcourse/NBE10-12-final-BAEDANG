@@ -6,8 +6,8 @@ import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
-import com.baedang.trading.dto.OrderQuoteResponse;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.dto.MarketOrderQuoteResponse;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.OrderQuoteQueryContext;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.user.entity.Account;
@@ -20,9 +20,9 @@ import java.time.Clock;
 import java.time.Instant;
 
 @Service
-public class OrderQuoteService {
+public class MarketOrderQuoteService {
 
-    private static final Logger log = LoggerFactory.getLogger(OrderQuoteService.class);
+    private static final Logger log = LoggerFactory.getLogger(MarketOrderQuoteService.class);
 
     private final OrderQuoteQueryService queryService;
 
@@ -30,14 +30,16 @@ public class OrderQuoteService {
     private final MarketSessionProvider marketSessionProvider;
     private final ExecutionExchangeRateProvider exchangeRateProvider;
     private final MarketOrderSettlementCalculator amountCalculator;
+    private final OrderPolicy orderPolicy;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
 
-    public OrderQuoteService(
+    public MarketOrderQuoteService(
             OrderQuoteQueryService queryService,
             MarketSessionProvider marketSessionProvider,
             ExecutionExchangeRateProvider exchangeRateProvider,
             MarketOrderSettlementCalculator amountCalculator,
+            OrderPolicy orderPolicy,
             MarketOrderPolicy marketOrderPolicy,
             Clock clock
     ) {
@@ -45,25 +47,26 @@ public class OrderQuoteService {
         this.marketSessionProvider = marketSessionProvider;
         this.exchangeRateProvider = exchangeRateProvider;
         this.amountCalculator = amountCalculator;
+        this.orderPolicy = orderPolicy;
         this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
     }
 
     /** 견적은 자금이나 수량을 예약하지 않는 비구속성 읽기 모델입니다. */
-    public OrderQuoteResponse getQuote(
+    public MarketOrderQuoteResponse getQuote(
             Long userId,
             String symbolValue,
             String marketCountryValue,
             String sideValue,
             String quantityValue
     ) {
-        OrderTerms terms = marketOrderPolicy.parseTerms(
+        OrderTerms terms = orderPolicy.parseTerms(
                 symbolValue, marketCountryValue, sideValue, quantityValue);
 
         OrderQuoteQueryContext queryContext = queryService.load(userId, terms);
         Account account = queryContext.account();
         Stock stock = queryContext.stock();
-        if (!marketOrderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
+        if (!orderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
             throw new BusinessException(
                     ErrorCode.QUOTE_CURRENCY_MISMATCH,
                     "stockCurrency=" + stock.getCurrency()
@@ -76,7 +79,7 @@ public class OrderQuoteService {
         if (exchangeRate == null || exchangeRate.signum() <= 0) {
             throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
         }
-        OrderAmount amount = amountCalculator.calculate(
+        MarketOrderAmount amount = amountCalculator.calculate(
                 stock.getMarketCountry(),
                 terms.side(),
                 queryContext.quote().getLastPrice(),
@@ -100,7 +103,7 @@ public class OrderQuoteService {
             log.info("시장가 견적 실행 불가: userId={}, stockId={}, side={}, quantity={}, reason={}",
                     userId, stock.getStockId(), terms.side(), terms.quantity(), reason);
         }
-        return OrderQuoteResponse.of(
+        return MarketOrderQuoteResponse.of(
                 stock.getSymbol(),
                 stock.getMarketCountry(),
                 terms.side(),

@@ -506,5 +506,17 @@ Limit orders use two phases: Phase 1 commits PENDING/reservations; a worker repe
 
 > 🧪 **Good verification tests** — after every trade, check `buy: net_amount = gross_amount + fee` and `sell: net_amount = gross_amount − fee − tax` always hold, and the cumulative sum of `ledger_entry.amount` (fee included) equals `account.cash_balance`. The surest proof you understand the ledger.
 
----
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` and `db/migration/V2__limit_order_lifecycle.sql`
+
+## LIMIT acceptance evidence (#120)
+
+Order history uses `ix_order_history (account_id, order_id DESC)` to match its account-scoped order-ID cursor (applied via `db/migration/V2__limit_order_lifecycle.sql`).
+
+Three immutable acceptance columns are added to trade_order:
+- requested_limit_price NUMERIC(19,4): original user-entered unit price; whole KRW or cent USD.
+- requested_limit_currency VARCHAR(3): KRW or USD; KR stocks permit KRW only.
+- acceptance_exchange_rate NUMERIC(19,6): original validated acceptance FX; KR uses 1. Preserved after cancellation/expiration, not used as the later execution FX.
+
+All three are NULL for MARKET and required for LIMIT. limit_price remains the fixed stock-currency price (USD for US); US KRW input is divided by acceptance FX and rounded to cents HALF_UP. Original inputs, not converted prices, are the idempotency comparison basis. No initial_reserved_cash column is added. Initial reserve comes from original input; reserved_cash continues to represent only current remainder.
+
+Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. Existing active-order and expiry indexes are reused. No legacy row corrections or migrations are included.

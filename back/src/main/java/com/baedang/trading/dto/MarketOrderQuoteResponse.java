@@ -2,7 +2,7 @@ package com.baedang.trading.dto;
 
 import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.model.OrderAmount;
+import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.stock.entity.MarketCountry;
 
 import java.math.BigDecimal;
@@ -13,7 +13,7 @@ import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
 
-public record OrderQuoteResponse(
+public record MarketOrderQuoteResponse(
         String symbol,
         MarketCountry marketCountry,
         OrderSide side,
@@ -30,17 +30,17 @@ public record OrderQuoteResponse(
         String reason
 ) {
 
-    public static OrderQuoteResponse of(
+    public static MarketOrderQuoteResponse of(
             String symbol,
             MarketCountry marketCountry,
             OrderSide side,
             BigDecimal quantity,
-            OrderAmount amount,
+            MarketOrderAmount amount,
             BigDecimal availableCash,
             OffsetDateTime quoteAt,
             ErrorCode reason
     ) {
-        return new OrderQuoteResponse(
+        return new MarketOrderQuoteResponse(
                 symbol,
                 marketCountry,
                 side,

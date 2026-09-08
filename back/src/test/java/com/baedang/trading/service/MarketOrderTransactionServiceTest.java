@@ -7,14 +7,14 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.PlaceOrderRequest;
+import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.MarketOrderExecutionContext;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
@@ -57,6 +57,7 @@ class MarketOrderTransactionServiceTest {
     @Mock TradeExecutionRepository tradeExecutionRepository;
     @Mock LedgerService ledgerService;
     @Mock MarketOrderSettlementCalculator amountCalculator;
+    @Mock OrderPolicy orderPolicy;
     @Mock MarketOrderPolicy marketOrderPolicy;
 
     private Clock clock;
@@ -75,7 +76,7 @@ class MarketOrderTransactionServiceTest {
         service = new MarketOrderTransactionService(
                 accountRepository, stockRepository, quoteSnapshotRepository, holdingRepository,
                 tradeOrderRepository, ledgerEntryRepository, tradeExecutionRepository, ledgerService,
-                amountCalculator, marketOrderPolicy, clock);
+                amountCalculator, orderPolicy, marketOrderPolicy, clock);
     }
 
     // ==========================================
@@ -85,7 +86,7 @@ class MarketOrderTransactionServiceTest {
     @Test
     void 시장가_주문_진입점은_외부_트랜잭션_참여를_금지한다() throws Exception {
         var attribute = new AnnotationTransactionAttributeSource().getTransactionAttribute(
-                MarketOrderService.class.getMethod("place", Long.class, PlaceOrderRequest.class), MarketOrderService.class);
+                MarketOrderService.class.getMethod("place", Long.class, MarketOrderRequest.class), MarketOrderService.class);
 
         assertThat(attribute).isNotNull();
         assertThat(attribute.getPropagationBehavior()).isEqualTo(Propagation.NEVER.value());
@@ -98,7 +99,7 @@ class MarketOrderTransactionServiceTest {
                         "execute",
                         Long.class,
                         MarketOrderCommand.class,
-                        MarketOrderExecutionContext.class), MarketOrderTransactionService.class);
+                        OrderMarketContext.class), MarketOrderTransactionService.class);
 
         assertThat(attribute).isNotNull();
         assertThat(attribute.getPropagationBehavior()).isEqualTo(Propagation.REQUIRED.value());
@@ -244,7 +245,7 @@ class MarketOrderTransactionServiceTest {
     @Test
     void execute_계좌_비관적락_조회_실패시_ACCOUNT_NOT_FOUND_예외를_던진다() {
         MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
-        MarketOrderExecutionContext context = executionContext(MarketCountry.KR);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.execute(USER_ID, command, context))
@@ -256,7 +257,7 @@ class MarketOrderTransactionServiceTest {
     @Test
     void execute_종목이_존재하지_않으면_STOCK_NOT_FOUND_예외를_던진다() {
         MarketOrderCommand command = command("UNKNOWN", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
-        MarketOrderExecutionContext context = executionContext(MarketCountry.KR);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
         Account account = createAccount();
 
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
@@ -271,7 +272,7 @@ class MarketOrderTransactionServiceTest {
     @Test
     void execute_종목시장과_실행컨텍스트_시장이_불일치하면_STOCK_NOT_FOUND_예외를_던진다() {
         MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
-        MarketOrderExecutionContext usContext = executionContext(MarketCountry.US);
+        OrderMarketContext usContext = executionContext(MarketCountry.US);
         Account account = createAccount();
         Stock krStock = createStock("005930", MarketCountry.KR);
 
@@ -287,13 +288,13 @@ class MarketOrderTransactionServiceTest {
     @Test
     void execute_동시성_재시도시_기존_거절주문은_거절결과로_재생한다() {
         MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
-        MarketOrderExecutionContext context = executionContext(MarketCountry.KR);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
         Account account = createAccount();
         Stock stock = createStock("005930", MarketCountry.KR);
         TradeOrder rejectedOrder = createOrder(OrderStatus.REJECTED, ErrorCode.INSUFFICIENT_CASH.name());
 
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
-        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
         when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(rejectedOrder));
 
         MarketOrderResult result = service.execute(USER_ID, command, context);
@@ -305,13 +306,13 @@ class MarketOrderTransactionServiceTest {
     @Test
     void execute_동시성_재시도시_주문조건이_불일치하면_DUPLICATE_ORDER_예외를_던진다() {
         MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, new BigDecimal("5"));
-        MarketOrderExecutionContext context = executionContext(MarketCountry.KR);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
         Account account = createAccount();
         Stock stock = createStock("005930", MarketCountry.KR);
         TradeOrder existingOrderWithQty1 = createOrder(OrderStatus.REJECTED, ErrorCode.INSUFFICIENT_CASH.name());
 
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
-        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
         when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrderWithQty1));
 
         assertThatThrownBy(() -> service.execute(USER_ID, command, context))
@@ -323,7 +324,7 @@ class MarketOrderTransactionServiceTest {
     @Test
     void execute_호가스냅샷이_존재하지_않으면_QUOTE_NOT_FOUND_예외를_던진다() {
         MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
-        MarketOrderExecutionContext context = executionContext(MarketCountry.KR);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
         Account account = createAccount();
         Stock stock = createStock("005930", MarketCountry.KR);
 
@@ -346,8 +347,8 @@ class MarketOrderTransactionServiceTest {
         return new MarketOrderCommand(ACCOUNT_ID, CLIENT_ORDER_ID, new OrderTerms(symbol, country, side, quantity));
     }
 
-    private MarketOrderExecutionContext executionContext(MarketCountry country) {
-        return new MarketOrderExecutionContext(
+    private OrderMarketContext executionContext(MarketCountry country) {
+        return new OrderMarketContext(
                 country,
                 true,
                 NOW.plusSeconds(3600),

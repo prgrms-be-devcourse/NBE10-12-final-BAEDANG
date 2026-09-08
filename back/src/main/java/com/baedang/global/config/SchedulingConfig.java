@@ -4,6 +4,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
 /**
  * 애플리케이션의 {@code @Scheduled} 기반 배치 실행 인프라를 구성한다.
@@ -14,6 +15,26 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 @Configuration
 @EnableScheduling
 public class SchedulingConfig {
+
+    /** 전용 스케줄러 추가 후에도 기존 배치가 사용할 공용 스케줄러를 명시합니다. */
+    @Bean(name = "taskScheduler")
+    public ThreadPoolTaskScheduler taskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("scheduling-");
+        return scheduler;
+    }
+
+    /** 주문 만료는 시세 수집과 분리된 단일 스레드에서 실행합니다. 미완료 건은 재시작 후 복구합니다. */
+    @Bean(name = "limitOrderTaskScheduler")
+    public ThreadPoolTaskScheduler limitOrderTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("limit-order-expiration-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
 
     /**
      * 일봉 수집의 외부 API 호출과 DB I/O를 스케줄러 스레드에서 분리한다.

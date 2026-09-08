@@ -1,5 +1,6 @@
 package com.baedang.market.provider;
 
+import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketCalendarPort;
@@ -44,9 +45,9 @@ public class ExecutionExchangeRateProviderBridge implements ExecutionExchangeRat
         if (cached != null && cached.isValidAt(clock.instant().atOffset(ZoneOffset.UTC))) {
             return cached;
         }
-        var quote = marketCalendarPort.fetchExchangeRate();
+        ExchangeRateQuote quote = marketCalendarPort.fetchExchangeRate();
         // 요청 시작이 아닌 수신 완료 시각을 보존합니다. 실패/만료 응답은 캐시에 넣지 않습니다.
-        var snapshot = ExecutionExchangeRateSnapshot.from(quote, clock.instant().atOffset(ZoneOffset.UTC));
+        ExecutionExchangeRateSnapshot snapshot = ExecutionExchangeRateSnapshot.from(quote, clock.instant().atOffset(ZoneOffset.UTC));
         cached = snapshot;
         return snapshot;
     }

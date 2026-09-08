@@ -36,7 +36,7 @@ The `global` package provides foundations shared across domains; not every file 
 | [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | Inject `PasswordEncoder`; call `encode(raw)` and `matches(raw, encoded)` | Currently uses BCrypt. Do not implement separate hashing or repeatedly construct encoders |
 | [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | Automatically enables JPA Auditing and `auditingDateTimeProvider` | The current provider directly uses `OffsetDateTime.now(ZoneOffset.UTC)`; fixing the injected Clock does not fix auditing timestamps |
 | [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | Inherit to populate `createdAt` and `updatedAt` automatically | Only for tables with both `created_at` and `updated_at`. Does not replace account `openedAt` or ledger `occurredAt` |
-| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | Enables scheduling and provides `dailyCandleTaskExecutor`. Inject that executor with `@Qualifier("dailyCandleTaskExecutor")` | Dedicated to daily candles: one thread, queue capacity 10, up to 30 seconds for shutdown. Do not indiscriminately share it with other async tasks; each scheduler owns its activation conditions |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | Provides common `taskScheduler`, dedicated `limitOrderTaskScheduler` and `dailyCandleTaskExecutor`. Inject that executor with `@Qualifier("dailyCandleTaskExecutor")` | Dedicated to daily candles: one thread, queue capacity 10, up to 30 seconds for shutdown. Do not indiscriminately share it with other async tasks; each scheduler owns its activation conditions |
 | [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | Automatically applies to `/api/**`; configure origins via `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS` | No direct invocation needed. CORS does not replace authentication or authorization |
 
 ### Error Handling and External Communication
@@ -169,7 +169,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 Source: [MarketOrderSettlementCalculator.java](../back/src/main/java/com/baedang/trading/service/MarketOrderSettlementCalculator.java)
 
-`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `OrderAmount`.
+`calculate(marketCountry, side, executedPrice, quantity, exchangeRate)` → `MarketOrderAmount`.
 Inject this Spring bean so it uses the configured fee and tax rates. The order policy validates input and tradability.
 
 Rates and the SEC minimum are project-fixed `.env` settings, not per-order snapshots. Keep them unchanged across restarts/deployments while orders are active.
@@ -235,7 +235,10 @@ Even when reused across use cases, these components retain domain-specific contr
 | [LedgerCursor](../back/src/main/java/com/baedang/account/support/LedgerCursor.java) | Static `encode(entryId)`, `decode(cursor)` | Ledger-only Base64URL cursor; decoding errors produce `INVALID_CURSOR`. Different format from ranking cursors |
 | [StockCategory](../back/src/main/java/com/baedang/stock/entity/StockCategory.java) | Static `from(securityType, isCommonShare)` | ETF / ETN take precedence; false common-share flag yields PREFERRED, otherwise INDIVIDUAL |
 | [CandleQueryPolicy](../back/src/main/java/com/baedang/stock/service/CandleQueryPolicy.java) | `parse(interval, range)`, `parseMarketCountry(value)` | Currently requests `1m/1D=200`, `1d/1M=22`, `1d/6M=130`, `1d/1Y=250`. Not a guarantee of returned count or a backfill count setting |
-| [MarketOrderPolicy](../back/src/main/java/com/baedang/trading/service/MarketOrderPolicy.java) | `parseCommand`, `parseTerms`, `determineRejection`, `determineStaticRejection`, `validateExecutionContextFresh`, `hasValidCurrencyForMarket` | Order input, tradability, quote/context freshness, and market-currency validation; preserve validation order and retry error data |
+| [OrderPolicy](../back/src/main/java/com/baedang/trading/service/OrderPolicy.java) | `parseInput`, `parseTerms`, `determineStaticRejection`, `validateQuoteTime`, `validateExecutionContextFresh`, `hasValidCurrencyForMarket` | Shared MARKET/LIMIT input, stock, quote/context freshness and market-currency validation; preserve validation order and retry error data |
+| [MarketOrderPolicy](../back/src/main/java/com/baedang/trading/service/MarketOrderPolicy.java) | `determineRejection` | Injects OrderPolicy for shared validation, then checks market-order net settlement, buying power and sellable quantity in rejection-priority order; not used for LIMIT acceptance |
+| [OrderInput](../back/src/main/java/com/baedang/trading/model/OrderInput.java) | `accountId`, `clientOrderId`, `terms` | Shared parseInput result; each use case directly creates MarketOrderCommand or LimitOrderCommand |
+| [OrderMarketContext](../back/src/main/java/com/baedang/trading/model/OrderMarketContext.java) | `executionRate()`, `isMarketOpenAt(now)` | Shared external market snapshot for MARKET execution and LIMIT acceptance; prepare before the transaction and revalidate after acquiring the account lock |
 | [ClientOrderRetryPolicy](../back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java) | `asData()` | Map containing `retryPolicy`; SAME_CLIENT_ORDER_ID / NEW_CLIENT_ORDER_ID / NOT_RETRYABLE contract |
 | [QuoteRealtimePolicy](../back/src/main/java/com/baedang/stock/service/QuoteRealtimePolicy.java) | `isRealtime(country, quote)`, `isMarketOpen(country)` | Uses sessions at the current and quote times; may query the calendar, so it is not a pure calculation |
 | [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` → `Optional<LocalDate>` | Resolves the latest completed trading day using local dates and the calendar; currently a 10-minute finalization delay and up to 14 days of lookback. Returns empty on lookup failure, response mismatch, or no result |
@@ -299,3 +302,13 @@ API and exchange-rate lookup modules are HTTP clients, not pure helpers. Reuse t
 - Preserve existing tests first. If a refactoring breaks a test, first check whether it changed a service-specific policy.
 - Add boundary tests for new public methods, and update method names, examples, and caveats in both language versions of this guide.
 - Reference tests: [normalization](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizerTest.java), [service contracts](../back/src/test/java/com/baedang/global/normalizer/DomainNormalizationContractTest.java), [market information](../back/src/test/java/com/baedang/stock/entity/MarketCountryTest.java), [return ratios](../back/src/test/java/com/baedang/account/support/ReturnRateCalculatorTest.java), [frontend helpers](../front/src/lib/__tests__).
+
+## LIMIT lifecycle components (#120)
+
+- LimitOrderRequestPolicy: supported input currency and lossless input-price validation. Not a rounding helper.
+- LimitOrderPricing: inject; converts US KRW limits to fixed USD cents and computes original-input reserve through LimitOrderSettlementCalculator. One-fill indicative amounts reuse MarketOrderSettlementCalculator; never use these to settle partial fills.
+- LimitOrderService: NEVER entry point for acceptance, quote and cancellation. Performs external preparation before DB mutation. The disabled acceptance flag does not block existing-order replay or cancellation.
+- LimitOrderTransactionService: REQUIRED account-first acceptance/closure; no external calls or ledger inserts. Returns closure results so an expiration conflict can be converted to an HTTP error after commit.
+- OrderReadService: read-only ownership checks, current-round order cursor and per-order execution cursor; executed balances come from linked ledger entries.
+- LimitOrderExpirationService: NEVER scan, no external market calls, independent per-order closure transactions with 2-second transaction-local lock timeout and retry on failure. LimitOrderExpirationScheduler runs this service on the dedicated single-thread limitOrderTaskScheduler, including asynchronous startup recovery and a 30-second fixed delay.
+- Account.reserveCash/releaseCash and Holding.reserveQuantity/releaseQuantity: mutate reservation only; caller must hold the account lock and, for holdings, the holding lock. Holding methods take explicit UTC change time.
