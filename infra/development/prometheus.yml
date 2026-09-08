@@ -10,4 +10,4 @@ scrape_configs:
       #       Docker Desktop 은 host.docker.internal 을 자동 제공. Linux 호스트면
       #       docker-compose.yml 의 prometheus 서비스에 extra_hosts(host-gateway) 필요.
       #   - back_1:8081 = 앱을 network `common` 컨테이너(서비스명 back)로 배포한 경우(dev 서버).
-      - targets: ["host.docker.internal:8081", "back_1:8081"]
+      - targets: ["host.docker.internal:8081", "trading-back-1:8081"]

@@ -23,8 +23,6 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
     volumes:
       - pgdata:/var/lib/postgresql
-      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      - ./timescale.sql:/docker-entrypoint-initdb.d/02-timescale.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
       interval: 5s
@@ -38,6 +36,7 @@ services:
     image: prom/prometheus:latest
     container_name: trading-prometheus
     volumes:
+      - promdata:/prometheus
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     # command 를 지정하면 이미지 기본 인자가 통째로 대체되므로 config.file/storage 를
     # 반드시 다시 명시한다. --web.enable-remote-write-receiver 로 k6 부하 지표(push)를
@@ -72,6 +71,7 @@ services:
 
 volumes:
   pgdata:
+  promdata:
 
 networks:
   common:

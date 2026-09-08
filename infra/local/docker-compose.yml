@@ -5,11 +5,11 @@
 #   docker compose down         중지 (데이터 유지)
 #   docker compose down -v      중지 + 데이터 삭제  ← 스키마 바뀌면 이걸로 재생성
 #
-# [스키마 관리 — Flyway 미도입]
-#   schema.sql 이 유일한 진실입니다. 변경했다면:
-#       docker compose down -v && docker compose up -d
-#   볼륨이 남아 있으면 초기화 스크립트가 실행되지 않으니 -v 를 꼭 붙이세요.
-#   팀원에게는 "스키마 바뀜, down -v 하고 다시 올리세요" 를 공지해야 합니다.
+# [스키마 관리 — Flyway]
+#   이 컨테이너는 빈 DB 로 뜹니다. 스키마는 백엔드 기동 시 Flyway 가 만듭니다.
+#       back/src/main/resources/db/migration/
+#   스키마를 바꿀 때는 V2, V3 ... 새 마이그레이션 파일을 추가하세요.
+#   적용된 마이그레이션은 절대 수정하지 않습니다 (체크섬 불일치로 기동 실패).
 #
 # 접속 정보
 #   host      localhost:5432
@@ -27,8 +27,8 @@ services:
     image: timescale/timescaledb:latest-pg18
     #
     # ── TimescaleDB 없이 순수 PostgreSQL 로 갈 경우 ──
-    #   위 image 를 지우고 아래를 쓰면서, volumes 의 02-timescale.sql 줄도 지우세요.
-    #   daily_candle 이 일반 테이블로 남을 뿐 나머지는 전부 그대로 동작합니다.
+    #   V1__init.sql 의 TimescaleDB 절에서 실패하므로 그 절을 뺀 마이그레이션이
+    #   따로 필요합니다. daily_candle 이 일반 테이블로 남을 뿐 나머지는 그대로입니다.
     # image: postgres:18-alpine
     container_name: trading-db
     # pg_stat_statements 로 부하 테스트 중 상위 쿼리·DB time 을 수집한다(이슈 #70).
@@ -54,16 +54,6 @@ services:
       # 데이터 영속화 (컨테이너를 지워도 테이블이 남음)
       - pgdata:/var/lib/postgresql
 
-      # ── 최초 기동 시 자동 실행 (이름순) ────────────────────────────────
-      #   Flyway 를 안 쓰므로 여기가 스키마 관리 지점입니다.
-      #   !! 이미 볼륨이 있으면 실행되지 않습니다.
-      #      스키마를 바꿨다면 반드시 `docker compose down -v` 후 재기동하세요.
-      - ../schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
-      # TimescaleDB 하이퍼테이블 지정 (daily_candle + 주봉 연속 집계).
-      #   schema.sql 이 BEGIN...COMMIT 으로 감싸여 있어서 합칠 수 없습니다 —
-      #   CREATE EXTENSION timescaledb 는 트랜잭션 안에서 실행되지 않습니다.
-      #   순수 PostgreSQL 로 간다면 이 줄을 지우세요.
-      - ../timescale.sql:/docker-entrypoint-initdb.d/02-timescale.sql:ro
       # 테스트용 시드 데이터가 필요하면 주석을 푸세요.
       # - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro
     healthcheck:

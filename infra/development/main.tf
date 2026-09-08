@@ -136,8 +136,8 @@ resource "aws_iam_role_policy_attachment" "ec2_ssm" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-resource "aws_iam_role_policy" "s3_asset_read" {
-  name = "${var.prefix}-ec2-role-1-policy-s3_asset_read"
+resource "aws_iam_role_policy" "s3_read" {
+  name = "${var.prefix}-ec2-role-1-policy-s3_read"
   role = aws_iam_role.ec2_role_1.name
 
   policy = jsonencode({
@@ -146,10 +146,33 @@ resource "aws_iam_role_policy" "s3_asset_read" {
       {
         Effect = "Allow"
         Action = ["s3:GetObject"]
-        Resource = [
-          for key in local.s3_asset_keys :
-          "${data.aws_s3_bucket.asset.arn}/${key}"
+        Resource = concat(
+          [for key in local.s3_asset_keys : "${data.aws_s3_bucket.asset.arn}/${key}"],
+          [for key in local.s3_dump_keys : "${data.aws_s3_bucket.asset.arn}/dump/${key}"],
+          ["${data.aws_s3_bucket.asset.arn}/scratch/*"],
+        )
+      },
+    ]
+  })
+}
+
+resource "aws_iam_role_policy" "s3_write" {
+  name = "${var.prefix}-ec2-role-1-policy-s3_write"
+  role = aws_iam_role.ec2_role_1.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:AbortMultipartUpload",
         ]
+        Resource = concat(
+          [for key in local.s3_dump_keys : "${data.aws_s3_bucket.asset.arn}/dump/${key}"],
+          ["${data.aws_s3_bucket.asset.arn}/scratch/*"],
+        )
       },
     ]
   })
@@ -222,10 +245,16 @@ data "aws_ssm_parameter" "ubuntu_ami" {
 
 locals {
   s3_asset_keys = [
-    "docker-compose.yml",
-    "schema.sql",
-    "timescale.sql",
+    "compose.yaml",
     "prometheus.yml",
+    ".env",
+  ]
+
+  s3_dump_keys = [
+    "data.sql",
+    "daily_candle.csv",
+    "minute_candle.csv",
+    "prometheus.tgz"
   ]
 
   ec2_bootstrap = <<-EOF
@@ -280,7 +309,7 @@ locals {
   aws --version
   echo "=================================================="
 
-  echo "=============== 3. Login to GHCR ================"
+  echo "================ 3. Login to GHCR ================"
   sudo apt-get install -y jq
 
   set +x
@@ -293,13 +322,25 @@ locals {
   set -x
   echo "=================================================="
 
-  echo "=============== 4. Docker Compose ================"
+  echo "============== 4. Make Directories ==============="
   mkdir /opt/${var.prefix}
-  cd /opt/${var.prefix}
+  mkdir /opt/${var.prefix}/dump
+  echo "=================================================="
 
+  echo "========== 5. Get Assets From S3 Bucket =========="
+  cd /opt/${var.prefix}
   for KEY in ${join(" ", local.s3_asset_keys)}; do
     aws s3 cp "s3://${data.aws_s3_bucket.asset.id}/$KEY" .
   done
+
+  cd /opt/${var.prefix}/dump
+  for KEY in ${join(" ", local.s3_dump_keys)}; do
+    aws s3 cp "s3://${data.aws_s3_bucket.asset.id}/dump/$KEY" .
+  done
+  echo "=================================================="
+
+  echo "=============== 6. Docker Compose ================"
+  cd /opt/${var.prefix}
 
   docker compose up -d
   echo "=================================================="
@@ -325,7 +366,7 @@ resource "aws_instance" "ec2_1" {
   hostnamectl set-hostname ec2-1
   EOF
   depends_on = [
-    aws_iam_role_policy.s3_asset_read,
+    aws_iam_role_policy.s3_read,
     aws_ssm_parameter.github_username,
     aws_ssm_parameter.github_access_token,
     aws_iam_role_policy.ssm_parameter_read,
