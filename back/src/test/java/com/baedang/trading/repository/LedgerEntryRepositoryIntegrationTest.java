@@ -13,10 +13,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.MountableFile;
+import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -29,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @Testcontainers
 @DataJpaTest(properties = {
-        "spring.jpa.hibernate.ddl-auto=validate",  // 스키마는 컨테이너가 마운트한 schema.sql 이 진실
+        "spring.jpa.hibernate.ddl-auto=validate",  // 스키마는 Flyway 마이그레이션(V1__init.sql)이 진실
         "spring.sql.init.mode=never"
 })
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -37,11 +36,9 @@ class LedgerEntryRepositoryIntegrationTest {
 
     @Container
     @ServiceConnection
-    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:18-alpine")
-            .withCopyFileToContainer(
-                    MountableFile.forHostPath(Path.of("..", "infra", "schema.sql")
-                            .toAbsolutePath().normalize()),
-                    "/docker-entrypoint-initdb.d/01-schema.sql");
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
 
     @Autowired LedgerEntryRepository ledgerEntryRepository;
     @Autowired JdbcTemplate jdbc;
