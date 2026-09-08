@@ -511,19 +511,21 @@ Daily & minute chart
 |---|---|---|
 | `marketCountry` | O | symbol market — `KR` · `US` |
 | `interval` | O | time unit per candle — `1m` · `5m` · `10m` · `1d` · `1w` |
-| `range` | O | period — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
+| `range` | O | period — `1D` · `1W` · `1M` · `6M` · `1Y` |
 
 **Valid combinations — anything else rejected with 400**
 
 | interval | allowed ranges | # candles | data source |
 |---|---|---|---|
 | `1m` | `1D` | latest 200 | top 100: 1-minute scheduler · other stocks: on-demand Toss `/candles?interval=1m` |
-| `5m` | `1D` · `1W` | 78 / 390 | aggregate 1-min |
-| `10m` | `1W` | 195 | aggregate 1-min |
+| `5m` | `1D` · `1W` | 78 / 390 | `candle_5m` (continuous aggregate of 1-min) |
+| `10m` | `1W` | 195 | `candle_10m` (continuous aggregate of 1-min) |
 | `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
-| `1w` | `3Y` | 156 | aggregate daily |
+| `1w` | `6M` · `1Y` | 26 / 52 | `candle_1w` (continuous aggregate of daily) |
 
-**Toss provides only `1m` and `1d`** — 5m·10m·1w must be aggregated by us (group 1-min candles in fives → 40 five-min candles). **Must block combos like `1m` + `1Y`** — a year of 1-min candles is 120k rows.
+**Toss provides only `1m` and `1d`** — 5m·10m·1w are built by us, not in Java but by TimescaleDB continuous aggregates. **Must block combos like `1m` + `1Y`** — a year of 1-min candles is 120k rows.
+
+**Short data returns whatever exists.** Combinations whose source is thin (`5m+1W` needs 1,950 minute candles) return a shorter chart until it fills; minute backfill is capped at Toss's 200 per call.
 
 **Response**
 ```json
@@ -553,7 +555,7 @@ For financial-data integrity, the MVP daily chart returns only finalized rows st
 | `INVALID_INTERVAL_RANGE` | disallowed interval × range combination |
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
 
-**MVP scope is `1d` and `1m` only.** Supported combinations are `1m+1D` and `1d+1M/6M/1Y`; all others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 20 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
+**Supported combinations are `1m+1D`, `5m+1D/1W`, `10m+1W`, `1d+1M/6M/1Y` and `1w+6M/1Y`.** All others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close); 5m·10m·1w come from continuous aggregate views. For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 20 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching.
 
 **Minute candles: scheduled for the ranked universe + on-demand cache elsewhere**
 ```
@@ -567,7 +569,7 @@ is there data within 60s in minute_candle?
              return from the DB
 ```
 **Off-hours or foreign-market stocks behave the same.** Calling `/candles` on a closed market returns the last session's candles as-is — opening NVDA in the Korean daytime shows the prior close + the last US session's minute chart. The frontend just flips the "실시간/종가" label from `realtime`; the chart itself needs no branching. An empty chart reads as "broken screen" — **always separate "not tradable" from "not viewable"**.
-The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 20 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination and 5m/10m aggregation.
+The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 20 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination.
 **200 candles per call.** KR regular session 09:00~15:30 = 330 minutes, so a full day needs `before` × 2. With the week-1 chart as "last 200 minutes", 1 call suffices — keep 1 call as the default and use 2 only when "view all" is pressed.
 **Needs measurement** — whether `before` is inclusive, and whether the closing-auction (15:30) candle exists. Without a 15:30 candle it's 329, not 330. Overlapping boundary candles are filtered by `ON CONFLICT DO NOTHING` on `(stock_id, candle_at)`.
 
@@ -906,7 +908,7 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
 \* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.
-**Not in the scheduler** — off-universe quotes and off-hours minute charts are filled on-demand when the user opens a detail page. Top-100 minute-candle collection is part of the MVP scheduler; week 2 adds limit-order fill determination and aggregation.
+**Not in the scheduler** — off-universe quotes and off-hours minute charts are filled on-demand when the user opens a detail page. Top-100 minute-candle collection is part of the MVP scheduler; week 2 adds limit-order fill determination.
 
 ### Client polling policy
 
