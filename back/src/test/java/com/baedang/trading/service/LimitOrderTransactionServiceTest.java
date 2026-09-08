@@ -28,6 +28,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -40,6 +44,7 @@ import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -152,109 +157,12 @@ class LimitOrderTransactionServiceTest {
             assertThat(result.get().orderId()).isEqualTo(1L);
         }
 
-        @Test
-        void 기존_주문이_존재하지만_수량이_다르면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(new BigDecimal("20"), new BigDecimal("50000"));
-            TradeOrder existingOrder = createPendingOrder(OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
-
-            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-
-            assertThatThrownBy(() -> service.existing(USER_ID, command))
-                    .isInstanceOfSatisfying(BusinessException.class, e ->
-                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATE_ORDER));
-        }
-
-        @Test
-        void 기존_주문_유형이_지정가가_아니면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            TradeOrder order = mock(TradeOrder.class);
-            when(order.getOrderType()).thenReturn(OrderType.MARKET);
-            when(order.getStockId()).thenReturn(STOCK_ID);
-
+        @ParameterizedTest(name = "기존 주문과 {0}이면 DUPLICATE_ORDER")
+        @MethodSource("com.baedang.trading.service.LimitOrderTransactionServiceTest#mismatchedOrders")
+        void 기존_주문과_조건이_불일치하면_DUPLICATE_ORDER(String description, LimitOrderCommand command, TradeOrder order, Stock stock) {
             when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
             when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(order));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-
-            assertThatThrownBy(() -> service.existing(USER_ID, command))
-                    .isInstanceOfSatisfying(BusinessException.class, e ->
-                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATE_ORDER));
-        }
-
-        @Test
-        void 기존_주문의_방향이_다르면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            TradeOrder existingOrder = createPendingOrder(OrderSide.SELL, BigDecimal.TEN, new BigDecimal("50000"), BigDecimal.ZERO);
-
-            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-
-            assertThatThrownBy(() -> service.existing(USER_ID, command))
-                    .isInstanceOfSatisfying(BusinessException.class, e ->
-                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATE_ORDER));
-        }
-
-        @Test
-        void 기존_주문의_국가가_다르면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            TradeOrder existingOrder = createPendingOrder(OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
-            Stock usStock = Stock.create("AAPL", MarketCountry.US, "NASDAQ", "Apple", null, "USD", "STOCK", true);
-            ReflectionTestUtils.setField(usStock, "stockId", STOCK_ID);
-
-            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(usStock));
-
-            assertThatThrownBy(() -> service.existing(USER_ID, command))
-                    .isInstanceOfSatisfying(BusinessException.class, e ->
-                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATE_ORDER));
-        }
-
-        @Test
-        void 기존_주문의_심볼이_다르면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            TradeOrder existingOrder = createPendingOrder(OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
-            Stock otherStock = Stock.create("005935", MarketCountry.KR, "KOSPI", "삼성전자우", null, "KRW", "STOCK", false);
-            ReflectionTestUtils.setField(otherStock, "stockId", STOCK_ID);
-
-            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(otherStock));
-
-            assertThatThrownBy(() -> service.existing(USER_ID, command))
-                    .isInstanceOfSatisfying(BusinessException.class, e ->
-                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATE_ORDER));
-        }
-
-        @Test
-        void 기존_주문의_통화가_다르면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            TradeOrder existingOrder = TradeOrder.pendingLimitOrder(
-                    ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY, BigDecimal.TEN,
-                    new BigDecimal("50000"), new BigDecimal("500000"),
-                    AT.minusMinutes(10), AT.plusHours(1),
-                    new BigDecimal("50"), "USD", new BigDecimal("1300"));
-            ReflectionTestUtils.setField(existingOrder, "orderId", 1L);
-
-            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-
-            assertThatThrownBy(() -> service.existing(USER_ID, command))
-                    .isInstanceOfSatisfying(BusinessException.class, e ->
-                            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.DUPLICATE_ORDER));
-        }
-
-        @Test
-        void 기존_주문의_가격이_다르면_DUPLICATE_ORDER() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("60000"));
-            TradeOrder existingOrder = createPendingOrder(OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
-
-            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
+            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(stock));
 
             assertThatThrownBy(() -> service.existing(USER_ID, command))
                     .isInstanceOfSatisfying(BusinessException.class, e ->
@@ -296,6 +204,67 @@ class LimitOrderTransactionServiceTest {
                     .isInstanceOfSatisfying(BusinessException.class, e ->
                             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ACCOUNT_ROUND_CHANGED));
         }
+    }
+
+    static Stream<Arguments> mismatchedOrders() {
+        Stock normalStock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
+        ReflectionTestUtils.setField(normalStock, "stockId", STOCK_ID);
+
+        Stock usStock = Stock.create("AAPL", MarketCountry.US, "NASDAQ", "Apple", null, "USD", "STOCK", true);
+        ReflectionTestUtils.setField(usStock, "stockId", STOCK_ID);
+
+        Stock diffSymbolStock = Stock.create("005935", MarketCountry.KR, "KOSPI", "삼성전자우", null, "KRW", "STOCK", false);
+        ReflectionTestUtils.setField(diffSymbolStock, "stockId", STOCK_ID);
+
+        TradeOrder normalOrder = TradeOrder.pendingLimitOrder(
+                ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY, BigDecimal.TEN,
+                new BigDecimal("50000"), new BigDecimal("500000"),
+                AT.minusMinutes(10), AT.plusHours(1),
+                new BigDecimal("50000"), "KRW", BigDecimal.ONE);
+        ReflectionTestUtils.setField(normalOrder, "orderId", 1L);
+
+        TradeOrder sellOrder = TradeOrder.pendingLimitOrder(
+                ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.SELL, BigDecimal.TEN,
+                new BigDecimal("50000"), BigDecimal.ZERO,
+                AT.minusMinutes(10), AT.plusHours(1),
+                new BigDecimal("50000"), "KRW", BigDecimal.ONE);
+        ReflectionTestUtils.setField(sellOrder, "orderId", 1L);
+
+        TradeOrder marketOrder = mock(TradeOrder.class);
+        when(marketOrder.getOrderType()).thenReturn(OrderType.MARKET);
+        when(marketOrder.getStockId()).thenReturn(STOCK_ID);
+
+        TradeOrder usdOrder = TradeOrder.pendingLimitOrder(
+                ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY, BigDecimal.TEN,
+                new BigDecimal("50000"), new BigDecimal("500000"),
+                AT.minusMinutes(10), AT.plusHours(1),
+                new BigDecimal("50"), "USD", new BigDecimal("1300"));
+        ReflectionTestUtils.setField(usdOrder, "orderId", 1L);
+
+        LimitOrderCommand standardCommand = new LimitOrderCommand(
+                ACCOUNT_ID, CLIENT_ORDER_ID,
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.TEN),
+                new BigDecimal("50000"), "KRW");
+
+        LimitOrderCommand diffQtyCommand = new LimitOrderCommand(
+                ACCOUNT_ID, CLIENT_ORDER_ID,
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, new BigDecimal("20")),
+                new BigDecimal("50000"), "KRW");
+
+        LimitOrderCommand diffPriceCommand = new LimitOrderCommand(
+                ACCOUNT_ID, CLIENT_ORDER_ID,
+                new OrderTerms("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.TEN),
+                new BigDecimal("60000"), "KRW");
+
+        return Stream.of(
+                Arguments.of("수량 불일치", diffQtyCommand, normalOrder, normalStock),
+                Arguments.of("주문유형 불일치", standardCommand, marketOrder, normalStock),
+                Arguments.of("방향 불일치", standardCommand, sellOrder, normalStock),
+                Arguments.of("국가 불일치", standardCommand, normalOrder, usStock),
+                Arguments.of("심볼 불일치", standardCommand, normalOrder, diffSymbolStock),
+                Arguments.of("통화 불일치", standardCommand, usdOrder, normalStock),
+                Arguments.of("가격 불일치", diffPriceCommand, normalOrder, normalStock)
+        );
     }
 
     // ==========================================
@@ -380,8 +349,13 @@ class LimitOrderTransactionServiceTest {
                             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH));
         }
 
-        @Test
-        void 정적_거절조건_발생시_REJECTED_주문_생성() {
+        @ParameterizedTest(name = "{0} 거절 시 REJECTED 주문 생성")
+        @CsvSource({
+                "STOCK_SUSPENDED, true",
+                "MARKET_CLOSED, false",
+                "STALE_QUOTE, true"
+        })
+        void 시장_및_시세_불능시_REJECTED_주문_생성(ErrorCode reason, boolean marketOpen) {
             LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
             QuoteSnapshot quote = mock(QuoteSnapshot.class);
             when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
@@ -389,54 +363,19 @@ class LimitOrderTransactionServiceTest {
             when(stocks.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(krStock));
             when(quotes.findById(STOCK_ID)).thenReturn(Optional.of(quote));
             when(policy.hasValidCurrencyForMarket(krStock, quote)).thenReturn(true);
-            when(policy.determineStaticRejection(krStock)).thenReturn(ErrorCode.STOCK_SUSPENDED);
+            if (reason == ErrorCode.STOCK_SUSPENDED) {
+                when(policy.determineStaticRejection(krStock)).thenReturn(ErrorCode.STOCK_SUSPENDED);
+            } else if (reason == ErrorCode.STALE_QUOTE) {
+                when(policy.validateQuoteTime(quote, NOW)).thenReturn(ErrorCode.STALE_QUOTE);
+            }
             when(orders.save(any(TradeOrder.class))).thenAnswer(i -> i.getArgument(0));
 
             LimitOrderPricing.Price price = new LimitOrderPricing.Price(
                     new BigDecimal("50000"), new BigDecimal("500000"), DUMMY_AMOUNT);
 
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
+            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(marketOpen), price);
             assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
-            assertThat(response.rejectReason()).isEqualTo(ErrorCode.STOCK_SUSPENDED.name());
-        }
-
-        @Test
-        void 장마감시_MARKET_CLOSED_거절() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            QuoteSnapshot quote = mock(QuoteSnapshot.class);
-            when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
-            when(stocks.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(krStock));
-            when(quotes.findById(STOCK_ID)).thenReturn(Optional.of(quote));
-            when(policy.hasValidCurrencyForMarket(krStock, quote)).thenReturn(true);
-            when(orders.save(any(TradeOrder.class))).thenAnswer(i -> i.getArgument(0));
-
-            LimitOrderPricing.Price price = new LimitOrderPricing.Price(
-                    new BigDecimal("50000"), new BigDecimal("500000"), DUMMY_AMOUNT);
-
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(false), price);
-            assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
-            assertThat(response.rejectReason()).isEqualTo(ErrorCode.MARKET_CLOSED.name());
-        }
-
-        @Test
-        void 시세시각_지연시_STALE_QUOTE_거절() {
-            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
-            QuoteSnapshot quote = mock(QuoteSnapshot.class);
-            when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
-            when(stocks.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(krStock));
-            when(quotes.findById(STOCK_ID)).thenReturn(Optional.of(quote));
-            when(policy.hasValidCurrencyForMarket(krStock, quote)).thenReturn(true);
-            when(policy.validateQuoteTime(quote, NOW)).thenReturn(ErrorCode.STALE_QUOTE);
-            when(orders.save(any(TradeOrder.class))).thenAnswer(i -> i.getArgument(0));
-
-            LimitOrderPricing.Price price = new LimitOrderPricing.Price(
-                    new BigDecimal("50000"), new BigDecimal("500000"), DUMMY_AMOUNT);
-
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
-            assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
-            assertThat(response.rejectReason()).isEqualTo(ErrorCode.STALE_QUOTE.name());
+            assertThat(response.rejectReason()).isEqualTo(reason.name());
         }
 
         @Test
@@ -585,7 +524,6 @@ class LimitOrderTransactionServiceTest {
                     .isInstanceOfSatisfying(BusinessException.class, e ->
                             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ORDER_NOT_FOUND));
 
-            // 다른 계좌의 주문인 경우
             TradeOrder otherOrder = createPendingOrder(OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
             ReflectionTestUtils.setField(otherOrder, "accountId", 999L);
             when(orders.findForUpdate(2L)).thenReturn(Optional.of(otherOrder));
@@ -753,34 +691,25 @@ class LimitOrderTransactionServiceTest {
             verify(filledOrder, never()).expire(any());
         }
 
-        @Test
-        void 만료시각이_과거이면_현재시각으로_만료() {
+        @ParameterizedTest(name = "만료시각={0}이면 종료시각={1}")
+        @CsvSource({
+                "PAST, CURRENT",
+                "FUTURE, EXPIRES_AT"
+        })
+        void 활성_주문_격리시_시각조건에_맞춰_만료처리한다(String expiryScenario, String expectedClosedScenario) {
+            OffsetDateTime expiresAt = "PAST".equals(expiryScenario) ? AT.minusMinutes(1) : AT.plusHours(1);
             TradeOrder order = TradeOrder.pendingLimitOrder(
                     ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY, BigDecimal.TEN,
                     new BigDecimal("50000"), new BigDecimal("500000"),
-                    AT.minusMinutes(10), AT.minusMinutes(1),
+                    AT.minusMinutes(10), expiresAt,
                     new BigDecimal("50000"), "KRW", BigDecimal.ONE);
             when(orders.findForUpdate(1L)).thenReturn(Optional.of(order));
 
             service.isolateCorruptedOrder(1L);
 
             assertThat(order.getStatus()).isEqualTo(OrderStatus.EXPIRED);
-            assertThat(order.getClosedAt()).isEqualTo(AT);
-        }
-
-        @Test
-        void 만료시각이_미래이면_만료시각으로_강제만료() {
-            TradeOrder order = TradeOrder.pendingLimitOrder(
-                    ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY, BigDecimal.TEN,
-                    new BigDecimal("50000"), new BigDecimal("500000"),
-                    AT.minusMinutes(10), AT.plusHours(1),
-                    new BigDecimal("50000"), "KRW", BigDecimal.ONE);
-            when(orders.findForUpdate(1L)).thenReturn(Optional.of(order));
-
-            service.isolateCorruptedOrder(1L);
-
-            assertThat(order.getStatus()).isEqualTo(OrderStatus.EXPIRED);
-            assertThat(order.getClosedAt()).isEqualTo(AT.plusHours(1));
+            OffsetDateTime expectedClosedAt = "CURRENT".equals(expectedClosedScenario) ? AT : expiresAt;
+            assertThat(order.getClosedAt()).isEqualTo(expectedClosedAt);
         }
 
         @Test
