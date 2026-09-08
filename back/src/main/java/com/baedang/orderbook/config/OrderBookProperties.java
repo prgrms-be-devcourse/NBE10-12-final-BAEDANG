@@ -12,8 +12,6 @@ public record OrderBookProperties(
         boolean enabled,
         String policyVersion,
         Duration refreshInterval,
-        int levelsPerSide,
-        int spreadStepsPerSide,
         Duration maxQuoteAge,
         BigDecimal krBaseNotional,
         BigDecimal usBaseNotional,
@@ -29,8 +27,6 @@ public record OrderBookProperties(
             boolean enabled,
             String policyVersion,
             Duration refreshInterval,
-            int levelsPerSide,
-            int spreadStepsPerSide,
             Duration maxQuoteAge,
             BigDecimal krBaseNotional,
             BigDecimal usBaseNotional,
@@ -40,9 +36,9 @@ public record OrderBookProperties(
             int noiseMaxBps,
             Duration unconsumedRetention
     ) {
-        this(enabled, policyVersion, refreshInterval, levelsPerSide, spreadStepsPerSide, maxQuoteAge,
-                krBaseNotional, usBaseNotional, minQuantity, maxQuantity, noiseMinBps, noiseMaxBps,
-                unconsumedRetention, Duration.ZERO, Duration.ZERO);
+        this(enabled, policyVersion, refreshInterval, maxQuoteAge, krBaseNotional, usBaseNotional,
+                minQuantity, maxQuantity, noiseMinBps, noiseMaxBps, unconsumedRetention,
+                Duration.ZERO, Duration.ZERO);
     }
     @ConstructorBinding
     public OrderBookProperties {
@@ -50,8 +46,6 @@ public record OrderBookProperties(
         if (refreshInitialDelay == null || refreshInitialDelay.isNegative()) throw new IllegalArgumentException("orderbook refresh-initial-delay는 0 이상이어야 합니다");
         if (retentionInitialDelay == null || retentionInitialDelay.isNegative()) throw new IllegalArgumentException("orderbook retention-initial-delay는 0 이상이어야 합니다");
         if (refreshInterval == null || refreshInterval.isZero() || refreshInterval.isNegative()) throw new IllegalArgumentException("orderbook refresh-interval은 양수여야 합니다");
-        if (levelsPerSide != 10) throw new IllegalArgumentException("V1 levels-per-side는 10이어야 합니다");
-        if (spreadStepsPerSide != 1) throw new IllegalArgumentException("V1 spread-steps-per-side는 1이어야 합니다");
         if (maxQuoteAge == null || maxQuoteAge.isZero() || maxQuoteAge.isNegative()) throw new IllegalArgumentException("orderbook max-quote-age는 양수여야 합니다");
         if (krBaseNotional == null || krBaseNotional.signum() <= 0) throw new IllegalArgumentException("orderbook kr-base-notional은 양수여야 합니다");
         if (usBaseNotional == null || usBaseNotional.signum() <= 0) throw new IllegalArgumentException("orderbook us-base-notional은 양수여야 합니다");

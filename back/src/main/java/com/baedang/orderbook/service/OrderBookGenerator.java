@@ -26,8 +26,8 @@ import java.util.Random;
  * <p>V1 가격 배열: ASK 1은 basePrice보다 큰 첫 유효 가격, BID 1은 basePrice보다
  * 작은 첫 유효 가격이고, 이후 각 레벨은 직전 레벨의 다음/이전 유효 가격이다.
  * 구간 경계를 지날 때 새 구간의 규칙이 다시 적용되므로 {@link TickSizePolicy}에
- * 위임한다. ASK는 항상 설정된 깊이만큼 만들고, 미국 BID는 양수 유효 가격이
- * 남아 있는 깊이(1~10개)까지만 만든다. 같은 가격 반복이나 강제 치환은 하지 않는다.
+ * 위임한다. V1 깊이는 {@link #DEPTH_MULTIPLIERS}의 10단계로 고정한다. ASK는 항상
+ * 10개를 만들고, 미국 BID는 양수 유효 가격이 남아 있는 깊이(1~10개)까지만 만든다.
  */
 @Component
 public class OrderBookGenerator {
@@ -62,9 +62,8 @@ public class OrderBookGenerator {
     ) {
         Random random = new Random(seed);
         BigDecimal baseNotional = baseNotionalFor(policy, stock);
-        int levelsPerSide = policy.levelsPerSide();
 
-        List<GeneratedOrderBookLevel> levels = new ArrayList<>(levelsPerSide * 2);
+        List<GeneratedOrderBookLevel> levels = new ArrayList<>(DEPTH_MULTIPLIERS.size() * 2);
         levels.addAll(generateSide(policy, stock, OrderBookSide.ASK, basePrice, baseNotional, random));
         levels.addAll(generateSide(policy, stock, OrderBookSide.BID, basePrice, baseNotional, random));
 
@@ -88,9 +87,9 @@ public class OrderBookGenerator {
             BigDecimal baseNotional,
             Random random
     ) {
-        List<GeneratedOrderBookLevel> levels = new ArrayList<>(policy.levelsPerSide());
+        List<GeneratedOrderBookLevel> levels = new ArrayList<>(DEPTH_MULTIPLIERS.size());
         BigDecimal price = basePrice;
-        for (int depth = 1; depth <= policy.levelsPerSide(); depth++) {
+        for (int depth = 1; depth <= DEPTH_MULTIPLIERS.size(); depth++) {
             Optional<BigDecimal> nextPrice = side == OrderBookSide.ASK
                     ? Optional.of(tickSizePolicy.nextValidPriceAbove(stock, price))
                     : tickSizePolicy.findPreviousValidPriceBelow(stock, price);

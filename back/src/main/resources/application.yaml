@@ -141,8 +141,6 @@ trading:
     policy-version: V1
     refresh-interval: 3s
     refresh-initial-delay: ${ORDERBOOK_REFRESH_INITIAL_DELAY:0s}
-    levels-per-side: 10
-    spread-steps-per-side: 1
     max-quote-age: 15s
     kr-base-notional: 20000000
     us-base-notional: 15000

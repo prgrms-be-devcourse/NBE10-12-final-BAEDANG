@@ -23,7 +23,7 @@ class OrderBookGeneratorTest {
 
     private static OrderBookProperties v1() {
         return new OrderBookProperties(
-                false, "V1", Duration.ofSeconds(3), 10, 1, Duration.ofSeconds(15),
+                false, "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 BigDecimal.ONE, new BigDecimal("1000000"), 8000, 12000, Duration.ofMinutes(1)
         );

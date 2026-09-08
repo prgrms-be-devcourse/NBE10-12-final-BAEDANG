@@ -262,8 +262,7 @@ class OrderBookQueryIntegrationTest {
                 generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
 
         OrderBookProperties disabled = new OrderBookProperties(
-                false, properties.policyVersion(), properties.refreshInterval(),
-                properties.levelsPerSide(), properties.spreadStepsPerSide(), properties.maxQuoteAge(),
+                false, properties.policyVersion(), properties.refreshInterval(), properties.maxQuoteAge(),
                 properties.krBaseNotional(), properties.usBaseNotional(), properties.minQuantity(),
                 properties.maxQuantity(), properties.noiseMinBps(), properties.noiseMaxBps(),
                 properties.unconsumedRetention()
