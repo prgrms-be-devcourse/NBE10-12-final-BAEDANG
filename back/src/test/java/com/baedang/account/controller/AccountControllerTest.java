@@ -13,6 +13,7 @@ import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.trading.dto.OrderPageResponse;
 import com.baedang.trading.service.OrderReadService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -213,7 +214,7 @@ class AccountControllerTest {
     @Test
     void 계좌의_주문목록을_조회하면_200과_페이징_결과를_응답한다() throws Exception {
         when(orderReadService.list(7L, null, 20))
-                .thenReturn(new OrderReadService.Page<>(List.of(), null, false));
+                .thenReturn(new OrderPageResponse(List.of(), null, false));
 
         mockMvc.perform(get("/api/accounts/me/orders").with(authenticatedUser(7L)))
                 .andExpect(status().isOk())

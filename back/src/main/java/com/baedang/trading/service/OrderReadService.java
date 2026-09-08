@@ -5,6 +5,7 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.dto.OrderDetailResponse;
 import com.baedang.trading.dto.ExecutionResponse;
 import com.baedang.trading.dto.OrderExecutionsResponse;
+import com.baedang.trading.dto.OrderPageResponse;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.LedgerEntry;
@@ -67,9 +68,7 @@ public class OrderReadService {
         return OrderDetailResponse.from(order, stock(order.getStockId()));
     }
 
-    public record Page<T>(List<T> items, String nextCursor, boolean hasNext) {}
-
-    public Page<OrderDetailResponse> list(Long userId, String cursor, int size) {
+    public OrderPageResponse list(Long userId, String cursor, int size) {
         validateSize(size);
         Long accountId = accounts.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND)).getAccountId();
@@ -86,7 +85,7 @@ public class OrderReadService {
             if (stock == null) throw new BusinessException(ErrorCode.INTERNAL_ERROR);
             return OrderDetailResponse.from(o, stock);
         }).toList();
-        return new Page<>(items, more ? encode("orders:" + accountId, items.getLast().orderId()) : null, more);
+        return new OrderPageResponse(items, more ? encode("orders:" + accountId, items.getLast().orderId()) : null, more);
     }
 
     public OrderExecutionsResponse executions(Long userId, Long id, String cursor, int size) {

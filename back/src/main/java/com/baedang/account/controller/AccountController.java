@@ -8,7 +8,7 @@ import com.baedang.account.dto.LedgerResponse;
 import com.baedang.account.service.AccountResetService;
 import com.baedang.account.service.AccountService;
 import com.baedang.account.service.LedgerQueryService;
-import com.baedang.trading.dto.OrderDetailResponse;
+import com.baedang.trading.dto.OrderPageResponse;
 import com.baedang.trading.service.OrderReadService;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -74,7 +74,7 @@ public class AccountController {
     }
 
     @GetMapping("/me/orders")
-    public ResponseEntity<OrderReadService.Page<OrderDetailResponse>> getOrders(
+    public ResponseEntity<OrderPageResponse> getOrders(
             @AuthenticationPrincipal Long userId,
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "20") int size

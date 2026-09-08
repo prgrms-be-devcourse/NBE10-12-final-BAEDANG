@@ -1,5 +1,7 @@
 package com.baedang.trading.service;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
@@ -58,7 +60,8 @@ public class LimitOrderExpirationService {
                 }
                 for (TradeOrder order : batch) {
                     try {
-                        Account account = accounts.findById(order.getAccountId()).orElseThrow();
+                        Account account = accounts.findById(order.getAccountId())
+                                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "accountId=" + order.getAccountId()));
                         transactions.close(account.getUserId(), account.getAccountId(), order.getOrderId(), true);
                     } catch (RuntimeException e) {
                         if (isTransientLockFailure(e)) {
