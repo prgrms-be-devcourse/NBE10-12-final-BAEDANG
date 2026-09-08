@@ -319,6 +319,31 @@ class LimitOrderLifecycleIntegrationTest {
     }
 
     @Test
+    void 동결해제_실패는_주문종료를_롤백하고_후속주문처리와_복구후재시도를_허용한다() {
+        com.baedang.trading.dto.OrderDetailResponse first = service.place(user, request("BUY", "2", "100", "USD"));
+        com.baedang.trading.dto.OrderDetailResponse second = service.place(user, request("BUY", "1", "100", "USD"));
+        jdbc.update("UPDATE account SET locked_cash=140014 WHERE account_id=?", account);
+        time.set(NOW.plusSeconds(3601));
+
+        expiration.expireDue();
+
+        assertThat(reads.detail(user, first.orderId()).status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(reads.detail(user, first.orderId()).reservedCash()).isEqualTo("280028");
+        assertThat(reads.detail(user, second.orderId()).status()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(locked()).isZero();
+        jdbc.update("UPDATE account SET locked_cash=280028 WHERE account_id=?", account);
+
+        expiration.expireDue();
+        expiration.expireDue();
+
+        assertThat(reads.detail(user, first.orderId()).status()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account))
+                .isEqualByComparingTo("50000000");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM ledger_entry WHERE account_id=?", Long.class, account)).isZero();
+    }
+
+    @Test
     void 만료스캔은_중단시간동안_지난주문도_복구하고_반복해제하지_않는다() {
         var result = service.place(user, request("BUY", "1", "100", "USD"));
         time.set(NOW.plusSeconds(86400));

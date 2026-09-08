@@ -67,12 +67,7 @@ public class LimitOrderExpirationService {
                         if (isTransientLockFailure(e)) {
                             log.warn("지정가 만료 락 획득 대기 초과 (다음 주기에 재시도): orderId={}", order.getOrderId(), e);
                         } else {
-                            log.error("지정가 만료 영구 실패 대상 격리: orderId={}", order.getOrderId(), e);
-                            try {
-                                transactions.isolateCorruptedOrder(order.getOrderId());
-                            } catch (RuntimeException isolateEx) {
-                                log.error("지정가 만료 영구 실패 주문 격리 실패: orderId={}", order.getOrderId(), isolateEx);
-                            }
+                            log.error("지정가 만료 실패: 상태와 동결을 보존하고 다음 스캔에서 재시도합니다. orderId={}", order.getOrderId(), e);
                         }
                     }
                 }

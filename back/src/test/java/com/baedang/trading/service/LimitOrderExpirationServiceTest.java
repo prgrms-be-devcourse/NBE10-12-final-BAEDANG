@@ -4,7 +4,6 @@ import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.repository.AccountRepository;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.dao.CannotAcquireLockException;
@@ -60,43 +59,42 @@ class LimitOrderExpirationServiceTest {
         assertThat(queries.get()).isEqualTo(2);
     }
 
-    @Test
-    void 계좌조회_영구실패_주문은_격리_만료처리한다() {
+    @ParameterizedTest
+    @ValueSource(strings = {"lock", "connection", "missing-account"})
+    void 실패주문을_건너뛰고_다음스캔에서_재시도한다(String failure) {
         TradeOrderRepository orders = mock(TradeOrderRepository.class);
         AccountRepository accounts = mock(AccountRepository.class);
         LimitOrderTransactionService transactions = mock(LimitOrderTransactionService.class);
-        TradeOrder order = mock(TradeOrder.class);
-        when(order.getOrderId()).thenReturn(100L);
-        when(order.getAccountId()).thenReturn(50L);
-        when(orders.expired(any(), anyLong(), any())).thenReturn(List.of(order), List.of());
-        when(accounts.findById(50L)).thenReturn(Optional.empty());
-
-        LimitOrderExpirationService service = new LimitOrderExpirationService(orders, accounts,
-                transactions, Clock.fixed(Instant.parse("2026-09-07T07:00:00Z"), ZoneOffset.UTC));
-        service.expireDue();
-
-        verify(transactions).isolateCorruptedOrder(100L);
-    }
-
-    @Test
-    void 락경합_타임아웃은_격리하지_않고_다음스캔을_위해_건너뛴다() {
-        TradeOrderRepository orders = mock(TradeOrderRepository.class);
-        AccountRepository accounts = mock(AccountRepository.class);
-        LimitOrderTransactionService transactions = mock(LimitOrderTransactionService.class);
-        TradeOrder order = mock(TradeOrder.class);
-        when(order.getOrderId()).thenReturn(101L);
-        when(order.getAccountId()).thenReturn(51L);
+        TradeOrder first = mock(TradeOrder.class);
+        TradeOrder second = mock(TradeOrder.class);
+        when(first.getOrderId()).thenReturn(100L);
+        when(second.getOrderId()).thenReturn(101L);
+        when(first.getAccountId()).thenReturn(50L);
+        when(second.getAccountId()).thenReturn(50L);
         Account account = mock(Account.class);
         when(account.getUserId()).thenReturn(1L);
-        when(account.getAccountId()).thenReturn(51L);
-        when(orders.expired(any(), anyLong(), any())).thenReturn(List.of(order), List.of());
-        when(accounts.findById(51L)).thenReturn(Optional.of(account));
-        when(transactions.close(1L, 51L, 101L, true)).thenThrow(new CannotAcquireLockException("lock timeout"));
-
+        when(account.getAccountId()).thenReturn(50L);
+        when(orders.expired(any(), org.mockito.ArgumentMatchers.eq(101L), any())).thenReturn(List.of());
+        when(orders.expired(any(), org.mockito.ArgumentMatchers.eq(100L), any())).thenReturn(List.of());
+        org.mockito.Mockito.doReturn(List.of(first, second), List.of(first))
+                .when(orders).expired(any(), org.mockito.ArgumentMatchers.eq(0L), any());
+        if ("missing-account".equals(failure)) {
+            when(accounts.findById(50L)).thenReturn(Optional.empty(), Optional.of(account));
+        } else {
+            when(accounts.findById(50L)).thenReturn(Optional.of(account));
+            RuntimeException error = "lock".equals(failure)
+                    ? new CannotAcquireLockException("lock timeout")
+                    : new org.springframework.dao.DataAccessResourceFailureException("connection unavailable");
+            when(transactions.close(1L, 50L, 100L, true)).thenThrow(error).thenReturn(null);
+        }
         LimitOrderExpirationService service = new LimitOrderExpirationService(orders, accounts,
                 transactions, Clock.fixed(Instant.parse("2026-09-07T07:00:00Z"), ZoneOffset.UTC));
         service.expireDue();
-
-        verify(transactions, never()).isolateCorruptedOrder(101L);
+        verify(transactions).close(1L, 50L, 101L, true);
+        service.expireDue();
+        verify(transactions, org.mockito.Mockito.times("missing-account".equals(failure) ? 1 : 2))
+                .close(1L, 50L, 100L, true);
+        verify(first, never()).expire(any());
+        verify(second, never()).expire(any());
     }
 }
