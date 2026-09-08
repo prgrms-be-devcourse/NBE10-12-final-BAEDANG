@@ -318,8 +318,10 @@ class OrderBookPublicationIntegrationTest {
                 """
                 insert into trade_order (account_id, stock_id, client_order_id, order_type, side,
                                          quantity, filled_quantity, limit_price, reserved_cash,
+                                         requested_limit_price, requested_limit_currency, acceptance_exchange_rate,
                                          status, ordered_at, closed_at, expires_at)
-                values (?, ?, gen_random_uuid(), 'LIMIT', 'BUY', 1, 1, 70100, 0, 'FILLED', now(), now(), now() + interval '1 hour')
+                values (?, ?, gen_random_uuid(), 'LIMIT', 'BUY', 1, 1, 70100, 0,
+                        70100, 'KRW', 1, 'FILLED', now(), now(), now() + interval '1 hour')
                 returning order_id
                 """, Long.class, accountId, krStock.getStockId());
         jdbcTemplate.update(
