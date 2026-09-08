@@ -7,6 +7,7 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import java.math.BigDecimal;
 import java.util.regex.Pattern;
+import java.util.Map;
 import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 import static com.baedang.trading.support.NumericBounds.MONEY_LIMIT;
 
@@ -17,19 +18,19 @@ public final class LimitOrderRequestPolicy {
 
     public static String currency(String value, MarketCountry country) {
         String currency = DomainNormalizer.currency(value);
-        if (!("KRW".equals(currency) || (country == MarketCountry.US && "USD".equals(currency)))) throw invalid();
+        if (!("KRW".equals(currency) || (country == MarketCountry.US && "USD".equals(currency)))) throw invalid("limitCurrency");
         return currency;
     }
 
     public static BigDecimal price(String value, String currency) {
-        if (value == null || value.length() > 32 || !PRICE.matcher(value.trim()).matches()) throw invalid();
+        if (value == null || value.length() > 32 || !PRICE.matcher(value.trim()).matches()) throw invalid("limitPrice");
         BigDecimal price = new BigDecimal(value.trim());
         if (price.signum() <= 0 || price.compareTo(MONEY_LIMIT) >= 0
-                || !isRepresentableAtScale(price, "KRW".equals(currency) ? 0 : 2)) throw invalid();
+                || !isRepresentableAtScale(price, "KRW".equals(currency) ? 0 : 2)) throw invalid("limitPrice");
         return price;
     }
 
-    private static BusinessException invalid() {
-        return new BusinessException(ErrorCode.INVALID_INPUT, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+    private static BusinessException invalid(String field) {
+        return new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", field, "retryPolicy", ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.name()));
     }
 }
