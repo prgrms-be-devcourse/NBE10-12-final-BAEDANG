@@ -506,11 +506,11 @@ Limit orders use two phases: Phase 1 commits PENDING/reservations; a worker repe
 
 > 🧪 **Good verification tests** — after every trade, check `buy: net_amount = gross_amount + fee` and `sell: net_amount = gross_amount − fee − tax` always hold, and the cumulative sum of `ledger_entry.amount` (fee included) equals `account.cash_balance`. The surest proof you understand the ledger.
 
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` and `db/migration/V2__limit_order_lifecycle.sql`
 
 ## LIMIT acceptance evidence (#120)
 
-Order history uses `ix_order_history (account_id, order_id DESC)` to match its account-scoped order-ID cursor. This changes the schema definition only; existing databases need the index change applied separately.
+Order history uses `ix_order_history (account_id, order_id DESC)` to match its account-scoped order-ID cursor (applied via `db/migration/V2__limit_order_lifecycle.sql`).
 
 Three immutable acceptance columns are added to trade_order:
 - requested_limit_price NUMERIC(19,4): original user-entered unit price; whole KRW or cent USD.

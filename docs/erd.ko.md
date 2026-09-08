@@ -501,11 +501,11 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 
 > 🧪 **검증 테스트로 만들면 좋은 것** — 모든 거래 후 `매수 시 net_amount = gross_amount + fee`, `매도 시 net_amount = gross_amount − fee − tax` 가 항상 성립하는지, 그리고 `ledger_entry.amount`(수수료 포함) 의 누적 합이 `account.cash_balance` 와 일치하는지 확인하는 테스트를 두세요. 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
 
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql` 과 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql` 및 `db/migration/V2__limit_order_lifecycle.sql` 과 함께 보세요
 
 ## 지정가 접수 근거 (#120)
 
-주문 이력은 계좌별 주문 ID 커서 조회에 맞춘 `ix_order_history (account_id, order_id DESC)`를 사용합니다. 스키마 정의 변경이며 기존 DB에는 인덱스 변경을 별도로 적용해야 합니다.
+주문 이력은 계좌별 주문 ID 커서 조회에 맞춘 `ix_order_history (account_id, order_id DESC)`를 사용합니다 (`db/migration/V2__limit_order_lifecycle.sql` 적용).
 
 trade_order에 접수 후 변경하지 않는 세 컬럼을 추가합니다.
 - requested_limit_price NUMERIC(19,4): 사용자 원본 단가. KRW 원 단위 또는 USD 센트 단위.
