@@ -1,9 +1,3 @@
-# 기존 pgdata를 보존한 채 orderbook 스키마를 반영하려면 애플리케이션을 중지하고
-# 저장소 루트에서 다음을 1회 실행한다:
-#   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f infra/migrations/2026-09-07-orderbook.sql
-# 스크립트는 orphan book_level_id와 중복 active version을 먼저 검사하며 기존 거래·원장
-# 데이터는 수정하지 않는다. 빈 DB 신규 기동은 schema.sql만 사용한다.
-
 services:
   postgres:
     image: timescale/timescaledb:latest-pg18

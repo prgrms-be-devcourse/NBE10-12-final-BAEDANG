@@ -67,8 +67,9 @@ class TradeExecutionSettlementIntegrationTest {
             var at = AT.plusMinutes(i);
             var evidence = country == MarketCountry.KR ? ExecutionRateEvidence.krw(at)
                     : new ExecutionRateEvidence(rate, at, at, at.plusMinutes(1));
+            Long bookLevelId = insertBookLevel(order, price, i);
             var execution = executions.save(TradeExecution.limit(order, country, UUID.randomUUID(), i, BigDecimal.ONE,
-                    price, evidence, result.requireExecutionAmounts(), at, at, (long) i));
+                    price, evidence, result.requireExecutionAmounts(), at, at, bookLevelId));
             var reserve = side == OrderSide.BUY
                     ? calculator.reserveAfterBuy(order.getReservedCash(), order.activeRemainingQuantity(), BigDecimal.ONE, result.netAmountKrw()).reservedCashAfter()
                     : BigDecimal.ZERO;
@@ -104,12 +105,14 @@ class TradeExecutionSettlementIntegrationTest {
         // 모델과 매핑만 검증합니다. 계좌 정산/취소 유스케이스를 대신 구현하지 않습니다.
         TradeOrder order = seed(MarketCountry.KR, OrderSide.BUY);
         Long executionId = null;
+        Long bookLevelId = null;
         if (filled == 1) {
             var result = calculator().calculate(MarketCountry.KR, OrderSide.BUY,
                     new BigDecimal("90"), BigDecimal.ONE, null, CumulativeSettlementState.empty());
+            bookLevelId = insertBookLevel(order, new BigDecimal("90"), 1);
             var execution = executions.save(TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1,
                     BigDecimal.ONE, new BigDecimal("90"), ExecutionRateEvidence.krw(AT),
-                    result.requireExecutionAmounts(), AT, AT.plusSeconds(1), 1L));
+                    result.requireExecutionAmounts(), AT, AT.plusSeconds(1), bookLevelId));
             executionId = execution.getExecutionId();
             var reservation = calculator().reserveAfterBuy(order.getReservedCash(), order.activeRemainingQuantity(),
                     BigDecimal.ONE, result.netAmountKrw());
@@ -132,7 +135,7 @@ class TradeExecutionSettlementIntegrationTest {
         assertThat(closed.getExecutionCount()).isEqualTo(filled);
         if (executionId != null) {
             var execution = executions.findById(executionId).orElseThrow();
-            assertThat(execution.getBookLevelId()).isEqualTo(1L);
+            assertThat(execution.getBookLevelId()).isEqualTo(bookLevelId);
             assertThat(closed.getLastExecutedAt()).isEqualTo(AT.plusSeconds(1));
             var ledger = ledgers.findFirstByOrderIdOrderByEntryIdAsc(closed.getOrderId()).orElseThrow();
             assertThat(ledger.getExecutionId()).isEqualTo(executionId);
@@ -147,9 +150,10 @@ class TradeExecutionSettlementIntegrationTest {
         if (filled == 1) {
             var result = calculator().calculate(MarketCountry.KR, OrderSide.BUY,
                     new BigDecimal("90"), BigDecimal.ONE, null, CumulativeSettlementState.empty());
+            Long bookLevelId = insertBookLevel(order, new BigDecimal("90"), 1);
             var execution = executions.save(TradeExecution.limit(order, MarketCountry.KR, UUID.randomUUID(), 1,
                     BigDecimal.ONE, new BigDecimal("90"), ExecutionRateEvidence.krw(AT),
-                    result.requireExecutionAmounts(), AT, AT.plusSeconds(1), 1L));
+                    result.requireExecutionAmounts(), AT, AT.plusSeconds(1), bookLevelId));
             order.applyExecution(execution, new BigDecimal("2910"));
             entityManager.flush();
         }
@@ -171,7 +175,37 @@ class TradeExecutionSettlementIntegrationTest {
         return orders.saveAndFlush(TradeOrder.pendingLimitOrder(account, stock, UUID.randomUUID(), side,
                 new BigDecimal("3"), new BigDecimal(side == OrderSide.BUY ? "1000" : "1"),
                 side == OrderSide.BUY ? calculator().initialReservedCash(country, new BigDecimal("1000"),
-                        new BigDecimal("3"), new BigDecimal("1500")) : BigDecimal.ZERO, AT, AT.plusHours(6), new BigDecimal(side == OrderSide.BUY ? "1000" : "1"), "USD", BigDecimal.ONE));
+                        new BigDecimal("3"), new BigDecimal("1500")) : BigDecimal.ZERO, AT, AT.plusHours(6),
+                new BigDecimal(side == OrderSide.BUY ? "1000" : "1"), country.defaultCurrency(),
+                country == MarketCountry.KR ? BigDecimal.ONE : new BigDecimal("1500")));
+    }
+
+    /** LIMIT 체결 fixture도 운영 FK와 동일하게 실제 호가 레벨을 참조한다. */
+    private Long insertBookLevel(TradeOrder order, BigDecimal price, int depth) {
+        Long versionId = jdbc.query("""
+                        SELECT book_version_id
+                          FROM order_book_version
+                         WHERE stock_id = ? AND is_active = true
+                        """,
+                resultSet -> resultSet.next() ? resultSet.getLong(1) : null,
+                order.getStockId());
+        if (versionId == null) {
+            versionId = jdbc.queryForObject("""
+                    INSERT INTO order_book_version
+                        (stock_id, base_price, currency, quote_at, generated_at, policy_version, seed, revision)
+                    SELECT stock_id, ?, currency, ?, ?, 'V1', 1, 0
+                      FROM stock
+                     WHERE stock_id = ?
+                    RETURNING book_version_id
+                    """, Long.class, price, AT, AT, order.getStockId());
+        }
+        String side = order.getSide() == OrderSide.BUY ? "ASK" : "BID";
+        return jdbc.queryForObject("""
+                INSERT INTO order_book_level
+                    (book_version_id, side, level_depth, price, initial_quantity, remaining_quantity)
+                VALUES (?, ?, ?, ?, 10, 10)
+                RETURNING level_id
+                """, Long.class, versionId, side, depth, price);
     }
 
     private LimitOrderSettlementCalculator calculator() {
