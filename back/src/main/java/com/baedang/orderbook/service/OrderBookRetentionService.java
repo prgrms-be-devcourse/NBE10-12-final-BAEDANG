@@ -2,6 +2,7 @@ package com.baedang.orderbook.service;
 
 import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
+import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -21,19 +22,23 @@ public class OrderBookRetentionService {
     private final OrderBookVersionRepository versionRepository;
     private final OrderBookProperties properties;
     private final Clock clock;
+    private final EntityManager entityManager;
 
     public OrderBookRetentionService(
             OrderBookVersionRepository versionRepository,
             OrderBookProperties properties,
-            Clock clock
+            Clock clock,
+            EntityManager entityManager
     ) {
         this.versionRepository = versionRepository;
         this.properties = properties;
         this.clock = clock;
+        this.entityManager = entityManager;
     }
 
     @Transactional
     public int deleteExpiredClosed() {
+        entityManager.createNativeQuery("SET LOCAL lock_timeout = '2s'").executeUpdate();
         var cutoff = clock.instant()
                 .minus(properties.closedVersionRetention())
                 .atOffset(ZoneOffset.UTC);

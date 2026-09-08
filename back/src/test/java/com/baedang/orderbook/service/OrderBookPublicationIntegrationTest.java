@@ -27,6 +27,7 @@ import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -332,4 +333,72 @@ class OrderBookPublicationIntegrationTest {
                 "select book_level_id from trade_execution where order_id = ?", Long.class, orderId))
                 .isEqualTo(levelId);
     }
+
+    @Test
+    void stock_락이_장시간_점유되면_publish는_대기를_중단하고_다음_호출에서_재시도한다() throws Exception {
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            Future<?> blocker = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        stockRepository.findByIdForUpdate(krStock.getStockId()).orElseThrow();
+                        lockHeld.countDown();
+                        try {
+                            releaseLock.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(exception);
+                        }
+                    }));
+            assertThat(lockHeld.await(3, TimeUnit.SECONDS)).isTrue();
+
+            assertThatThrownBy(() -> publicationService.publish(
+                    generatedBook(42L), BASE.plusSeconds(600)))
+                    .isInstanceOf(PessimisticLockingFailureException.class);
+
+            releaseLock.countDown();
+            blocker.get(3, TimeUnit.SECONDS);
+        } finally {
+            releaseLock.countDown();
+        }
+
+        assertThat(publicationService.publish(generatedBook(43L), BASE.plusSeconds(600))).isPresent();
+    }
+
+    @Test
+    void 종료버전_락이_장시간_점유되면_retention은_대기를_중단하고_다음_호출에서_재시도한다() throws Exception {
+        Long versionId = publicationService.publish(generatedBook(41L), BASE.plusSeconds(600)).orElseThrow();
+        publicationService.closeActive(krStock.getStockId());
+        clock.advance(Duration.ofMinutes(2));
+        CountDownLatch lockHeld = new CountDownLatch(1);
+        CountDownLatch releaseLock = new CountDownLatch(1);
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            Future<?> blocker = executor.submit(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        jdbcTemplate.queryForObject(
+                                "select book_version_id from order_book_version where book_version_id = ? for update",
+                                Long.class, versionId);
+                        lockHeld.countDown();
+                        try {
+                            releaseLock.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException exception) {
+                            Thread.currentThread().interrupt();
+                            throw new AssertionError(exception);
+                        }
+                    }));
+            assertThat(lockHeld.await(3, TimeUnit.SECONDS)).isTrue();
+
+            assertThatThrownBy(retentionService::deleteExpiredClosed)
+                    .isInstanceOf(PessimisticLockingFailureException.class);
+
+            releaseLock.countDown();
+            blocker.get(3, TimeUnit.SECONDS);
+        } finally {
+            releaseLock.countDown();
+        }
+
+        retentionService.deleteExpiredClosed();
+        assertThat(versionRepository.findById(versionId)).isEmpty();
+    }
+
 }

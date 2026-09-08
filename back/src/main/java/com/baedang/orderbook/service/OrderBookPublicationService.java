@@ -10,6 +10,7 @@ import com.baedang.orderbook.repository.OrderBookLevelRepository;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import jakarta.persistence.EntityManager;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,19 +38,22 @@ public class OrderBookPublicationService {
     private final OrderBookLevelRepository levelRepository;
     private final OrderBookProperties properties;
     private final Clock clock;
+    private final EntityManager entityManager;
 
     public OrderBookPublicationService(
             StockRepository stockRepository,
             OrderBookVersionRepository versionRepository,
             OrderBookLevelRepository levelRepository,
             OrderBookProperties properties,
-            Clock clock
+            Clock clock,
+            EntityManager entityManager
     ) {
         this.stockRepository = stockRepository;
         this.versionRepository = versionRepository;
         this.levelRepository = levelRepository;
         this.properties = properties;
         this.clock = clock;
+        this.entityManager = entityManager;
     }
 
     /**
@@ -59,6 +63,7 @@ public class OrderBookPublicationService {
      */
     @Transactional
     public Optional<Long> publish(GeneratedOrderBook generated, Instant sessionValidUntil) {
+        applyLockTimeout();
         Stock stock = stockRepository.findByIdForUpdate(generated.stockId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
         OrderBookVersion active = versionRepository.findActiveForUpdate(stock.getStockId()).orElse(null);
@@ -87,10 +92,16 @@ public class OrderBookPublicationService {
     /** 새 버전 없이 활성 버전만 종료한다(장 마감 열거, 생성 실패 종목용). */
     @Transactional
     public void closeActive(Long stockId) {
+        applyLockTimeout();
         Stock stock = stockRepository.findByIdForUpdate(stockId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
         versionRepository.findActiveForUpdate(stock.getStockId())
                 .ifPresent(version -> version.close(clock.instant()));
+    }
+
+    /** 스케줄러 한 건이 공용 DB 락을 무기한 기다리지 않게 트랜잭션 안에서만 적용한다. */
+    private void applyLockTimeout() {
+        entityManager.createNativeQuery("SET LOCAL lock_timeout = '2s'").executeUpdate();
     }
 
     /** 설계서 §5.1 — 미래 시세와 maxQuoteAge 초과만拒绝. abs() 비교 금지. */

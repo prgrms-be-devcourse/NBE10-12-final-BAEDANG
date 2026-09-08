@@ -79,6 +79,8 @@ class OrderBookPropertiesTest {
                 .isEqualTo("${trading.orderbook.refresh-initial-delay}");
         assertThat(retention.initialDelayString())
                 .isEqualTo("${trading.orderbook.retention-initial-delay}");
+        assertThat(refresh.scheduler()).isEqualTo("orderBookTaskScheduler");
+        assertThat(retention.scheduler()).isEqualTo("orderBookTaskScheduler");
     }
 
     @Test

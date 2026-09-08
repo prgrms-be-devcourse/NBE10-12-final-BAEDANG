@@ -82,7 +82,8 @@ public class OrderBookRefreshScheduler {
 
     @Scheduled(
             fixedDelayString = "${trading.orderbook.refresh-interval}",
-            initialDelayString = "${trading.orderbook.refresh-initial-delay}"
+            initialDelayString = "${trading.orderbook.refresh-initial-delay}",
+            scheduler = "orderBookTaskScheduler"
     )
     @Transactional(propagation = Propagation.NEVER)
     public void refreshOrderBooks() {
@@ -97,7 +98,8 @@ public class OrderBookRefreshScheduler {
 
     @Scheduled(
             fixedDelayString = "${trading.orderbook.closed-version-retention}",
-            initialDelayString = "${trading.orderbook.retention-initial-delay}"
+            initialDelayString = "${trading.orderbook.retention-initial-delay}",
+            scheduler = "orderBookTaskScheduler"
     )
     @Transactional(propagation = Propagation.NEVER)
     public void deleteExpiredClosedVersions() {
