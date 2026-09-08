@@ -1010,4 +1010,6 @@ LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW �
 
 지정가 입력 검증 실패는 기존 SAME_CLIENT_ORDER_ID 정책을 유지하고, data.field에 limitPrice 또는 limitCurrency를 제공합니다.
 
+시장가·지정가 공통 입력 검증도 잘못된 side, marketCountry, quantity, clientOrderId를 data.field로 식별합니다. 기존 오류 코드·재시도 정책은 유지하며, 잘못된 clientOrderId는 NOT_RETRYABLE, 유효한 ID 이후 주문 조건 오류는 SAME_CLIENT_ORDER_ID입니다.
+
 레거시 보정·데이터 백필은 제공하지 않습니다. 스키마 적용을 위한 DB 재생성 등은 별도 명시적 승인이 필요합니다.

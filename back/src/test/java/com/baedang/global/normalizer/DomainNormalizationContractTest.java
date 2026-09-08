@@ -62,7 +62,7 @@ class DomainNormalizationContractTest {
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getDetail()).isEqualTo("marketCountry= jp ");
                     assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID")
-                            .doesNotContainKey("field");
+                            .containsEntry("field", "marketCountry");
                 });
     }
 

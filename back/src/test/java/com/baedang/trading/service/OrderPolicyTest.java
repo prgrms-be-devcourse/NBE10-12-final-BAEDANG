@@ -134,21 +134,37 @@ class OrderPolicyTest {
                 1L, "invalid", "005930", "KR", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getData())
-                                .containsEntry("retryPolicy", "NOT_RETRYABLE"));
+                                .containsEntry("retryPolicy", "NOT_RETRYABLE")
+                                .containsEntry("field", "clientOrderId"));
     }
 
-    @Test
-    void 잘못된_수량_입력은_INVALID_QUANTITY_예외를_던진다() {
-        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", null))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
-        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "0"))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
-        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1000001"))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
-        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "1.5"))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
-        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", "abc"))
-                .isInstanceOfSatisfying(BusinessException.class, e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+    @ParameterizedTest
+    @org.junit.jupiter.params.provider.NullAndEmptySource
+    @org.junit.jupiter.params.provider.ValueSource(strings = {" ", "0", "1000001", "1.5", "abc", "111111111111111111111111111111111"})
+    void 잘못된_수량은_문제필드와_재시도정책을_제공한다(String quantity) {
+        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", quantity))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY);
+                    assertThat(e.getData()).containsEntry("field", "quantity")
+                            .containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+        assertThatThrownBy(() -> policy.parseTerms("005930", "KR", "BUY", quantity))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getData()).containsEntry("field", "quantity"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"KR,UNKNOWN,side", "INVALID,BUY,marketCountry"})
+    void 잘못된_시장과_방향은_견적과_주문에서_문제필드를_제공한다(String country, String side, String field) {
+        assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", country, side, "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
+                    assertThat(e.getData()).containsEntry("field", field)
+                            .containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+        assertThatThrownBy(() -> policy.parseTerms("005930", country, side, "1"))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getData()).containsEntry("field", field));
     }
 
     @Test

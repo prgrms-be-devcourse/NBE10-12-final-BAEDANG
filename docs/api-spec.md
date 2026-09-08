@@ -1011,4 +1011,6 @@ Order closure and reservation release commit atomically. Any failure rolls back 
 
 Invalid limit-order input preserves SAME_CLIENT_ORDER_ID and includes data.field as limitPrice or limitCurrency.
 
+Shared MARKET/LIMIT input validation also identifies malformed side, marketCountry, quantity and clientOrderId via data.field. Existing error codes and retry policies are unchanged: malformed clientOrderId is NOT_RETRYABLE; invalid terms after a valid ID are SAME_CLIENT_ORDER_ID.
+
 No historical data backfill or legacy correction is provided. Schema changes require an explicitly authorized database recreation or deployment schema procedure.

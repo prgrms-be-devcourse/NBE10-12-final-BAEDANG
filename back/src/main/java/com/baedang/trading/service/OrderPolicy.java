@@ -148,7 +148,7 @@ public class OrderPolicy {
             throw new BusinessException(
                     ErrorCode.INVALID_INPUT,
                     "clientOrderId=" + value,
-                    ClientOrderRetryPolicy.NOT_RETRYABLE.asData());
+                    Map.of("field", "clientOrderId", "retryPolicy", ClientOrderRetryPolicy.NOT_RETRYABLE.name()));
         }
     }
 
@@ -157,14 +157,14 @@ public class OrderPolicy {
         try {
             return OrderSide.valueOf(DomainNormalizer.upperCode(value));
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.INVALID_INPUT, "side=" + value);
+            throw new BusinessException(ErrorCode.INVALID_INPUT, "side=" + value, Map.of("field", "side"));
         }
     }
 
     private MarketCountry parseMarketCountry(String value) {
         if (value == null || value.isBlank()) throw missingField("marketCountry");
         return MarketCountry.parse(value)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value));
+                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT, "marketCountry=" + value, Map.of("field", "marketCountry")));
     }
 
     private BigDecimal parseQuantity(String value) {
@@ -174,18 +174,18 @@ public class OrderPolicy {
         String normalized = value.trim();
         if (normalized.length() > MAX_QUANTITY_INPUT_LENGTH
                 || !QUANTITY_PATTERN.matcher(normalized).matches()) {
-            throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value);
+            throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value, Map.of("field", "quantity"));
         }
         try {
             BigDecimal parsed = new BigDecimal(normalized);
             if (parsed.compareTo(BigDecimal.ONE) < 0
                     || parsed.compareTo(maxOrderQuantity) > 0
                     || parsed.stripTrailingZeros().scale() > 0) {
-                throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value);
+                throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value, Map.of("field", "quantity"));
             }
             return parsed;
         } catch (NumberFormatException e) {
-            throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value);
+            throw new BusinessException(ErrorCode.INVALID_QUANTITY, "quantity=" + value, Map.of("field", "quantity"));
         }
     }
 
