@@ -5,6 +5,7 @@ import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -41,6 +42,7 @@ class CandleQueryServiceTest {
 
     @Mock StockRepository stockRepository;
     @Mock DailyCandleRepository dailyCandleRepository;
+    @Mock CandleAggregateRepository candleAggregateRepository;
     @Mock MinuteCandleRepository minuteCandleRepository;
     @Mock MarketDataPort marketDataPort;
     @Mock MinuteCandlePersistenceService persistenceService;
@@ -55,6 +57,7 @@ class CandleQueryServiceTest {
                 new CandleQueryPolicy(),
                 stockRepository,
                 dailyCandleRepository,
+                candleAggregateRepository,
                 minuteCandleRepository,
                 marketDataPort,
                 persistenceService,

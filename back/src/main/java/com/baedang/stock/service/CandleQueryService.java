@@ -8,6 +8,7 @@ import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
 import com.baedang.stock.dto.CandleResponse;
@@ -35,10 +36,13 @@ public class CandleQueryService {
     private static final Duration MINUTE_FRESHNESS = Duration.ofSeconds(60);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     private static final int REFRESH_LOCK_STRIPES = 64;
+    // 집계 뷰용 분봉 백필 개수. 토스가 한 번에 주는 상한이라 5m+1W(1,950개)에는 모자라다.
+    private static final int MINUTE_BACKFILL_COUNT = 200;
 
     private final CandleQueryPolicy candleQueryPolicy;
     private final StockRepository stockRepository;
     private final DailyCandleRepository dailyCandleRepository;
+    private final CandleAggregateRepository candleAggregateRepository;
     private final MinuteCandleRepository minuteCandleRepository;
     private final MarketDataPort marketDataPort;
     private final MinuteCandlePersistenceService persistenceService;
@@ -51,6 +55,7 @@ public class CandleQueryService {
             CandleQueryPolicy candleQueryPolicy,
             StockRepository stockRepository,
             DailyCandleRepository dailyCandleRepository,
+            CandleAggregateRepository candleAggregateRepository,
             MinuteCandleRepository minuteCandleRepository,
             MarketDataPort marketDataPort,
             MinuteCandlePersistenceService persistenceService,
@@ -61,6 +66,7 @@ public class CandleQueryService {
         this.candleQueryPolicy = candleQueryPolicy;
         this.stockRepository = stockRepository;
         this.dailyCandleRepository = dailyCandleRepository;
+        this.candleAggregateRepository = candleAggregateRepository;
         this.minuteCandleRepository = minuteCandleRepository;
         this.marketDataPort = marketDataPort;
         this.persistenceService = persistenceService;
@@ -84,10 +90,7 @@ public class CandleQueryService {
         List<CandleResponse.Item> items = switch (query.interval()) {
             case ONE_MINUTE -> minuteItems(stock, query.count());
             case ONE_DAY -> dailyItems(stock, query.count());
-            // ponytail: 2번(조합 확장) 단독 커밋용 임시 갈래. 3번에서 candle_5m/10m/1w 조회로 대체한다.
-            case FIVE_MINUTES, TEN_MINUTES, ONE_WEEK -> throw new BusinessException(
-                    ErrorCode.INVALID_INTERVAL_RANGE,
-                    "interval=" + query.interval().value() + " 준비 중");
+            case FIVE_MINUTES, TEN_MINUTES, ONE_WEEK -> aggregateItems(stock, query);
         };
         return new CandleResponse(
                 stock.getSymbol(),
@@ -129,6 +132,28 @@ public class CandleQueryService {
                         row.getLowPrice(),
                         row.getClosePrice(),
                         row.getVolume(),
+                        stock.getCurrency()))
+                .toList();
+    }
+
+    private List<CandleResponse.Item> aggregateItems(Stock stock, CandleQuery query) {
+        if (query.interval() == CandleQueryInterval.ONE_WEEK) {
+            stockOnDemandQuoteService.ensureDailyCandles(stock);
+        } else {
+            refreshMinuteCandlesIfNeeded(stock, MINUTE_BACKFILL_COUNT);
+        }
+        List<CandleAggregateRepository.AggregateCandle> rows = new ArrayList<>(
+                candleAggregateRepository.findLatest(
+                        query.interval(), stock.getStockId(), query.count()));
+        Collections.reverse(rows);
+        return rows.stream()
+                .map(row -> CandleResponse.Item.of(
+                        row.bucket(),
+                        row.openPrice(),
+                        row.highPrice(),
+                        row.lowPrice(),
+                        row.closePrice(),
+                        row.volume(),
                         stock.getCurrency()))
                 .toList();
     }
