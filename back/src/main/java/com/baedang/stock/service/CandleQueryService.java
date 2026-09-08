@@ -84,6 +84,10 @@ public class CandleQueryService {
         List<CandleResponse.Item> items = switch (query.interval()) {
             case ONE_MINUTE -> minuteItems(stock, query.count());
             case ONE_DAY -> dailyItems(stock, query.count());
+            // ponytail: 2번(조합 확장) 단독 커밋용 임시 갈래. 3번에서 candle_5m/10m/1w 조회로 대체한다.
+            case FIVE_MINUTES, TEN_MINUTES, ONE_WEEK -> throw new BusinessException(
+                    ErrorCode.INVALID_INTERVAL_RANGE,
+                    "interval=" + query.interval().value() + " 준비 중");
         };
         return new CandleResponse(
                 stock.getSymbol(),
