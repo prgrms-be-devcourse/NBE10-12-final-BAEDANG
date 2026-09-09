@@ -71,6 +71,7 @@ public class OrderBookPublicationService {
         Instant lockedAt = clock.instant();
 
         if (!stock.isTradable()
+                || !stockRepository.isQuoteTarget(stock.getStockId(), lockedAt.atOffset(java.time.ZoneOffset.UTC))
                 || !lockedAt.isBefore(sessionValidUntil)
                 || !isValidQuoteTime(generated.quoteAt(), lockedAt)) {
             if (active != null) active.close(lockedAt);
@@ -97,6 +98,18 @@ public class OrderBookPublicationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
         versionRepository.findActiveForUpdate(stock.getStockId())
                 .ifPresent(version -> version.close(clock.instant()));
+    }
+
+    /** 순회 도중 새 주문이 접수된 종목의 호가를 이전 대상 목록만 보고 종료하지 않습니다. */
+    @Transactional
+    public void closeIfNotTarget(Long stockId) {
+        applyLockTimeout();
+        Stock stock = stockRepository.findByIdForUpdate(stockId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
+        Instant now = clock.instant();
+        if (!stockRepository.isQuoteTarget(stockId, now.atOffset(java.time.ZoneOffset.UTC))) {
+            versionRepository.findActiveForUpdate(stockId).ifPresent(version -> version.close(clock.instant()));
+        }
     }
 
     /** 스케줄러 한 건이 공용 DB 락을 무기한 기다리지 않게 트랜잭션 안에서만 적용한다. */
