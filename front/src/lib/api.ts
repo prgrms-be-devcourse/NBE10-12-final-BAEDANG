@@ -603,6 +603,50 @@ export function getCandles(
   });
 }
 
+export type OrderBookLevel = {
+  level: number;
+  price: string;
+  quantity: string;
+};
+
+export type OrderBook = {
+  symbol: string;
+  marketCountry: string;
+  bookVersion: number;
+  revision: number;
+  basePrice: string;
+  currency: string;
+  quoteAt: string;
+  generatedAt: string;
+  virtual: boolean;
+  description: string;
+  /** 항상 10개(오름차순, ASK 1이 최우선 매도호가) — `docs/api-spec.md` 참고. */
+  asks: OrderBookLevel[];
+  /**
+   * 내림차순(BID 1이 최우선 매수호가). 국내는 항상 10개지만, 미국은 최소 호가
+   * 단위($0.01)에 가까운 저가 종목이면 10개 미만(1~10개)이 올 수 있다 — 마지막
+   * 행의 가격은 그 경우 항상 $0.01. 고정 인덱스 접근 대신 배열 길이 그대로 렌더링할 것.
+   */
+  bids: OrderBookLevel[];
+};
+
+/**
+ * `GET /api/stocks/{symbol}/orderbook` — 전체 사용자가 공유하는 가상 호가 스냅샷.
+ * 실제 주문 호가가 아니라 현재가 기반으로 생성된 참고용 데이터다(`virtual: true`).
+ *
+ * <p>정상적인 상황에서도 503(`ORDER_BOOK_UNAVAILABLE`)이 흔하다 — 장 마감,
+ * 거래정지/정리매매 종목, 시세 지연(15초 이상) 등. 호출부는 이 경우 화면 전체를
+ * 에러로 덮지 말고 호가 영역에만 안내를 띄운 뒤, 폴링 주기에 따라 조용히
+ * 재시도해야 한다(주문과 달리 `retryPolicy`가 없다 — 사용자가 뭘 다시 눌러야
+ * 하는 에러가 아니라는 뜻).
+ */
+export function getOrderBook(symbol: string, marketCountry: MarketCountry): Promise<OrderBook> {
+  const params = new URLSearchParams({ marketCountry });
+  return request<OrderBook>(`/api/stocks/${encodeURIComponent(symbol)}/orderbook?${params.toString()}`, {
+    method: "GET",
+  });
+}
+
 // ── 마이페이지(보유/원장/초기화) ────────────────────────────────────────────────
 
 export type HoldingItem = {
