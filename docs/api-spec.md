@@ -504,6 +504,86 @@ Quote loading is owned by the separate market-data ingestion work. When no quote
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
 | `INVALID_INPUT` | missing `marketCountry` or a value other than KR/US |
 
+### `GET /stocks/{symbol}/financials?marketCountry=KR`
+Korean stock industry classification & financial statements — cache-first
+
+`GET /stocks/{symbol}` does not make external financial calls to preserve quote latency and availability. Financial information is queried separately through this dedicated endpoint.
+
+| Param | Req | Value |
+|---|---|---|
+| `marketCountry` | O | market identifier — `KR` only |
+
+**Response · 200**
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "dataStatus": "FRESH",
+  "industry": {
+    "standard": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "large": { "code": "03", "name": "제조업" },
+    "medium": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "small": { "code": "03261", "name": "반도체 제조업" }
+  },
+  "annual": [
+    {
+      "statementYearMonth": "202512",
+      "balanceSheet": {
+        "currentAssets": "...",
+        "fixedAssets": "...",
+        "totalAssets": "...",
+        "currentLiabilities": "...",
+        "fixedLiabilities": "...",
+        "totalLiabilities": "...",
+        "capitalStock": "...",
+        "capitalSurplus": "...",
+        "retainedEarnings": "...",
+        "totalEquity": "..."
+      },
+      "incomeStatement": {
+        "sales": "...",
+        "operatingProfit": "...",
+        "netIncome": "..."
+      },
+      "ratios": {
+        "salesGrowthRate": "...",
+        "operatingProfitGrowthRate": "...",
+        "netIncomeGrowthRate": "...",
+        "roe": "...",
+        "eps": "...",
+        "salesPerShare": "...",
+        "bps": "...",
+        "reserveRatio": "...",
+        "debtRatio": "...",
+        "netProfitMargin": "...",
+        "operatingProfitMargin": "..."
+      }
+    }
+  ],
+  "quarterly": [],
+  "syncedAt": {
+    "industry": "2026-09-08T00:00:00Z",
+    "annual": "2026-09-08T00:00:01Z",
+    "quarterly": "2026-09-08T00:00:02Z"
+  }
+}
+```
+
+- **Data format**: All financial amounts and ratios are serialized as plain strings without exponent notation or trailing zeros (`FinancialDecimalFormatter.plain`). `annual` and `quarterly` arrays are ordered by `statementYearMonth` descending. Null values are omitted from JSON per global `non_null` inclusion policy.
+- **Operating profit margin**: Derived at query time as `operatingProfit × 100 ÷ sales` with scale 6 `HALF_UP` rounding. If `sales` is 0 or null, `operatingProfitMargin` is returned as null.
+- **`dataStatus`**:
+  - `FRESH`: All three groups are within TTL (financials 7 days / 7d, industry 30 days / 30d) or were refreshed successfully. Normal empty KIS response is stored as a negative cache and also returns `FRESH`.
+  - `STALE`: A refresh was needed and attempted, but external KIS failed, and previously cached data was returned as fallback.
+
+| Error code | HTTP | When |
+|---|---|---|
+| `INVALID_INPUT` | 400 | missing `marketCountry` parameter or invalid format |
+| `STOCK_NOT_FOUND` | 404 | symbol does not exist |
+| `FINANCIALS_NOT_SUPPORTED` | 422 | US stocks, ETFs, ETNs, or non-6-digit Korean symbols |
+| `KIS_RATE_LIMITED` | 429 | KIS request rate limit reached and no previous cache exists |
+| `KIS_API_ERROR` | 502 | KIS external communication error and no previous cache exists |
+| `KIS_API_UNAVAILABLE` | 503 | KIS is disabled (`kis.enabled=false`) and no cached data exists for a required group |
+
 ### `GET /stocks/{symbol}/candles`
 Daily & minute chart
 

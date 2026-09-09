@@ -47,6 +47,9 @@
 | [GlobalExceptionHandler](../back/src/main/java/com/baedang/global/error/GlobalExceptionHandler.java), [ErrorResponse](../back/src/main/java/com/baedang/global/error/ErrorResponse.java) | 전역 예외 처리기가 오류를 HTTP 응답으로 자동 변환 | 컨트롤러마다 같은 try/catch·오류 응답 생성을 복제하지 않음 |
 | [TossSecuritiesClient](../back/src/main/java/com/baedang/global/clients/toss/TossSecuritiesClient.java) | Toss 어댑터에서 빈을 주입받아 `get(path, queryParams, responseType)` 호출 | 업무 서비스는 기존 Port를 사용. 허용 경로 검증과 전역 RateLimiter를 우회하지 않으며 실제 주문 API는 절대 호출하지 않음 |
 | [TossRateLimiterRegistry](../back/src/main/java/com/baedang/global/clients/toss/TossRateLimiterRegistry.java), [TossApiGroup](../back/src/main/java/com/baedang/global/clients/toss/TossApiGroup.java), [Whitelist](../back/src/main/java/com/baedang/global/clients/toss/Whitelist.java) | 그룹별 공유 호출 제한과 경로 매핑. 레지스트리는 `acquire(group)`, `tryAcquire(group)` 제공 | 일반 요청은 Toss 클라이언트가 이미 제한을 적용하므로 상위 서비스에서 같은 요청에 permit을 이중 획득하지 않음. 호출 제한은 같은 애플리케이션 인스턴스 안에서 공유 |
+| [FixedIntervalGate](../back/src/main/java/com/baedang/global/clients/FixedIntervalGate.java) | `com.baedang.global.clients`에 위치한 토큰 버킷 공용 게이트 알고리즘 | 증권사 간 공용 재사용. Toss와 KIS는 독립적인 게이트 인스턴스를 유지하며 증권사 간에 permit을 교차 대여하지 않음 |
+| [KisSecuritiesClient](../back/src/main/java/com/baedang/global/clients/kis/KisSecuritiesClient.java), [KisTokenProvider](../back/src/main/java/com/baedang/global/clients/kis/KisTokenProvider.java), [KisRateLimiter](../back/src/main/java/com/baedang/global/clients/kis/KisRateLimiter.java), [KisWhitelist](../back/src/main/java/com/baedang/global/clients/kis/KisWhitelist.java) | 토큰 double-check 잠금과 65초 실패 쿨다운을 적용한 KIS Developers 전용 화이트리스트 클라이언트 | OAuth 토큰 발급 및 승인된 5개 GET 경로로 엄격 제한. 호출 제한 적용(2026-09-10 KST 이전 3 TPS / 2026-09-10 KST 이후 18 TPS 운영 예정). 실제 주문·정정·취소·계좌 API 호출 금지 |
+| [KisProperties](../back/src/main/java/com/baedang/global/clients/kis/KisProperties.java) | `kis.*` 설정값 검증 레코드 | `kis.enabled=false`일 때만 빈 credential 허용. 기동 시 1..18 TPS 및 양수 timeout/TTL 검증 |
 
 ## 3. 문자열 정규화 — DomainNormalizer
 
@@ -248,6 +251,9 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 지정가 부분 체결 엔진(#122)이 동일 트랜잭션에서 활성 버전과 방향별 실제 레벨을 비관적 락으로 잠금. ASK는 10개, KRW BID는 10개, USD BID는 1~10개이며 10개 미만이면 마지막 가격은 `$0.01`. BUY→ASK, SELL→BID |
 | [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `enabled()`, `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V1 기본값: enabled=false, 3s 주기, 15s maxQuoteAge, 1m retention |
 
+| [StockFinancialInfoPort](../back/src/main/java/com/baedang/stock/port/StockFinancialInfoPort.java), [KisStockFinancialInfoAdapter](../back/src/main/java/com/baedang/stock/client/kis/KisStockFinancialInfoAdapter.java) | 산업분류 및 결산연월별 재무제표용 도메인 포트 및 KIS 어댑터 | 포트는 순수 도메인 레코드(`IndustryData`, `PeriodData`) 반환. 어댑터 빈은 `kis.enabled=true` 조건부 등록 |
+| [StockFinancialSyncService](../back/src/main/java/com/baedang/stock/service/StockFinancialSyncService.java) | `ensureFresh(stock, trigger)`, `refresh(stock, trigger)`, `refreshRankedTargets(trigger)` | TTL 판정(재무 7일 / 7d, 산업 30일 / 30d), 종목별 `CompletableFuture` single-flight, 주간 배치 실행. `Optional<StockFinancialInfoPort>` 주입으로 KIS 비활성 시에도 정상 부팅 유지 |
+| [StockFinancialQueryService](../back/src/main/java/com/baedang/stock/service/StockFinancialQueryService.java) | `getFinancials(symbol, marketCountry)` | 캐시 우선 재무 조회 서비스. 국내 비ETF/ETN 종목 검증, 조회 시점 영업이익률 계산, FRESH/STALE 판정 및 폴백 처리 |
 현재 구현의 설정 가능한 가상 호가 V1 기본값은 다음과 같습니다: `enabled=false`, `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V1 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 10레벨이고 인접 레벨은 유효 호가 1틱 간격이며, 미국 BID는 `$0.01`에서 조기 종료할 수 있습니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
 
 `trading.orderbook.enabled`는 #121 가상 호가 생성·조회만 제어합니다. #120의 지정가 신규 접수 플래그와 기존 지정가 주문의 취소·만료·복구 처리는 별도 플래그와 유스케이스가 소유하며, 호가 플래그로 함께 켜거나 끄지 않습니다. #122 체결 워커 활성화도 별도 경계입니다. #122 통합 검증 전 지정가 신규 접수 기본값은 계속 비활성입니다.
@@ -280,6 +286,28 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - **정수 수량 정책**: DB 컬럼은 후속 소수점 호환성을 위해 `NUMERIC(19,6)`을 유지하지만, V1 가상 호가 생성과 체결 소비는 **정수 주 단위** 정책입니다 (`minQuantity=1`, `maxQuantity=1000000`).
 - **수량 분포의 성격**: 깊이 배수와 라운드 넘버 부스트는 모의 시장 V1 공급 정책일 뿐이며, 실제 시장의 호가 잔량 분포를 실증 재현한 것이 아니므로 상단 수량이 항상 크다는 절대 불변식을 가정하지 않습니다.
 
+
+### 한국투자증권(KIS) 재무정보 연동 계약
+
+#### 1. 호출 제한 및 시크릿 보호
+- **공용 게이트 위치**: `com.baedang.global.clients.FixedIntervalGate`를 공용으로 재사용하되, `TossRateLimiterRegistry`와 `KisRateLimiter`는 엄격히 분리된 게이트 인스턴스를 유지합니다.
+- **호출 제한 정책**: `kis.requests-per-second` (1..18) 설정 기반. 운영 환경은 2026-09-10 KST 이전 3 TPS / 2026-09-10 KST 이후 18 TPS 운영 예정입니다. 토큰 발급은 single-flight 중복 제거 및 실패 시 65초 쿨다운을 적용합니다.
+- **시크릿 보호**: KIS `app-key`, `app-secret`, access token은 환경변수/시크릿으로만 주입하며 소스, fixture, 로그, 예외 메시지에 남기지 않습니다. `.env.example`에는 변수명과 빈 기본값만 제공합니다.
+
+#### 2. 아키텍처 및 포트-어댑터 경계
+- **도메인 포트 격리**: 도메인 서비스(`StockFinancialSyncService`, `StockFinancialQueryService`)는 오직 `StockFinancialInfoPort`에만 의존하며 KIS 클라이언트나 어댑터를 직접 참조하지 않습니다.
+- **Optional 포트 주입**: `StockFinancialSyncService`는 `Optional<StockFinancialInfoPort>`를 주입받아, `kis.enabled=false` 상태에서도 앱 기동이 깨지지 않고 로컬 캐시로 안전하게 서비스합니다.
+- **트랜잭션 분리**: 외부 KIS HTTP 호출은 절대 활성 DB 트랜잭션 안에서 수행하지 않습니다. 단기 트랜잭션은 파싱된 기간 데이터 저장과 동기화 시각 갱신 시 `StockFinancialPersistenceService`에서만 엽니다.
+
+#### 3. TTL 및 스케줄링 정책
+- **TTL 규칙**: 재무제표(연간·분기)는 7일(7d / 7 days), 산업분류는 30일(30d / 30 days) TTL을 적용합니다.
+- **Single-Flight 동시성**: 동일 종목에 대한 동시 요청은 `ConcurrentHashMap` 기반의 owner/waiter `CompletableFuture`를 공유하며, 완료 및 실패 시 `finally`에서 인덱스를 제거합니다.
+- **주간 배치 호출량**: 매주 월요일 08:10 KST에 국내 상위 100위 비ETF/ETN 종목을 순차 처리합니다. 종목당 연간 4콜 + 분기 4콜을 호출하며 산업분류는 미적재 또는 만료 시에만 1콜 추가합니다 (최대 800 / 900콜).
+- **단일 레플리카 한계**: 현재 인메모리 single-flight와 rate limiter는 단일 JVM 인스턴스 범위입니다. 다중 레플리카로 확장하기 전 분산 락, 공유 토큰 캐시, 중앙 rate limiter가 선행되어야 합니다.
+
+#### 4. 폴백 및 Negative Cache
+- **Negative Cache**: KIS에서 정상 빈 응답이 오면 해당 동기화 시각을 갱신하고 빈 상태를 유지하여, TTL 기간 동안 불필요한 반복 호출을 방지합니다.
+- **STALE 폴백**: 외부 갱신이 실패하더라도 기존 캐시가 존재하면 `dataStatus="STALE"`로 반환합니다. 기존 캐시가 전혀 없으면 원래 실패 코드(`KIS_RATE_LIMITED` 우선, 그 외 `KIS_API_ERROR`)를 클라이언트에 반환합니다.
 ## 8. 프론트 공용 모듈
 
 ### 금액 계산·표시

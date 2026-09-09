@@ -47,7 +47,7 @@
 | order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: ASK 10, KR BID 10, US BID 1~10, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
 
-### 테이블 맵 (15개)
+### 테이블 맵 (18개)
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
@@ -65,6 +65,9 @@
 | | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
 | **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
 | | `order_book_level` | 버전당 최대 20개 레벨(ASK 10 / KR BID 10 / US BID 1~10) 가격·수량 |
+| **산업 · 재무 (KIS)** | `stock_industry` | 표준산업분류 및 지수업종(대·중·소) 분류 |
+| | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율 |
+| | `stock_financial_sync` | 그룹별 동기화 시각 및 TTL(negative cache 지원) |
 
 ### MVP 동작 매트릭스 (확정)
 
@@ -151,6 +154,9 @@ quote_snapshot.prev_close
 | `holding` | 자체 | 원장에서 파생. `avg_exchange_rate` 만 토스 환율에서 유래. |
 | `ledger_entry` | 자체 | 체결/원장 서비스가 기록하며 개별 trade_execution의 환율을 그대로 사용. append-only. |
 | `users` `account` `daily_account_snapshot` `stock_external_id` | 자체 | 외부 API 와 무관. **계정계는 전적으로 우리가 소유** — 이것이 이 프로젝트가 채널계가 아니라 계정계인 이유. |
+| `stock_industry` | KIS | `/uapi/domestic-stock/v1/quotations/search-stock-info` 원천. 정상 빈 응답은 null 분류로 negative cache 저장. |
+| `stock_financial_period` | KIS | KIS 4대 재무 API(대차대조표, 손익계산서, 재무비율, 수익성비율) 원천. 과거 행 보존. |
+| `stock_financial_sync` | 자체 + KIS | 그룹별 동기화 시각(재무 7일 / 7d, 산업 30일 / 30d TTL 판정 및 캐시 여부). |
 
 ### 배치 일정 (확정)
 
@@ -158,6 +164,7 @@ quote_snapshot.prev_close
 |---|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 월요일 **07:00** | 주 1회 | **① 전체 종목 마스터 갱신** — `/stocks/all` × 마켓 7개 → 전 종목 심볼, `/stocks` 배치 200개씩 → 상세. 신규 상장·상장폐지 반영. **약 50콜, 15초.**                                                                      |
 | 월요일 **08:00** | 주 1회 | **② 국내 거래대금 상위 100 선정 — 토스 1콜.** `/rankings?market=KR&duration=1w&count=100` → `is_ranked`, `rank_no`, `trading_amount` 갱신 · 신규 편입의 `prev_close`·일봉 백필 · **빈 배열이면 지난주 유니버스 유지**. |
+| 월요일 **08:10** | 주 1회 | **국내 거래대금 상위 100 재무정보 갱신 — 종목당 연간 4콜 + 분기 4콜.** 산업분류는 미적재 또는 30일(30d) 경과 시에만 조회(최대 800 / 900콜). 순차 처리 및 종목별 예외 격리. 2026-09-10 KST 이전 3 TPS / 2026-09-10 KST 이후 18 TPS 운영 예정. |
 | 월요일 **21:00** | 주 1회 | **③ 미국 거래대금 상위 100 선정 — 토스 1콜.** 국내와 동일한 처리. 미국장 시작(22:30) **1시간 30분 전**이라 새 유니버스로 첫 시세 수집을 시작할 수 있습니다.                                                            |
 | **08:50** | 일 1회 | 국내 `prev_close` ← 전일 `daily_candle.close_price` (장 시작 10분 전). 상하한가도 이때 함께 받음. **확정 목록에는 없지만 등락률 계산에 필요** (아래 설명).                                                             |
 | 국내 정규장(캘린더) | 5초 목표 | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집. |
@@ -465,6 +472,55 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 - **종료 버전 정리**: `is_active = false`이고 종료 후 1분이 지난 버전은 소비·체결 참조 여부와 무관하게 삭제합니다.
 - **레벨 연쇄 정리**: 종료 버전 삭제 시 연관된 최대 20개 레벨은 `ON DELETE CASCADE`로 함께 삭제합니다.
 - **체결 영구 보존**: `trade_execution`의 가격·수량·환율·정산 금액은 유지되며, `book_level_id`는 FK 없는 소비 당시 추적 값으로 남습니다.
+
+### 산업 · 재무 (KIS — Flyway V6)
+
+#### `stock_industry` — 산업분류
+국내 종목의 표준산업분류와 시장 지수업종 대·중·소분류 최신 한 행을 저장합니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `stock_id` | BIGINT PK | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). |
+| `standard_industry_code` | VARCHAR(10) | 한국표준산업분류 코드 (negative cache인 경우 null 가능). |
+| `standard_industry_name` | VARCHAR(100) | 한국표준산업분류 명칭. |
+| `index_industry_large_code` | VARCHAR(10) | 지수업종 대분류 코드. |
+| `index_industry_large_name` | VARCHAR(100) | 지수업종 대분류 명칭. |
+| `index_industry_medium_code` | VARCHAR(10) | 지수업종 중분류 코드. |
+| `index_industry_medium_name` | VARCHAR(100) | 지수업종 중분류 명칭. |
+| `index_industry_small_code` | VARCHAR(10) | 지수업종 소분류 코드. |
+| `index_industry_small_name` | VARCHAR(100) | 지수업종 소분류 명칭. |
+| `fetched_at` | TIMESTAMPTZ | 증권사에서 산업분류 정보를 조회한 시각. |
+| `created_at` `updated_at` | TIMESTAMPTZ | 감사용 자동 기록 컬럼 (`BaseEntity`). |
+
+#### `stock_financial_period` — 연간·분기 재무제표 및 지표
+결산연월별 대차대조표, 손익계산서, 재무/수익성 비율 이력을 저장합니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `stock_id` | BIGINT | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). 복합 PK. |
+| `period_type` | VARCHAR(10) | `ANNUAL`(연간) 또는 `QUARTERLY`(분기). 복합 PK. |
+| `statement_year_month` | CHAR(6) | `YYYYMM` 형식의 6자리 결산연월(예: `202512`). 복합 PK. |
+| 대차대조표 (10개) | NUMERIC(30,6) | `current_assets`, `fixed_assets`, `total_assets`, `current_liabilities`, `fixed_liabilities`, `total_liabilities`, `capital_stock`, `capital_surplus`, `retained_earnings`, `total_equity`. |
+| 손익계산서 (3개) | NUMERIC(30,6) | `sales`, `operating_profit`, `net_income`. |
+| 재무/수익성 비율 (10개) | NUMERIC(30,6) | `sales_growth_rate`, `operating_profit_growth_rate`, `net_income_growth_rate`, `roe`, `eps`, `sales_per_share`, `bps`, `reserve_ratio`, `debt_ratio`, `net_profit_margin`. |
+| `created_at` `updated_at` | TIMESTAMPTZ | 감사용 자동 기록 컬럼 (`BaseEntity`). |
+
+- **파생 지표**: 영업이익률은 조회 시점에 `operatingProfit × 100 ÷ sales` (소수점 6자리 `HALF_UP`)로 동적 계산하며, `sales`가 0 또는 null이면 null로 반환합니다.
+- **과거 이력 보존**: 재수집 시 동일 결산연월은 갱신하고, 응답에서 누락된 이전 결산연월 행은 삭제하지 않고 영구 보존합니다.
+
+#### `stock_financial_sync` — 동기화 메타데이터 및 negative cache 추적
+그룹별 최신 성공 동기화 시각을 저장해 TTL 판정과 negative cache를 관리합니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `stock_id` | BIGINT PK | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). |
+| `industry_synced_at` | TIMESTAMPTZ | 산업분류 최신 성공 시각 (TTL: 30일 / 30d). |
+| `annual_synced_at` | TIMESTAMPTZ | 연간 재무 최신 성공 시각 (TTL: 7일 / 7d). |
+| `quarterly_synced_at` | TIMESTAMPTZ | 분기 재무 최신 성공 시각 (TTL: 7일 / 7d). |
+| `created_at` `updated_at` | TIMESTAMPTZ | 감사용 자동 기록 컬럼 (`BaseEntity`). |
+
+- **시세·주문 비사용 원칙**: KIS 데이터는 종목 상세의 기업 정보 표시 전용입니다. 시세 산정, 주문 가능 여부 판정, 체결 정산에는 절대 사용하지 않습니다.
+- **Negative Cache**: KIS에서 정상 빈 응답이 오면 해당 `*_synced_at`을 갱신하고 빈 상태를 유지하여, TTL 동안 불필요한 반복 외부 호출을 방지합니다.
 ---
 
 ## 종목 분류 모델
