@@ -68,7 +68,7 @@
 
 ### MVP 동작 매트릭스 (확정)
 
-> **조회는 언제나 전 종목 가능하고, 거래는 "해당 시장 정규장 + 상위 100" 에만 허용**됩니다.
+> **조회는 언제나 전 종목 가능하고, 거래는 랭킹과 무관하게 ACTIVE 상장 상태·해당 시장 정규장·거래 제약·시세 신선도 검증 후 허용**됩니다.
 > **판정 기준은 보는 사람의 시각이 아니라 그 종목이 속한 시장이 열려 있는가입니다** — 한국 낮에 엔비디아를 열면 미국장이 닫혀 있으므로 전일 종가가 나갑니다.
 
 | 시간대 (KST) | 국내 상위 100 | 미국 상위 100 | 그 외 전 종목 |
@@ -229,7 +229,7 @@ quote_snapshot.prev_close
 | `order_type` | VARCHAR(10) | `MARKET` / `LIMIT`. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
 | `status` | VARCHAR(20) | MARKET은 FILLED/REJECTED로 즉시 확정. LIMIT은 PENDING → PARTIALLY_FILLED → FILLED 또는 활성 잔여분 CANCELED/EXPIRED. 계좌 잠금 아래 상태·체결 순번을 검증하며 EXPIRED는 저장된 정규 세션 종료 시각 기준. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `NOT_IN_UNIVERSE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
 | `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
 | `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
@@ -363,7 +363,7 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 | 랭킹 종목 + 활성 지정가 주문 종목 | 해당 시장 정규장 중 **5초 우선 수집 목표** | 토스 원본 시각. 수집 시각만으로 신선한 시세를 보장하지 않음. |
 | 활성 지정가 주문이 없는 비랭킹 종목 | 상세 조회 시 온디맨드, 5초 수집 캐시 | 원본 quote_at 유지. 재조회 성공만으로 신선한 시세가 되지 않음. |
 
-> **이렇게 하면 화면 로직이 하나로 통일됩니다.** 상세 페이지는 종목이 상위 100 이든 아니든 항상 이 테이블만 조회하고, `quote_at` 을 보고 문구만 바꿉니다. **"이 종목이 상위 100 인가?"를 화면이 알 필요가 없어집니다.** 거래 가능 판정은 별도 — `stock.is_ranked` AND 해당 시장 정규장 중 AND 거래정지 아님.
+> **이렇게 하면 화면 로직이 하나로 통일됩니다.** 상세 페이지는 종목이 상위 100 이든 아니든 항상 이 테이블만 조회하고, `quote_at` 을 보고 문구만 바꿉니다. **"이 종목이 상위 100 인가?"를 화면이 알 필요가 없어집니다.** 거래 가능 판정은 별도 — ACTIVE 상장 상태 AND 해당 시장 정규장 중 AND 거래정지·정리매매 아님 및 원본 시세 신선도.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
@@ -510,7 +510,7 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 | 단계 | 동작 | 설명 |
 |---|---|---|
 | ① | `SELECT … FOR UPDATE` | 계좌 행 잠금. **검증보다 먼저 잠가야** 그 사이에 값이 안 바뀝니다. |
-| ② | 검증 | 장 시간 · `is_ranked` · 거래정지 · 시세 유효시간(15초) · **주문가능금액 = `cash_balance − locked_cash` ≥ `net_amount`** |
+| ② | 검증 | 장 시간 · 상장/거래 상태 · 거래정지 · 시세 유효시간(15초) · **주문가능금액 = `cash_balance − locked_cash` ≥ `net_amount`** |
 | ③ | `locked_cash += reserved_cash` | 매수 비용까지 고려해 계산된 최초 동결액. 주문의 현재 동결액에도 저장하며 미체결 주문의 net_amount(체결 누계)는 0. |
 | ④ | `INSERT trade_order (PENDING)` | `(account_id, client_order_id)` 유니크 위반이면 중복 클릭이므로 기존 주문 결과를 반환. |
 

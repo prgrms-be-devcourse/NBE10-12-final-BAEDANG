@@ -68,7 +68,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 
 ### MVP Behavior Matrix (confirmed)
 
-> **Read is always available for all stocks; trading is only allowed during "that market's regular session + top 100".**
+> **Read is always available for all stocks; trading requires an active listing, an open regular session, valid trading status and a fresh quote, regardless of ranking.**
 > **The deciding factor is whether the stock's own market is open, not the viewer's viewpoint** — opening NVDA in the Korean daytime shows the prior close because the US market is closed.
 
 | Time (KST) | KR top 100 | US top 100 | All other stocks |
@@ -232,7 +232,7 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 | `order_type` | VARCHAR(10) | MARKET / LIMIT. |
 | `quantity` | NUMERIC(19,6) | order quantity. KR is whole shares but US allows fractional — NUMERIC leaves room. |
 | `status` | VARCHAR(20) | MARKET immediately settles as FILLED/REJECTED. LIMIT: PENDING → PARTIALLY_FILLED → FILLED, or active remainder → CANCELED/EXPIRED. Validate state/sequence under the account lock. Expiration uses the stored regular-session close. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `NOT_IN_UNIVERSE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
 | `reference_price` | NUMERIC(19,4) | Price in the stock currency used to evaluate a `REJECTED` order. Kept separate from `executed_price` because no fill occurred. |
 | `executed_price` | NUMERIC(19,4) | fill price. **In the stock's currency** (USD for US stocks). KRW conversion stored separately in `gross_amount`. |
 | `quote_at` | TIMESTAMPTZ | Quote timestamp used for either fill or rejection evaluation. Copied from `quote_snapshot.quote_at`. |
@@ -371,7 +371,7 @@ Internal `stock_id` is the canonical identifier; external symbols are separated 
 | Ranked stocks + active limit-order stocks | **5s priority target** during their regular session | Actual Toss source timestamp; collection time does not guarantee a fresh price. |
 | Other stocks without active limit orders | On-demand detail refresh, 5s collection cache | Retain source quote_at; a successful fetch does not make an old source price fresh. |
 
-> **This unifies the screen logic.** Detail always queries only this table regardless of top-100 status, and just changes the label based on `quote_at`. **The screen never needs to know "is this stock top 100?".** Tradeability is separate — `stock.is_ranked` AND that market's regular session AND not suspended.
+> **This unifies the screen logic.** Detail always queries only this table regardless of top-100 status, and just changes the label based on `quote_at`. **The screen never needs to know "is this stock top 100?".** Tradeability is separate — ACTIVE listing AND that market's regular session AND not suspended/liquidating, with fresh source quotes.
 
 | Column | Type | Description |
 |---|---|---|
@@ -514,7 +514,7 @@ Limit orders use two phases: Phase 1 commits PENDING/reservations; a worker repe
 | Step | Action | Description |
 |---|---|---|
 | ① | `SELECT … FOR UPDATE` | Lock the account row. **Lock BEFORE validation** so values can't change in between. |
-| ② | validate | market hours · `is_ranked` · suspension · quote freshness (15s) · **buying power = `cash_balance − locked_cash` ≥ `net_amount`** |
+| ② | validate | market hours · listing/trading status · suspension · quote freshness (15s) · **buying power = `cash_balance − locked_cash` ≥ `net_amount`** |
 | ③ | `locked_cash += reserved_cash` | Calculated initial buy reserve includes costs. Store the current reserve on the order; net_amount is the settled total, initially zero. |
 | ④ | `INSERT trade_order (PENDING)` | `(account_id, client_order_id)` unique violation = duplicate click → return the existing order result. |
 
