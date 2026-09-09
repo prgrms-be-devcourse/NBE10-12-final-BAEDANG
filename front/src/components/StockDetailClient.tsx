@@ -20,12 +20,15 @@ import {
   getAccountSummary,
   getCandles,
   getHoldings,
+  getLimitOrderQuote,
+  placeLimitOrder,
   placeMarketOrder,
   type AccountSummary,
   type Candle,
   type CandleInterval,
   type CandleRange,
   type HoldingItem,
+  type LimitOrderQuoteResponse,
   type StockDetail,
 } from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
@@ -124,6 +127,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [chartExpanded, setChartExpanded] = useState(false);
   const [tourActive, setTourActive] = useState(false);
   const [side, setSide] = useState<"매수" | "매도">("매수");
+  const [orderType, setOrderType] = useState<"시장가" | "지정가">("시장가");
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
   const [orderResult, setOrderResult] = useState<string | null>(null);
@@ -133,6 +137,17 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 백엔드가 응답에 실어주는 retryPolicy로 결정한다 (lib/order-retry-policy.ts 참고).
   // null이면 "지금 이 주문 시도는 끝났다" — 다음 제출 때 완전히 새로 발급한다.
   const [clientOrderId, setClientOrderId] = useState<string | null>(null);
+
+  // ── 지정가 주문 ──────────────────────────────────────────────────────────────
+  // 처음엔 현재가에 가까운 값을 기본으로 채워준다(그 뒤로는 사용자 입력을 그대로 둔다).
+  const [limitPriceInput, setLimitPriceInput] = useState(() =>
+    detail.price.lastPrice ? String(detail.price.lastPrice) : ""
+  );
+  // 국내 종목은 원화만 허용한다(백엔드 규칙). 미국 종목만 원화/달러 입력을 토글할 수 있다.
+  const [limitCurrency, setLimitCurrency] = useState<"KRW" | "USD">("KRW");
+  const [limitQuote, setLimitQuote] = useState<LimitOrderQuoteResponse | null>(null);
+  const [limitQuoteLoading, setLimitQuoteLoading] = useState(false);
+  const [limitQuoteError, setLimitQuoteError] = useState<string | null>(null);
 
   const categoryLabelValue = categoryLabel(detail.category, detail.isDividend);
   const changeDecimal = toDecimal(detail.price.changeAmount);
@@ -275,13 +290,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 자동으로 바뀌면, 그 ID로 제출했을 때 "같은 ID인데 다른 내용"으로
   // DUPLICATE_ORDER 거절을 받을 수 있다(아래 side 전환 핸들러와 같은 이유).
   useEffect(() => {
-    if (side === "매수" && quantity > buyMaxQuantity) {
+    if (orderType === "시장가" && side === "매수" && quantity > buyMaxQuantity) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuantityInput(String(buyMaxQuantity));
       setClientOrderId(null);
       setOrderError(null);
     }
-  }, [side, quantity, buyMaxQuantity]);
+  }, [orderType, side, quantity, buyMaxQuantity]);
 
   const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
@@ -309,6 +324,104 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     blockReason = "보유 수량이 부족해요";
   } else if (side === "매수" && amount.netAmount > availableCash) {
     blockReason = "주문가능금액이 부족해요";
+  }
+
+  // ── 지정가 주문 계산 ──────────────────────────────────────────────────────────
+  const limitPriceDecimal = toDecimal(limitPriceInput);
+  const limitPriceValid = !!limitPriceDecimal && limitPriceDecimal.greaterThan(0);
+  // 매수력·미리보기 계산은 종목 고유 통화(KR은 KRW, US는 USD) 기준 단가가 필요하다.
+  // 미국 종목에 원화로 입력한 경우 현재 환율로 대략 환산한다 — 실제 접수가는
+  // 서버가 접수 시점 환율로 다시 계산해 확정한다(이 값은 화면 미리보기 전용).
+  const limitPriceInStockCurrency =
+    limitPriceValid && limitPriceDecimal
+      ? isUsdStock
+        ? limitCurrency === "USD"
+          ? limitPriceDecimal.toNumber()
+          : usdKrwRate > 0
+            ? limitPriceDecimal.dividedBy(usdKrwRate).toNumber()
+            : null
+        : limitPriceDecimal.toNumber()
+      : null;
+
+  const limitBuyMaxQuantity =
+    limitPriceInStockCurrency != null
+      ? maxAffordableQuantity({ price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate, availableCash })
+      : 0;
+
+  const limitAmount =
+    limitPriceInStockCurrency != null
+      ? calculateOrderAmount({ side, quantity, price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate })
+      : { grossAmount: 0, fee: 0, tax: 0, netAmount: 0 };
+
+  // 지정가 매수도 시장가와 같은 이유로 상한이 바뀌면 입력값을 같이 맞춘다(위 시장가
+  // 클램프 effect 주석 참고) — 다만 여기 상한은 현재가가 아니라 사용자가 입력한
+  // 지정가를 기준으로 한다.
+  useEffect(() => {
+    if (orderType === "지정가" && side === "매수" && quantity > limitBuyMaxQuantity) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuantityInput(String(limitBuyMaxQuantity));
+      setClientOrderId(null);
+      setOrderError(null);
+    }
+  }, [orderType, side, quantity, limitBuyMaxQuantity]);
+
+  // 지정가 접수 가능 여부(acceptable/reason)와 예약금·만료시각은 클라이언트가 흉내낼 수
+  // 없는 서버 전용 판단이라(시장 세션·시세 최신성·환율 스냅샷 등), 입력이 바뀌고 잠시
+  // 멈추면(500ms) 실제 미리보기 API를 호출해 확인한다.
+  useEffect(() => {
+    if (orderType !== "지정가" || !isLoggedIn || !detail.tradable || quantity <= 0 || !limitPriceValid) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLimitQuote(null);
+      setLimitQuoteError(null);
+      setLimitQuoteLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      setLimitQuoteLoading(true);
+      getLimitOrderQuote({
+        symbol: detail.symbol,
+        marketCountry: detail.marketCountry,
+        side: side === "매수" ? "BUY" : "SELL",
+        quantity: quantityInput,
+        limitPrice: limitPriceInput,
+        limitCurrency,
+      })
+        .then((quote) => {
+          if (cancelled) return;
+          setLimitQuote(quote);
+          setLimitQuoteError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setLimitQuote(null);
+          setLimitQuoteError(err instanceof ApiError ? err.message : "미리보기를 불러오지 못했어요.");
+        })
+        .finally(() => {
+          if (!cancelled) setLimitQuoteLoading(false);
+        });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [orderType, isLoggedIn, detail.tradable, detail.symbol, detail.marketCountry, side, quantity, quantityInput, limitPriceInput, limitCurrency, limitPriceValid]);
+
+  let limitBlockReason: string | null = null;
+  if (!detail.tradable) {
+    limitBlockReason = detail.tradableReason ? TRADABLE_REASON_LABEL[detail.tradableReason] ?? "지금은 거래할 수 없어요" : "지금은 거래할 수 없어요";
+  } else if (quantity <= 0) {
+    limitBlockReason = "수량은 1주 이상의 정수로 입력해주세요";
+  } else if (!limitPriceValid) {
+    limitBlockReason = "지정가를 입력해주세요";
+  } else if (side === "매도" && quantity > availableQuantity) {
+    limitBlockReason = "보유 수량이 부족해요";
+  } else if (limitQuoteLoading) {
+    limitBlockReason = "미리보기 확인 중…";
+  } else if (limitQuote && !limitQuote.acceptable) {
+    limitBlockReason = limitQuote.reason ? TRADABLE_REASON_LABEL[limitQuote.reason] ?? "지금은 지정가 주문을 접수할 수 없어요" : "지금은 지정가 주문을 접수할 수 없어요";
+  } else if (!limitQuote && limitQuoteError) {
+    limitBlockReason = limitQuoteError;
   }
 
   // 매수/매도 필박스 색 — 예전에는 --up/--down 토큰을 그대로 썼는데, 그 토큰을
@@ -382,6 +495,72 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       } else {
         setOrderError("주문 처리 중 오류가 발생했어요.");
         setClientOrderId(idToUse); // 정책 정보가 없는 예상 밖 오류는 안전하게 같은 ID로 재시도 허용.
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleSubmitLimit() {
+    if (limitBlockReason || submitting) return;
+    if (!isLoggedIn || !user) {
+      setModalOpen(true);
+      return;
+    }
+
+    setSubmitting(true);
+    setOrderError(null);
+
+    let currentAccount = account;
+    if (!currentAccount) {
+      try {
+        currentAccount = await getAccountSummary();
+        setAccount(currentAccount);
+      } catch {
+        setOrderError("계좌 정보를 불러오지 못했어요. 잠시 후 다시 시도해주세요.");
+        setSubmitting(false);
+        return;
+      }
+    }
+
+    const idToUse = clientOrderId ?? generateClientOrderId();
+
+    try {
+      const response = await placeLimitOrder({
+        accountId: currentAccount.accountId,
+        clientOrderId: idToUse,
+        symbol: detail.symbol,
+        marketCountry: detail.marketCountry,
+        side: side === "매수" ? "BUY" : "SELL",
+        quantity: quantityInput,
+        limitPrice: limitPriceInput,
+        limitCurrency,
+      });
+      const priceLabelForMsg = limitCurrency === "USD" ? `${limitPriceInput}$` : `${formatNumber(limitPriceInput)}원`;
+      if (response.status === "REJECTED") {
+        // 지정가는 시장가와 달리 정상 접수 흐름에서도(자금/수량 검증 실패 등) REJECTED
+        // 상태로 201이 내려올 수 있다 — 이 경우도 명확한 실패로 안내한다.
+        setOrderError(response.rejectReason ?? "지정가 주문이 거절됐어요.");
+      } else {
+        setOrderResult(
+          `${detail.name} ${response.quantity}주 지정가(${priceLabelForMsg}) ${side} 주문을 접수했어요` +
+            `${response.status === "PARTIALLY_FILLED" ? " (일부 체결)" : ""}. 체결 전까지 예약금이 잠겨요.`
+        );
+      }
+      setClientOrderId(null); // 성공(거절 포함, 최종 결과가 확정됐으니)했으니 다음 주문은 새로 시작한다.
+      // 예약금이 잠기거나(성공) 잠금 시도 자체가 없었을 수(거절) 있으니 계좌 요약을 다시 조회한다.
+      getAccountSummary().then(setAccount).catch(() => {});
+      getHoldings().then((res) => setHoldings(res.items)).catch(() => {});
+    } catch (err) {
+      if (err instanceof ApiError) {
+        setOrderError(err.message);
+        setClientOrderId(nextClientOrderId(err.retryPolicy, idToUse));
+        if (err.code === "ACCOUNT_ROUND_CHANGED" || err.code === "ACCOUNT_NOT_FOUND") {
+          getAccountSummary().then(setAccount).catch(() => {});
+        }
+      } else {
+        setOrderError("주문 처리 중 오류가 발생했어요.");
+        setClientOrderId(idToUse);
       }
     } finally {
       setSubmitting(false);
@@ -554,7 +733,31 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               화면 가이드
             </button>
           </div>
-          <div className="mb-3.5 text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>시장가 주문 · 즉시 체결</div>
+          <div className="mb-3.5 text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>
+            {orderType === "시장가" ? "시장가 주문 · 즉시 체결" : "지정가 주문 · 조건 성립 시 체결"}
+          </div>
+
+          <PillTabs
+            options={[
+              { value: "시장가", label: "시장가" },
+              { value: "지정가", label: "지정가" },
+            ]}
+            value={orderType}
+            onChange={(v) => {
+              setOrderType(v as "시장가" | "지정가");
+              // 주문 유형이 바뀌면(엔드포인트·요청 형태 자체가 달라진다) 이전 시도의
+              // clientOrderId를 재사용하면 안 된다 — side 전환과 같은 이유.
+              setClientOrderId(null);
+              setOrderError(null);
+            }}
+            trackClassName="mb-3 w-full rounded-xl p-1"
+            trackStyle={{ background: "var(--fill)" }}
+            pillColor="var(--accent)"
+            pillRadius="9px"
+            buttonClassName="rounded-[9px] py-1.5 text-[13px] font-bold"
+            activeTextClassName="text-white"
+            inactiveTextStyle={{ color: "var(--mut2)" }}
+          />
 
           <div data-tour="side-toggle">
             <PillTabs
@@ -598,11 +801,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   const digitsOnly = e.target.value.replace(/[^0-9]/g, "").slice(0, 9);
                   // 매수는 입력 즉시 주문가능금액으로 살 수 있는 최대 수량을 넘지
                   // 못하게 막는다 — "주문가능금액이 부족해요"로 제출을 막는 것만으론
-                  // 화면에 비현실적인 금액이 그대로 보이는 문제가 있었다.
-                  const capped =
-                    side === "매수" && Number(digitsOnly || 0) > buyMaxQuantity
-                      ? String(buyMaxQuantity)
-                      : digitsOnly;
+                  // 화면에 비현실적인 금액이 그대로 보이는 문제가 있었다. 지정가는
+                  // 현재가가 아니라 사용자가 입력한 지정가 기준 상한을 쓴다.
+                  const maxForCap = orderType === "지정가" ? limitBuyMaxQuantity : buyMaxQuantity;
+                  const capped = side === "매수" && Number(digitsOnly || 0) > maxForCap ? String(maxForCap) : digitsOnly;
                   setQuantityInput(capped);
                   setClientOrderId(null);
                   setOrderError(null);
@@ -617,16 +819,74 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           )}
           {side === "매수" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
-              최대 {formatNumber(buyMaxQuantity)}주까지 살 수 있어요
+              최대 {formatNumber(orderType === "지정가" ? limitBuyMaxQuantity : buyMaxQuantity)}주까지 살 수 있어요
             </div>
           )}
 
-          <div className="mb-3.5 flex justify-between text-[13.5px] font-bold" style={{ color: "var(--mut)" }}>
-            <span>체결 예상 단가</span>
-            <span style={{ color: "var(--ink)" }}>
-              {priceLabel}{isUsdStock ? ` (${formatUsd(detail.price.lastPrice)})` : ""} (현재가)
-            </span>
-          </div>
+          {orderType === "지정가" && (
+            <div className="mb-3.5">
+              <div className="mb-1 flex items-center justify-between">
+                <label className="text-[13.5px] font-bold" style={{ color: "var(--mut2)" }}>지정가</label>
+                {isUsdStock && (
+                  <PillTabs
+                    options={[
+                      { value: "KRW", label: "원" },
+                      { value: "USD", label: "$" },
+                    ]}
+                    value={limitCurrency}
+                    onChange={(v) => {
+                      setLimitCurrency(v as "KRW" | "USD");
+                      setLimitPriceInput("");
+                      setClientOrderId(null);
+                      setOrderError(null);
+                    }}
+                    trackClassName="w-[76px] gap-0.5 rounded-full p-[2px]"
+                    trackStyle={{ background: "var(--fill)" }}
+                    buttonClassName="rounded-full py-0.5 text-[11.5px] font-bold"
+                    inactiveTextStyle={{ color: "var(--mut2)" }}
+                  />
+                )}
+              </div>
+              <input
+                className="w-full min-w-0 rounded-xl px-3.5 py-2.5 text-[14.5px] font-bold outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+                inputMode="decimal"
+                placeholder={limitCurrency === "USD" ? "예: 95.50" : "예: 72000"}
+                maxLength={15}
+                value={limitPriceInput}
+                onChange={(e) => {
+                  // KRW는 정수만, USD는 소수점 둘째 자리까지만 허용한다(백엔드 규칙 —
+                  // 초과 정밀도는 반올림하지 않고 그대로 거절한다).
+                  const raw = e.target.value.replace(/[^0-9.]/g, "");
+                  const cleaned = limitCurrency === "USD" ? raw.replace(/(\..*)\./g, "$1") : raw.replace(/\./g, "");
+                  setLimitPriceInput(cleaned);
+                  setClientOrderId(null);
+                  setOrderError(null);
+                }}
+              />
+              {isUsdStock && limitCurrency === "KRW" && limitPriceValid && (
+                <div className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                  약 {limitPriceInStockCurrency != null ? limitPriceInStockCurrency.toFixed(2) : "-"}$로 환산돼요(접수 시점 환율로 최종 확정)
+                </div>
+              )}
+            </div>
+          )}
+
+          {orderType === "시장가" ? (
+            <div className="mb-3.5 flex justify-between text-[13.5px] font-bold" style={{ color: "var(--mut)" }}>
+              <span>체결 예상 단가</span>
+              <span style={{ color: "var(--ink)" }}>
+                {priceLabel}{isUsdStock ? ` (${formatUsd(detail.price.lastPrice)})` : ""} (현재가)
+              </span>
+            </div>
+          ) : (
+            <div className="mb-3.5 flex justify-between text-[13.5px] font-bold" style={{ color: "var(--mut)" }}>
+              <span>참고 현재가</span>
+              <span style={{ color: "var(--ink)" }}>
+                {priceLabel}{isUsdStock ? ` (${formatUsd(detail.price.lastPrice)})` : ""}
+              </span>
+            </div>
+          )}
 
           <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }} data-tour="order-summary">
             {isUsdStock && (
@@ -637,11 +897,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             )}
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>주문 금액</span>
-              <b style={{ color: "var(--ink)" }}>{formatNumber(amount.grossAmount)}</b>
+              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.grossAmount : amount.grossAmount)}</b>
             </div>
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>수수료 0.01%</span>
-              <span style={{ color: "var(--ink)" }}>{formatNumber(amount.fee)}</span>
+              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.fee : amount.fee)}</span>
             </div>
             <div className="mb-1.5 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>
@@ -650,12 +910,21 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   ({side === "매수" ? "매수는 없음" : detail.marketCountry === "KR" ? "증권거래세 0.2%" : "SEC Fee"})
                 </span>
               </span>
-              <span style={{ color: "var(--ink)" }}>{formatNumber(amount.tax)}</span>
+              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.tax : amount.tax)}</span>
             </div>
             <div className="flex justify-between pt-1.5 text-[14px]" style={{ borderTop: "1px solid var(--line)" }}>
-              <b style={{ color: "var(--ink)" }}>{side === "매수" ? "총 차감액" : "총 입금액"}</b>
-              <b style={{ color: "var(--ink)" }}>{formatNumber(amount.netAmount)}</b>
+              <b style={{ color: "var(--ink)" }}>{side === "매수" ? "총 차감액(예약)" : "총 입금액(예상)"}</b>
+              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.netAmount : amount.netAmount)}</b>
             </div>
+            {orderType === "지정가" && (
+              <div className="mt-1.5 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                {limitQuoteLoading
+                  ? "미리보기 확인 중…"
+                  : limitQuote
+                    ? `${new Date(limitQuote.expiresAt).toLocaleString("ko-KR")}까지 미체결이면 자동 만료돼요`
+                    : "수량·지정가를 입력하면 접수 가능 여부를 확인해요"}
+              </div>
+            )}
           </div>
 
           <div className="mb-3 flex justify-between text-[13.5px] font-bold" style={{ color: "var(--mut)" }}>
@@ -663,18 +932,43 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <span style={{ color: "var(--ink)" }}>{formatNumber(availableCash)}원</span>
           </div>
 
-          {blockReason ? (
+          {orderType === "시장가" ? (
+            blockReason ? (
+              <button
+                disabled
+                className="w-full cursor-not-allowed rounded-xl py-3 text-[15px] font-bold"
+                style={{ background: "var(--fill)", color: "var(--disabledText)" }}
+                data-tour="submit"
+              >
+                {blockReason}
+              </button>
+            ) : (
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className="w-full rounded-xl py-3 text-[15px] font-bold text-white transition-[background] duration-200 disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+                onMouseEnter={(e) => {
+                  if (!submitting) e.currentTarget.style.background = txPillColor;
+                }}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "var(--accent)")}
+                data-tour="submit"
+              >
+                {submitting ? "처리 중…" : side === "매수" ? "매수하기" : "매도하기"}
+              </button>
+            )
+          ) : limitBlockReason ? (
             <button
               disabled
               className="w-full cursor-not-allowed rounded-xl py-3 text-[15px] font-bold"
               style={{ background: "var(--fill)", color: "var(--disabledText)" }}
               data-tour="submit"
             >
-              {blockReason}
+              {limitBlockReason}
             </button>
           ) : (
             <button
-              onClick={handleSubmit}
+              onClick={handleSubmitLimit}
               disabled={submitting}
               className="w-full rounded-xl py-3 text-[15px] font-bold text-white transition-[background] duration-200 disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--accent)" }}
@@ -684,7 +978,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               onMouseLeave={(e) => (e.currentTarget.style.background = "var(--accent)")}
               data-tour="submit"
             >
-              {submitting ? "처리 중…" : side === "매수" ? "매수하기" : "매도하기"}
+              {submitting ? "처리 중…" : side === "매수" ? "매수 주문 접수" : "매도 주문 접수"}
             </button>
           )}
           {!isLoggedIn && (
