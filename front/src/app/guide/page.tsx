@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { WikiPanel } from "@/components/WikiPanel";
 import { useTheme } from "@/components/ThemeProvider";
 
 const SECTIONS = [
@@ -93,34 +94,7 @@ export default function GuidePage() {
       </Reveal>
 
       {tab === "wiki" ? (
-        <div
-          className="flex flex-col items-center justify-center gap-1.5 rounded-[24px] px-10 py-18 text-center"
-          style={{ background: "var(--card)" }}
-        >
-          <span
-            className="mb-4.5 inline-block rounded-full px-3.5 py-1.5 text-[12px] font-extrabold"
-            style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
-          >
-            준비 중
-          </span>
-          <h2 className="text-[24px] font-extrabold" style={{ color: "var(--ink)" }}>
-            금융 용어 위키는 준비 중이에요
-          </h2>
-          <p className="mt-1 max-w-[420px] text-[14.5px] leading-[1.75]" style={{ color: "var(--mut)" }}>
-            예수금, 시장가, 증권거래세처럼 거래 화면에 등장하는 용어를
-            <br />
-            쉬운 말로 풀어 정리하고 있어요. 조금만 기다려 주세요.
-          </p>
-          <button
-            onClick={() => setTab("guide")}
-            className="mt-6.5 rounded-[14px] px-7 py-3.5 text-[14px] font-bold transition-[background] duration-150"
-            style={{ background: "var(--fill)", color: "var(--ink)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--line)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "var(--fill)")}
-          >
-            이용가이드 먼저 보기
-          </button>
-        </div>
+        <WikiPanel />
       ) : (
         <>
           <Reveal delay={0.02}>
