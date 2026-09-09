@@ -567,8 +567,8 @@ export function getRankings(market: MarketCountry, size = 20, cursor?: string): 
   return request<RankingPage>(`/api/stocks/rankings?${params.toString()}`, { method: "GET" });
 }
 
-export type CandleInterval = "1m" | "1d";
-export type CandleRange = "1D" | "1M" | "6M" | "1Y";
+export type CandleInterval = "1m" | "5m" | "10m" | "1d" | "1w";
+export type CandleRange = "1D" | "1W" | "1M" | "6M" | "1Y";
 
 export type Candle = {
   at: string;
@@ -589,7 +589,8 @@ export type CandleData = {
 
 /**
  * `GET /api/stocks/{symbol}/candles` — 캔들 차트. 백엔드가 유효한 조합만 허용한다
- * (1m은 반드시 range=1D, 1d는 1M/6M/1Y — `CandleQueryPolicy` 참고).
+ * (1m→1D, 5m→1D/1W, 10m→1W, 1d→1M/6M/1Y, 1w→6M/1Y — `CandleQueryPolicy` 참고).
+ * 유효한 조합 선택 자체는 `lib/candle-query.ts`의 `CANDLE_UNIT_PERIODS`/`toCandleQuery`가 담당한다.
  */
 export function getCandles(
   symbol: string,

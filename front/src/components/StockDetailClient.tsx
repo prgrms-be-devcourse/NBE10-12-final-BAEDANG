@@ -16,6 +16,7 @@ import { INITIAL_CASH } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { calculateOrderAmount, maxAffordableQuantity } from "@/lib/order-amount";
 import { sanitizeLimitPriceInput } from "@/lib/limit-price-input";
+import { toCandleQuery, type CandlePeriod, type CandleUnit } from "@/lib/candle-query";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
 import {
   ApiError,
@@ -27,8 +28,6 @@ import {
   placeMarketOrder,
   type AccountSummary,
   type Candle,
-  type CandleInterval,
-  type CandleRange,
   type HoldingItem,
   type LimitOrderQuoteResponse,
   type StockDetail,
@@ -63,7 +62,7 @@ const STOCK_DETAIL_TOUR_STEPS: TourStep[] = [
     target: '[data-tour="candle-toggle"]',
     title: "기간 바꿔보기",
     description:
-      "일봉은 하루 단위, 1분봉은 1분 단위로\n가격 흐름을 보여줘요.\n1개월·6개월·1년 버튼으로 더 긴 흐름도 볼 수 있어요.\n눌러서 바꿔볼까요?",
+      "1분·5분·10분봉은 짧은 시간 단위,\n일봉·1주봉은 긴 시간 단위로\n가격 흐름을 보여줘요.\n봉 단위에 맞춰 1일부터 1년까지\n기간 버튼으로 골라볼 수 있어요.\n눌러서 바꿔볼까요?",
   },
   {
     target: '[data-tour="chart-expand"]',
@@ -102,18 +101,14 @@ const CATEGORY_GUIDE: Record<string, string> = {
   ETF: "ETF는 여러 기업에 나눠 투자하는 상품이에요. 한 기업이 흔들려도 전체 영향은 희석돼서, 개별주보다 변동이 작아요.",
 };
 
-/** 화면에 넣을 캔들 구간 옵션 → 백엔드 interval/range 쌍. 1분봉은 반드시 range=1D (CandleQueryPolicy). */
-function toCandleQuery(candleUnit: "일봉" | "1분봉", period: "1개월" | "6개월" | "1년"): { interval: CandleInterval; range: CandleRange } {
-  if (candleUnit === "1분봉") return { interval: "1m", range: "1D" };
-  const range: CandleRange = period === "1개월" ? "1M" : period === "6개월" ? "6M" : "1Y";
-  return { interval: "1d", range };
-}
-
 // 1분봉은 백엔드가 top-100 종목을 1분마다 수집한다(docs/erd.md) — 그 주기에
-// 맞춰 1분마다 다시 조회한다. 일봉은 장 마감 직후 하루 한 번만 새로 생기므로
-// 세션 중에 계속 폴링해도 더 받을 데이터가 없다 — 그래서 일봉은 폴링하지
-// 않고, 세그먼트/기간이 바뀔 때만 다시 조회하는 기존 동작을 그대로 둔다.
+// 맞춰 1분마다 다시 조회한다. 5분봉·10분봉은 그 1분봉을 연속 집계(continuous
+// aggregate)한 값이라 같은 주기로 갱신되므로 똑같이 폴링한다. 일봉·1주봉은
+// 장 마감(또는 주간 마감) 이후에만 새로 생겨서 세션 중에 계속 폴링해도 더
+// 받을 데이터가 없다 — 그래서 이 둘은 폴링하지 않고, 세그먼트/기간이 바뀔
+// 때만 다시 조회하는 기존 동작을 그대로 둔다.
 const MINUTE_CANDLE_POLL_INTERVAL_MS = 60 * 1000;
+const INTRADAY_CANDLE_UNITS: readonly CandleUnit[] = ["1분봉", "5분봉", "10분봉"];
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
@@ -122,8 +117,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { theme } = useTheme();
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
-  const [candleUnit, setCandleUnit] = useState<"일봉" | "1분봉">("일봉");
-  const [period, setPeriod] = useState<"1개월" | "6개월" | "1년">("6개월");
+  const [candleUnit, setCandleUnit] = useState<CandleUnit>("일봉");
+  const [period, setPeriod] = useState<CandlePeriod>("6개월");
   const [candleItems, setCandleItems] = useState<Candle[]>([]);
   const [candleLoading, setCandleLoading] = useState(true);
   const [chartExpanded, setChartExpanded] = useState(false);
@@ -249,11 +244,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     };
   }, [detail.symbol, detail.marketCountry, candleUnit, period]);
 
-  // 1분봉을 보고 있을 때만 1분마다 조용히 다시 조회한다 — 로딩 스피너를 다시
-  // 띄우지 않고 데이터만 갈아끼운다. 실패하면 지금 보여주고 있는 캔들을 그대로
-  // 유지하고 다음 주기에 재시도한다. 일봉은 폴링하지 않는다(위 주석 참고).
-  // 이 종목의 시장이 장 마감 중이면 minute_candle 자체가 그 주기로 수집되지
-  // 않으므로(docs/erd.md), 장 시간대에만 폴링한다.
+  // 분봉 계열(1분·5분·10분봉)을 보고 있을 때만 1분마다 조용히 다시 조회한다 —
+  // 로딩 스피너를 다시 띄우지 않고 데이터만 갈아끼운다. 실패하면 지금 보여주고
+  // 있는 캔들을 그대로 유지하고 다음 주기에 재시도한다. 일봉·1주봉은 폴링하지
+  // 않는다(위 주석 참고). 이 종목의 시장이 장 마감 중이면 minute_candle 자체가
+  // 그 주기로 수집되지 않으므로(docs/erd.md), 장 시간대에만 폴링한다.
   const candlePollInFlightRef = useRef(false);
   useVisiblePolling(
     () => {
@@ -268,7 +263,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         });
     },
     MINUTE_CANDLE_POLL_INTERVAL_MS,
-    candleUnit === "1분봉" && isMarketOpen(detail.marketCountry)
+    INTRADAY_CANDLE_UNITS.includes(candleUnit) && isMarketOpen(detail.marketCountry)
   );
 
   const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
