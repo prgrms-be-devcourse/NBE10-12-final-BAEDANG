@@ -80,11 +80,11 @@ class StockFinancialQueryServiceTest {
     }
 
     @Test
-    void missing_stock_throws_STOCK_NOT_FOUND() {
-        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("UNKNOWN", MarketCountry.KR))
+    void missing_valid_stock_code_throws_STOCK_NOT_FOUND() {
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("999999", MarketCountry.KR))
                 .thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getFinancials("UNKNOWN", "KR"))
+        assertThatThrownBy(() -> service.getFinancials("999999", "KR"))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode())
                                 .isEqualTo(ErrorCode.STOCK_NOT_FOUND));
@@ -98,17 +98,35 @@ class StockFinancialQueryServiceTest {
                                 .isEqualTo(ErrorCode.INVALID_INPUT));
     }
 
-    static Stream<Arguments> unsupportedStocks() {
+    @Test
+    void malformed_KR_stock_code_throws_FINANCIALS_NOT_SUPPORTED_before_lookup() {
+        assertThatThrownBy(() -> service.getFinancials("12345A", "KR"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.FINANCIALS_NOT_SUPPORTED));
+
+        verify(stockRepository, never()).findBySymbolIgnoreCaseAndMarketCountry(any(), any());
+    }
+
+    @Test
+    void US_market_throws_FINANCIALS_NOT_SUPPORTED_before_lookup() {
+        assertThatThrownBy(() -> service.getFinancials("AAPL", "US"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.FINANCIALS_NOT_SUPPORTED));
+
+        verify(stockRepository, never()).findBySymbolIgnoreCaseAndMarketCountry(any(), any());
+    }
+
+    static Stream<Arguments> unsupportedCategories() {
         return Stream.of(
-                Arguments.of(MarketCountry.US, StockCategory.INDIVIDUAL, "AAPL"),
                 Arguments.of(MarketCountry.KR, StockCategory.ETF, "069500"),
-                Arguments.of(MarketCountry.KR, StockCategory.ETN, "500001"),
-                Arguments.of(MarketCountry.KR, StockCategory.INDIVIDUAL, "12345A"));
+                Arguments.of(MarketCountry.KR, StockCategory.ETN, "500001"));
     }
 
     @ParameterizedTest
-    @MethodSource("unsupportedStocks")
-    void unsupported_stock_throws_FINANCIALS_NOT_SUPPORTED_without_sync(
+    @MethodSource("unsupportedCategories")
+    void unsupported_category_throws_FINANCIALS_NOT_SUPPORTED_without_sync(
             MarketCountry country, StockCategory category, String symbol) {
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry(symbol, country))
                 .thenReturn(Optional.of(stock));

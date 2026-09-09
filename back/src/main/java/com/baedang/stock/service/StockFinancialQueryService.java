@@ -83,10 +83,12 @@ public class StockFinancialQueryService {
             throw new BusinessException(ErrorCode.INVALID_INPUT);
         }
 
+        validateRequestSupported(symbol, marketCountry);
+
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(symbol, marketCountry)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
 
-        validateSupported(stock);
+        validateSupportedCategory(stock);
 
         Long stockId = stock.getStockId();
         String dataStatus = resolveDataStatus(stock, stockId);
@@ -94,13 +96,15 @@ public class StockFinancialQueryService {
         return assembleResponse(stock, stockId, dataStatus);
     }
 
-    private void validateSupported(Stock stock) {
+    private static void validateRequestSupported(String symbol, MarketCountry marketCountry) {
+        if (marketCountry != MarketCountry.KR || !symbol.matches("[0-9]{6}")) {
+            throw new BusinessException(ErrorCode.FINANCIALS_NOT_SUPPORTED);
+        }
+    }
+
+    private static void validateSupportedCategory(Stock stock) {
         StockCategory category = stock.getStockCategory();
-        if (stock.getMarketCountry() != MarketCountry.KR
-                || category == StockCategory.ETF
-                || category == StockCategory.ETN
-                || stock.getSymbol() == null
-                || !stock.getSymbol().matches("[0-9]{6}")) {
+        if (category == StockCategory.ETF || category == StockCategory.ETN) {
             throw new BusinessException(ErrorCode.FINANCIALS_NOT_SUPPORTED);
         }
     }
