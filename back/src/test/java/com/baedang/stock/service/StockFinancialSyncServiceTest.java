@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -213,6 +214,30 @@ class StockFinancialSyncServiceTest {
                 .contains("symbol=005930")
                 .contains("group=annual")
                 .contains(providerContext);
+    }
+
+    @Test
+    void persistence_failures_do_not_block_later_groups_and_first_failure_is_rethrown() {
+        RuntimeException industryFailure = new IllegalStateException("industry persistence failed");
+        RuntimeException annualFailure = new IllegalStateException("annual persistence failed");
+        List<PeriodData> annual = List.of(period("202512"));
+        List<PeriodData> quarterly = List.of(period("202509"));
+        when(syncRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
+        when(port.fetchIndustry(SYMBOL)).thenReturn(industry());
+        when(port.fetchFinancials(SYMBOL, FinancialPeriodType.ANNUAL)).thenReturn(annual);
+        when(port.fetchFinancials(SYMBOL, FinancialPeriodType.QUARTERLY)).thenReturn(quarterly);
+        doThrow(industryFailure).when(persistenceService).saveIndustry(STOCK_ID, industry(), NOW);
+        doThrow(annualFailure).when(persistenceService).saveFinancials(
+                STOCK_ID, FinancialPeriodType.ANNUAL, annual, NOW);
+
+        assertThatThrownBy(() -> service.ensureFresh(stock, SyncTrigger.ON_DEMAND))
+                .isSameAs(industryFailure)
+                .satisfies(exception -> assertThat(exception.getSuppressed())
+                        .containsExactly(annualFailure));
+
+        verify(persistenceService).saveFinancials(
+                STOCK_ID, FinancialPeriodType.QUARTERLY, quarterly, NOW);
+        assertThat(counter("on_demand", "error")).isEqualTo(1);
     }
 
     @Test

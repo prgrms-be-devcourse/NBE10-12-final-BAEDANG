@@ -172,16 +172,50 @@ public class StockFinancialSyncService {
             throw new BusinessException(ErrorCode.KIS_API_UNAVAILABLE);
         }
 
-        GroupResult industry = refreshIndustry
-                ? synchronizeIndustry(stock)
-                : GroupResult.fresh();
-        GroupResult annual = refreshAnnual
-                ? synchronizeFinancials(stock, FinancialPeriodType.ANNUAL)
-                : GroupResult.fresh();
-        GroupResult quarterly = refreshQuarterly
-                ? synchronizeFinancials(stock, FinancialPeriodType.QUARTERLY)
-                : GroupResult.fresh();
+        RuntimeException deferredFailure = null;
+
+        GroupResult industry = GroupResult.fresh();
+        if (refreshIndustry) {
+            try {
+                industry = synchronizeIndustry(stock);
+            } catch (RuntimeException exception) {
+                deferredFailure = defer(deferredFailure, exception);
+            }
+        }
+
+        GroupResult annual = GroupResult.fresh();
+        if (refreshAnnual) {
+            try {
+                annual = synchronizeFinancials(stock, FinancialPeriodType.ANNUAL);
+            } catch (RuntimeException exception) {
+                deferredFailure = defer(deferredFailure, exception);
+            }
+        }
+
+        GroupResult quarterly = GroupResult.fresh();
+        if (refreshQuarterly) {
+            try {
+                quarterly = synchronizeFinancials(stock, FinancialPeriodType.QUARTERLY);
+            } catch (RuntimeException exception) {
+                deferredFailure = defer(deferredFailure, exception);
+            }
+        }
+
+        if (deferredFailure != null) {
+            throw deferredFailure;
+        }
         return new SyncResult(industry, annual, quarterly);
+    }
+
+    private static RuntimeException defer(
+            RuntimeException first, RuntimeException next) {
+        if (first == null) {
+            return next;
+        }
+        if (first != next) {
+            first.addSuppressed(next);
+        }
+        return first;
     }
 
     private GroupResult synchronizeIndustry(Stock stock) {
