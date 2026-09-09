@@ -41,6 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -357,6 +358,65 @@ class StockOnDemandQuoteServiceTest {
         QuoteSnapshot mockQuote = org.mockito.Mockito.mock(QuoteSnapshot.class);
         lenient().when(mockQuote.getCollectedAt()).thenReturn(collectedAt);
         return mockQuote;
+    }
+
+    @Test
+    void 백필이_일봉을_넣으면_주봉_집계를_즉시_갱신한다() {
+        LocalDate expectedTradeDate = LocalDate.of(2026, 8, 31);
+        stubBackfillNeeded(expectedTradeDate);
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
+                .thenReturn(List.of(candle(expectedTradeDate, "100")));
+
+        service.ensureDailyCandles(stock);
+
+        verify(candleAggregateRepository).refreshWeekly();
+    }
+
+    @Test
+    void 백필하지_않으면_주봉도_갱신하지_않는다() {
+        LocalDate expectedTradeDate = LocalDate.of(2026, 8, 31);
+        when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
+        when(latestCompletedTradingDayResolver.resolve(MarketCountry.KR))
+                .thenReturn(Optional.of(expectedTradeDate));
+        when(dailyCandleRepository.findTopByStockIdOrderByTradeDateDesc(10L))
+                .thenReturn(Optional.of(new DailyCandle(
+                        10L, expectedTradeDate, BigDecimal.ONE, BigDecimal.ONE,
+                        BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)));
+
+        service.ensureDailyCandles(stock);
+
+        verifyNoInteractions(candleAggregateRepository);
+    }
+
+    /**
+     * 주봉 갱신은 완료 기록을 남긴 <b>뒤</b> 별도 try 로 부른다.
+     * 앞으로 옮기면 갱신 실패가 백필 실패로 번져 그 종목을 조회할 때마다 Toss 를 다시 부른다.
+     */
+    @Test
+    void 주봉_갱신이_실패해도_백필을_다시_하지_않는다() {
+        LocalDate expectedTradeDate = LocalDate.of(2026, 8, 31);
+        stubBackfillNeeded(expectedTradeDate);
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
+                .thenReturn(List.of(candle(expectedTradeDate, "100")));
+        doThrow(new RuntimeException("refresh 실패"))
+                .when(candleAggregateRepository).refreshWeekly();
+
+        service.ensureDailyCandles(stock);
+        service.ensureDailyCandles(stock);
+
+        verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
+        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), any());
+    }
+
+    /** 일봉 200개는 있지만 최신 확정 거래일보다 오래돼서 백필이 필요한 상태. */
+    private void stubBackfillNeeded(LocalDate expectedTradeDate) {
+        when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
+        when(latestCompletedTradingDayResolver.resolve(MarketCountry.KR))
+                .thenReturn(Optional.of(expectedTradeDate));
+        when(dailyCandleRepository.findTopByStockIdOrderByTradeDateDesc(10L))
+                .thenReturn(Optional.of(new DailyCandle(
+                        10L, expectedTradeDate.minusDays(1), BigDecimal.ONE, BigDecimal.ONE,
+                        BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)));
     }
 
     private Candle candle(LocalDate date, String close) {

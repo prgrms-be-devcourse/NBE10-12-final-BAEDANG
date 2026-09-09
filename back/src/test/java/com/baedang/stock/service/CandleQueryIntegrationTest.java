@@ -6,6 +6,7 @@ import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
 import com.baedang.market.service.LatestCompletedTradingDayResolver;
@@ -66,6 +67,7 @@ class CandleQueryIntegrationTest {
     @Autowired MinuteCandlePersistenceService persistenceService;
     @Autowired StockRepository stockRepository;
     @Autowired DailyCandleRepository dailyCandleRepository;
+    @Autowired CandleAggregateRepository candleAggregateRepository;
     @Autowired MinuteCandleRepository minuteCandleRepository;
     @Autowired JdbcClient jdbcClient;
 
@@ -231,6 +233,28 @@ class CandleQueryIntegrationTest {
         assertThat(response.items().get(1).at().toInstant())
                 .isEqualTo(Instant.parse("2026-11-02T14:30:00Z"));
         assertThat(new BigDecimal(response.items().get(1).close())).isEqualByComparingTo("21");
+    }
+
+    /**
+     * 온디맨드 백필 직후 호출되는 경로를 실제 DB 로 확인한다.
+     * 단위 테스트는 목이라 프록시를 안 타므로, {@code Propagation.NEVER} 와
+     * {@code CALL refresh_continuous_aggregate} 가 실제로 도는지는 여기서만 검증된다.
+     */
+    @Test
+    void 주봉_즉시_갱신을_호출하면_저장된_일봉이_주봉으로_조회된다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        dailyCandleRepository.saveAll(List.of(
+                daily(stock, LocalDate.of(2026, 8, 25), "100"),
+                daily(stock, LocalDate.of(2026, 8, 31), "140")));
+
+        candleAggregateRepository.refreshWeekly();
+
+        var response = candleQueryService.getCandles(stock.getSymbol(), "KR", "1w", "6M");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).at()).isEqualTo(kst(2026, 8, 24, 0, 0));
+        assertThat(new BigDecimal(response.items().get(0).close())).isEqualByComparingTo("100");
+        assertThat(response.items().get(1).at()).isEqualTo(kst(2026, 8, 31, 0, 0));
     }
 
     private void refreshAggregate(String view) {
