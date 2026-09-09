@@ -8,7 +8,7 @@ import {
   signUp,
   login,
   getAccountSummary,
-  placeOrder,
+  placeMarketOrder,
   getExchangeRateLatest,
   getExchangeRateHistory,
   getStockDetail,
@@ -169,8 +169,8 @@ describe('getExchangeRateHistory — 성공', () => {
   });
 });
 
-describe('placeOrder — 성공 (accountId 포함)', () => {
-  it('201 → OrderResponse 반환 및 accountId 바디 전송', async () => {
+describe('placeMarketOrder — 성공 (accountId 포함)', () => {
+  it('201 → MarketOrderResponse 반환 및 /api/orders/market 로 accountId 바디 전송', async () => {
     const orderData = {
       orderId: 100,
       status: 'FILLED',
@@ -188,8 +188,8 @@ describe('placeOrder — 성공 (accountId 포함)', () => {
       orderedAt: '2026-08-28T00:00:01Z',
       account: { cashBalanceAfter: '49299930' },
     };
-    mockFetch(201, orderData);
-    const response = await placeOrder({
+    const fetchSpy = mockFetch(201, orderData);
+    const response = await placeMarketOrder({
       accountId: 10,
       clientOrderId: 'uuid-1234',
       symbol: '005930',
@@ -198,6 +198,10 @@ describe('placeOrder — 성공 (accountId 포함)', () => {
       quantity: '10',
     });
     expect(response).toEqual(orderData);
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining('/api/orders/market'),
+      expect.anything()
+    );
   });
 });
 

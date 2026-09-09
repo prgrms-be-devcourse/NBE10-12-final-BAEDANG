@@ -20,7 +20,7 @@ import {
   getAccountSummary,
   getCandles,
   getHoldings,
-  placeOrder,
+  placeMarketOrder,
   type AccountSummary,
   type Candle,
   type CandleInterval,
@@ -352,7 +352,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
     const idToUse = clientOrderId ?? generateClientOrderId();
 
     try {
-      const response = await placeOrder({
+      const response = await placeMarketOrder({
         accountId: currentAccount.accountId,
         clientOrderId: idToUse,
         symbol: detail.symbol,

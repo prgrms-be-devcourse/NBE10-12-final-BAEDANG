@@ -252,7 +252,7 @@ export function getAccountSummary(): Promise<AccountSummary> {
 
 // ── 주문 ──────────────────────────────────────────────────────────────────────
 
-export type PlaceOrderInput = {
+export type MarketOrderRequest = {
   accountId: number;
   clientOrderId: string;
   symbol: string;
@@ -261,7 +261,7 @@ export type PlaceOrderInput = {
   quantity: string;
 };
 
-export type OrderResponse = {
+export type MarketOrderResponse = {
   orderId: number;
   status: string;
   symbol: string;
@@ -279,9 +279,12 @@ export type OrderResponse = {
   account: { cashBalanceAfter: string };
 };
 
-/** `POST /api/orders` — 시장가 매수/매도. 로그인한 사용자만 호출 가능(accessToken 필요). */
-export function placeOrder(input: PlaceOrderInput): Promise<OrderResponse> {
-  return request<OrderResponse>("/api/orders", { method: "POST", auth: true, body: input });
+/**
+ * `POST /api/orders/market` — 시장가 매수/매도. 로그인한 사용자만 호출 가능(accessToken 필요).
+ * 지정가 주문은 `POST /api/orders/limit`(별도 엔드포인트)을 사용한다.
+ */
+export function placeMarketOrder(input: MarketOrderRequest): Promise<MarketOrderResponse> {
+  return request<MarketOrderResponse>("/api/orders/market", { method: "POST", auth: true, body: input });
 }
 
 // ── 종목 ──────────────────────────────────────────────────────────────────────
