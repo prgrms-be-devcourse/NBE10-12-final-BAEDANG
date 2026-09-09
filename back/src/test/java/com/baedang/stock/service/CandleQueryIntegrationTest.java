@@ -55,7 +55,8 @@ class CandleQueryIntegrationTest {
     @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
             DockerImageName.parse("timescale/timescaledb:latest-pg18")
-                    .asCompatibleSubstituteFor("postgres"));
+                    .asCompatibleSubstituteFor("postgres"))
+            .withCommand("postgres", "-c", "timescaledb.max_background_workers=0");
 
     @MockitoBean MarketDataPort marketDataPort;
     @MockitoBean LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
@@ -260,7 +261,22 @@ class CandleQueryIntegrationTest {
     private void refreshAggregate(String view) {
         // 뷰는 WITH NO DATA 로 만들고 갱신 정책(백그라운드 잡)이 채운다.
         // 테스트에서는 잡을 기다리지 않고 직접 새로고침한다.
-        jdbcClient.sql("CALL refresh_continuous_aggregate('" + view + "', NULL, NULL)").update();
+        for (int attempt = 0; attempt < 5; attempt++) {
+            try {
+                jdbcClient.sql("CALL refresh_continuous_aggregate('" + view + "', NULL, NULL)").update();
+                return;
+            } catch (Exception e) {
+                if (e.getMessage() != null && e.getMessage().contains("concurrent refresh") && attempt < 4) {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException ignored) {
+                        Thread.currentThread().interrupt();
+                    }
+                    continue;
+                }
+                throw e;
+            }
+        }
     }
 
     private MinuteCandle minute(
