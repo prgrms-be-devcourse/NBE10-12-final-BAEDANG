@@ -481,7 +481,7 @@ Up to 20 rows are generated per version: 10 ASK rows and 1–10 BID rows (KR alw
 - **Level cascade cleanup**: Deleting a closed version removes its up to 20 levels via `ON DELETE CASCADE`.
 - **Executions preserved**: Execution price, quantity, FX, and settlement amounts remain permanent; `book_level_id` remains a non-FK trace value captured at consumption time.
 
-### Financial · Industry (KIS — Flyway V6)
+### Financial · Industry (KIS — Flyway V5)
 
 #### `stock_industry` — industry classification
 Stores the latest standard and market-index industry classifications for Korean stocks.
