@@ -81,20 +81,33 @@ function TermModal({ term, onClose }: { term: WikiTerm; onClose: () => void }) {
   const paras = useMemo(() => toParas(term.body), [term.body]);
   const chips = term.aliases.length ? term.aliases : ["별칭 없음"];
 
+  // 모달이 떠 있는 동안 뒷배경(가이드 페이지) 스크롤을 잠근다. 이 컴포넌트는 열릴 때만
+  // 마운트되므로 마운트에서 잠그고 언마운트에서 원복한다(이전 overflow 값 보존).
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
   return (
     <div
       onClick={onClose}
       className="fixed inset-0 z-[150] flex items-center justify-center p-6"
-      style={{ background: "rgba(8,14,26,.6)", animation: "modalFade .28s" }}
+      style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wiki-term-title"
         onClick={(e) => e.stopPropagation()}
         className="flex w-full max-w-[620px] flex-col rounded-[24px] px-8 py-[30px]"
         style={{ maxHeight: "85vh", background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="text-[26px] font-extrabold tracking-[-.02em]" style={{ color: "var(--ink)" }}>
+            <h3 id="wiki-term-title" className="text-[26px] font-extrabold tracking-[-.02em]" style={{ color: "var(--ink)" }}>
               {term.name}
             </h3>
             <div className="mt-[9px] flex flex-wrap gap-1.5">
