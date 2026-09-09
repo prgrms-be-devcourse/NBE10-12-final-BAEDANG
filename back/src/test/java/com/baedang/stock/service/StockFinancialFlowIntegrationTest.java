@@ -210,7 +210,7 @@ class StockFinancialFlowIntegrationTest {
     void response_assembly_uses_one_database_snapshot() throws Exception {
         Stock stock = stockRepository.save(Stock.create(
                 "051910", MarketCountry.KR, "KOSPI", "LG화학", null, "KRW", "STOCK", true));
-        Instant oldSyncedAt = Instant.now();
+        Instant oldSyncedAt = Instant.parse("2026-09-09T18:14:22Z");
         Instant newSyncedAt = oldSyncedAt.plusSeconds(60);
         persistenceService.saveIndustry(stock.getStockId(), industry("0200"), oldSyncedAt);
         persistenceService.saveFinancials(stock.getStockId(), FinancialPeriodType.ANNUAL,
