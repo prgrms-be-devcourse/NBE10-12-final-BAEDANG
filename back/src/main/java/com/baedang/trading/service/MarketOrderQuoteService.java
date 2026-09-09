@@ -14,12 +14,15 @@ import com.baedang.user.entity.Account;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 
 @Service
+@Transactional(propagation = Propagation.NEVER)
 public class MarketOrderQuoteService {
 
     private static final Logger log = LoggerFactory.getLogger(MarketOrderQuoteService.class);
@@ -33,6 +36,7 @@ public class MarketOrderQuoteService {
     private final OrderPolicy orderPolicy;
     private final MarketOrderPolicy marketOrderPolicy;
     private final Clock clock;
+    private final OrderMarketDataService marketData;
 
     public MarketOrderQuoteService(
             OrderQuoteQueryService queryService,
@@ -41,7 +45,8 @@ public class MarketOrderQuoteService {
             MarketOrderSettlementCalculator amountCalculator,
             OrderPolicy orderPolicy,
             MarketOrderPolicy marketOrderPolicy,
-            Clock clock
+            Clock clock,
+            OrderMarketDataService marketData
     ) {
         this.queryService = queryService;
         this.marketSessionProvider = marketSessionProvider;
@@ -50,6 +55,7 @@ public class MarketOrderQuoteService {
         this.orderPolicy = orderPolicy;
         this.marketOrderPolicy = marketOrderPolicy;
         this.clock = clock;
+        this.marketData = marketData;
     }
 
     /** 견적은 자금이나 수량을 예약하지 않는 비구속성 읽기 모델입니다. */
@@ -63,7 +69,7 @@ public class MarketOrderQuoteService {
         OrderTerms terms = orderPolicy.parseTerms(
                 symbolValue, marketCountryValue, sideValue, quantityValue);
 
-        OrderQuoteQueryContext queryContext = queryService.load(userId, terms);
+        OrderQuoteQueryContext queryContext = marketData.prepareEstimate(queryService.load(userId, terms));
         Account account = queryContext.account();
         Stock stock = queryContext.stock();
         if (!orderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
