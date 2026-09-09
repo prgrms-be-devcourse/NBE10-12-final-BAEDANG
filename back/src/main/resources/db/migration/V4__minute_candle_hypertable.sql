@@ -1,17 +1,18 @@
---flyway:executeInTransaction=false
 -- V4__minute_candle_hypertable.sql
 -- 분봉 상시 적재 전환 (#128): minute_candle 하이퍼테이블화 + 5분봉·10분봉 연속 집계
 --
--- !! executeInTransaction=false 는 필수입니다.
---    연속 집계(CREATE MATERIALIZED VIEW ... timescaledb.continuous) 생성은
---    트랜잭션 블록 안에서 실행할 수 없습니다. V1 과 같은 이유입니다.
+-- 이 파일은 Flyway 기본값대로 하나의 트랜잭션 안에서 실행됩니다.
+-- 중도 실패하면 전부 롤백되므로 반쯤 적용된 스키마가 남지 않습니다.
 --
--- !! 트랜잭션 밖이라 롤백이 없다. 중도 실패하면 앞부분만 적용된 채 남는다.
---    그래서 모든 구문을 재실행 가능하게 짰다(hypertable·뷰·정책 전부
---    if_not_exists). 복구 절차는 객체를 손으로 지우는 게 아니라:
---      1) flyway repair   — 실패로 기록된 V4 이력을 지운다
---      2) 앱 재기동       — V4 가 다시 돌며 이미 만들어진 것은 건너뛴다
---    실측 확인: 재실행 시 "already exists, skipping" NOTICE 만 남고 성공한다.
+-- !! 예전 TimescaleDB 는 하이퍼테이블 전환·연속 집계 생성을 트랜잭션 블록 안에서
+--    거부했습니다. 2.29.2(PG18) 에서는 아래 네 가지 모두 트랜잭션 안에서 커밋되는
+--    것을 확인했습니다 — create_hypertable(migrate_data), CREATE MATERIALIZED VIEW
+--    ... timescaledb.continuous, add_continuous_aggregate_policy, CREATE EXTENSION.
+--    TimescaleDB 를 내리는 일이 있으면 이 전제를 다시 확인할 것.
+--
+-- !! migrate_data => TRUE 는 복사가 끝날 때까지 minute_candle 에 배타 락을 걸고,
+--    트랜잭션 안이라 커밋까지 쥡니다. 지금은 온디맨드 캐시라 행이 얼마 없지만,
+--    상시 적재가 쌓인 뒤 처음 적용하는 환경이라면 그만큼 쓰기가 막힙니다.
 --
 -- 주봉(candle_1w)은 V1 에서 이미 만들었으므로 여기서는 다루지 않습니다.
 --
@@ -34,8 +35,7 @@
 -- ────────────────────────────────────────────────────────────────────────────
 SELECT create_hypertable('minute_candle', 'candle_at',
                          chunk_time_interval => INTERVAL '1 day',
-                         migrate_data        => TRUE,
-                         if_not_exists       => TRUE);
+                         migrate_data        => TRUE);
 
 
 -- ────────────────────────────────────────────────────────────────────────────
@@ -60,7 +60,7 @@ SELECT create_hypertable('minute_candle', 'candle_at',
 --      이 창을 뚫으려면 한 달 넘게 휴장해야 한다 — 추측이 아닌 상한이다.
 --      무효화된 버킷만 증분 재계산하므로 창을 넓혀도 비용은 거의 없다.
 -- ────────────────────────────────────────────────────────────────────────────
-CREATE MATERIALIZED VIEW IF NOT EXISTS candle_5m WITH (timescaledb.continuous) AS
+CREATE MATERIALIZED VIEW candle_5m WITH (timescaledb.continuous) AS
 SELECT stock_id,
        time_bucket(INTERVAL '5 minutes', candle_at) AS bucket,
        first(open_price, candle_at)                 AS open_price,
@@ -75,12 +75,11 @@ SELECT stock_id,
 SELECT add_continuous_aggregate_policy('candle_5m',
        start_offset      => INTERVAL '1 month',
        end_offset        => INTERVAL '1 minute',
-       schedule_interval => INTERVAL '1 minute',
-       if_not_exists     => TRUE);
+       schedule_interval => INTERVAL '1 minute');
 
 --   10분봉도 candle_5m 이 아니라 minute_candle 에서 직접 만든다.
 --   계층형 연속 집계는 갱신이 한 단계 더 밀려서 최신 봉이 늦게 붙는다.
-CREATE MATERIALIZED VIEW IF NOT EXISTS candle_10m WITH (timescaledb.continuous) AS
+CREATE MATERIALIZED VIEW candle_10m WITH (timescaledb.continuous) AS
 SELECT stock_id,
        time_bucket(INTERVAL '10 minutes', candle_at) AS bucket,
        first(open_price, candle_at)                  AS open_price,
@@ -95,8 +94,7 @@ SELECT stock_id,
 SELECT add_continuous_aggregate_policy('candle_10m',
        start_offset      => INTERVAL '1 month',
        end_offset        => INTERVAL '1 minute',
-       schedule_interval => INTERVAL '1 minute',
-       if_not_exists     => TRUE);
+       schedule_interval => INTERVAL '1 minute');
 
 
 -- ────────────────────────────────────────────────────────────────────────────
