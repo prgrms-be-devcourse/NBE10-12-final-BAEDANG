@@ -10,6 +10,9 @@ import java.util.List;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import com.baedang.global.clients.kis.KisProperties;
 import com.baedang.global.error.BusinessException;
@@ -46,6 +49,7 @@ public class StockFinancialQueryService {
     private final StockIndustryRepository industryRepository;
     private final StockFinancialPeriodRepository periodRepository;
     private final StockFinancialSyncRepository syncRepository;
+    private final TransactionTemplate snapshotTransaction;
     private final boolean kisEnabled;
     private final Duration financialTtl;
     private final Duration industryTtl;
@@ -57,6 +61,7 @@ public class StockFinancialQueryService {
             StockIndustryRepository industryRepository,
             StockFinancialPeriodRepository periodRepository,
             StockFinancialSyncRepository syncRepository,
+            PlatformTransactionManager transactionManager,
             KisProperties kisProperties,
             Clock clock
     ) {
@@ -65,6 +70,10 @@ public class StockFinancialQueryService {
         this.industryRepository = Objects.requireNonNull(industryRepository, "industryRepository");
         this.periodRepository = Objects.requireNonNull(periodRepository, "periodRepository");
         this.syncRepository = Objects.requireNonNull(syncRepository, "syncRepository");
+        this.snapshotTransaction = new TransactionTemplate(
+                Objects.requireNonNull(transactionManager, "transactionManager"));
+        this.snapshotTransaction.setReadOnly(true);
+        this.snapshotTransaction.setIsolationLevel(TransactionDefinition.ISOLATION_REPEATABLE_READ);
         Objects.requireNonNull(kisProperties, "kisProperties");
         this.kisEnabled = kisProperties.enabled();
         this.financialTtl = kisProperties.financialCacheTtl();
@@ -93,7 +102,7 @@ public class StockFinancialQueryService {
         Long stockId = stock.getStockId();
         String dataStatus = resolveDataStatus(stock, stockId);
 
-        return assembleResponse(stock, stockId, dataStatus);
+        return snapshotTransaction.execute(ignored -> assembleResponse(stock, stockId, dataStatus));
     }
 
     private static void validateRequestSupported(String symbol, MarketCountry marketCountry) {

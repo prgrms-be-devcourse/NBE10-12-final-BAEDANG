@@ -28,6 +28,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
 
 import com.baedang.global.clients.kis.KisProperties;
 import com.baedang.global.error.BusinessException;
@@ -66,12 +68,15 @@ class StockFinancialQueryServiceTest {
     @Mock StockIndustryRepository industryRepository;
     @Mock StockFinancialPeriodRepository periodRepository;
     @Mock StockFinancialSyncRepository syncRepository;
+    @Mock PlatformTransactionManager transactionManager;
+    @Mock TransactionStatus transactionStatus;
     @Mock Stock stock;
 
     private StockFinancialQueryService service;
 
     @BeforeEach
     void setUp() {
+        lenient().when(transactionManager.getTransaction(any())).thenReturn(transactionStatus);
         service = service(true);
         lenient().when(stock.getStockId()).thenReturn(STOCK_ID);
         lenient().when(stock.getSymbol()).thenReturn(SYMBOL);
@@ -319,6 +324,7 @@ class StockFinancialQueryServiceTest {
                 industryRepository,
                 periodRepository,
                 syncRepository,
+                transactionManager,
                 properties(kisEnabled),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }

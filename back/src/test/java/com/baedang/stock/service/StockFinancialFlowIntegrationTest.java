@@ -1,6 +1,7 @@
 package com.baedang.stock.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
@@ -12,6 +13,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,6 +26,7 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -33,6 +39,7 @@ import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.stock.dto.StockFinancialResponse;
 import com.baedang.stock.entity.FinancialPeriodType;
 import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.StockFinancialPeriod;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.StockFinancialInfoPort;
 import com.baedang.stock.port.StockFinancialInfoPort.BalanceSheet;
@@ -75,7 +82,7 @@ class StockFinancialFlowIntegrationTest {
     @Autowired StockFinancialPersistenceService persistenceService;
     @Autowired StockRepository stockRepository;
     @Autowired StockIndustryRepository industryRepository;
-    @Autowired StockFinancialPeriodRepository periodRepository;
+    @MockitoSpyBean StockFinancialPeriodRepository periodRepository;
     @Autowired StockFinancialSyncRepository syncRepository;
     @Autowired JdbcTemplate jdbcTemplate;
 
@@ -197,6 +204,58 @@ class StockFinancialFlowIntegrationTest {
         assertThat(periods)
                 .extracting(p -> p.getSales().stripTrailingZeros().toPlainString())
                 .containsExactly("1200", "900");
+    }
+
+    @Test
+    void response_assembly_uses_one_database_snapshot() throws Exception {
+        Stock stock = stockRepository.save(Stock.create(
+                "051910", MarketCountry.KR, "KOSPI", "LG화학", null, "KRW", "STOCK", true));
+        Instant oldSyncedAt = Instant.now();
+        Instant newSyncedAt = oldSyncedAt.plusSeconds(60);
+        persistenceService.saveIndustry(stock.getStockId(), industry("0200"), oldSyncedAt);
+        persistenceService.saveFinancials(stock.getStockId(), FinancialPeriodType.ANNUAL,
+                List.of(period("202412", "1000")), oldSyncedAt);
+        persistenceService.saveFinancials(stock.getStockId(), FinancialPeriodType.QUARTERLY,
+                List.of(period("202409", "800")), oldSyncedAt);
+
+        CountDownLatch annualRead = new CountDownLatch(1);
+        CountDownLatch releaseReader = new CountDownLatch(1);
+        AtomicBoolean blocked = new AtomicBoolean();
+        doAnswer(invocation -> {
+            List<StockFinancialPeriod> result = periodRepository.findAll().stream()
+                    .filter(period -> period.getStockId().equals(stock.getStockId()))
+                    .filter(period -> period.getPeriodType() == FinancialPeriodType.ANNUAL)
+                    .toList();
+            if (blocked.compareAndSet(false, true)) {
+                annualRead.countDown();
+                if (!releaseReader.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("timed out waiting to release snapshot reader");
+                }
+            }
+            return result;
+        }).when(periodRepository).findByStockIdAndPeriodTypeOrderByStatementYearMonthDesc(
+                stock.getStockId(), FinancialPeriodType.ANNUAL);
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var responseFuture = executor.submit(() -> queryService.getFinancials(stock.getSymbol(), "KR"));
+            if (!annualRead.await(5, TimeUnit.SECONDS)) {
+                responseFuture.get(1, TimeUnit.SECONDS);
+                throw new AssertionError("financial response completed before the annual snapshot read was observed");
+            }
+
+            persistenceService.saveFinancials(stock.getStockId(), FinancialPeriodType.ANNUAL,
+                    List.of(period("202412", "2000")), newSyncedAt);
+            releaseReader.countDown();
+
+            StockFinancialResponse response = responseFuture.get(5, TimeUnit.SECONDS);
+            assertThat(response.annual().getFirst().incomeStatement().sales()).isEqualTo("1000");
+            assertThat(response.syncedAt().annual().toInstant()).isEqualTo(oldSyncedAt);
+        } finally {
+            releaseReader.countDown();
+        }
+
+        assertThat(syncRepository.findById(stock.getStockId()).orElseThrow()
+                .getAnnualSyncedAt().toInstant()).isEqualTo(newSyncedAt);
     }
 
     private static IndustryData industry(String code) {
