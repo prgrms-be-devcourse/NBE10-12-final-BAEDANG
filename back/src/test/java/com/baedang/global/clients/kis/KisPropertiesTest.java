@@ -15,6 +15,7 @@ import org.springframework.web.client.RestClient;
 
 import com.baedang.global.config.TimeConfig;
 import com.baedang.stock.client.kis.KisStockFinancialInfoAdapter;
+import com.baedang.stock.scheduler.StockFinancialCollectionScheduler;
 
 class KisPropertiesTest {
 
@@ -50,7 +51,8 @@ class KisPropertiesTest {
                 .withUserConfiguration(
                         TimeConfig.class,
                         KisClientConfiguration.class,
-                        KisStockFinancialInfoAdapter.class)
+                        KisStockFinancialInfoAdapter.class,
+                        StockFinancialCollectionScheduler.class)
                 .withPropertyValues(VALID_DEFAULTS)
                 .run(context -> {
                     assertThat(context).hasSingleBean(KisProperties.class);
@@ -59,9 +61,9 @@ class KisPropertiesTest {
                     assertThat(context).doesNotHaveBean(KisTokenProvider.class);
                     assertThat(context).doesNotHaveBean(KisSecuritiesClient.class);
                     assertThat(context).doesNotHaveBean(KisStockFinancialInfoAdapter.class);
+                    assertThat(context).doesNotHaveBean(StockFinancialCollectionScheduler.class);
                 });
     }
-
     @Test
     void documented_defaults_bind_as_expected() {
         withDefaults().run(context -> {

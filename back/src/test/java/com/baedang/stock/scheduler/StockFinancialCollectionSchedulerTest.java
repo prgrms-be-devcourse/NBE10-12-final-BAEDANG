@@ -14,6 +14,7 @@ import java.time.ZonedDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
@@ -60,5 +61,23 @@ class StockFinancialCollectionSchedulerTest {
                 .when(syncService).refreshRankedTargets(SyncTrigger.SCHEDULED);
 
         assertThatCode(scheduler::scheduleWeeklyRefresh).doesNotThrowAnyException();
+    }
+
+    @Test
+    void disabled_kis_does_not_register_scheduler_bean() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(StockFinancialCollectionScheduler.class)
+                .withBean(StockFinancialSyncService.class, () -> syncService)
+                .withPropertyValues("kis.enabled=false")
+                .run(context -> assertThat(context).doesNotHaveBean(StockFinancialCollectionScheduler.class));
+    }
+
+    @Test
+    void enabled_kis_registers_scheduler_bean() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(StockFinancialCollectionScheduler.class)
+                .withBean(StockFinancialSyncService.class, () -> syncService)
+                .withPropertyValues("kis.enabled=true")
+                .run(context -> assertThat(context).hasSingleBean(StockFinancialCollectionScheduler.class));
     }
 }
