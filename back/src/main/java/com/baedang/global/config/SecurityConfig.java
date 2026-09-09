@@ -54,6 +54,7 @@ public class SecurityConfig {
                                 "/api/orders/**",
                                 "/api/accounts/**",
                                 "/api/users/**",
+                                "/api/reports/**",
                                 "/api/auth/logout").authenticated().anyRequest().permitAll()
                 ).addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
