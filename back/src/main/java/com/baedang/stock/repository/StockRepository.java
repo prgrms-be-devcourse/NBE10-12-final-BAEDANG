@@ -11,11 +11,30 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.math.BigDecimal;
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface StockRepository extends JpaRepository<Stock, Long> {
+
+    /** 랭킹 또는 모든 사용자 중 활성 지정가 주문이 있는 종목만 매 페이지 재확인합니다. */
+    @Query("""
+            select s from Stock s
+            where s.marketCountry = :country and s.stockId > :after
+              and s.listingStatus = com.baedang.stock.entity.ListingStatus.ACTIVE
+              and (s.isRanked = true or exists (
+                select o.orderId from TradeOrder o
+                where o.stockId = s.stockId
+                  and o.orderType = com.baedang.trading.entity.OrderType.LIMIT
+                  and o.status in (com.baedang.trading.entity.OrderStatus.PENDING,
+                                   com.baedang.trading.entity.OrderStatus.PARTIALLY_FILLED)
+                  and o.expiresAt > :now and o.quantity > o.filledQuantity))
+            order by s.stockId
+            """)
+    List<Stock> findQuoteTargets(@Param("country") MarketCountry country,
+            @Param("after") Long after,
+            @Param("now") OffsetDateTime now, Pageable page);
 
     Optional<Stock> findBySymbolIgnoreCaseAndMarketCountry(String symbol, MarketCountry marketCountry);
 

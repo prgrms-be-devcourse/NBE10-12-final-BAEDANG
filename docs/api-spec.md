@@ -426,7 +426,7 @@ Partial match on Korean name · English name · ticker
 }
 ```
 **Search scope is confirmed: all stocks (~8,500).** The entire `stock` table is in scope regardless of top-100 status, and clicking a result opens the detail page normally — the only difference is realtime vs prior close.
-**Off-universe stocks have an empty `quote_snapshot`** — the scheduler only covers the top 100. On entering the detail page, call `/prices` and `/candles` together, fill it, and UPSERT into `quote_snapshot`. Once queried, the stock comes from the DB thereafter. To show prices in the result list, fetch 20 rows in **one `/prices` batch call** (per-stock = 20 calls = rate limit). For week 1, showing the name first and filling the price after click is simpler.
+**Current-price collection covers ranked stocks and stocks with active limit orders only**, with a 5-second regular-session target. Other stocks use on-demand detail refresh with a 5-second collection cache. In-flight requests are shared; source quoteAt is never replaced by fetch time. Non-ranked trading remains a separate #141 integration.
 **Toss gives Korean names for US stocks, so "엔비디아" matches too.** English names are inconsistent (SamsungElec, HyundaiMtr, KIA CORP.) — strip whitespace + lowercase, then partial-match; a generated column for the search key is convenient.
 **Week-1 implementation is `LIKE '%q%'`** — at 8,500 rows a full scan is milliseconds. But leading/trailing `%` skips indexes; when data grows, switch to **`pg_trgm` + GIN index** — same query, just add the index.
 **Sort order: exact match → prefix match → partial match.** Typing "삼성" must put 삼성전자 above 미래에셋삼성...
@@ -511,21 +511,19 @@ Daily & minute chart
 |---|---|---|
 | `marketCountry` | O | symbol market — `KR` · `US` |
 | `interval` | O | time unit per candle — `1m` · `5m` · `10m` · `1d` · `1w` |
-| `range` | O | period — `1D` · `1W` · `1M` · `6M` · `1Y` |
+| `range` | O | period — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
 
 **Valid combinations — anything else rejected with 400**
 
 | interval | allowed ranges | # candles | data source |
 |---|---|---|---|
 | `1m` | `1D` | latest 200 | top 100: 1-minute scheduler · other stocks: on-demand Toss `/candles?interval=1m` |
-| `5m` | `1D` · `1W` | 78 / 390 | `candle_5m` (continuous aggregate of 1-min) |
-| `10m` | `1W` | 195 | `candle_10m` (continuous aggregate of 1-min) |
+| `5m` | `1D` · `1W` | 78 / 390 | aggregate 1-min |
+| `10m` | `1W` | 195 | aggregate 1-min |
 | `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
-| `1w` | `6M` · `1Y` | 26 / 52 | `candle_1w` (continuous aggregate of daily) |
+| `1w` | `3Y` | 156 | aggregate daily |
 
-**Toss provides only `1m` and `1d`** — 5m·10m·1w are built by us, not in Java but by TimescaleDB continuous aggregates. **Must block combos like `1m` + `1Y`** — a year of 1-min candles is 120k rows.
-
-**Short data returns whatever exists.** Combinations whose source is thin (`5m+1W` needs 1,950 minute candles) return a shorter chart until it fills; minute backfill is capped at Toss's 200 per call.
+**Toss provides only `1m` and `1d`** — 5m·10m·1w must be aggregated by us (group 1-min candles in fives → 40 five-min candles). **Must block combos like `1m` + `1Y`** — a year of 1-min candles is 120k rows.
 
 **Response**
 ```json
@@ -555,7 +553,7 @@ For financial-data integrity, the MVP daily chart returns only finalized rows st
 | `INVALID_INTERVAL_RANGE` | disallowed interval × range combination |
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
 
-**Supported combinations are `1m+1D`, `5m+1D/1W`, `10m+1W`, `1d+1M/6M/1Y` and `1w+6M/1Y`.** All others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close); 5m·10m·1w come from continuous aggregate views. For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 20 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching.
+**MVP scope is `1d` and `1m` only.** Supported combinations are `1m+1D` and `1d+1M/6M/1Y`; all others return `INVALID_INTERVAL_RANGE`. Daily comes from `daily_candle` (scheduler stores it after close). For the ranked top 100, minute candles are collected once per minute through sequential 20-stock groups within the `MARKET_DATA_CHART` 20 TPS group. Off-universe and off-hours detail charts use on-demand `minute_candle` caching. 5m·10m·1w aggregation moves to week 2.
 
 **Minute candles: scheduled for the ranked universe + on-demand cache elsewhere**
 ```
@@ -569,7 +567,7 @@ is there data within 60s in minute_candle?
              return from the DB
 ```
 **Off-hours or foreign-market stocks behave the same.** Calling `/candles` on a closed market returns the last session's candles as-is — opening NVDA in the Korean daytime shows the prior close + the last US session's minute chart. The frontend just flips the "실시간/종가" label from `realtime`; the chart itself needs no branching. An empty chart reads as "broken screen" — **always separate "not tradable" from "not viewable"**.
-The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 20 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination.
+The ranked-universe collector runs once per minute, sequentially in 20-stock groups under the separate 20 TPS chart limit. Off-universe detail requests remain on-demand and reuse a 60-second cache, so stocks nobody watches are not collected continuously. Week 2 adds limit-order fill determination and 5m/10m aggregation.
 **200 candles per call.** KR regular session 09:00~15:30 = 330 minutes, so a full day needs `before` × 2. With the week-1 chart as "last 200 minutes", 1 call suffices — keep 1 call as the default and use 2 only when "view all" is pressed.
 **Needs measurement** — whether `before` is inclusive, and whether the closing-auction (15:30) candle exists. Without a 15:30 candle it's 329, not 330. Overlapping boundary candles are filtered by `ON CONFLICT DO NOTHING` on `(stock_id, candle_at)`.
 
@@ -769,7 +767,7 @@ Market orders never write `PENDING` and never modify `locked_cash` or `locked_qu
 
 The market-order use case is a top-level transaction boundary. It must not be invoked inside another transaction; the application entry point enforces this with `Propagation.NEVER`, while the DB mutation service starts its own `REQUIRED` transaction. This keeps a committed `REJECTED` record from being rolled back by an unrelated outer workflow.
 
-**Tradable universe** — the MVP trades only the top 100 stocks per market whose quotes are collected on schedule, so the `is_ranked` guard remains active. When on-demand quotes are introduced, a quote or order for a stock outside the top 100 will first fetch current price and tradability data from Toss and cache it. At that point `is_ranked` becomes only the scheduled-collection flag and the order policy must change with it. Until that infrastructure exists, orders outside the top 100 stay blocked.
+**Tradable universe** — #140 collects ranked stocks and active-limit-order stocks, with on-demand reads for others. Existing `is_ranked` trading checks and response contracts remain; #141 separately connects non-ranked market/limit/quote eligibility and tradability validation.
 
 One order may contain at most **1,000,000 shares**, configured by `trading.max-order-quantity`; scientific notation is not accepted.
 
@@ -962,18 +960,18 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 | Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call                                   |
 | Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open                                                  |
 | 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together                                                |
-| 09:00 ~ 15:30 | 5s | KR top-100 current price — `/prices` 1 batch call (1.3% of limit)                                           |
+| KR regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, up to 200 per request. |
 | 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group     |
 | 15:40 ~ 17:10 | 30m | KR daily-candle retries — after calendar close + 10m, excluding stocks already stored for the date          |
 | 09:00 ET * | daily | US `prev_close` refresh — 30 min before regular open (22:00 KST during DST, 23:00 KST during standard time) |
-| 22:30 ~ 05:00 * | 5s | US top-100 current price — 1 batch call. 23:30 ~ 06:00 in winter                                            |
+| US regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, calendar-based session times. |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group      |
 | US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks       |
 | every hour on the hour | hourly | FX storage — 24 calls/day                                                                                   |
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
 \* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.
-**Not in the scheduler** — off-universe quotes and off-hours minute charts are filled on-demand when the user opens a detail page. Top-100 minute-candle collection is part of the MVP scheduler; week 2 adds limit-order fill determination.
+**On-demand supplementation** — stocks outside scheduled collection refresh through the shared coordinator on detail entry, reusing a 5-second collection cache. Daily backfill and minute-candle policies remain unchanged.
 
 ### Client polling policy
 

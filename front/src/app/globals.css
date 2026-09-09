@@ -385,3 +385,29 @@ body {
     transform: translate(0, 0) scale(1);
   }
 }
+
+/* 금융 용어 위키 — 검색 전 유휴 상태에서 용어 알약들이 좌로 흐르는 마퀴.
+   한 줄 안에 같은 목록을 네 번 이어 붙여(각 25%) -25% 만큼 밀면 이음매 없이
+   무한 반복된다. 마우스를 올리면 멈춰서 클릭하기 쉽게 한다. */
+@keyframes wikiMarquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-25%);
+  }
+}
+.wiki-marquee-row {
+  display: flex;
+  width: max-content;
+  gap: 12px;
+  animation: wikiMarquee linear infinite;
+}
+.wiki-marquee-row:hover {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wiki-marquee-row {
+    animation: none;
+  }
+}
