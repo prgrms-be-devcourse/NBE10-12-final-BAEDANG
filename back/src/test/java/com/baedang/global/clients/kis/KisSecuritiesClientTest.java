@@ -210,6 +210,48 @@ class KisSecuritiesClientTest {
     }
 
     @Test
+    void token_expiry_message_refreshes_token_and_retries_once() {
+        stubTokenSequence(86_400L, null);
+        stubFor(get(urlPathEqualTo(PATH))
+                .inScenario("body-token-expiry")
+                .whenScenarioStateIs(STARTED)
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00123\",\"msg1\":\"expired\"}"))
+                .willSetStateTo("refreshed"));
+        stubFor(get(urlPathEqualTo(PATH))
+                .inScenario("body-token-expiry")
+                .whenScenarioStateIs("refreshed")
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"rt_cd\":\"0\",\"msg_cd\":\"\",\"msg1\":\"OK\"}")));
+
+        JsonNode response = client.get(PATH, Map.of(), JsonNode.class);
+
+        assertThat(response.path("rt_cd").asText()).isEqualTo("0");
+        verify(1, getRequestedFor(urlPathEqualTo(PATH))
+                .withHeader("authorization", equalTo("Bearer token-1")));
+        verify(1, getRequestedFor(urlPathEqualTo(PATH))
+                .withHeader("authorization", equalTo("Bearer token-2")));
+        verify(2, postRequestedFor(urlEqualTo(TOKEN_PATH)));
+    }
+
+    @Test
+    void second_token_expiry_message_is_not_retried_again() {
+        stubTokenSequence(86_400L, null);
+        stubFor(get(urlPathEqualTo(PATH)).willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"rt_cd\":\"1\",\"msg_cd\":\"EGW00123\",\"msg1\":\"expired\"}")));
+
+        assertThatThrownBy(() -> client.get(PATH, Map.of(), JsonNode.class))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.KIS_API_ERROR);
+                    assertThat(exception.getDetail()).contains("msgCd=EGW00123");
+                });
+        verify(2, getRequestedFor(urlPathEqualTo(PATH)));
+        verify(2, postRequestedFor(urlEqualTo(TOKEN_PATH)));
+    }
+
+    @Test
     void rate_limit_message_is_retried_once_after_injected_sleep() {
         stubToken("token-1");
         stubFor(get(urlPathEqualTo(PATH))

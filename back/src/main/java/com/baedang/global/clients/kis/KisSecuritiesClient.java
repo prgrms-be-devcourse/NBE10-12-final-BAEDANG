@@ -77,7 +77,15 @@ public class KisSecuritiesClient {
         while (true) {
             try {
                 JsonNode body = request(endpoint, queryParams, requestToken);
-                validate(endpoint, body);
+                if (validate(endpoint, body)) {
+                    record(endpoint, RequestResult.ERROR);
+                    if (authenticationRetried) {
+                        throw failure(ErrorCode.KIS_API_ERROR, endpoint, "EGW00123");
+                    }
+                    authenticationRetried = true;
+                    requestToken = tokenProvider.refreshIfStillStale(requestToken);
+                    continue;
+                }
                 T response = objectMapper.treeToValue(body, responseType);
                 record(endpoint, RequestResult.SUCCESS);
                 return response;
@@ -136,17 +144,21 @@ public class KisSecuritiesClient {
                 .body(JsonNode.class);
     }
 
-    private void validate(KisWhitelist endpoint, JsonNode body) throws JsonProcessingException {
+    private boolean validate(KisWhitelist endpoint, JsonNode body) throws JsonProcessingException {
         if (body == null) {
             throw failure(ErrorCode.KIS_API_ERROR, endpoint, "EMPTY_RESPONSE");
         }
         KisApiResponse response = objectMapper.treeToValue(body, KisApiResponse.class);
+        if ("EGW00123".equals(response.msgCd())) {
+            return true;
+        }
         if ("EGW00201".equals(response.msgCd())) {
             throw failure(ErrorCode.KIS_RATE_LIMITED, endpoint, response.msgCd());
         }
         if (!"0".equals(response.rtCd())) {
             throw failure(ErrorCode.KIS_API_ERROR, endpoint, response.msgCd());
         }
+        return false;
     }
 
     private static BusinessException failure(
