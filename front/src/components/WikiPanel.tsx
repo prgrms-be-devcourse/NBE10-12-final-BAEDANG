@@ -167,6 +167,15 @@ export function WikiPanel() {
   const query = q.trim().toLowerCase();
   const found = useMemo(() => {
     if (!query) return [];
+    // 쿼리가 자음 자모(ㄱ~ㅎ)로만 이뤄졌으면 초성 검색. 사용자가 자판으로 친 홑자음은
+    // 생성기가 미리 계산해 둔 chosung 과 같은 호환 자모라 변환 없이 바로 대조한다.
+    const isChosung = /^[ㄱ-ㅎ]+$/.test(query.replace(/\s/g, ""));
+    if (isChosung) {
+      const cq = query.replace(/\s/g, "");
+      return WIKI_TERMS.filter(
+        (t) => t.chosung.includes(cq) || t.aliasChosungs.some((c) => c.includes(cq))
+      ).slice(0, 40);
+    }
     return WIKI_TERMS.filter(
       (t) =>
         t.name.toLowerCase().includes(query) ||
@@ -208,7 +217,7 @@ export function WikiPanel() {
             type="text"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="용어 또는 별칭으로 검색"
+            placeholder="용어·별칭·초성(ㅅㄱ)으로 검색"
             className="w-full rounded-[12px] border-0 py-2.5 pl-[42px] pr-4 text-[15px] outline-none"
             style={{ background: "var(--card)", color: "var(--ink)" }}
           />

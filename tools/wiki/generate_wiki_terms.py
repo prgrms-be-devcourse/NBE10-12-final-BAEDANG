@@ -27,6 +27,24 @@ SRC = os.path.join(HERE, "..", "terms.md")  # 리포 루트 tools/terms.md (생�
 DEFAULT_OUT = os.path.join(REPO_ROOT, "front", "src", "data", "wikiTerms.ts")
 
 
+CHO = list("ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ")  # 19 현대 초성(호환 자모)
+
+
+def chosung(s):
+    """문자열의 초성 키. 한글 음절 → 초성 자모(호환 자모), 공백 제거, 그 외는 소문자 보존.
+    사용자가 자판으로 친 홑자음(ㅅ 등)이 이 호환 자모와 같은 코드포인트라 그대로 매칭된다."""
+    out = []
+    for ch in s:
+        if ch.isspace():
+            continue
+        code = ord(ch)
+        if 0xAC00 <= code <= 0xD7A3:
+            out.append(CHO[(code - 0xAC00) // 588])  # 588 = 중성21 × 종성28
+        else:
+            out.append(ch.lower())
+    return "".join(out)
+
+
 def alias_split(rest):
     return [a.strip() for a in rest.split(",") if a.strip()]
 
@@ -77,6 +95,9 @@ def parse(path):
             "summary": " ".join(summary_parts).strip(),
             "aliases": aliases,
             "body": "\n".join(raw[i:]).strip(),
+            # 초성 검색용 미리 계산 키. 이름/별칭 각각의 초성을 담아 둔다.
+            "chosung": chosung(b["name"]),
+            "aliasChosungs": [chosung(a) for a in aliases],
         })
     return parsed
 
@@ -93,6 +114,9 @@ export type WikiTerm = {
   aliases: string[];
   summary: string;
   body: string;
+  /** 초성 검색용 미리 계산 키(예: "시가총액" → "ㅅㄱㅊㅇ"). aliasChosungs 는 aliases 와 순서 대응. */
+  chosung: string;
+  aliasChosungs: string[];
 };
 
 export const WIKI_TERMS: WikiTerm[] =
