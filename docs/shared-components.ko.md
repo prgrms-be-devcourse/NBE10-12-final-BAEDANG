@@ -312,3 +312,17 @@ API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 �
 - OrderReadService: 읽기 전용 소유권 검증, 현재 회차 주문 커서·주문별 체결 커서. 체결 직후 잔액은 연결 원장에서 조회합니다.
 - LimitOrderExpirationService: NEVER 스캔, 외부 시장 호출 없음. 주문별 종료 트랜잭션에 2초 잠금 대기 제한을 적용하고 실패 건은 다음 스캔에서 재시도합니다. LimitOrderExpirationScheduler가 전용 단일 스레드 limitOrderTaskScheduler에서 시작 시 비동기 복구 및 완료 후 30초 간격 실행을 담당합니다.
 - Account.reserveCash/releaseCash, Holding.reserveQuantity/releaseQuantity: 동결 상태만 변경. 호출부는 계좌 잠금 및 필요한 보유 잠금을 획득해야 합니다. 보유 메서드는 명시적 UTC 변경 시각을 받습니다.
+
+## 현재가 수집 확대 (#140)
+
+QuoteSnapshotLoadService는 정규장 중 ACTIVE 종목 가운데 랭킹 또는 미만료 LIMIT 주문(PENDING/PARTIALLY_FILLED, quantity > filledQuantity)이 있는 종목만 stockId keyset 200개 페이지로 5초 목표 순회합니다. 별도 플래그 없이 모든 사용자의 주문 존재 여부로 판단합니다. 마지막 활성 주문이 종료된 비랭킹 종목은 다음 대상 조회부터 제외하며 이미 제출된 요청 1회는 완료될 수 있습니다. 랭킹 종목은 유지합니다. 전체 종목 순회는 하지 않으며 거래 허용 범위와 캔들/백필은 별도입니다.
+
+QuoteRefreshCoordinator는 정기·온디맨드 현재가 조회의 진행 중 종목을 병합합니다. 배경 작업은 3개 스레드, 실행기 대기열 없음, 초당 8회 제출 예산을 사용하며 사용자 호출용 별도 1개 슬롯을 둡니다. 최종 MARKET_DATA 합산 15 TPS는 기존 Toss 클라이언트가 재시도·다른 호출까지 포함해 제한합니다. 진행/대기 종목 맵은 기본 1,000개로 제한하고 완료/실패 시 제거합니다. 배경 제출이 거절되면 페이지 커서를 유지합니다. 전용 스케줄러 기본 fixedDelay는 25ms이며 실제 순환 시간에는 작업·용량 대기도 포함됩니다.
+
+거래용 조회는 QuoteRefreshCoordinator를 주입하여 **트랜잭션 밖에서** requireFresh(stock, maxAge)를 호출합니다. 원본 quoteAt이 신선하면 재사용하고 아니면 갱신 후 누락/미래/오래된 시세를 거절합니다. 주문·캔들·세션·환율·거래 상태 조회는 하지 않습니다. 주문 연결과 다른 계약 검증은 #141 범위입니다. refresh(stock)는 화면용 갱신으로 실패 시 기존값 표시 여부는 호출자가 결정합니다. 일봉 백필 정책은 그대로입니다.
+
+QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미래 시각을 검증하고 원자적 JDBC UPSERT를 수행합니다. 오래된 quoteAt 및 같은 quoteAt의 오래된 수집 응답은 최신 값을 덮지 않습니다. 현재가 갱신은 prev_close와 상하한가를 보존하고 updatePrevClose는 해당 컬럼만 변경합니다. 신규 테이블/migration은 없습니다.
+
+설정: trading.quote-collection.refresh-interval=5s, dispatch-interval=25ms, background-concurrency=3, background-requests-per-second=8, max-in-flight-stocks=1000, request-timeout=20s. ExternalHttpConfig는 자동 구성 RestClient 빌더에 toss.connect-timeout=2s/read-timeout=5s를 적용해 무응답 I/O가 슬롯을 영구 점유하지 않게 합니다. coordinator 대기 timeout은 전체 큐/HTTP 작업을 합친 총 응답시간 보장이 아닙니다.
+
+지표: quote.collection.batch, quote.collection.sweep.submission(HTTP 완료가 아닌 제출 순회 시간), quote.collection.source.age(실제 응답에서 관측한 시세 나이), quote.collection.inflight, quote.collection.requested, quote.collection.updated, quote.collection.failures. 그룹 전체 사용량은 기존 toss.ratelimiter 지표를 사용합니다. 조회에 성공해도 시세의 원본 시각은 그대로입니다. /prices는 symbol/timestamp/lastPrice/currency만 제공하며 Stock의 거래정지·정리매매 플래그를 갱신하지 않습니다. 상태 정보는 별도 종목 메타데이터이며 #141에서 별도로 검증해야 합니다.
