@@ -18,6 +18,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -55,13 +56,40 @@ public class StockSearchServiceTest {
     }
 
     @Test
-    @DisplayName("검색어가 2자 미만이면 예외 발생")
+    @DisplayName("1자 검색어도 조회한다 (#148)")
     void t2(){
         StockSearchService service = new StockSearchService(stockRepository);
-        assertThatThrownBy(() -> service.search("삼",10))
+
+        when(stockRepository.searchByJamo("삼")).thenReturn(List.of());
+
+        assertThat(service.search("삼",10).items()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("정규화 후 빈 검색어면 예외 발생")
+    void t2_1(){
+        StockSearchService service = new StockSearchService(stockRepository);
+
+        assertThatThrownBy(() -> service.search(" %_ ",10))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e->((BusinessException)e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_QUERY);
+    }
+
+    /**
+     * 빈 결과만 보면 DB 가 0건을 준 건지 앞에서 걸러낸 건지 구분되지 않으므로,
+     * 조회 자체가 일어나지 않았음을 확인합니다.
+     */
+    @Test
+    @DisplayName("음절 경계를 깨는 자모는 조회하지 않고 0건 응답")
+    void t2_2(){
+        StockSearchService service = new StockSearchService(stockRepository);
+
+        assertThat(service.search("ㅊ김",10).items()).isEmpty();
+        assertThat(service.search("김ㅏ",10).items()).isEmpty();
+        assertThat(service.search("ㅏ",10).items()).isEmpty();
+
+        verifyNoInteractions(stockRepository);
     }
 
     @Test

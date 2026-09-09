@@ -110,16 +110,16 @@ public class StockControllerTest {
     @Test
     @DisplayName("검색어가 잘못되면 400 응답 반환")
     void t3() throws Exception {
-        when(stockSearchService.search("삼", 10))
+        when(stockSearchService.search("%", 10))
                 .thenThrow(new BusinessException(ErrorCode.INVALID_QUERY));
 
         mockMvc.perform(
                         get("/api/stocks/search")
-                                .param("q", "삼")
+                                .param("q", "%")
                                 .param("size", "10")
                 ).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_QUERY"))
-                .andExpect(jsonPath("$.message").value("검색어는 2자 이상 입력해주세요"));
+                .andExpect(jsonPath("$.message").value("검색어를 1자 이상 입력해주세요"));
     }
 
     @Test
