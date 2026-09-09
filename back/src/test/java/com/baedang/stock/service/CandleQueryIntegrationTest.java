@@ -13,6 +13,7 @@ import com.baedang.market.service.LatestCompletedTradingDayResolver;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -70,6 +71,16 @@ class CandleQueryIntegrationTest {
     @Autowired CandleAggregateRepository candleAggregateRepository;
     @Autowired MinuteCandleRepository minuteCandleRepository;
     @Autowired JdbcClient jdbcClient;
+
+    @BeforeAll
+    static void disableAutomaticPolicies(@Autowired JdbcClient jdbcClient) {
+        // 테스트는 백그라운드 자동 집계가 필요 없고, 테스트 코드가 직접 refreshAggregate()로
+        // 수동 집계하여 검증한다. 테스트 실행 중 백그라운드 스케줄러와의 경합을 원천 차단하기 위해
+        // 마이그레이션이 등록한 자동 갱신 정책을 테스트 시작 시 모두 제거한다.
+        jdbcClient.sql("SELECT remove_continuous_aggregate_policy('candle_5m', if_exists => true)").query().listOfRows();
+        jdbcClient.sql("SELECT remove_continuous_aggregate_policy('candle_10m', if_exists => true)").query().listOfRows();
+        jdbcClient.sql("SELECT remove_continuous_aggregate_policy('candle_1w', if_exists => true)").query().listOfRows();
+    }
 
     @Test
     void 일봉은_최신_N개를_시간순으로_반환한다() {
