@@ -39,6 +39,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import com.baedang.global.clients.kis.KisProperties;
@@ -442,7 +443,7 @@ class StockFinancialSyncServiceTest {
         lenient().when(third.getMarketCountry()).thenReturn(MarketCountry.KR);
         lenient().when(third.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
 
-        when(stockRepository.findKisFinancialCollectionTargets())
+        when(stockRepository.findKisFinancialCollectionTargets(PageRequest.of(0, 100)))
                 .thenReturn(List.of(first, second, third));
 
         when(syncRepository.findById(101L)).thenReturn(Optional.of(sync(NOW, NOW, NOW)));
@@ -486,7 +487,7 @@ class StockFinancialSyncServiceTest {
         lenient().when(successful.getMarketCountry()).thenReturn(MarketCountry.KR);
         lenient().when(successful.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
 
-        when(stockRepository.findKisFinancialCollectionTargets())
+        when(stockRepository.findKisFinancialCollectionTargets(PageRequest.of(0, 100)))
                 .thenReturn(List.of(failing, successful));
 
         when(syncRepository.findById(201L)).thenThrow(new IllegalStateException("db connectivity issue"));

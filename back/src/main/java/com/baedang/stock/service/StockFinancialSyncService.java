@@ -13,6 +13,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import com.baedang.global.clients.kis.KisProperties;
@@ -36,6 +37,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 public class StockFinancialSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(StockFinancialSyncService.class);
+    private static final PageRequest KIS_FINANCIAL_COLLECTION_PAGE = PageRequest.of(0, 100);
 
     private final StockRepository stockRepository;
     private final Optional<StockFinancialInfoPort> port;
@@ -81,7 +83,7 @@ public class StockFinancialSyncService {
     public BatchSummary refreshRankedTargets(SyncTrigger trigger) {
         Objects.requireNonNull(trigger, "trigger");
         long startedNanos = System.nanoTime();
-        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets();
+        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets(KIS_FINANCIAL_COLLECTION_PAGE);
         int total = targets.size();
         int success = 0;
         int empty = 0;

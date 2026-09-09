@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
@@ -250,11 +252,11 @@ class StockFinancialPersistenceIntegrationTest {
     void findKisFinancialCollectionTargets_returns_only_ranked_KR_non_etf_etn_stocks() {
         Stock krRanked1 = stockRepository.save(Stock.create(
                 "005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true));
-        krRanked1.applyRanking(1, new BigDecimal("1000000"));
+        krRanked1.applyRanking(2, new BigDecimal("1000000"));
 
         Stock krRanked2 = stockRepository.save(Stock.create(
                 "000660", MarketCountry.KR, "KOSPI", "SK하이닉스", null, "KRW", "STOCK", true));
-        krRanked2.applyRanking(2, new BigDecimal("900000"));
+        krRanked2.applyRanking(1, new BigDecimal("900000"));
 
         Stock krUnranked = stockRepository.save(Stock.create(
                 "035420", MarketCountry.KR, "KOSPI", "NAVER", null, "KRW", "STOCK", true));
@@ -271,12 +273,31 @@ class StockFinancialPersistenceIntegrationTest {
                 "AAPL", MarketCountry.US, "NASDAQ", "Apple", null, "USD", "STOCK", true));
         usRanked.applyRanking(1, new BigDecimal("5000000"));
 
-        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets();
+        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets(PageRequest.of(0, 100));
 
         assertThat(targets)
                 .extracting(Stock::getSymbol)
-                .contains(krRanked1.getSymbol(), krRanked2.getSymbol())
+                .containsExactly(krRanked2.getSymbol(), krRanked1.getSymbol())
                 .doesNotContain(krUnranked.getSymbol(), krEtf.getSymbol(), krEtn.getSymbol(), usRanked.getSymbol());
+    }
+
+    @Test
+    void findKisFinancialCollectionTargets_limits_each_batch_to_top_100_ranks() {
+        List<Stock> ranked = new ArrayList<>();
+        for (int rank = 1; rank <= 101; rank++) {
+            Stock stock = Stock.create(
+                    String.valueOf(100000 + rank), MarketCountry.KR, "KOSPI", "종목 " + rank,
+                    null, "KRW", "STOCK", true);
+            stock.applyRanking(rank, BigDecimal.valueOf(1_000_000L - rank));
+            ranked.add(stock);
+        }
+        stockRepository.saveAll(ranked);
+
+        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets(PageRequest.of(0, 100));
+
+        assertThat(targets).hasSize(100);
+        assertThat(targets.getFirst().getRankNo()).isEqualTo(1);
+        assertThat(targets.getLast().getRankNo()).isEqualTo(100);
     }
 
     private static IndustryData industry(String code) {
