@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import {
   ApiError,
   cancelOrder,
+  getOrderDetail,
   getOrderExecutions,
   type ExecutionResponse,
   type OrderDetailResponse,
@@ -122,7 +123,20 @@ export function OrderDetailModal({
       const updated = await cancelOrder(order.orderId);
       onUpdated(updated);
     } catch (err) {
-      setCancelError(err instanceof ApiError ? err.message : "주문 취소에 실패했어요.");
+      if (err instanceof ApiError && err.code === "ORDER_STATE_CONFLICT") {
+        // 취소를 누르는 사이에 이미 체결되었거나(FILLED) 만료된(EXPIRED) 경합 상황이다 —
+        // 이 화면이 들고 있던 PENDING/부분체결 정보가 낡았다는 뜻이니, 서버가 준 최신
+        // 상태로 목록·모달을 다시 맞춘다. 재조회 자체가 실패하면 원래 에러만 보여준다.
+        try {
+          const fresh = await getOrderDetail(order.orderId);
+          onUpdated(fresh);
+          setCancelError("그 사이 주문 상태가 바뀌었어요(이미 체결되었거나 만료됨). 최신 상태로 갱신했어요.");
+        } catch {
+          setCancelError(err.message);
+        }
+      } else {
+        setCancelError(err instanceof ApiError ? err.message : "주문 취소에 실패했어요.");
+      }
     } finally {
       setCanceling(false);
     }
@@ -158,6 +172,7 @@ export function OrderDetailModal({
 
         <div className="mb-4 rounded-xl p-4 text-[13.5px]" style={{ background: "var(--fill)" }}>
           <Row label="수량" value={`${formatNumber(order.filledQuantity)} / ${formatNumber(order.quantity)}주`} />
+          {cancelable && <Row label="미체결 수량" value={`${formatNumber(order.activeRemainingQuantity)}주`} />}
           {order.orderType === "LIMIT" && (
             <Row
               label="지정가"
@@ -217,23 +232,24 @@ export function OrderDetailModal({
           </button>
         )}
 
+        {/* 취소 경합(409) 안내는 취소 버튼과 함께 사라지면 안 된다 — 재조회로 order.status가
+            바뀌어 cancelable이 false가 된 뒤에도(예: 그 사이 FILLED로 확정) 왜 취소 버튼이
+            없어졌는지 사용자가 알 수 있어야 한다. */}
+        {cancelError && (
+          <p className="mb-2 text-[12.5px]" style={{ color: "var(--dangerText)" }}>
+            {cancelError}
+          </p>
+        )}
         {cancelable && (
-          <>
-            {cancelError && (
-              <p className="mb-2 text-[12.5px]" style={{ color: "var(--dangerText)" }}>
-                {cancelError}
-              </p>
-            )}
-            <button
-              type="button"
-              onClick={handleCancel}
-              disabled={canceling}
-              className="w-full cursor-pointer rounded-xl py-3 text-[14px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerBg)", color: "var(--dangerText)" }}
-            >
-              {canceling ? "취소하는 중…" : "주문 취소"}
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={handleCancel}
+            disabled={canceling}
+            className="w-full cursor-pointer rounded-xl py-3 text-[14px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ background: "var(--dangerBg)", color: "var(--dangerText)" }}
+          >
+            {canceling ? "취소하는 중…" : "주문 취소"}
+          </button>
         )}
       </div>
     </div>

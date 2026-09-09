@@ -9,6 +9,8 @@ import {
   login,
   getAccountSummary,
   placeMarketOrder,
+  getLimitOrderQuote,
+  placeLimitOrder,
   getExchangeRateLatest,
   getExchangeRateHistory,
   getStockDetail,
@@ -205,6 +207,120 @@ describe('placeMarketOrder — 성공 (accountId 포함)', () => {
   });
 });
 
+describe('getLimitOrderQuote — 성공', () => {
+  it('200 → LimitOrderQuoteResponse 반환, /api/orders/quote/limit 로 쿼리스트링 전송', async () => {
+    const quoteData = {
+      requestedLimitPrice: '70000',
+      requestedLimitCurrency: 'KRW',
+      limitPrice: '70000',
+      acceptanceExchangeRate: '1',
+      acceptable: true,
+      reason: null,
+      availableCash: '48240000',
+      availableQuantity: '0',
+      expiresAt: '2026-08-28T06:30:00Z',
+      limitEstimate: { grossAmount: '700000', fee: '70', tax: '0', netAmount: '700070', reservedCash: '700070' },
+      executionPreview: { status: 'UNSUPPORTED' },
+    };
+    const fetchSpy = mockFetch(200, quoteData);
+    const response = await getLimitOrderQuote({
+      symbol: '005930',
+      marketCountry: 'KR',
+      side: 'BUY',
+      quantity: '10',
+      limitPrice: '70000',
+      limitCurrency: 'KRW',
+    });
+    expect(response).toEqual(quoteData);
+    const calledUrl = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain('/api/orders/quote/limit?');
+    expect(calledUrl).toContain('symbol=005930');
+    expect(calledUrl).toContain('limitPrice=70000');
+    expect(calledUrl).toContain('limitCurrency=KRW');
+  });
+});
+
+describe('placeLimitOrder — 성공/실패', () => {
+  it('201 → OrderDetailResponse(PENDING) 반환 및 /api/orders/limit 로 요청 본문 전송(orderType 없음)', async () => {
+    const orderData = {
+      orderId: 200,
+      accountId: 10,
+      stockId: 1,
+      symbol: '005930',
+      name: '삼성전자',
+      marketCountry: 'KR',
+      orderType: 'LIMIT',
+      side: 'BUY',
+      status: 'PENDING',
+      quantity: '10',
+      filledQuantity: '0',
+      activeRemainingQuantity: '10',
+      requestedLimitPrice: '70000',
+      requestedLimitCurrency: 'KRW',
+      limitPrice: '70000',
+      acceptanceExchangeRate: '1',
+      reservedCash: '700070',
+      grossAmount: '0',
+      fee: '0',
+      tax: '0',
+      netAmount: '0',
+      rejectReason: null,
+      orderedAt: '2026-08-28T00:00:01Z',
+      expiresAt: '2026-08-28T06:30:00Z',
+      closedAt: null,
+    };
+    const fetchSpy = mockFetch(201, orderData);
+    const response = await placeLimitOrder({
+      accountId: 10,
+      clientOrderId: 'uuid-5678',
+      symbol: '005930',
+      marketCountry: 'KR',
+      side: 'BUY',
+      quantity: '10',
+      limitPrice: '70000',
+      limitCurrency: 'KRW',
+    });
+    expect(response).toEqual(orderData);
+    const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
+    expect(calledUrl).toContain('/api/orders/limit');
+    const sentBody = JSON.parse((calledInit as RequestInit).body as string);
+    expect(sentBody).toEqual({
+      accountId: 10,
+      clientOrderId: 'uuid-5678',
+      symbol: '005930',
+      marketCountry: 'KR',
+      side: 'BUY',
+      quantity: '10',
+      limitPrice: '70000',
+      limitCurrency: 'KRW',
+    });
+    expect(sentBody.orderType).toBeUndefined(); // URL이 주문 유형을 정하므로 바디엔 없어야 한다.
+  });
+
+  it('DUPLICATE_ORDER(같은 clientOrderId 재사용) → retryPolicy로 재시도 여부를 판단할 수 있다', async () => {
+    // 지정가도 시장가와 같은 clientOrderId 멱등성 계약을 쓴다 — 실패 응답의
+    // data.retryPolicy를 그대로 노출해서, 호출부가 같은 ID로 재시도할지
+    // 새 ID를 발급할지 정할 수 있어야 한다.
+    mockFetch(409, {
+      code: 'DUPLICATE_ORDER',
+      message: '이미 처리된 주문이에요',
+      data: { retryPolicy: 'NOT_RETRYABLE' },
+    });
+    const err = await placeLimitOrder({
+      accountId: 10,
+      clientOrderId: 'uuid-5678',
+      symbol: '005930',
+      marketCountry: 'KR',
+      side: 'BUY',
+      quantity: '10',
+      limitPrice: '70000',
+      limitCurrency: 'KRW',
+    }).catch((e) => e);
+    expect(err.code).toBe('DUPLICATE_ORDER');
+    expect(err.retryPolicy).toBe('NOT_RETRYABLE');
+  });
+});
+
 describe('getStockDetail — 성공', () => {
   it('200 → StockDetail 반환, marketCountry 쿼리스트링 포함', async () => {
     const detailData = {
@@ -373,6 +489,20 @@ describe('postJson — HTTP 에러 응답', () => {
     mockFetch(401, { code: 'UNAUTHORIZED', message: '인증이 필요합니다.', data: { foo: 'bar' } });
     const err = await login({ email: 'x@x.com', password: 'pw' }).catch(e => e);
     expect(err.fieldErrors).toBeUndefined();
+  });
+
+  it('INVALID_INPUT — 주문 API 계약(data.field 단일 문자열)은 invalidField로 추출', async () => {
+    // 회원가입과 달리 주문 API의 INVALID_INPUT은 {필드명: 메시지} 맵이 아니라
+    // {field: "limitPrice"}처럼 문제 필드 이름 하나만 싣는다(LIMIT order lifecycle 문서).
+    mockFetch(400, { code: 'INVALID_INPUT', message: '입력값이 올바르지 않아요', data: { field: 'limitPrice' } });
+    const err = await login({ email: 'x@x.com', password: 'pw' }).catch(e => e);
+    expect(err.invalidField).toBe('limitPrice');
+  });
+
+  it('INVALID_INPUT이 아니면 invalidField도 undefined', async () => {
+    mockFetch(409, { code: 'ORDER_STATE_CONFLICT', message: '현재 주문 상태에서는 취소할 수 없어요', data: { field: 'limitPrice' } });
+    const err = await login({ email: 'x@x.com', password: 'pw' }).catch(e => e);
+    expect(err.invalidField).toBeUndefined();
   });
 
   it('JSON 응답 없음 → UNKNOWN_ERROR 폴백', async () => {

@@ -14,6 +14,7 @@ import { useTheme } from "./ThemeProvider";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { calculateOrderAmount, maxAffordableQuantity } from "@/lib/order-amount";
+import { sanitizeLimitPriceInput } from "@/lib/limit-price-input";
 import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
 import {
   ApiError,
@@ -148,6 +149,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [limitQuote, setLimitQuote] = useState<LimitOrderQuoteResponse | null>(null);
   const [limitQuoteLoading, setLimitQuoteLoading] = useState(false);
   const [limitQuoteError, setLimitQuoteError] = useState<string | null>(null);
+  // 지정가 접수(POST /orders/limit) 실패가 INVALID_INPUT이고 서버가 어떤 필드가
+  // 문제인지(`data.field`) 알려주면, 하단 공용 배너 대신 해당 입력 옆에 표시한다.
+  // 회원가입 검증 실패(ApiError.fieldErrors, {필드: 메시지} 맵)와는 계약이 다르다 —
+  // 여기 field는 값이 아니라 필드 "이름" 하나뿐이라 메시지는 공용 문구를 그대로 쓴다.
+  const [limitFieldError, setLimitFieldError] = useState<{ field: string; message: string } | null>(null);
 
   const categoryLabelValue = categoryLabel(detail.category, detail.isDividend);
   const changeDecimal = toDecimal(detail.price.changeAmount);
@@ -353,6 +359,26 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       ? calculateOrderAmount({ side, quantity, price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate })
       : { grossAmount: 0, fee: 0, tax: 0, netAmount: 0 };
 
+  // 확정 정산식(HALF_UP 원 단위 등)은 서버만 정확히 계산할 수 있으므로, 미리보기 조회가
+  // 끝나 있으면 그 값을 그대로 보여준다 — limitAmount(클라이언트 근사치)는 조회 전
+  // 잠깐 보여주는 자리표시자일 뿐이다. 미국 종목에 원화로 입력한 경우 특히 두 값이
+  // 갈릴 수 있다(클라이언트는 현재 환율로, 서버는 접수 시점 환율로 계산).
+  const limitDisplayAmount = limitQuote
+    ? {
+        grossAmount: limitQuote.limitEstimate.grossAmount,
+        fee: limitQuote.limitEstimate.fee,
+        tax: limitQuote.limitEstimate.tax,
+        netAmount: limitQuote.limitEstimate.netAmount,
+        reservedCash: limitQuote.limitEstimate.reservedCash,
+      }
+    : {
+        grossAmount: limitAmount.grossAmount,
+        fee: limitAmount.fee,
+        tax: limitAmount.tax,
+        netAmount: limitAmount.netAmount,
+        reservedCash: limitAmount.netAmount,
+      };
+
   // 지정가 매수도 시장가와 같은 이유로 상한이 바뀌면 입력값을 같이 맞춘다(위 시장가
   // 클램프 effect 주석 참고) — 다만 여기 상한은 현재가가 아니라 사용자가 입력한
   // 지정가를 기준으로 한다.
@@ -510,6 +536,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
 
     setSubmitting(true);
     setOrderError(null);
+    setLimitFieldError(null);
 
     let currentAccount = account;
     if (!currentAccount) {
@@ -553,7 +580,16 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       getHoldings().then((res) => setHoldings(res.items)).catch(() => {});
     } catch (err) {
       if (err instanceof ApiError) {
-        setOrderError(err.message);
+        // limitPrice/limitCurrency/quantity 중 하나가 원인이라고 서버가 콕 집어주면
+        // (data.field) 하단 공용 배너 대신 해당 입력 옆에 표시한다 — 그 외(symbol,
+        // marketCountry 등 사용자가 직접 건드릴 수 없는 필드나 INVALID_INPUT이 아닌
+        // 에러)는 지금까지와 같이 공용 배너에 메시지를 보여준다.
+        const field = err.invalidField;
+        if (field === "limitPrice" || field === "limitCurrency" || field === "quantity") {
+          setLimitFieldError({ field, message: err.message });
+        } else {
+          setOrderError(err.message);
+        }
         setClientOrderId(nextClientOrderId(err.retryPolicy, idToUse));
         if (err.code === "ACCOUNT_ROUND_CHANGED" || err.code === "ACCOUNT_NOT_FOUND") {
           getAccountSummary().then(setAccount).catch(() => {});
@@ -749,6 +785,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
               // clientOrderId를 재사용하면 안 된다 — side 전환과 같은 이유.
               setClientOrderId(null);
               setOrderError(null);
+              setLimitFieldError(null);
             }}
             trackClassName="mb-3 w-full rounded-xl p-1"
             trackStyle={{ background: "var(--fill)" }}
@@ -772,6 +809,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 // "같은 ID인데 다른 내용"은 NOT_RETRYABLE(DUPLICATE_ORDER)로 거절된다.
                 setClientOrderId(null);
                 setOrderError(null);
+                setLimitFieldError(null);
               }}
               trackClassName="mb-4 w-full rounded-xl p-1"
               trackStyle={{ background: "var(--fill)" }}
@@ -808,8 +846,12 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   setQuantityInput(capped);
                   setClientOrderId(null);
                   setOrderError(null);
+                  setLimitFieldError(null);
                 }}
               />
+              {limitFieldError?.field === "quantity" && (
+                <p className="mt-1 text-[12px]" style={{ color: "var(--dangerText)" }}>{limitFieldError.message}</p>
+              )}
             </div>
           </div>
           {side === "매도" && (
@@ -839,6 +881,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                       setLimitPriceInput("");
                       setClientOrderId(null);
                       setOrderError(null);
+                      setLimitFieldError(null);
                     }}
                     trackClassName="w-[76px] gap-0.5 rounded-full p-[2px]"
                     trackStyle={{ background: "var(--fill)" }}
@@ -855,13 +898,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 maxLength={15}
                 value={limitPriceInput}
                 onChange={(e) => {
-                  // KRW는 정수만, USD는 소수점 둘째 자리까지만 허용한다(백엔드 규칙 —
-                  // 초과 정밀도는 반올림하지 않고 그대로 거절한다).
-                  const raw = e.target.value.replace(/[^0-9.]/g, "");
-                  const cleaned = limitCurrency === "USD" ? raw.replace(/(\..*)\./g, "$1") : raw.replace(/\./g, "");
-                  setLimitPriceInput(cleaned);
+                  setLimitPriceInput(sanitizeLimitPriceInput(e.target.value, limitCurrency));
                   setClientOrderId(null);
                   setOrderError(null);
+                  setLimitFieldError(null);
                 }}
               />
               {isUsdStock && limitCurrency === "KRW" && limitPriceValid && (
@@ -869,6 +909,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   약 {limitPriceInStockCurrency != null ? limitPriceInStockCurrency.toFixed(2) : "-"}$로 환산돼요(접수 시점 환율로 최종 확정)
                 </div>
               )}
+              {limitFieldError?.field === "limitPrice" || limitFieldError?.field === "limitCurrency" ? (
+                <p className="mt-1 text-[12px]" style={{ color: "var(--dangerText)" }}>{limitFieldError.message}</p>
+              ) : null}
             </div>
           )}
 
@@ -891,17 +934,19 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           <div className="mb-3.5 rounded-xl p-4" style={{ background: "var(--fill)" }} data-tour="order-summary">
             {isUsdStock && (
               <div className="mb-2 text-[11.5px]" style={{ color: "var(--mut2)" }}>
-                적용 환율 {formatNumber(usdKrwRate)}원{" "}
-                ({exchangeRateUpdatedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} 기준)
+                {orderType === "지정가" && limitQuote
+                  ? <>접수 환율 {formatNumber(limitQuote.acceptanceExchangeRate)}원 — 실제 체결 시점 환율은 달라질 수 있어요</>
+                  : <>적용 환율 {formatNumber(usdKrwRate)}원{" "}
+                      ({exchangeRateUpdatedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} 기준)</>}
               </div>
             )}
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>주문 금액</span>
-              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.grossAmount : amount.grossAmount)}</b>
+              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.grossAmount : amount.grossAmount)}</b>
             </div>
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>수수료 0.01%</span>
-              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.fee : amount.fee)}</span>
+              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.fee : amount.fee)}</span>
             </div>
             <div className="mb-1.5 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>
@@ -910,20 +955,35 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   ({side === "매수" ? "매수는 없음" : detail.marketCountry === "KR" ? "증권거래세 0.2%" : "SEC Fee"})
                 </span>
               </span>
-              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.tax : amount.tax)}</span>
+              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.tax : amount.tax)}</span>
             </div>
             <div className="flex justify-between pt-1.5 text-[14px]" style={{ borderTop: "1px solid var(--line)" }}>
-              <b style={{ color: "var(--ink)" }}>{side === "매수" ? "총 차감액(예약)" : "총 입금액(예상)"}</b>
-              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitAmount.netAmount : amount.netAmount)}</b>
+              <b style={{ color: "var(--ink)" }}>
+                {orderType === "지정가"
+                  ? side === "매수"
+                    ? "예상 동결 예수금" // 지정가 매수는 체결 전까지 이 금액이 그대로 잠긴다(reservedCash === netAmount) — 별도 줄로 안 나누고 이 라벨 자체로 그 뜻을 담는다.
+                    : "예상 입금액"
+                  : side === "매수"
+                    ? "총 차감액"
+                    : "총 입금액"}
+              </b>
+              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.netAmount : amount.netAmount)}</b>
             </div>
             {orderType === "지정가" && (
-              <div className="mt-1.5 text-[11.5px]" style={{ color: "var(--mut2)" }}>
-                {limitQuoteLoading
-                  ? "미리보기 확인 중…"
-                  : limitQuote
-                    ? `${new Date(limitQuote.expiresAt).toLocaleString("ko-KR")}까지 미체결이면 자동 만료돼요`
-                    : "수량·지정가를 입력하면 접수 가능 여부를 확인해요"}
-              </div>
+              <>
+                <div className="mt-1.5 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                  {limitQuoteLoading
+                    ? "미리보기 확인 중…"
+                    : limitQuote
+                      ? `${new Date(limitQuote.expiresAt).toLocaleString("ko-KR")}까지 미체결이면 자동 만료돼요`
+                      : "수량·지정가를 입력하면 접수 가능 여부를 확인해요"}
+                </div>
+                {limitQuote?.executionPreview?.status === "UNSUPPORTED" && (
+                  <div className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                    호가 기반 체결 예상은 서비스 준비 중이에요. 실제 체결은 지정가 조건이 성립하는 대로 이뤄져요.
+                  </div>
+                )}
+              </>
             )}
           </div>
 

@@ -71,6 +71,18 @@ export class ApiError extends Error {
   }
 
   /**
+   * 주문 계열 API의 INVALID_INPUT은 회원가입과 계약이 다르다 — `{필드명: 메시지}` 맵이
+   * 아니라 `{"field": "limitPrice"}`처럼 잘못된 파라미터 이름 하나만 문자열로 싣는다
+   * (docs/api-spec.md의 LIMIT order lifecycle 설명 참고). 메시지 자체는 이 필드 값과
+   * 무관하게 공용 문구(`message`)를 그대로 쓴다.
+   */
+  get invalidField(): string | undefined {
+    if (this.code !== "INVALID_INPUT") return undefined;
+    const value = this.data?.field;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  /**
    * 주문 실패 응답에 실리는 재시도 정책. 없으면(정책 정보 없이 실패한 경우) `undefined`.
    * `back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java`와 값이 같다.
    */

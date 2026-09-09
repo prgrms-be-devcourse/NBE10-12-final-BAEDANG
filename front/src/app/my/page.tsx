@@ -510,6 +510,11 @@ export default function MyPage() {
                 </span>
                 <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
                   {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
+                  {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
+                    <div className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}>
+                      미체결 {formatNumber(order.activeRemainingQuantity)}
+                    </div>
+                  )}
                 </span>
                 <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
                   {order.orderType === "LIMIT"
