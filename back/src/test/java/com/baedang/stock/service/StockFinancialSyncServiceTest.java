@@ -303,6 +303,53 @@ class StockFinancialSyncServiceTest {
     }
 
     @Test
+    void forced_refresh_waiting_for_nonforced_flight_runs_after_owner_completes() throws Exception {
+        StockFinancialSync fresh = sync(NOW, NOW, NOW);
+        CountDownLatch ownerEntered = new CountDownLatch(1);
+        CountDownLatch releaseOwner = new CountDownLatch(1);
+        when(syncRepository.findById(STOCK_ID)).thenAnswer(invocation -> {
+            if (ownerEntered.getCount() > 0) {
+                ownerEntered.countDown();
+                if (!releaseOwner.await(5, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("timed out waiting to release owner");
+                }
+            }
+            return Optional.of(fresh);
+        });
+        when(port.fetchFinancials(SYMBOL, FinancialPeriodType.ANNUAL))
+                .thenReturn(List.of(period("202512")));
+        when(port.fetchFinancials(SYMBOL, FinancialPeriodType.QUARTERLY))
+                .thenReturn(List.of(period("202509")));
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<SyncResult> owner = executor.submit(
+                    () -> service.ensureFresh(stock, SyncTrigger.ON_DEMAND));
+            assertThat(ownerEntered.await(5, TimeUnit.SECONDS)).isTrue();
+
+            AtomicReference<Thread> forcedThread = new AtomicReference<>();
+            CountDownLatch forcedStarted = new CountDownLatch(1);
+            Future<SyncResult> forced = executor.submit(() -> {
+                forcedThread.set(Thread.currentThread());
+                forcedStarted.countDown();
+                return service.refresh(stock, SyncTrigger.SCHEDULED);
+            });
+            assertThat(forcedStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitWaiting(forcedThread.get());
+            releaseOwner.countDown();
+
+            assertThat(owner.get(5, TimeUnit.SECONDS).annual().status())
+                    .isEqualTo(GroupStatus.FRESH);
+            assertThat(forced.get(5, TimeUnit.SECONDS).annual().status())
+                    .isEqualTo(GroupStatus.UPDATED);
+            verify(port).fetchFinancials(SYMBOL, FinancialPeriodType.ANNUAL);
+            verify(port).fetchFinancials(SYMBOL, FinancialPeriodType.QUARTERLY);
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
     void failed_single_flight_entry_is_removed_so_the_next_call_can_retry() {
         when(syncRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
         when(port.fetchIndustry(SYMBOL)).thenReturn(industry());

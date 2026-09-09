@@ -46,8 +46,7 @@ public class StockFinancialSyncService {
     private final Clock clock;
     private final MeterRegistry meterRegistry;
     private final Timer batchDurationTimer;
-    private final ConcurrentHashMap<Long, CompletableFuture<SyncResult>> inFlight =
-            new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Long, SyncFlight> inFlight = new ConcurrentHashMap<>();
 
     public StockFinancialSyncService(
             StockRepository stockRepository,
@@ -130,19 +129,28 @@ public class StockFinancialSyncService {
         }
         Long stockId = Objects.requireNonNull(stock.getStockId(), "stockId");
 
-        CompletableFuture<SyncResult> owned = new CompletableFuture<>();
-        CompletableFuture<SyncResult> existing = inFlight.putIfAbsent(stockId, owned);
-        if (existing != null) {
-            return await(existing);
+        SyncFlight owned = new SyncFlight(forceFinancials, new CompletableFuture<>());
+        while (true) {
+            SyncFlight existing = inFlight.putIfAbsent(stockId, owned);
+            if (existing == null) {
+                break;
+            }
+            SyncResult shared = await(existing.future());
+            if (!forceFinancials
+                    || existing.forceFinancials()
+                    || financialGroupsUpdated(shared)) {
+                return shared;
+            }
+            inFlight.remove(stockId, existing);
         }
 
         try {
             SyncResult result = synchronize(stock, forceFinancials);
-            owned.complete(result);
+            owned.future().complete(result);
             record(trigger, result.stale() ? "error" : result.empty() ? "empty" : "success");
             return result;
         } catch (RuntimeException exception) {
-            owned.completeExceptionally(exception);
+            owned.future().completeExceptionally(exception);
             record(trigger, "error");
             throw exception;
         } finally {
@@ -250,6 +258,11 @@ public class StockFinancialSyncService {
                 && data.small() == null;
     }
 
+    private static boolean financialGroupsUpdated(SyncResult result) {
+        return result.annual().status() == GroupStatus.UPDATED
+                && result.quarterly().status() == GroupStatus.UPDATED;
+    }
+
     private static SyncResult await(CompletableFuture<SyncResult> future) {
         try {
             return future.join();
@@ -259,6 +272,12 @@ public class StockFinancialSyncService {
             }
             throw exception;
         }
+    }
+
+    private record SyncFlight(
+            boolean forceFinancials,
+            CompletableFuture<SyncResult> future
+    ) {
     }
 
     public enum SyncTrigger {
