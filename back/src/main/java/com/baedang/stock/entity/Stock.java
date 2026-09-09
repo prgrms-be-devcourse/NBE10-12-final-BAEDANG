@@ -103,6 +103,14 @@ public class Stock extends BaseEntity {
     @Column(name = "rank_no")
     private Integer rankNo;
 
+    /**
+     * V5 생성 컬럼(읽기 전용). 초성 검색 결과를 정렬할 때
+     * <b>검색과 같은 초성 공간에서</b> 완전일치/접두일치를 판정하려고 읽습니다.
+     * 값은 DB가 만들기 때문에 절대 쓰지(insert/update) 마세요. ({@code insertable/updatable = false}).
+     */
+    @Column(name = "name_chosung", insertable = false, updatable = false)
+    private String nameChosung;
+
     /** 최근 1주 누적 거래대금. 랭킹 정렬 기준이자 커서의 1차 키. */
     @Column(name = "trading_amount", precision = 24, scale = 0)
     private BigDecimal tradingAmount;
@@ -226,6 +234,7 @@ public class Stock extends BaseEntity {
     public MarketCountry getMarketCountry() { return marketCountry; }
     public String getMarket() { return market; }
     public String getName() { return name; }
+    public String getNameChosung() { return nameChosung; }
     public String getEnglishName() { return englishName; }
     public String getIsinCode() { return isinCode; }
     public String getCurrency() { return currency; }

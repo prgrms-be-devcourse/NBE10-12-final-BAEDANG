@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.function.ToIntFunction;
 import java.util.regex.Pattern;
 
 @Service
@@ -43,18 +44,20 @@ public class StockSearchService {
         validateSize(size);
 
         if (isChosungOnly(keyword)) {
-            return respond(stockRepository.searchByChosung(keyword), keyword, size);
+            return respond(stockRepository.searchByChosung(keyword),
+                    stock -> chosungRank(stock, keyword), size);
         }
 
         if (isValid(keyword)) {
-            return respond(stockRepository.searchByJamo(keyword), keyword, size);
+            return respond(stockRepository.searchByJamo(keyword),
+                    stock -> matchRank(stock, keyword), size);
         }
 
         return new StockSearchResponse(List.of());
     }
 
-    private StockSearchResponse respond(List<Stock> found, String keyword, int size) {
-        List<StockSearchResponse.Item> items = found.stream().sorted(searchOrder(keyword)).limit(size).map(this::toItem).toList();
+    private StockSearchResponse respond(List<Stock> found, ToIntFunction<Stock> rank, int size) {
+        List<StockSearchResponse.Item> items = found.stream().sorted(searchOrder(rank)).limit(size).map(this::toItem).toList();
 
         return new StockSearchResponse(items);
     }
@@ -78,9 +81,9 @@ public class StockSearchService {
         return keyword.chars().allMatch(c -> JAEUM_FIRST <= c && c <= JAEUM_LAST);
     }
 
-    private Comparator<Stock> searchOrder(String keyword) {
+    private Comparator<Stock> searchOrder(ToIntFunction<Stock> rank) {
         return Comparator
-                .<Stock>comparingInt(stock -> matchRank(stock, keyword))
+                .<Stock>comparingInt(rank)
                 .thenComparing(
                         Stock::getName,
                         Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
@@ -102,11 +105,42 @@ public class StockSearchService {
             return 0;
         }
 
-        if (values.stream().anyMatch(value -> value.startsWith(keyword))) {
+        String prefix = withoutTrailingJaeum(keyword);
+
+        if (values.stream().anyMatch(value -> value.startsWith(prefix))) {
             return 1;
         }
 
         return 2;
+    }
+
+    /**
+     * 초성 검색 결과의 순위. 검색이 {@code name_chosung} 으로 걸린 것이므로
+     * 순위도 같은 초성 공간에서 매겨야 합니다 — 원문 이름과 'ㅅㅅㅈㅈ' 를 비교하면
+     * 모든 결과가 같은 순위가 되어 정렬이 이름순으로만 남습니다.
+     */
+    private int chosungRank(Stock stock, String keyword) {
+        String chosung = stock.getNameChosung();
+
+        if (chosung == null) return 2;
+        if (chosung.equals(keyword)) return 0;
+        if (chosung.startsWith(keyword)) return 1;
+
+        return 2;
+    }
+
+    /**
+     * 미완성 입력('삼ㅅ')의 접두 판정용. 마지막 독립 자음을 떼고 완성된 부분만 봅니다
+     * (원문 이름에는 독립 자음이 없어 그대로 비교하면 접두 일치가 영영 안 잡힙니다).
+     */
+    private String withoutTrailingJaeum(String keyword) {
+        char last = keyword.charAt(keyword.length() - 1);
+
+        if (JAEUM_FIRST <= last && last <= JAEUM_LAST && keyword.length() > 1) {
+            return keyword.substring(0, keyword.length() - 1);
+        }
+
+        return keyword;
     }
 
     private String normalizeQuery(String query) {

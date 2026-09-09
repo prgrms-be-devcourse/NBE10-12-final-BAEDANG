@@ -113,4 +113,44 @@ public class StockSearchServiceTest {
                 .extracting(e->((BusinessException)e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
     }
+
+    /**
+     * 이름순 정렬만 남으면 '삼성전자' 가 앞이므로, 완전일치가 이름순을 이겨야 검증이 된다.
+     */
+    @Test
+    @DisplayName("초성 검색은 초성 완전일치를 상위로 (#148)")
+    void t5() {
+        StockSearchService service = new StockSearchService(stockRepository);
+
+        Stock exact = stubStock("석삼", "ㅅㅅ");
+        Stock partial = stubStock("삼성전자", "ㅅㅅㅈㅈ");
+
+        when(stockRepository.searchByChosung("ㅅㅅ")).thenReturn(List.of(partial, exact));
+
+        assertThat(service.search("ㅅㅅ", 10).items())
+                .extracting(StockSearchResponse.Item::name)
+                .containsExactly("석삼", "삼성전자");
+    }
+
+    @Test
+    @DisplayName("미완성 입력도 접두 일치를 상위로 (#148)")
+    void t6() {
+        StockSearchService service = new StockSearchService(stockRepository);
+
+        Stock prefix = stubStock("삼성전자", null);
+        Stock contains = stubStock("가나삼성", null);
+
+        when(stockRepository.searchByJamo("삼ㅅ")).thenReturn(List.of(contains, prefix));
+
+        assertThat(service.search("삼ㅅ", 10).items())
+                .extracting(StockSearchResponse.Item::name)
+                .containsExactly("삼성전자", "가나삼성");
+    }
+
+    private Stock stubStock(String name, String chosung) {
+        Stock s = org.mockito.Mockito.mock(Stock.class);
+        org.mockito.Mockito.lenient().when(s.getName()).thenReturn(name);
+        org.mockito.Mockito.lenient().when(s.getNameChosung()).thenReturn(chosung);
+        return s;
+    }
 }
