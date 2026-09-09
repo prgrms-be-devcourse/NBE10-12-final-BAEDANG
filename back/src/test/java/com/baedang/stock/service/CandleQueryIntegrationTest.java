@@ -1,10 +1,12 @@
 package com.baedang.stock.service;
 
 import com.baedang.market.entity.DailyCandle;
+import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
 import com.baedang.market.service.LatestCompletedTradingDayResolver;
@@ -15,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -24,6 +27,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -63,7 +67,9 @@ class CandleQueryIntegrationTest {
     @Autowired MinuteCandlePersistenceService persistenceService;
     @Autowired StockRepository stockRepository;
     @Autowired DailyCandleRepository dailyCandleRepository;
+    @Autowired CandleAggregateRepository candleAggregateRepository;
     @Autowired MinuteCandleRepository minuteCandleRepository;
+    @Autowired JdbcClient jdbcClient;
 
     @Test
     void 일봉은_최신_N개를_시간순으로_반환한다() {
@@ -139,6 +145,139 @@ class CandleQueryIntegrationTest {
                 .get()
                 .extracting(row -> row.getClosePrice())
                 .satisfies(value -> assertThat((BigDecimal) value).isEqualByComparingTo("105"));
+    }
+
+    @Test
+    void 오분봉_뷰가_일분봉_다섯개를_하나의_OHLCV로_묶는다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        // 09:00~09:04 가 한 봉, 09:05 가 다음 봉. 고가·저가가 봉 가운데에 오도록 섞는다.
+        minuteCandleRepository.saveAll(List.of(
+                minute(stock, kst(2026, 8, 27, 9, 0), "100", "101", "99", "100"),
+                minute(stock, kst(2026, 8, 27, 9, 1), "100", "130", "99", "120"),
+                minute(stock, kst(2026, 8, 27, 9, 2), "120", "125", "80", "90"),
+                minute(stock, kst(2026, 8, 27, 9, 3), "90", "95", "85", "95"),
+                minute(stock, kst(2026, 8, 27, 9, 4), "95", "110", "90", "105"),
+                minute(stock, kst(2026, 8, 27, 9, 5), "105", "106", "104", "106")));
+        refreshAggregate("candle_5m");
+
+        var response = candleQueryService.getCandles(stock.getSymbol(), "KR", "5m", "1D");
+
+        assertThat(response.items()).hasSize(2);
+        var first = response.items().get(0);
+        assertThat(first.at()).isEqualTo(kst(2026, 8, 27, 9, 0));
+        assertThat(new BigDecimal(first.open())).isEqualByComparingTo("100");   // 첫 봉의 시가
+        assertThat(new BigDecimal(first.high())).isEqualByComparingTo("130");   // 다섯 봉의 최고가
+        assertThat(new BigDecimal(first.low())).isEqualByComparingTo("80");     // 다섯 봉의 최저가
+        assertThat(new BigDecimal(first.close())).isEqualByComparingTo("105");  // 마지막 봉의 종가
+        assertThat(new BigDecimal(first.volume())).isEqualByComparingTo("5000");
+        assertThat(response.items().get(1).at()).isEqualTo(kst(2026, 8, 27, 9, 5));
+    }
+
+    @Test
+    void 십분봉_뷰는_십분_경계로_묶는다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        // 5분봉은 3봉으로, 10분봉은 2봉으로 묶이게끔 1분봉 데이터를 추가한다.
+        // (10분봉은 9:00~9:10이 한 봉이라 9:00과 9:07인 1분봉이 하나로 묶인다)
+        minuteCandleRepository.saveAll(List.of(
+                minute(stock, kst(2026, 8, 27, 9, 0), "100", "100", "100", "100"),
+                minute(stock, kst(2026, 8, 27, 9, 7), "200", "200", "200", "200"),
+                minute(stock, kst(2026, 8, 27, 9, 12), "300", "300", "300", "300")));
+        refreshAggregate("candle_10m");
+
+        var response = candleQueryService.getCandles(stock.getSymbol(), "KR", "10m", "1W");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).at()).isEqualTo(kst(2026, 8, 27, 9, 0));
+        assertThat(new BigDecimal(response.items().get(0).close())).isEqualByComparingTo("200");
+        assertThat(response.items().get(1).at()).isEqualTo(kst(2026, 8, 27, 9, 10));
+    }
+
+    @Test
+    void 주봉은_월요일이_휴장이어도_그_주에_묶고_KST_자정을_돌려준다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        // 8/24(월)은 휴장이라 행이 없다. 화~금만 있어도 봉은 8/24 주에 붙어야 한다.
+        dailyCandleRepository.saveAll(List.of(
+                daily(stock, LocalDate.of(2026, 8, 25), "100"),
+                daily(stock, LocalDate.of(2026, 8, 26), "110"),
+                daily(stock, LocalDate.of(2026, 8, 27), "120"),
+                daily(stock, LocalDate.of(2026, 8, 28), "130"),
+                daily(stock, LocalDate.of(2026, 8, 31), "140")));
+        refreshAggregate("candle_1w");
+
+        var response = candleQueryService.getCandles(stock.getSymbol(), "KR", "1w", "6M");
+
+        assertThat(response.items()).hasSize(2);
+        // 봉 시각은 서버 타임존이 아니라 KST 자정이어야 한다(일봉 응답과 같은 기준).
+        assertThat(response.items().get(0).at()).isEqualTo(kst(2026, 8, 24, 0, 0));
+        assertThat(new BigDecimal(response.items().get(0).close())).isEqualByComparingTo("130");
+        assertThat(response.items().get(1).at()).isEqualTo(kst(2026, 8, 31, 0, 0));
+    }
+
+    @Test
+    void 미국_서머타임이_끝나도_장시작_분봉이_제_봉으로_묶인다() {
+        Stock stock = saveStock(MarketCountry.US, "USD");
+        // 미국은 서머타임이 있다: 1년에 한 번 하루가 1시간 앞당겨지고(그날은 23시간), 한 번 되돌아간다(그날은 25시간).
+        // (ex. 09:30 ET는 서머타임 종료(11/1) 전에는 13:30 UTC, 후에는 14:30 UTC)
+        minuteCandleRepository.saveAll(List.of(
+                minute(stock, et(2026, 10, 30, 9, 30), "10", "10", "10", "10"),
+                minute(stock, et(2026, 10, 30, 9, 31), "11", "11", "11", "11"),
+                minute(stock, et(2026, 11, 2, 9, 30), "20", "20", "20", "20"),
+                minute(stock, et(2026, 11, 2, 9, 31), "21", "21", "21", "21")));
+        refreshAggregate("candle_5m");
+
+        var response = candleQueryService.getCandles(stock.getSymbol(), "US", "5m", "1W");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).at().toInstant())
+                .isEqualTo(Instant.parse("2026-10-30T13:30:00Z"));
+        assertThat(response.items().get(1).at().toInstant())
+                .isEqualTo(Instant.parse("2026-11-02T14:30:00Z"));
+        assertThat(new BigDecimal(response.items().get(1).close())).isEqualByComparingTo("21");
+    }
+
+    /**
+     * 온디맨드 백필 직후 호출되는 경로를 실제 DB 로 확인한다.
+     * 단위 테스트는 목이라 프록시를 안 타므로, {@code Propagation.NEVER} 와
+     * {@code CALL refresh_continuous_aggregate} 가 실제로 도는지는 여기서만 검증된다.
+     */
+    @Test
+    void 주봉_즉시_갱신을_호출하면_저장된_일봉이_주봉으로_조회된다() {
+        Stock stock = saveStock(MarketCountry.KR, "KRW");
+        dailyCandleRepository.saveAll(List.of(
+                daily(stock, LocalDate.of(2026, 8, 25), "100"),
+                daily(stock, LocalDate.of(2026, 8, 31), "140")));
+
+        candleAggregateRepository.refreshWeekly();
+
+        var response = candleQueryService.getCandles(stock.getSymbol(), "KR", "1w", "6M");
+
+        assertThat(response.items()).hasSize(2);
+        assertThat(response.items().get(0).at()).isEqualTo(kst(2026, 8, 24, 0, 0));
+        assertThat(new BigDecimal(response.items().get(0).close())).isEqualByComparingTo("100");
+        assertThat(response.items().get(1).at()).isEqualTo(kst(2026, 8, 31, 0, 0));
+    }
+
+    private void refreshAggregate(String view) {
+        // 뷰는 WITH NO DATA 로 만들고 갱신 정책(백그라운드 잡)이 채운다.
+        // 테스트에서는 잡을 기다리지 않고 직접 새로고침한다.
+        jdbcClient.sql("CALL refresh_continuous_aggregate('" + view + "', NULL, NULL)").update();
+    }
+
+    private MinuteCandle minute(
+            Stock stock, OffsetDateTime at, String open, String high, String low, String close) {
+        return new MinuteCandle(stock.getStockId(), at,
+                new BigDecimal(open), new BigDecimal(high),
+                new BigDecimal(low), new BigDecimal(close), new BigDecimal("1000"));
+    }
+
+    private OffsetDateTime kst(int year, int month, int day, int hour, int minute) {
+        return java.time.LocalDateTime.of(year, month, day, hour, minute)
+                .atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime();
+    }
+
+    private OffsetDateTime et(int year, int month, int day, int hour, int minute) {
+        return java.time.LocalDateTime.of(year, month, day, hour, minute)
+                .atZone(ZoneId.of("America/New_York")).toOffsetDateTime();
     }
 
     private Stock saveStock(MarketCountry country, String currency) {
