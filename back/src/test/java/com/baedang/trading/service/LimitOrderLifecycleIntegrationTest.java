@@ -535,11 +535,41 @@ class LimitOrderLifecycleIntegrationTest {
 
     private long insertExecution(long orderId, int sequence) {
         var at = NOW.plusSeconds(sequence).atOffset(ZoneOffset.UTC);
+        long bookLevelId = insertBookLevel(orderId, sequence);
         return jdbc.queryForObject("""
                 INSERT INTO trade_execution(order_id,execution_key,sequence_no,quantity,price,exchange_rate,
                 sec_fee_usd,gross_amount_krw,fee_krw,tax_krw,net_amount_krw,quote_at,executed_at,book_level_id)
-                VALUES (?,?,?,1,100,1400,0,140000,14,0,140014,?,?,1) RETURNING execution_id
-                """, Long.class, orderId, UUID.randomUUID(), sequence, at, at);
+                VALUES (?,?,?,1,100,1400,0,140000,14,0,140014,?,?,?) RETURNING execution_id
+                """, Long.class, orderId, UUID.randomUUID(), sequence, at, at, bookLevelId);
+    }
+
+    /** LIMIT 체결 fixture가 소비 당시의 실제 ASK 레벨 ID를 추적 값으로 기록한다. */
+    private long insertBookLevel(long orderId, int depth) {
+        Long stockId = jdbc.queryForObject(
+                "SELECT stock_id FROM trade_order WHERE order_id = ?", Long.class, orderId);
+        Long versionId = jdbc.query("""
+                        SELECT book_version_id
+                          FROM order_book_version
+                         WHERE stock_id = ? AND is_active = true
+                        """,
+                resultSet -> resultSet.next() ? resultSet.getLong(1) : null,
+                stockId);
+        if (versionId == null) {
+            versionId = jdbc.queryForObject("""
+                    INSERT INTO order_book_version
+                        (stock_id, base_price, currency, quote_at, generated_at, policy_version, seed, revision)
+                    SELECT stock_id, 100, currency, ?, ?, 'V1', 1, 0
+                      FROM stock
+                     WHERE stock_id = ?
+                    RETURNING book_version_id
+                    """, Long.class, NOW.atOffset(ZoneOffset.UTC), NOW.atOffset(ZoneOffset.UTC), stockId);
+        }
+        return jdbc.queryForObject("""
+                INSERT INTO order_book_level
+                    (book_version_id, side, level_depth, price, initial_quantity, remaining_quantity)
+                VALUES (?, 'ASK', ?, 100, 10, 10)
+                RETURNING level_id
+                """, Long.class, versionId, depth);
     }
 
     @Test

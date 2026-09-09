@@ -2,9 +2,11 @@ package com.baedang.stock.repository;
 
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -35,6 +37,14 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
             @Param("now") OffsetDateTime now, Pageable page);
 
     Optional<Stock> findBySymbolIgnoreCaseAndMarketCountry(String symbol, MarketCountry marketCountry);
+
+    /**
+     * 가상 호가 publisher가 종목별로 버전 교체를 직렬화할 때 씁니다 (설계서 §5.2 1단계).
+     * 조회 전용이 아니라 {@code FOR UPDATE}이므로 반드시 트랜잭션 안에서 호출하세요.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from Stock s where s.stockId = :stockId")
+    Optional<Stock> findByIdForUpdate(@Param("stockId") Long stockId);
 
     /**
      * 보유 종목들의 심볼·이름·통화를 한 번에 조회합니다 (마이페이지 보유 목록).

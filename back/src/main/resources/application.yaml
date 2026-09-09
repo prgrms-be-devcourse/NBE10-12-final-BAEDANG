@@ -141,6 +141,22 @@ trading:
     max-in-flight-stocks: ${QUOTE_MAX_IN_FLIGHT_STOCKS:1000}
     request-timeout: ${QUOTE_REQUEST_TIMEOUT:20s}
 
+  # 전체 사용자 공유 가상 호가 정책 (V1)
+  orderbook:
+    enabled: ${ORDERBOOK_ENABLED:false}
+    policy-version: V1
+    refresh-interval: 3s
+    refresh-initial-delay: ${ORDERBOOK_REFRESH_INITIAL_DELAY:0s}
+    max-quote-age: 15s
+    kr-base-notional: 20000000
+    us-base-notional: 15000
+    min-quantity: 1
+    max-quantity: 1000000
+    noise-min-bps: 8000
+    noise-max-bps: 12000
+    closed-version-retention: 1m
+    retention-initial-delay: ${ORDERBOOK_RETENTION_INITIAL_DELAY:0s}
+
 auth:
   jwt:
     issuer: baedang

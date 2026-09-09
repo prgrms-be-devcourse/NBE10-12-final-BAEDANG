@@ -36,7 +36,7 @@ The `global` package provides foundations shared across domains; not every file 
 | [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | Inject `PasswordEncoder`; call `encode(raw)` and `matches(raw, encoded)` | Currently uses BCrypt. Do not implement separate hashing or repeatedly construct encoders |
 | [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | Automatically enables JPA Auditing and `auditingDateTimeProvider` | The current provider directly uses `OffsetDateTime.now(ZoneOffset.UTC)`; fixing the injected Clock does not fix auditing timestamps |
 | [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | Inherit to populate `createdAt` and `updatedAt` automatically | Only for tables with both `created_at` and `updated_at`. Does not replace account `openedAt` or ledger `occurredAt` |
-| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | Provides common `taskScheduler`, dedicated `limitOrderTaskScheduler` and `dailyCandleTaskExecutor`. Inject that executor with `@Qualifier("dailyCandleTaskExecutor")` | Dedicated to daily candles: one thread, queue capacity 10, up to 30 seconds for shutdown. Do not indiscriminately share it with other async tasks; each scheduler owns its activation conditions |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | Provides common `taskScheduler`, dedicated `limitOrderTaskScheduler` and `orderBookTaskScheduler`, plus `dailyCandleTaskExecutor`. Inject that executor with `@Qualifier("dailyCandleTaskExecutor")` | Order-book refresh and retention are serialized on the one-thread order-book scheduler, separate from common batches, and their DB transactions use a local 2-second lock timeout. Daily candles use one thread, queue capacity 10, and up to 30 seconds for shutdown. Do not indiscriminately share these executors; each scheduler owns its activation conditions |
 | [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | Automatically applies to `/api/**`; configure origins via `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS` | No direct invocation needed. CORS does not replace authentication or authorization |
 
 ### Error Handling and External Communication
@@ -243,6 +243,15 @@ Even when reused across use cases, these components retain domain-specific contr
 | [QuoteRealtimePolicy](../back/src/main/java/com/baedang/stock/service/QuoteRealtimePolicy.java) | `isRealtime(country, quote)`, `isMarketOpen(country)` | Uses sessions at the current and quote times; may query the calendar, so it is not a pure calculation |
 | [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` → `Optional<LocalDate>` | Resolves the latest completed trading day using local dates and the calendar; currently a 10-minute finalization delay and up to 14 days of lookback. Returns empty on lookup failure, response mismatch, or no result |
 
+| [TickSizePolicy](../back/src/main/java/com/baedang/orderbook/service/TickSizePolicy.java) | `nextValidPriceAbove`, `previousValidPriceBelow`, `isValidPrice`, `tickSizeAt` | Price bands and tick size calculations across market/category boundaries within NUMERIC(19,4) max bound (999999999999999.9999) |
+| [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed)` | Pure synthetic order-book generator using a fixed seed and properties. Applies V1 depth multipliers, integer noise, and tick-relative round-number boosts; generates 10 asks and market-specific bid depth (10 for KR, 1–10 for US) |
+| [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. Partial execution engine (#122) pessimistically locks the active version and the actual levels for the requested side in the same transaction: 10 asks, 10 KR bids, or 1–10 US bids. A partial US depth must end at `$0.01`. BUY→ASK, SELL→BID |
+| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `enabled()`, `policyVersion()`, `krBaseNotional()`, `minQuantity()`, etc. | `trading.orderbook` validated runtime properties record. V1 defaults: enabled=false, 3s refresh, 15s maxQuoteAge, 1m retention |
+
+The current implementation uses these configurable V1 virtual-order-book defaults: `enabled=false`, `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, and `retentionInitialDelay=0s`. V1 book shape is a code invariant, not runtime configuration: 10 levels per side with one valid tick between neighboring levels (US bids may stop at `$0.01`). Closed versions and levels are deleted after retention regardless of consumption; execution price, quantity, and settlement amounts remain permanent in `trade_execution`. A different shape requires a new policy version. These synthetic supply values require rationale and agreement in the #121 PR; implementation alone proves neither policy approval nor empirical market-depth fidelity. The two initial delays control scheduler startup timing only and must be nonnegative.
+
+`trading.orderbook.enabled` controls only #121 virtual order-book publication and query. #120's new-limit-order admission flag and the cancellation, expiration, and recovery flows for existing limit orders are separate flags and use cases; they must not be toggled together with the order-book flag. #122 worker activation is a separate boundary as well. New limit-order admission remains disabled by default until #122 integration verification.
+
 For calendar-dependent logic, inject the existing [MarketCalendarPort](../back/src/main/java/com/baedang/market/port/MarketCalendarPort.java) and [MarketSessionProvider](../back/src/main/java/com/baedang/market/port/MarketSessionProvider.java). Do not duplicate external calls or caches.
 
 Striped locks are not yet a shared helper. Keep the separate implementations in `CandleQueryService` and `StockOnDemandQuoteService`; do not share one global lock.
@@ -250,6 +259,26 @@ Striped locks are not yet a shared helper. Keep the separate implementations in 
 ### DecimalScaleValidator — Trading Input Scale Validation
 
 Call `com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale(value, scale)` statically. Null returns false; trailing zeros are ignored when checking lossless representability at the requested scale. The original value/scale is unchanged. This does not validate total NUMERIC precision, positivity or currency settlement calculations. Combine it with existing order/execution/settlement input conditions; callers choose the exception.
+
+### Virtual Order Book & Locking Contracts
+
+The virtual order book module (`com.baedang.orderbook`) supplies a shared synthetic 10-bid/10-ask order book based on Toss current price and provides the locking store contract for the #122 matching engine.
+
+#### 1. Lock Ordering Rules (Deadlock Prevention)
+- **Publisher (Order Book Publication/Close)**: `stock → order_book_version` (never acquires account, trade_order, or holding locks)
+- **Consumer (#122 Limit Execution Engine)**: `account → trade_order → order_book_version → order_book_level (in fill-price order) → holding` (never acquires stock lock)
+- The lock hierarchies are strictly separated to prevent mutual blocking between publishers and consumers.
+
+#### 2. Matching Engine (#122) Integration Contracts
+- **Port Invocation**: `OrderBookExecutionStore.lockForExecution(...)` requires `Propagation.MANDATORY` and must be invoked within the existing transaction where #122 already acquired `account → trade_order` locks.
+- **Side Mapping**: Order BUY consumes synthetic ASK liquidity, and order SELL consumes synthetic BID liquidity (`BUY → ASK`, `SELL → BID`).
+- **Level Order**: Locks are acquired via `FOR UPDATE` in price order: ASK uses `price ASC, levelDepth ASC`, and BID uses `price DESC, levelDepth ASC`. The store rejects a locked side whose depths are non-sequential or whose prices are not strictly ascending (ASK) or descending (BID).
+- **Mismatch Handling**: If the expected `bookVersion` or `revision` does not match, or if the version is already closed, it returns `Optional.empty()`. Handling this result via retry or holding is #122's responsibility; do not blanket-map it to HTTP `SAME_CLIENT_ORDER_ID`.
+- **State Transition Primitive**: Even when consuming multiple levels in a single transaction, call `OrderBookVersion.advanceRevision()` exactly once per transaction.
+
+#### 3. Quantity and Precision Policies
+- **Integer Quantity Policy**: Although the database maintains `NUMERIC(19,6)` for future fractional compatibility, V1 synthetic order book generation and fill consumption operate strictly in **whole integer shares** (`minQuantity=1`, `maxQuantity=1000000`).
+- **Nature of Quantity Distribution**: Depth multipliers and round-number boosts represent mock market V1 supply policies rather than an empirical replication of real market depth. Never treat upper-level volume dominance as an invariant.
 
 ## 8. Frontend Shared Modules
 
