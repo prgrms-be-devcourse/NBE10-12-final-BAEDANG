@@ -51,6 +51,7 @@ public enum ErrorCode {
     QUOTE_NOT_FOUND(HttpStatus.NOT_FOUND, "시세 정보를 가져올 수 없어요"),
     QUOTE_CURRENCY_MISMATCH(HttpStatus.BAD_GATEWAY, "시세 통화 정보가 올바르지 않아요"),
     EXCHANGE_RATE_NOT_FOUND(HttpStatus.NOT_FOUND, "환율 정보를 가져올 수 없어요"),
+    ORDER_BOOK_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "현재 가상 호가를 조회할 수 없어요"),
 
     // ── 주문 · 체결 ─────────────────────────────────────────────────────────
     MARKET_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "지금은 거래할 수 없는 시간이에요"),

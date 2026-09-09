@@ -3,7 +3,7 @@
 #   docker compose up -d        기동
 #   docker compose logs -f      로그 확인
 #   docker compose down         중지 (데이터 유지)
-#   docker compose down -v      중지 + 데이터 삭제  ← 스키마 바뀌면 이걸로 재생성
+#   docker compose down -v      중지 + 데이터 삭제 (폐기 가능한 개인 테스트 DB에서만)
 #
 # [스키마 관리 — Flyway]
 #   이 컨테이너는 빈 DB 로 뜹니다. 스키마는 백엔드 기동 시 Flyway 가 만듭니다.
@@ -53,6 +53,7 @@ services:
     volumes:
       # 데이터 영속화 (컨테이너를 지워도 테이블이 남음)
       - pgdata:/var/lib/postgresql
+
 
       # 테스트용 시드 데이터가 필요하면 주석을 푸세요.
       # - ./db/seed.sql:/docker-entrypoint-initdb.d/03-seed.sql:ro

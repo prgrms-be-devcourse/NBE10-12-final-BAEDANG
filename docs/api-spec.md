@@ -571,6 +571,71 @@ The ranked-universe collector runs once per minute, sequentially in 20-stock gro
 **200 candles per call.** KR regular session 09:00~15:30 = 330 minutes, so a full day needs `before` × 2. With the week-1 chart as "last 200 minutes", 1 call suffices — keep 1 call as the default and use 2 only when "view all" is pressed.
 **Needs measurement** — whether `before` is inclusive, and whether the closing-auction (15:30) candle exists. Without a 15:30 candle it's 329, not 330. Overlapping boundary candles are filtered by `ON CONFLICT DO NOTHING` on `(stock_id, candle_at)`.
 
+
+### `GET /stocks/{symbol}/orderbook?marketCountry={KR|US}`
+Synthetic order book and depth query based on latest market price
+
+All users share the same synthetic order book snapshot. A single request returns 10 asks and all available bids: KR stocks always have 10 bids, while US stocks may have 1 to 10 bids for low-priced symbols. Query requests never generate new order books; they read from the database using a single SQL snapshot of the current active version.
+
+| Field | Required | Description |
+|---|---|---|
+| `symbol` (path parameter) | Y | Stock symbol (e.g., `005930`, `NVDA`) |
+| `marketCountry` (query parameter) | Y | Market country (`KR` / `US`, case-insensitive). Returns 400 if missing or unsupported |
+| none | - | `depth`, `page`, and `cursor` parameters are not accepted; the server returns 10 asks and all available bids (10 for KR, 1–10 for US) |
+
+**Response 200** — `basePrice` and level `price` values are strings formatted by currency: KRW uses whole won with no decimal places, and USD uses exactly two decimal places. Level `quantity` is a string formatted via `FinancialDecimalFormatter.plain()`. `initialQuantity` is an internal audit value and is not exposed in the public API.
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "bookVersion": 1042,
+  "revision": 3,
+  "basePrice": "72000",
+  "currency": "KRW",
+  "quoteAt": "2026-09-03T01:15:30Z",
+  "generatedAt": "2026-09-03T01:15:33Z",
+  "virtual": true,
+  "description": "현재가 기반 가상 호가·가상 잔량",
+  "asks": [
+    { "level": 1, "price": "72100", "quantity": "1500" },
+    { "level": 2, "price": "72200", "quantity": "1440" },
+    { "level": 3, "price": "72300", "quantity": "1380" },
+    { "level": 4, "price": "72400", "quantity": "1290" },
+    { "level": 5, "price": "72500", "quantity": "1200" },
+    { "level": 6, "price": "72600", "quantity": "1080" },
+    { "level": 7, "price": "72700", "quantity": "960" },
+    { "level": 8, "price": "72800", "quantity": "840" },
+    { "level": 9, "price": "72900", "quantity": "720" },
+    { "level": 10, "price": "73000", "quantity": "600" }
+  ],
+  "bids": [
+    { "level": 1, "price": "71900", "quantity": "1800" },
+    { "level": 2, "price": "71800", "quantity": "1720" },
+    { "level": 3, "price": "71700", "quantity": "1650" },
+    { "level": 4, "price": "71600", "quantity": "1550" },
+    { "level": 5, "price": "71500", "quantity": "1440" },
+    { "level": 6, "price": "71400", "quantity": "1300" },
+    { "level": 7, "price": "71300", "quantity": "1150" },
+    { "level": 8, "price": "71200", "quantity": "1000" },
+    { "level": 9, "price": "71100", "quantity": "860" },
+    { "level": 10, "price": "71000", "quantity": "720" }
+  ]
+}
+```
+
+- `asks`: sell quotes (10 levels in ascending price order, starting with best ask ASK 1).
+- `bids`: buy quotes in descending price order, starting with best bid BID 1. KR returns 10 levels; US returns 1–10 available levels, and a partial US depth must end at the minimum valid price of `$0.01`.
+- `bookVersion`, `revision`, and levels come from a single database statement snapshot, guaranteeing consistency.
+
+**Errors**
+
+| Error code | HTTP | When |
+|---|---|---|
+| `INVALID_INPUT` | 400 | `marketCountry` parameter missing or unsupported (anything other than `KR`, `US`) |
+| `STOCK_NOT_FOUND` | 404 | Symbol does not exist |
+| `ORDER_BOOK_UNAVAILABLE` | 503 | Feature disabled (`ORDERBOOK_ENABLED=false`), untradable stock (suspended, liquidation, off-universe), market closed or session expired, quote older than 15s, future quote, currency mismatch, or missing/incomplete active version |
+
+GET error responses do not include an order submission `retryPolicy`; clients re-query based on their normal polling interval.
 ---
 
 ## Trading
@@ -975,7 +1040,6 @@ LIMIT uses option B (buy at asks <= limit, sell at bids >= limit) and expires at
 | `POST /orders/market` (fractional) | open US fractional orders. Add `allowsFractional` to the detail response; change the input unit for US stocks only |
 | `GET /accounts/me/assets/history` | asset trend chart (daily snapshots) |
 | `GET /accounts/me/report` | investment-habit diagnosis |
-| `GET /stocks/{symbol}/orderbook` | order book |
 | WebSocket | realtime quote push (replaces polling) |
 
 Not built yet, but the URL design reserves the slots so nothing collides.

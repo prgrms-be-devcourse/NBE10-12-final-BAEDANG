@@ -1065,6 +1065,8 @@ class MarketOrderIntegrationTest {
         assertThatThrownBy(() -> ledgerService.recordSell(null, null, null, null)).isInstanceOf(IllegalTransactionStateException.class);
     }
 
+
+
     private Account activeAccount(Long userId) {
         return accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE).orElseThrow();
     }
