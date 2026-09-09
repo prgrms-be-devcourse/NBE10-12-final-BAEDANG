@@ -49,25 +49,26 @@ docker compose up -d
 PostgreSQL + TimescaleDB 가 빈 상태로 뜹니다.
 **PostgreSQL 을 따로 설치하지 않아도 됩니다.**
 
-스키마는 백엔드를 기동할 때 Flyway 가 만듭니다
-(`back/src/main/resources/db/migration/V1__init.sql`).
+스키마는 백엔드를 기동할 때 Flyway가
+`back/src/main/resources/db/migration/`의 V1, V2, V3… 파일을 순서대로 적용합니다.
 
-기동 후 스키마가 들어갔는지 확인:
+기동 후 적용 이력을 확인:
 
 ```bash
-docker exec -it trading-db psql -U trading -d trading -c "\dt"
+docker exec -it trading-db psql -U trading -d trading \
+  -c "SELECT installed_rank, version, description, success FROM flyway_schema_history ORDER BY installed_rank;"
 ```
 
-테이블 14개가 나오면 정상입니다.
+각 migration의 `success`가 `t`이면 정상입니다.
 
 | 명령                              | 동작                                      |
 | --------------------------------- | ----------------------------------------- |
 | `docker compose ps`               | 상태 확인                                 |
 | `docker compose logs -f postgres` | 로그                                      |
 | `docker compose down`             | 중지 (데이터 유지)                        |
-| `docker compose down -v`          | 중지 + 데이터 삭제 — **스키마 바꿨을 때** |
+| `docker compose down -v`          | 중지 + 데이터 삭제 — **폐기 가능한 로컬 DB 초기화에만 사용** |
 
-스키마를 수정했다면 `down -v` 후 다시 올려야 반영됩니다.
+Flyway가 관리하는 볼륨은 스키마가 바뀌어도 삭제하지 않습니다. 새 migration은 다음 백엔드 기동 때 자동 적용됩니다. Flyway 도입 전에 `schema.sql`로 만든 로컬 볼륨에는 `flyway_schema_history`가 없으므로, 데이터가 불필요하면 한 번만 `down -v` 후 다시 올리세요. 보존할 데이터가 있으면 볼륨을 삭제하지 말고 백업 후 baseline·migration 절차를 적용해야 합니다.
 
 ### 2. 백엔드
 

@@ -25,6 +25,17 @@ public class SchedulingConfig {
         return scheduler;
     }
 
+    /** 가상 호가 갱신·정리를 공용 배치와 분리하고 두 작업은 직렬화합니다. */
+    @Bean(name = "orderBookTaskScheduler")
+    public ThreadPoolTaskScheduler orderBookTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("orderbook-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
+
     /** 주문 만료는 시세 수집과 분리된 단일 스레드에서 실행합니다. 미완료 건은 재시작 후 복구합니다. */
     @Bean(name = "limitOrderTaskScheduler")
     public ThreadPoolTaskScheduler limitOrderTaskScheduler() {

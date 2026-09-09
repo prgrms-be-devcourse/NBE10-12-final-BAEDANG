@@ -135,6 +135,22 @@ trading:
   quote-poll-interval-seconds: ${QUOTE_POLL_INTERVAL_SECONDS:5}
   universe-size: ${QUOTE_UNIVERSE_SIZE:100}
 
+  # 전체 사용자 공유 가상 호가 정책 (V1)
+  orderbook:
+    enabled: ${ORDERBOOK_ENABLED:false}
+    policy-version: V1
+    refresh-interval: 3s
+    refresh-initial-delay: ${ORDERBOOK_REFRESH_INITIAL_DELAY:0s}
+    max-quote-age: 15s
+    kr-base-notional: 20000000
+    us-base-notional: 15000
+    min-quantity: 1
+    max-quantity: 1000000
+    noise-min-bps: 8000
+    noise-max-bps: 12000
+    closed-version-retention: 1m
+    retention-initial-delay: ${ORDERBOOK_RETENTION_INITIAL_DELAY:0s}
+
 auth:
   jwt:
     issuer: baedang
