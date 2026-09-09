@@ -100,7 +100,9 @@ public class TradeExecution {
         if (!matchesMarket) {
             throw new IllegalArgumentException("종목 시장과 체결 환율·USD 거래대금·SEC 비용이 일치하지 않습니다");
         }
-        return create(order, key, sequenceNo, quantity, price, rate, amounts, quoteAt, executedAt, bookLevelId);
+        // 유효기간은 원래 시각으로 검증하고, 저장 시에만 PostgreSQL 정밀도로 맞춥니다.
+        return create(order, key, sequenceNo, quantity, price, rate, amounts, quoteAt,
+                executedAt.truncatedTo(ChronoUnit.MICROS), bookLevelId);
     }
 
     private static TradeExecution create(TradeOrder order, UUID key, int sequenceNo, BigDecimal quantity,

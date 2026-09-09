@@ -116,6 +116,10 @@ public class Account {
 
     /** 시장가 매도 체결 금액을 예수금에 즉시 반영합니다. */
     public void creditMarketSell(BigDecimal amount) {
+        creditSell(amount);
+    }
+
+    private void creditSell(BigDecimal amount) {
         requirePositive(amount);
         this.cashBalance = this.cashBalance.add(amount);
     }
@@ -129,6 +133,22 @@ public class Account {
             throw new IllegalStateException("예수금을 동결할 수 없습니다");
         }
         lockedCash = lockedCash.add(amount);
+    }
+
+    /** 지정가 매수는 자유 예수금이 아닌 예약 자원으로 결제합니다. 주문별 한도는 서비스가 검증합니다. */
+    public void settleReservedBuy(BigDecimal amount) {
+        requirePositive(amount);
+        if (status != AccountStatus.ACTIVE || !isRepresentableAtScale(amount, 0)
+                || lockedCash.compareTo(amount) < 0 || cashBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException("동결 예수금으로 결제할 수 없습니다");
+        }
+        cashBalance = cashBalance.subtract(amount);
+        lockedCash = lockedCash.subtract(amount);
+    }
+
+    public void creditLimitSell(BigDecimal amount) {
+        if (status != AccountStatus.ACTIVE) throw new IllegalStateException("종료된 계좌에 입금할 수 없습니다");
+        creditSell(amount);
     }
 
     /** 동결 해제는 예수금 증가가 아닙니다. */
