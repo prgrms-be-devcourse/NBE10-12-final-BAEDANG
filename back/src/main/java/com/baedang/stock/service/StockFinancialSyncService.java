@@ -281,15 +281,15 @@ public class StockFinancialSyncService {
 
     public record GroupResult(GroupStatus status, boolean empty, ErrorCode errorCode) {
 
-        private static GroupResult fresh() {
+        public static GroupResult fresh() {
             return new GroupResult(GroupStatus.FRESH, false, null);
         }
 
-        private static GroupResult updated(boolean empty) {
+        public static GroupResult updated(boolean empty) {
             return new GroupResult(GroupStatus.UPDATED, empty, null);
         }
 
-        private static GroupResult failed(ErrorCode errorCode) {
+        public static GroupResult failed(ErrorCode errorCode) {
             return new GroupResult(GroupStatus.FAILED, false, errorCode);
         }
     }
