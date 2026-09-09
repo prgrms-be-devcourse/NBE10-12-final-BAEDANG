@@ -5,7 +5,11 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
+import java.util.ArrayDeque;
+import java.util.Queue;
+import java.util.concurrent.Executor;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -27,13 +31,19 @@ class StockFinancialCollectionSchedulerTest {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
     private final StockFinancialSyncService syncService = mock(StockFinancialSyncService.class);
+    private final Queue<Runnable> submittedTasks = new ArrayDeque<>();
+    private final Executor executor = submittedTasks::add;
     private final StockFinancialCollectionScheduler scheduler =
-            new StockFinancialCollectionScheduler(syncService);
+            new StockFinancialCollectionScheduler(syncService, executor);
 
     @Test
-    void weekly_trigger_delegates_to_sync_service_with_scheduled_trigger() {
+    void weekly_trigger_submits_to_executor_before_running_collection() {
         scheduler.scheduleWeeklyRefresh();
 
+        verifyNoInteractions(syncService);
+        assertThat(submittedTasks).hasSize(1);
+
+        submittedTasks.remove().run();
         verify(syncService).refreshRankedTargets(SyncTrigger.SCHEDULED);
     }
 
@@ -59,14 +69,16 @@ class StockFinancialCollectionSchedulerTest {
     void sync_service_failure_is_not_propagated_out_of_scheduler() {
         doThrow(new BusinessException(ErrorCode.KIS_API_ERROR, "배치 실패"))
                 .when(syncService).refreshRankedTargets(SyncTrigger.SCHEDULED);
+        scheduler.scheduleWeeklyRefresh();
 
-        assertThatCode(scheduler::scheduleWeeklyRefresh).doesNotThrowAnyException();
+        assertThatCode(submittedTasks.remove()::run).doesNotThrowAnyException();
     }
 
     @Test
     void disabled_kis_does_not_register_scheduler_bean() {
         new ApplicationContextRunner()
                 .withUserConfiguration(StockFinancialCollectionScheduler.class)
+                .withBean("stockFinancialTaskExecutor", Executor.class, () -> executor)
                 .withBean(StockFinancialSyncService.class, () -> syncService)
                 .withPropertyValues("kis.enabled=false")
                 .run(context -> assertThat(context).doesNotHaveBean(StockFinancialCollectionScheduler.class));
@@ -76,6 +88,7 @@ class StockFinancialCollectionSchedulerTest {
     void enabled_kis_registers_scheduler_bean() {
         new ApplicationContextRunner()
                 .withUserConfiguration(StockFinancialCollectionScheduler.class)
+                .withBean("stockFinancialTaskExecutor", Executor.class, () -> executor)
                 .withBean(StockFinancialSyncService.class, () -> syncService)
                 .withPropertyValues("kis.enabled=true")
                 .run(context -> assertThat(context).hasSingleBean(StockFinancialCollectionScheduler.class));
