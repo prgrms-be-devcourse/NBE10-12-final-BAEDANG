@@ -204,7 +204,7 @@ class LimitOrderLifecycleIntegrationTest {
         assertThat(quote.limitPrice()).isEqualTo("100.00");
         assertThat(quote.limitEstimate().grossAmount()).isEqualTo("140000");
         assertThat(quote.limitEstimate().netAmount()).isEqualTo("BUY".equals(side) ? "140014" : "139972");
-        assertThat(quote.executionPreview()).containsEntry("status", "UNSUPPORTED");
+        assertThat(quote.executionPreview().status()).isEqualTo(com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.NOT_APPLICABLE);
         if (expected == ErrorCode.MARKET_CLOSED) assertThat(quote.expiresAt()).isNull();
         assertNoOrderEffects();
         assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account))
@@ -677,7 +677,7 @@ class LimitOrderLifecycleIntegrationTest {
 
         var quote = service.quote(user, symbol, "KR", "BUY", "1", "1000", "KRW");
         assertThat(quote.acceptable()).isTrue();
-        assertThat(quote.executionPreview()).containsEntry("status", "UNSUPPORTED");
+        assertThat(quote.executionPreview().status()).isEqualTo(com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.UNAVAILABLE);
         assertThat(locked()).isZero();
 
         service.place(user, new LimitOrderRequest(account, UUID.randomUUID().toString(), symbol, "KR", "BUY", "1", "1000", "KRW"));
