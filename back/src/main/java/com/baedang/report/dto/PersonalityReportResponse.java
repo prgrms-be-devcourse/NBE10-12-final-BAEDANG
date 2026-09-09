@@ -5,6 +5,7 @@ import com.baedang.user.entity.Account;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
@@ -30,6 +31,8 @@ public record PersonalityReportResponse(
         String typeLabel,
         Shares shares,
         int holdingCount,
+        int holdingPeriodWeeks,
+        List<LongHeldStock> longHeldStocks,
         OffsetDateTime asOf
 ) {
 
@@ -42,6 +45,21 @@ public record PersonalityReportResponse(
     ) {
     }
 
+    /**
+     * N주 이상 보유한 종목 한 건의 성과. 등락률은 <b>내 보유 수익률</b>
+     * {@code (현재가 − 평단가)/평단가}(종목 통화 기준)이다. 시세가 없으면 {@code returnRate} 는 null.
+     */
+    public record LongHeldStock(
+            String symbol,
+            String name,
+            String currency,
+            String avgBuyPrice,
+            String lastPrice,
+            String returnRate,
+            OffsetDateTime heldSince
+    ) {
+    }
+
     public static PersonalityReportResponse of(
             Account account,
             BigDecimal stockValue,
@@ -49,6 +67,8 @@ public record PersonalityReportResponse(
             BigDecimal totalPnl,
             BigDecimal returnRate,
             InvestmentProfile profile,
+            int holdingPeriodWeeks,
+            List<LongHeldStock> longHeldStocks,
             OffsetDateTime asOf
     ) {
         return new PersonalityReportResponse(
@@ -69,6 +89,8 @@ public record PersonalityReportResponse(
                         plain(profile.individualShare()),
                         plain(profile.aggressiveShare())),
                 profile.holdingCount(),
+                holdingPeriodWeeks,
+                longHeldStocks,
                 asOf
         );
     }
