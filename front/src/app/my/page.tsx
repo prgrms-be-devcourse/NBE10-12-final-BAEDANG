@@ -315,8 +315,8 @@ export default function MyPage() {
         <PillTabs
           options={[
             { value: "holdings", label: "보유 종목" },
-            { value: "ledger", label: "체결 내역" },
             { value: "orders", label: "주문 내역" },
+            { value: "ledger", label: "체결 내역" },
           ]}
           value={tab}
           onChange={(v) => setTab(v as "holdings" | "ledger" | "orders")}
@@ -410,61 +410,8 @@ export default function MyPage() {
             </div>
           </>
         )
-      ) : tab === "ledger" ? (
-      ledger.length === 0 ? (
-        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
-          체결 내역이 없어요
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
-          <div
-            className="grid px-5 py-2.5 text-[12px] font-bold"
-            style={{
-              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
-              columnGap: "20px",
-              borderBottom: "1px solid var(--line2)",
-              color: "var(--mut2)",
-            }}
-          >
-            <span>구분</span>
-            <span>설명</span>
-            <span className="text-right">증감액</span>
-            <span className="text-right">잔액</span>
-            <span>발생시각</span>
-          </div>
-          {ledger.map((entry) => {
-            const amount = toDecimal(entry.amount);
-            const isPositive = !amount || amount.greaterThanOrEqualTo(0);
-            return (
-              <div
-                key={entry.entryId}
-                className="grid items-center px-5 py-3 text-[15px]"
-                style={{
-                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
-                  columnGap: "20px",
-                  borderBottom: "1px solid var(--line2)",
-                }}
-              >
-                <span>
-                  <LedgerBadge type={entry.entryType} />
-                </span>
-                <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
-                <span
-                  className="text-right tabular-nums font-semibold"
-                  style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
-                >
-                  {formatSigned(entry.amount)}
-                </span>
-                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
-                  {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )
-      ) : orders.length === 0 ? (
+      ) : tab === "orders" ? (
+      orders.length === 0 ? (
         <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
           주문 내역이 없어요
         </div>
@@ -551,6 +498,59 @@ export default function MyPage() {
             </button>
           )}
         </>
+      )
+      ) : ledger.length === 0 ? (
+        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+          체결 내역이 없어요
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+          <div
+            className="grid px-5 py-2.5 text-[12px] font-bold"
+            style={{
+              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              columnGap: "20px",
+              borderBottom: "1px solid var(--line2)",
+              color: "var(--mut2)",
+            }}
+          >
+            <span>구분</span>
+            <span>설명</span>
+            <span className="text-right">증감액</span>
+            <span className="text-right">잔액</span>
+            <span>발생시각</span>
+          </div>
+          {ledger.map((entry) => {
+            const amount = toDecimal(entry.amount);
+            const isPositive = !amount || amount.greaterThanOrEqualTo(0);
+            return (
+              <div
+                key={entry.entryId}
+                className="grid items-center px-5 py-3 text-[15px]"
+                style={{
+                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                  columnGap: "20px",
+                  borderBottom: "1px solid var(--line2)",
+                }}
+              >
+                <span>
+                  <LedgerBadge type={entry.entryType} />
+                </span>
+                <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                <span
+                  className="text-right tabular-nums font-semibold"
+                  style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
+                >
+                  {formatSigned(entry.amount)}
+                </span>
+                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
+                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                  {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              </div>
+            );
+          })}
+        </div>
       )}
       </Reveal>
 
