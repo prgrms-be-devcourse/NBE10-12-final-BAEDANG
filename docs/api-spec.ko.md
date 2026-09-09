@@ -570,6 +570,71 @@ minute_candle 에 60초 이내 데이터가 있나?
 **한 번에 받을 수 있는 봉은 200개.** 국내 정규장 09:00~15:30 은 330분이라 하루치를 다 받으려면 `before` 로 2회 호출해야 합니다. **1주차 차트를 "최근 200분"으로 잡으면 1콜로 끝납니다** — 기본은 1콜로 두고 전체 보기를 누를 때만 2콜을 쓰는 편이 단순합니다.
 **실측 필요** — `before` 가 inclusive 인지, 마감 동시호가 봉(15:30)이 존재하는지. 15:30 봉이 없으면 330개가 아니라 329개입니다. 경계 봉이 중복돼도 `PRIMARY KEY (stock_id, candle_at)` 라 `ON CONFLICT DO NOTHING` 이 걸러줍니다.
 
+
+### `GET /stocks/{symbol}/orderbook?marketCountry={KR|US}`
+현재가 기반 가상 호가·가상 잔량 조회
+
+모든 사용자가 동일한 가상 호가 스냅샷을 공유하며, 단일 요청으로 매도(ASK) 10개와 매수(BID)를 반환합니다. 국내 종목의 BID는 10개이고, 미국 종목은 가격이 허용하는 1~10개일 수 있습니다. 조회 요청은 호가를 새로 생성하지 않으며 DB에 저장된 활성 버전을 기준으로 단일 SQL 스냅샷으로 조회합니다.
+
+| 항목 | 필수 | 설명 |
+|---|---|---|
+| `symbol` (경로 파라미터) | O | 종목 심볼 (예: `005930`, `NVDA`) |
+| `marketCountry` (쿼리 파라미터) | O | 시장 국가 (`KR` / `US`, 대소문자 무관). 누락 또는 미지원 시 400 |
+| 없음 | - | `depth`, `page`, `cursor` 파라미터는 받지 않으며, 서버는 ASK 10개와 시장별 가능한 BID 전부를 반환합니다 (KR: 10개, US: 1~10개) |
+
+**Response 200** — `basePrice`와 레벨 `price`는 통화별 문자열입니다. KRW는 소수점 없는 원 단위, USD는 정확히 소수점 둘째 자리까지 표현합니다. 레벨 `quantity`는 `FinancialDecimalFormatter.plain()` 규칙의 문자열입니다. `initialQuantity`는 내부 감사용이며 공개 API에는 노출하지 않습니다.
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "bookVersion": 1042,
+  "revision": 3,
+  "basePrice": "72000",
+  "currency": "KRW",
+  "quoteAt": "2026-09-03T01:15:30Z",
+  "generatedAt": "2026-09-03T01:15:33Z",
+  "virtual": true,
+  "description": "현재가 기반 가상 호가·가상 잔량",
+  "asks": [
+    { "level": 1, "price": "72100", "quantity": "1500" },
+    { "level": 2, "price": "72200", "quantity": "1440" },
+    { "level": 3, "price": "72300", "quantity": "1380" },
+    { "level": 4, "price": "72400", "quantity": "1290" },
+    { "level": 5, "price": "72500", "quantity": "1200" },
+    { "level": 6, "price": "72600", "quantity": "1080" },
+    { "level": 7, "price": "72700", "quantity": "960" },
+    { "level": 8, "price": "72800", "quantity": "840" },
+    { "level": 9, "price": "72900", "quantity": "720" },
+    { "level": 10, "price": "73000", "quantity": "600" }
+  ],
+  "bids": [
+    { "level": 1, "price": "71900", "quantity": "1800" },
+    { "level": 2, "price": "71800", "quantity": "1720" },
+    { "level": 3, "price": "71700", "quantity": "1650" },
+    { "level": 4, "price": "71600", "quantity": "1550" },
+    { "level": 5, "price": "71500", "quantity": "1440" },
+    { "level": 6, "price": "71400", "quantity": "1300" },
+    { "level": 7, "price": "71300", "quantity": "1150" },
+    { "level": 8, "price": "71200", "quantity": "1000" },
+    { "level": 9, "price": "71100", "quantity": "860" },
+    { "level": 10, "price": "71000", "quantity": "720" }
+  ]
+}
+```
+
+- `asks`는 매도 호가(최우선 매도 ASK 1부터 가격 오름차순 10개 레벨).
+- `bids`는 매수 호가(최우선 매수 BID 1부터 가격 내림차순). 국내는 10개, 미국은 1~10개이며 저가 종목에서는 가능한 깊이까지만 반환합니다. 미국 BID가 10개 미만이면 마지막 레벨은 최저 유효 가격인 `$0.01`입니다.
+- 응답의 `bookVersion`, `revision`, 레벨들은 단일 DB statement 스냅샷으로 일관성이 보장됩니다.
+
+**Errors**
+
+| 에러 코드 | HTTP | 발생 상황 |
+|---|---|---|
+| `INVALID_INPUT` | 400 | `marketCountry` 파라미터 누락 또는 미지원 (`KR`, `US` 외) |
+| `STOCK_NOT_FOUND` | 404 | 존재하지 않는 종목 심볼 |
+| `ORDER_BOOK_UNAVAILABLE` | 503 | 기능 비활성(`ORDERBOOK_ENABLED=false`), 거래 불가 종목(정지·정리매매·유니버스 이탈), 장 마감/세션 만료, 15초 초과 지연 시세, 미래 시세, 통화 불일치, 활성 버전 없음/불완전 |
+
+GET 에러 응답은 주문 접수용 `retryPolicy`를 반환하지 않으며, 클라이언트는 일반 폴링 주기에 따라 재조회합니다.
 ---
 
 ## 거래
@@ -974,7 +1039,6 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | `POST /orders/market` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
-| `GET /stocks/{symbol}/orderbook` | 호가 |
 | WebSocket | 실시간 시세 push (폴링 대체) |
 
 **지금 만들지는 않지만 URL 설계가 충돌하지 않게 미리 자리를 잡아둔 것입니다.**

@@ -43,8 +43,11 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | stock → daily_candle | 1:N |
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | data flow (`close_price` → `prev_close`) |
+| stock → order_book_version | 1:N (max 1 active per stock: is_active=true) |
+| order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
+| trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
 
-### Table Map (12)
+### Table Map (15)
 
 | Group | Table | Note |
 |---|---|---|
@@ -60,6 +63,8 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `daily_candle` | daily candles · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | minute time-series · top-100 scheduler + off-universe on-demand |
 | | `exchange_rate` | FX history · regular table · no FK relations |
+| **Synthetic Order Book** | `order_book_version` | synthetic order book set header refreshed every 3s based on current price |
+| | `order_book_level` | Up to 20 levels per version (10 ASK / 10 KR BID / 1–10 US BID) with prices and quantities |
 
 ### MVP Behavior Matrix (confirmed)
 
@@ -278,7 +283,7 @@ FX uses NUMERIC(19,6), based on the project premise that Toss supplies at most s
 
 LIMIT cumulative settlement is unchanged. Reconstruct US raw cumulative tax as `SUM(sec_fee_usd × exchange_rate)`, round the total to whole won with `HALF_UP`, then subtract the previous `SUM(tax_krw)` to obtain this fill's tax. Do not reconvert earlier SEC fee deltas at a new rate or charge the minimum independently for each fill. KR cumulative tax uses cumulative KRW gross and the project-fixed tax rate. No separate raw-tax or cumulative-USD cache columns are stored.
 
-Each execution consumes exactly one book level. Multiple executions may consume the same `book_level_id`, so it is not unique; protect shared liquidity debits within the execution transaction. A level's price/version identity is immutable and IDs must not be reused. Execution `price` is the actual fill-price snapshot. There is currently no book table or FK on `book_level_id`; integrating book storage must include both its FK and retention of referenced levels.
+Each execution consumes exactly one book level. Multiple executions may record the same `book_level_id`, so it is not unique; protect shared liquidity debits within the execution transaction. Execution `price` is the permanently retained actual fill-price snapshot. `book_level_id` is a non-FK trace value identifying the level at consumption time; after closed-version retention, the original level is no longer queryable.
 
 When creating a LIMIT fill, pass the order stock's market to `TradeExecution.limit(order, marketCountry, ...)`. KR requires FX 1, USD gross 0 and SEC fee 0; US requires a cent-representable execution price and USD gross equal to `price × quantity`. Trailing zeros are allowed; the entity does not round the price. The market is a validation input only, not another execution column.
 
@@ -430,6 +435,43 @@ Toss calls 삼성전자 `005930`; future sources may use another identifier such
 | `stock_id` + `source` | composite PK | `source` is `TOSS` in the MVP; `DART` / `FINNHUB` are reserved for future integrations. |
 | `external_id` | VARCHAR(50) | the identifier used by that source. Unique on `(source, external_id)` to **prevent one external id mapping to two stocks**. |
 
+
+#### `order_book_version` — synthetic order book version
+Header of the shared synthetic order book set generated from the current price (`quote_snapshot`). A new supply set is published every 3 seconds; each stock has at most one active version (`is_active = true`).
+
+| Column | Type | Description |
+|---|---|---|
+| `book_version_id` | BIGINT PK | Synthetic order book set unique identifier; increments on each publication. |
+| `stock_id` | BIGINT FK | Stock ID referencing `stock(stock_id)`. Partial unique index (`WHERE is_active = true`) enforces at most 1 active version per stock. |
+| `base_price` | NUMERIC(19,4) | Current price used as generation baseline (positive). |
+| `currency` | VARCHAR(3) | Currency (`KRW` / `USD`). |
+| `quote_at` | TIMESTAMPTZ | Exchange timestamp of the baseline quote; preserved verbatim without being overwritten. |
+| `generated_at` | TIMESTAMPTZ | Time the order book version was generated. |
+| `policy_version` | VARCHAR(20) | Order book generation policy version (`V1`). |
+| `seed` | BIGINT | Random seed used for deterministic quantity noise reproduction. |
+| `revision` | BIGINT | Count of committed quantity-mutation transactions (default 0); incremented by 1 per #122 execution transaction. |
+| `is_active` | BOOLEAN | Whether this version is currently active for querying and matching (default true). |
+| `closed_at` | TIMESTAMPTZ | Timestamp when closed upon new publication or market close. |
+
+#### `order_book_level` — synthetic order book level
+Up to 20 rows are generated per version: 10 ASK rows and 1–10 BID rows (KR always has 10 BID rows). The composite unique constraint `(book_version_id, side, level_depth)` is enforced.
+
+| Column | Type | Description |
+|---|---|---|
+| `level_id` | BIGINT PK | Unique level identifier; referenced by `trade_execution.book_level_id`. |
+| `book_version_id` | BIGINT FK | Version ID referencing `order_book_version(book_version_id)` (`ON DELETE CASCADE`). |
+| `side` | VARCHAR(4) | Side (`BID` / `ASK`). |
+| `level_depth` | INT | Level depth (1 to 10). |
+| `price` | NUMERIC(19,4) | Level price (positive). |
+| `initial_quantity` | NUMERIC(19,6) | Initial supplied quantity (audit baseline, positive). V1 supplied quantities are whole integer shares. |
+| `remaining_quantity` | NUMERIC(19,6) | Currently consumable remaining quantity (`0 <= remaining_quantity <= initial_quantity`). |
+
+### Synthetic Order Book Retention and Cleanup Policy (Confirmed)
+
+- **Active versions preserved**: Active versions (`is_active = true`) are not deleted.
+- **Closed versions cleaned up**: Closed versions older than one minute are deleted regardless of consumption or execution references.
+- **Level cascade cleanup**: Deleting a closed version removes its up to 20 levels via `ON DELETE CASCADE`.
+- **Executions preserved**: Execution price, quantity, FX, and settlement amounts remain permanent; `book_level_id` remains a non-FK trace value captured at consumption time.
 ---
 
 ## Stock Classification Model
@@ -506,8 +548,6 @@ Limit orders use two phases: Phase 1 commits PENDING/reservations; a worker repe
 
 > 🧪 **Good verification tests** — after every trade, check `buy: net_amount = gross_amount + fee` and `sell: net_amount = gross_amount − fee − tax` always hold, and the cumulative sum of `ledger_entry.amount` (fee included) equals `account.cash_balance`. The surest proof you understand the ledger.
 
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` and `db/migration/V2__limit_order_lifecycle.sql`
-
 ## LIMIT acceptance evidence (#120)
 
 Order history uses `ix_order_history (account_id, order_id DESC)` to match its account-scoped order-ID cursor (applied via `db/migration/V2__limit_order_lifecycle.sql`).
@@ -520,3 +560,6 @@ Three immutable acceptance columns are added to trade_order:
 All three are NULL for MARKET and required for LIMIT. limit_price remains the fixed stock-currency price (USD for US); US KRW input is divided by acceptance FX and rounded to cents HALF_UP. Original inputs, not converted prices, are the idempotency comparison basis. No initial_reserved_cash column is added. Initial reserve comes from original input; reserved_cash continues to represent only current remainder.
 
 Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. Existing active-order and expiry indexes are reused. No legacy row corrections or migrations are included.
+
+---
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, and `V3__order_book.sql`
