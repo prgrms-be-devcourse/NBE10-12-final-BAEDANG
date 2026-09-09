@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Objects;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.baedang.global.clients.kis.KisProperties;
 import com.baedang.global.error.BusinessException;
@@ -73,7 +72,6 @@ public class StockFinancialQueryService {
         this.clock = Objects.requireNonNull(clock, "clock");
     }
 
-    @Transactional(readOnly = true)
     public StockFinancialResponse getFinancials(String symbol, String marketCountryStr) {
         if (symbol == null || symbol.isBlank() || marketCountryStr == null || marketCountryStr.isBlank()) {
             throw new BusinessException(ErrorCode.INVALID_INPUT);
