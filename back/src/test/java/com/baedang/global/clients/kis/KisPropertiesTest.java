@@ -152,4 +152,20 @@ class KisPropertiesTest {
                     assertThat(properties.loadFinancials()).isTrue();
                 });
     }
+
+    @Test
+    void kis_components_use_named_rest_client_when_another_client_exists() {
+        withDefaults(
+                "kis.enabled=true",
+                "kis.app-key=app-key",
+                "kis.app-secret=app-secret")
+                .withBean("otherRestClient", RestClient.class,
+                        () -> RestClient.create("https://other.test"))
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasBean("kisRestClient");
+                    assertThat(context).hasSingleBean(KisTokenProvider.class);
+                    assertThat(context).hasSingleBean(KisSecuritiesClient.class);
+                });
+    }
 }

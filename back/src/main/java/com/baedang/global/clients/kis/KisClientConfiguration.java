@@ -3,6 +3,7 @@ package com.baedang.global.clients.kis;
 import java.time.Clock;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -45,7 +46,7 @@ public class KisClientConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
     KisTokenProvider kisTokenProvider(
-            RestClient restClient,
+            @Qualifier("kisRestClient") RestClient restClient,
             KisProperties properties,
             Clock clock,
             ObjectProvider<MeterRegistry> meterRegistryProvider
@@ -57,7 +58,7 @@ public class KisClientConfiguration {
     @Bean
     @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
     KisSecuritiesClient kisSecuritiesClient(
-            RestClient restClient,
+            @Qualifier("kisRestClient") RestClient restClient,
             KisProperties properties,
             KisRateLimiter rateLimiter,
             KisTokenProvider tokenProvider,
