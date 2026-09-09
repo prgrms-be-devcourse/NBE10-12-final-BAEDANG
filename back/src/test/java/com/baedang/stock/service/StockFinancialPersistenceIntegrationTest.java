@@ -246,6 +246,39 @@ class StockFinancialPersistenceIntegrationTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test
+    void findKisFinancialCollectionTargets_returns_only_ranked_KR_non_etf_etn_stocks() {
+        Stock krRanked1 = stockRepository.save(Stock.create(
+                "005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true));
+        krRanked1.applyRanking(1, new BigDecimal("1000000"));
+
+        Stock krRanked2 = stockRepository.save(Stock.create(
+                "000660", MarketCountry.KR, "KOSPI", "SK하이닉스", null, "KRW", "STOCK", true));
+        krRanked2.applyRanking(2, new BigDecimal("900000"));
+
+        Stock krUnranked = stockRepository.save(Stock.create(
+                "035420", MarketCountry.KR, "KOSPI", "NAVER", null, "KRW", "STOCK", true));
+
+        Stock krEtf = stockRepository.save(Stock.create(
+                "069500", MarketCountry.KR, "KOSPI", "KODEX 200", null, "KRW", "ETF", true));
+        krEtf.applyRanking(3, new BigDecimal("800000"));
+
+        Stock krEtn = stockRepository.save(Stock.create(
+                "500001", MarketCountry.KR, "KOSPI", "신한 코스피 ETN", null, "KRW", "ETN", true));
+        krEtn.applyRanking(4, new BigDecimal("700000"));
+
+        Stock usRanked = stockRepository.save(Stock.create(
+                "AAPL", MarketCountry.US, "NASDAQ", "Apple", null, "USD", "STOCK", true));
+        usRanked.applyRanking(1, new BigDecimal("5000000"));
+
+        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets();
+
+        assertThat(targets)
+                .extracting(Stock::getSymbol)
+                .contains(krRanked1.getSymbol(), krRanked2.getSymbol())
+                .doesNotContain(krUnranked.getSymbol(), krEtf.getSymbol(), krEtn.getSymbol(), usRanked.getSymbol());
+    }
+
     private static IndustryData industry(String code) {
         IndustryClassification classification = new IndustryClassification(code, "산업");
         return new IndustryData(classification, classification, classification, classification);

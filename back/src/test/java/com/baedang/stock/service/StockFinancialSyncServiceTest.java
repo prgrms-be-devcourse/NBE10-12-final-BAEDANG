@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -50,6 +51,8 @@ import com.baedang.stock.port.StockFinancialInfoPort.IndustryClassification;
 import com.baedang.stock.port.StockFinancialInfoPort.IndustryData;
 import com.baedang.stock.port.StockFinancialInfoPort.PeriodData;
 import com.baedang.stock.repository.StockFinancialSyncRepository;
+import com.baedang.stock.repository.StockRepository;
+import com.baedang.stock.service.StockFinancialSyncService.BatchSummary;
 import com.baedang.stock.service.StockFinancialSyncService.GroupStatus;
 import com.baedang.stock.service.StockFinancialSyncService.SyncResult;
 import com.baedang.stock.service.StockFinancialSyncService.SyncTrigger;
@@ -65,6 +68,7 @@ class StockFinancialSyncServiceTest {
 
     @Mock StockFinancialInfoPort port;
     @Mock StockFinancialSyncRepository syncRepository;
+    @Mock StockRepository stockRepository;
     @Mock StockFinancialPersistenceService persistenceService;
     @Mock Stock stock;
 
@@ -317,8 +321,93 @@ class StockFinancialSyncServiceTest {
         verify(port, times(2)).fetchFinancials(SYMBOL, FinancialPeriodType.ANNUAL);
     }
 
+    @Test
+    void refreshRankedTargets_processes_all_targets_in_order_and_records_batch_metrics() {
+        Stock first = mock(Stock.class);
+        Stock second = mock(Stock.class);
+        Stock third = mock(Stock.class);
+
+        lenient().when(first.getStockId()).thenReturn(101L);
+        lenient().when(first.getSymbol()).thenReturn("005930");
+        lenient().when(first.getMarketCountry()).thenReturn(MarketCountry.KR);
+        lenient().when(first.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
+
+        lenient().when(second.getStockId()).thenReturn(102L);
+        lenient().when(second.getSymbol()).thenReturn("000660");
+        lenient().when(second.getMarketCountry()).thenReturn(MarketCountry.KR);
+        lenient().when(second.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
+
+        lenient().when(third.getStockId()).thenReturn(103L);
+        lenient().when(third.getSymbol()).thenReturn("035420");
+        lenient().when(third.getMarketCountry()).thenReturn(MarketCountry.KR);
+        lenient().when(third.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
+
+        when(stockRepository.findKisFinancialCollectionTargets())
+                .thenReturn(List.of(first, second, third));
+
+        when(syncRepository.findById(101L)).thenReturn(Optional.of(sync(NOW, NOW, NOW)));
+        when(port.fetchFinancials("005930", FinancialPeriodType.ANNUAL))
+                .thenReturn(List.of(period("202512")));
+        when(port.fetchFinancials("005930", FinancialPeriodType.QUARTERLY))
+                .thenReturn(List.of(period("202509")));
+
+        when(syncRepository.findById(102L)).thenReturn(Optional.of(sync(NOW, NOW, NOW)));
+        when(port.fetchFinancials("000660", FinancialPeriodType.ANNUAL)).thenReturn(List.of());
+        when(port.fetchFinancials("000660", FinancialPeriodType.QUARTERLY)).thenReturn(List.of());
+
+        when(syncRepository.findById(103L)).thenReturn(Optional.of(sync(NOW, NOW, NOW)));
+        when(port.fetchFinancials("035420", FinancialPeriodType.ANNUAL))
+                .thenThrow(new BusinessException(ErrorCode.KIS_RATE_LIMITED));
+        when(port.fetchFinancials("035420", FinancialPeriodType.QUARTERLY))
+                .thenReturn(List.of(period("202509")));
+
+        BatchSummary summary = service.refreshRankedTargets(SyncTrigger.SCHEDULED);
+
+        assertThat(summary.totalTargets()).isEqualTo(3);
+        assertThat(summary.successCount()).isEqualTo(1);
+        assertThat(summary.emptyCount()).isEqualTo(1);
+        assertThat(summary.failureCount()).isEqualTo(1);
+        assertThat(summary.skippedCount()).isEqualTo(0);
+        assertThat(meterRegistry.get("kis.financial.batch.duration").timer().count()).isEqualTo(1);
+    }
+
+    @Test
+    void refreshRankedTargets_continues_processing_when_a_target_throws_unexpected_exception() {
+        Stock failing = mock(Stock.class);
+        Stock successful = mock(Stock.class);
+
+        lenient().when(failing.getStockId()).thenReturn(201L);
+        lenient().when(failing.getSymbol()).thenReturn("005930");
+        lenient().when(failing.getMarketCountry()).thenReturn(MarketCountry.KR);
+        lenient().when(failing.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
+
+        lenient().when(successful.getStockId()).thenReturn(202L);
+        lenient().when(successful.getSymbol()).thenReturn("000660");
+        lenient().when(successful.getMarketCountry()).thenReturn(MarketCountry.KR);
+        lenient().when(successful.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
+
+        when(stockRepository.findKisFinancialCollectionTargets())
+                .thenReturn(List.of(failing, successful));
+
+        when(syncRepository.findById(201L)).thenThrow(new IllegalStateException("db connectivity issue"));
+
+        when(syncRepository.findById(202L)).thenReturn(Optional.of(sync(NOW, NOW, NOW)));
+        when(port.fetchFinancials("000660", FinancialPeriodType.ANNUAL))
+                .thenReturn(List.of(period("202512")));
+        when(port.fetchFinancials("000660", FinancialPeriodType.QUARTERLY))
+                .thenReturn(List.of(period("202509")));
+
+        BatchSummary summary = service.refreshRankedTargets(SyncTrigger.SCHEDULED);
+
+        assertThat(summary.totalTargets()).isEqualTo(2);
+        assertThat(summary.successCount()).isEqualTo(1);
+        assertThat(summary.failureCount()).isEqualTo(1);
+        verify(port).fetchFinancials("000660", FinancialPeriodType.ANNUAL);
+    }
+
     private StockFinancialSyncService service(Optional<StockFinancialInfoPort> optionalPort) {
         return new StockFinancialSyncService(
+                stockRepository,
                 optionalPort,
                 syncRepository,
                 persistenceService,

@@ -27,6 +27,8 @@ import com.baedang.stock.port.StockFinancialInfoPort;
 import com.baedang.stock.port.StockFinancialInfoPort.IndustryData;
 import com.baedang.stock.port.StockFinancialInfoPort.PeriodData;
 import com.baedang.stock.repository.StockFinancialSyncRepository;
+import com.baedang.stock.repository.StockRepository;
+import io.micrometer.core.instrument.Timer;
 
 import io.micrometer.core.instrument.MeterRegistry;
 
@@ -35,6 +37,7 @@ public class StockFinancialSyncService {
 
     private static final Logger log = LoggerFactory.getLogger(StockFinancialSyncService.class);
 
+    private final StockRepository stockRepository;
     private final Optional<StockFinancialInfoPort> port;
     private final StockFinancialSyncRepository syncRepository;
     private final StockFinancialPersistenceService persistenceService;
@@ -42,10 +45,12 @@ public class StockFinancialSyncService {
     private final Duration industryTtl;
     private final Clock clock;
     private final MeterRegistry meterRegistry;
+    private final Timer batchDurationTimer;
     private final ConcurrentHashMap<Long, CompletableFuture<SyncResult>> inFlight =
             new ConcurrentHashMap<>();
 
     public StockFinancialSyncService(
+            StockRepository stockRepository,
             Optional<StockFinancialInfoPort> port,
             StockFinancialSyncRepository syncRepository,
             StockFinancialPersistenceService persistenceService,
@@ -53,6 +58,7 @@ public class StockFinancialSyncService {
             Clock clock,
             MeterRegistry meterRegistry
     ) {
+        this.stockRepository = Objects.requireNonNull(stockRepository, "stockRepository");
         this.port = Objects.requireNonNull(port, "port");
         this.syncRepository = Objects.requireNonNull(syncRepository, "syncRepository");
         this.persistenceService = Objects.requireNonNull(persistenceService, "persistenceService");
@@ -60,6 +66,9 @@ public class StockFinancialSyncService {
         this.industryTtl = properties.industryCacheTtl();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.meterRegistry = Objects.requireNonNull(meterRegistry, "meterRegistry");
+        this.batchDurationTimer = Timer.builder("kis.financial.batch.duration")
+                .description("KIS 재무정보 배치 소요시간")
+                .register(meterRegistry);
     }
 
     public SyncResult ensureFresh(Stock stock, SyncTrigger trigger) {
@@ -68,6 +77,48 @@ public class StockFinancialSyncService {
 
     public SyncResult refresh(Stock stock, SyncTrigger trigger) {
         return execute(stock, trigger, true);
+    }
+
+    public BatchSummary refreshRankedTargets(SyncTrigger trigger) {
+        Objects.requireNonNull(trigger, "trigger");
+        long startedNanos = System.nanoTime();
+        List<Stock> targets = stockRepository.findKisFinancialCollectionTargets();
+        int total = targets.size();
+        int success = 0;
+        int empty = 0;
+        int failure = 0;
+        int skipped = 0;
+
+        for (Stock stock : targets) {
+            try {
+                SyncResult result = refresh(stock, trigger);
+                if (result.stale()) {
+                    failure++;
+                } else if (result.empty()) {
+                    empty++;
+                } else {
+                    success++;
+                }
+            } catch (BusinessException exception) {
+                if (exception.getErrorCode() == ErrorCode.FINANCIALS_NOT_SUPPORTED) {
+                    skipped++;
+                } else {
+                    failure++;
+                }
+                log.warn("KIS batch target failed stockId={} symbol={} errorCode={}",
+                        stock.getStockId(), stock.getSymbol(), exception.getErrorCode());
+            } catch (Exception exception) {
+                failure++;
+                log.warn("KIS batch target unexpected error stockId={} symbol={}",
+                        stock.getStockId(), stock.getSymbol(), exception);
+            }
+        }
+
+        Duration duration = Duration.ofNanos(System.nanoTime() - startedNanos);
+        batchDurationTimer.record(duration);
+        log.info("KIS financial batch completed trigger={} targets={} success={} empty={} failure={} skipped={} durationMs={}",
+                trigger, total, success, empty, failure, skipped, duration.toMillis());
+        return new BatchSummary(total, success, empty, failure, skipped, duration);
     }
 
     private SyncResult execute(Stock stock, SyncTrigger trigger, boolean forceFinancials) {
@@ -264,5 +315,15 @@ public class StockFinancialSyncService {
             }
             return updated;
         }
+    }
+
+    public record BatchSummary(
+            int totalTargets,
+            int successCount,
+            int emptyCount,
+            int failureCount,
+            int skippedCount,
+            Duration duration
+    ) {
     }
 }

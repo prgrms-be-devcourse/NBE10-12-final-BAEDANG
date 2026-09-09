@@ -103,4 +103,15 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
     List<Stock> findByMarketCountryAndSymbolIn(MarketCountry marketCountry, Collection<String> symbols);
 
     Page<Stock> findAllByOrderByStockIdAsc(Pageable pageable);
+
+    @Query("""
+            select s from Stock s
+            where s.marketCountry = com.baedang.stock.entity.MarketCountry.KR
+              and s.isRanked = true
+              and s.stockCategory not in (
+                  com.baedang.stock.entity.StockCategory.ETF,
+                  com.baedang.stock.entity.StockCategory.ETN)
+            order by s.stockId asc
+            """)
+    List<Stock> findKisFinancialCollectionTargets();
 }
