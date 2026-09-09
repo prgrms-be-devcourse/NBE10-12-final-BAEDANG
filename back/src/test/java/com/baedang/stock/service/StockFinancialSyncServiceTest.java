@@ -37,6 +37,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import com.baedang.global.clients.kis.KisProperties;
 import com.baedang.global.error.BusinessException;
@@ -59,7 +61,7 @@ import com.baedang.stock.service.StockFinancialSyncService.SyncTrigger;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class StockFinancialSyncServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-09-09T00:00:00Z");
@@ -192,6 +194,25 @@ class StockFinancialSyncServiceTest {
         verify(persistenceService).saveFinancials(
                 STOCK_ID, FinancialPeriodType.QUARTERLY, List.of(period("202509")), NOW);
         assertThat(counter("on_demand", "error")).isEqualTo(1);
+    }
+
+    @Test
+    void provider_failure_log_includes_stock_and_safe_endpoint_context(CapturedOutput output) {
+        String providerContext = "endpoint=BALANCE_SHEET trId=FHKST66430100 msgCd=ERR001";
+        when(syncRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
+        when(port.fetchIndustry(SYMBOL)).thenReturn(industry());
+        when(port.fetchFinancials(SYMBOL, FinancialPeriodType.ANNUAL))
+                .thenThrow(new BusinessException(ErrorCode.KIS_API_ERROR, providerContext));
+        when(port.fetchFinancials(SYMBOL, FinancialPeriodType.QUARTERLY))
+                .thenReturn(List.of(period("202509")));
+
+        service.ensureFresh(stock, SyncTrigger.ON_DEMAND);
+
+        assertThat(output)
+                .contains("stockId=10")
+                .contains("symbol=005930")
+                .contains("group=annual")
+                .contains(providerContext);
     }
 
     @Test

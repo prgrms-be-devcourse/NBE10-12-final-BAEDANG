@@ -3,6 +3,8 @@ package com.baedang.global.clients.kis;
 import java.util.Map;
 import java.util.EnumMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -19,6 +21,8 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 
 public class KisSecuritiesClient {
+
+    private static final Logger log = LoggerFactory.getLogger(KisSecuritiesClient.class);
 
     private static final long RATE_LIMIT_RETRY_MILLIS = 1_000L;
 
@@ -73,7 +77,7 @@ public class KisSecuritiesClient {
         while (true) {
             try {
                 JsonNode body = request(endpoint, queryParams, requestToken);
-                validate(body);
+                validate(endpoint, body);
                 T response = objectMapper.treeToValue(body, responseType);
                 record(endpoint, RequestResult.SUCCESS);
                 return response;
@@ -81,14 +85,15 @@ public class KisSecuritiesClient {
                      | HttpClientErrorException.Forbidden exception) {
                 record(endpoint, RequestResult.ERROR);
                 if (authenticationRetried) {
-                    throw new BusinessException(ErrorCode.KIS_API_ERROR);
+                    throw failure(ErrorCode.KIS_API_ERROR, endpoint,
+                            "HTTP_" + exception.getStatusCode().value());
                 }
                 authenticationRetried = true;
                 requestToken = tokenProvider.refreshIfStillStale(requestToken);
             } catch (HttpClientErrorException.TooManyRequests exception) {
                 record(endpoint, RequestResult.RATE_LIMITED);
                 if (rateLimitRetried) {
-                    throw new BusinessException(ErrorCode.KIS_RATE_LIMITED);
+                    throw failure(ErrorCode.KIS_RATE_LIMITED, endpoint, "HTTP_429");
                 }
                 rateLimitRetried = true;
                 sleepBeforeRetry();
@@ -104,10 +109,10 @@ public class KisSecuritiesClient {
                 sleepBeforeRetry();
             } catch (JsonProcessingException exception) {
                 record(endpoint, RequestResult.ERROR);
-                throw new BusinessException(ErrorCode.KIS_API_ERROR);
+                throw failure(ErrorCode.KIS_API_ERROR, endpoint, "INVALID_RESPONSE");
             } catch (RestClientException exception) {
                 record(endpoint, RequestResult.ERROR);
-                throw new BusinessException(ErrorCode.KIS_API_ERROR);
+                throw failure(ErrorCode.KIS_API_ERROR, endpoint, "TRANSPORT_ERROR");
             }
         }
     }
@@ -131,17 +136,36 @@ public class KisSecuritiesClient {
                 .body(JsonNode.class);
     }
 
-    private void validate(JsonNode body) throws JsonProcessingException {
+    private void validate(KisWhitelist endpoint, JsonNode body) throws JsonProcessingException {
         if (body == null) {
-            throw new BusinessException(ErrorCode.KIS_API_ERROR);
+            throw failure(ErrorCode.KIS_API_ERROR, endpoint, "EMPTY_RESPONSE");
         }
         KisApiResponse response = objectMapper.treeToValue(body, KisApiResponse.class);
         if ("EGW00201".equals(response.msgCd())) {
-            throw new BusinessException(ErrorCode.KIS_RATE_LIMITED);
+            throw failure(ErrorCode.KIS_RATE_LIMITED, endpoint, response.msgCd());
         }
         if (!"0".equals(response.rtCd())) {
-            throw new BusinessException(ErrorCode.KIS_API_ERROR);
+            throw failure(ErrorCode.KIS_API_ERROR, endpoint, response.msgCd());
         }
+    }
+
+    private static BusinessException failure(
+            ErrorCode errorCode, KisWhitelist endpoint, String msgCode) {
+        String detail = "endpoint=" + endpoint.name()
+                + " trId=" + endpoint.trId()
+                + " msgCd=" + safeMsgCode(msgCode);
+        return new BusinessException(errorCode, detail);
+    }
+
+    private static String safeMsgCode(String msgCode) {
+        if (msgCode == null || msgCode.isBlank()) {
+            return "NONE";
+        }
+        if (msgCode.length() > 64 || !msgCode.matches("[A-Za-z0-9_-]+")) {
+            log.warn("KIS 응답의 msg_cd 형식이 올바르지 않습니다: endpointContext=redacted");
+            return "INVALID";
+        }
+        return msgCode;
     }
 
     private void sleepBeforeRetry() {

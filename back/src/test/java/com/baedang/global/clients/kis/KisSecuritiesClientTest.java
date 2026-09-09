@@ -199,9 +199,14 @@ class KisSecuritiesClientTest {
                 .withBody("{\"rt_cd\":\"1\",\"msg_cd\":\"ERR001\",\"msg1\":\"failed\"}")));
 
         assertThatThrownBy(() -> client.get(PATH, Map.of(), JsonNode.class))
-                .isInstanceOf(BusinessException.class)
-                .extracting(exception -> ((BusinessException) exception).getErrorCode())
-                .isEqualTo(ErrorCode.KIS_API_ERROR);
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.KIS_API_ERROR);
+                    assertThat(exception.getDetail())
+                            .contains("endpoint=SEARCH_STOCK_INFO")
+                            .contains("trId=CTPF1002R")
+                            .contains("msgCd=ERR001")
+                            .doesNotContain(APP_KEY, APP_SECRET, "token-1", "failed");
+                });
     }
 
     @Test

@@ -217,7 +217,8 @@ public class StockFinancialSyncService {
         if (exception instanceof BusinessException businessException) {
             ErrorCode errorCode = businessException.getErrorCode();
             if (errorCode == ErrorCode.KIS_API_ERROR || errorCode == ErrorCode.KIS_RATE_LIMITED) {
-                return failed(stock, group, errorCode, businessException.getClass().getSimpleName());
+                return failed(stock, group, errorCode,
+                        businessException.getClass().getSimpleName(), businessException.getDetail());
             }
             throw businessException;
         }
@@ -227,8 +228,14 @@ public class StockFinancialSyncService {
 
     private GroupResult failed(
             Stock stock, String group, ErrorCode errorCode, String failureType) {
-        log.warn("KIS financial sync failed stockId={} symbol={} group={} errorCode={} failureType={}",
-                stock.getStockId(), stock.getSymbol(), group, errorCode, failureType);
+        return failed(stock, group, errorCode, failureType, null);
+    }
+
+    private GroupResult failed(
+            Stock stock, String group, ErrorCode errorCode, String failureType,
+            String providerContext) {
+        log.warn("KIS financial sync failed stockId={} symbol={} group={} errorCode={} failureType={} providerContext={}",
+                stock.getStockId(), stock.getSymbol(), group, errorCode, failureType, providerContext);
         return GroupResult.failed(errorCode);
     }
 
