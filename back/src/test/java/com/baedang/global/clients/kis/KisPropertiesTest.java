@@ -14,6 +14,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.web.client.RestClient;
 
 import com.baedang.global.config.TimeConfig;
+import com.baedang.stock.client.kis.KisStockFinancialInfoAdapter;
 
 class KisPropertiesTest {
 
@@ -41,6 +42,24 @@ class KisPropertiesTest {
     @Test
     void disabled_with_empty_credentials_is_valid() {
         withDefaults().run(context -> assertThat(context).hasNotFailed());
+    }
+
+    @Test
+    void disabled_kis_does_not_register_external_call_beans() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(
+                        TimeConfig.class,
+                        KisClientConfiguration.class,
+                        KisStockFinancialInfoAdapter.class)
+                .withPropertyValues(VALID_DEFAULTS)
+                .run(context -> {
+                    assertThat(context).hasSingleBean(KisProperties.class);
+                    assertThat(context).doesNotHaveBean(RestClient.class);
+                    assertThat(context).doesNotHaveBean(KisRateLimiter.class);
+                    assertThat(context).doesNotHaveBean(KisTokenProvider.class);
+                    assertThat(context).doesNotHaveBean(KisSecuritiesClient.class);
+                    assertThat(context).doesNotHaveBean(KisStockFinancialInfoAdapter.class);
+                });
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.baedang.global.clients.kis;
 import java.time.Clock;
 
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,6 +20,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 public class KisClientConfiguration {
 
     @Bean
+    @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
     RestClient kisRestClient(KisProperties properties) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(properties.connectTimeout());
@@ -30,6 +32,7 @@ public class KisClientConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
     KisRateLimiter kisRateLimiter(
             KisProperties properties,
             ObjectProvider<MeterRegistry> meterRegistryProvider
@@ -40,11 +43,13 @@ public class KisClientConfiguration {
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
     KisTokenProvider kisTokenProvider(RestClient restClient, KisProperties properties, Clock clock) {
         return new KisTokenProvider(restClient, properties, clock);
     }
 
     @Bean
+    @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
     KisSecuritiesClient kisSecuritiesClient(
             RestClient restClient,
             KisProperties properties,

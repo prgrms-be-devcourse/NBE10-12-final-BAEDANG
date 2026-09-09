@@ -7,6 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import com.baedang.global.clients.kis.KisSecuritiesClient;
@@ -21,6 +22,7 @@ import com.baedang.stock.entity.FinancialPeriodType;
 import com.baedang.stock.port.StockFinancialInfoPort;
 
 @Component
+@ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
 public class KisStockFinancialInfoAdapter implements StockFinancialInfoPort {
 
     private static final String INDUSTRY_PATH = "/uapi/domestic-stock/v1/quotations/search-stock-info";
