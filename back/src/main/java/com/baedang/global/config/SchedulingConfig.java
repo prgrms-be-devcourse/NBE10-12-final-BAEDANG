@@ -1,5 +1,7 @@
 package com.baedang.global.config;
 
+import com.baedang.market.config.QuoteCollectionProperties;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
@@ -14,7 +16,31 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
  */
 @Configuration
 @EnableScheduling
+@EnableConfigurationProperties(QuoteCollectionProperties.class)
 public class SchedulingConfig {
+
+    /** 배경 현재가 HTTP/DB 작업: 대기열 없이 제한된 요청만 제출합니다. */
+    @Bean(name = "quoteCollectionExecutor")
+    public ThreadPoolTaskExecutor quoteCollectionExecutor(
+            QuoteCollectionProperties properties) {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(properties.backgroundConcurrency());
+        executor.setMaxPoolSize(properties.backgroundConcurrency());
+        executor.setQueueCapacity(0);
+        executor.setThreadNamePrefix("quote-collection-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        return executor;
+    }
+
+    /** 현재가 대상 순회가 다른 시장 배치나 주문 만료 스캔을 지연시키지 않게 합니다. */
+    @Bean(name = "quoteCollectionScheduler")
+    public ThreadPoolTaskScheduler quoteCollectionScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("quote-dispatch-");
+        return scheduler;
+    }
 
     /** 전용 스케줄러 추가 후에도 기존 배치가 사용할 공용 스케줄러를 명시합니다. */
     @Bean(name = "taskScheduler")

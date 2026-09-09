@@ -4,8 +4,8 @@ import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
+import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.market.port.MarketDataPort;
-import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.DailyCandlePersistenceService;
@@ -16,13 +16,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.OffsetDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.locks.ReentrantLock;
@@ -30,17 +30,12 @@ import java.util.concurrent.locks.ReentrantLock;
 /**
  * 종목 상세 조회에 필요한 시세와 일봉을 온디맨드로 채운다.
  *
- * <p>상위 100종목의 시세는 {@code QuoteSnapshotScheduler}(5초)가 유지하므로 온디맨드로
- * 갱신하지 않는다. 일봉 차트는 랭킹 여부와 관계없이 저장 이력이 부족할 수 있으므로,
- * 상세 또는 차트 최초 요청에서 최신 200개를 한 번 백필한다.
- *
- * <p>{@code db/migration/V1__init.sql}에 문서화된 "그 외 전 종목" 정책을 그대로 구현한다: 상세
- * 화면을 여는 순간 시세·일봉을 함께 채워 UPSERT하고, 8,500종목을 매일 도는 배치는
- * 만들지 않는다("대부분 아무도 안 보는 종목"). 그래서 두 데이터의 신선도 기준이 다르다.
+ * <p>정규장에는 랭킹·활성 지정가 주문 종목만 배경 수집한다. 그 외 종목의 상세 조회는
+ * 짧은 수집 캐시가 만료됐을 때 공통 현재가 조정자로 보충한다. 일봉 백필은 별도로 유지한다.
  *
  * <ul>
- *   <li><b>시세({@code quote_snapshot})</b>는 하루에 한 번(그 종목을 그날 처음 조회할 때만)
- *   갱신한다 — 화면에 보이는 "현재가"라 하루 이상 묵히면 눈에 띄게 틀려 보인다.</li>
+ *   <li><b>시세({@code quote_snapshot})</b>는 기본 5초 수집 캐시를 재사용한다.
+ *   원본 시세가 오래돼도 화면에는 표시할 수 있으며, 주문의 quoteAt 검증과는 별개다.</li>
  *   <li><b>일봉({@code daily_candle})</b>은 과거 200개 백필이 끝나지 않았거나 DB 최신
  *   거래일이 시장의 최신 확정 거래일보다 오래됐을 때 최신 200개를 요청한다. 차트 기간을
  *   바꿔도 같은 DB 데이터와 완료 기록을 재사용하므로 추가 외부 호출이 발생하지 않는다.</li>
@@ -58,10 +53,10 @@ public class StockOnDemandQuoteService {
 
     /** Toss 단일 호출 상한. 페이지네이션 없이 상세·차트가 공유할 최신 일봉을 확보한다. */
     private static final int DAILY_CANDLE_BACKFILL_COUNT = 200;
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
     /** {@code CandleQueryService.refreshMinuteCandlesIfNeeded}와 같은 개수·같은 이유. */
     private static final int REFRESH_LOCK_STRIPES = 64;
 
+    private final QuoteRefreshCoordinator quoteRefreshCoordinator;
     private final MarketDataPort marketDataPort;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
@@ -70,6 +65,7 @@ public class StockOnDemandQuoteService {
     private final OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker;
     private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     private final Clock clock;
+    private final Duration displayCacheTtl;
     private final ReentrantLock[] refreshLocks = createRefreshLocks();
 
     public StockOnDemandQuoteService(
@@ -80,8 +76,11 @@ public class StockOnDemandQuoteService {
             DailyCandlePersistenceService dailyCandlePersistenceService,
             OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker,
             LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
-            Clock clock
+            Clock clock,
+            QuoteRefreshCoordinator quoteRefreshCoordinator,
+            @Value("${trading.quote-collection.refresh-interval:5s}") Duration displayCacheTtl
     ) {
+        this.quoteRefreshCoordinator = quoteRefreshCoordinator;
         this.marketDataPort = marketDataPort;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.quoteSnapshotPersistenceService = quoteSnapshotPersistenceService;
@@ -90,6 +89,7 @@ public class StockOnDemandQuoteService {
         this.onDemandDailyCandleBackfillTracker = onDemandDailyCandleBackfillTracker;
         this.latestCompletedTradingDayResolver = latestCompletedTradingDayResolver;
         this.clock = clock;
+        this.displayCacheTtl = displayCacheTtl;
     }
 
     /**
@@ -104,9 +104,9 @@ public class StockOnDemandQuoteService {
             return existing;
         }
         if (!isStale(existing)) {
-            return existing;
+            return withPrevClose(stock, existing);
         }
-        return refreshQuoteIfStillStale(stock);
+        return withPrevClose(stock, refreshQuoteIfStillStale(stock));
     }
 
     /**
@@ -213,37 +213,35 @@ public class StockOnDemandQuoteService {
 
     private boolean isStale(QuoteSnapshot quote) {
         if (quote == null) return true;
-        LocalDate collectedDate = quote.getCollectedAt().atZoneSameInstant(KST).toLocalDate();
-        LocalDate today = clock.instant().atZone(KST).toLocalDate();
-        return !collectedDate.equals(today);
+        Instant now = clock.instant();
+        Instant collectedAt = quote.getCollectedAt().toInstant();
+        return collectedAt.isAfter(now) || !collectedAt.plus(displayCacheTtl).isAfter(now);
     }
 
     private QuoteSnapshot refreshQuote(Stock stock) {
-        List<PriceQuote> quotes;
+        QuoteSnapshot snapshot;
         try {
-            quotes = marketDataPort.fetchPrices(List.of(stock.getSymbol()));
+            snapshot = quoteRefreshCoordinator.refresh(stock);
         } catch (RuntimeException exception) {
             log.warn("[on-demand] {} 시세 조회 실패", stock.getSymbol(), exception);
             return quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
         }
-        if (quotes.isEmpty()) {
+        if (snapshot == null) {
             log.warn("[on-demand] {} 시세 응답이 비어 있음", stock.getSymbol());
             return quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
         }
 
-        OffsetDateTime collectedAt = clock.instant().atOffset(ZoneOffset.UTC);
-        quoteSnapshotPersistenceService.saveOrUpdate(List.of(stock), quotes, collectedAt);
+        return snapshot;
+    }
 
-        QuoteSnapshot snapshot = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
-        if (snapshot != null) {
-            BigDecimal prevClose = derivePrevClose(stock);
-            if (prevClose != null) {
-                snapshot.updatePrevClose(prevClose);
-                // findById가 이미 끝난 읽기 전용 트랜잭션 밖이라 snapshot은 detached 상태다 —
-                // 여기서 명시적으로 save하지 않으면 변경이 이 응답에만 반영되고 DB에는
-                // 저장되지 않는다(제미나이 코드 리뷰, PR #80).
-                snapshot = quoteSnapshotRepository.save(snapshot);
-            }
+    /** 배경 수집이 먼저 현재가를 채웠어도 일봉 기반 전일 종가는 별도로 보충합니다. */
+    private QuoteSnapshot withPrevClose(Stock stock, QuoteSnapshot snapshot) {
+        if (snapshot == null) return null;
+        BigDecimal prevClose = derivePrevClose(stock);
+        if (prevClose != null && (snapshot.getPrevClose() == null
+                || prevClose.compareTo(snapshot.getPrevClose()) != 0)) {
+            quoteSnapshotPersistenceService.updatePrevClose(stock.getStockId(), prevClose);
+            return quoteSnapshotRepository.findById(stock.getStockId()).orElse(snapshot);
         }
         return snapshot;
     }

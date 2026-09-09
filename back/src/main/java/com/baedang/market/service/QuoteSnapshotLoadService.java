@@ -1,78 +1,84 @@
 package com.baedang.market.service;
 
-import com.baedang.market.port.MarketDataPort;
-import com.baedang.market.port.PriceQuote;
+import com.baedang.market.config.QuoteCollectionProperties;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
-import java.time.OffsetDateTime;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
+/** 200개 keyset 페이지를 제출합니다. 전체 목록/무제한 작업 큐를 메모리에 적재하지 않습니다. */
 @Service
+@Transactional(propagation = Propagation.NEVER)
 public class QuoteSnapshotLoadService {
-
-    private static final Logger log =
-            LoggerFactory.getLogger(QuoteSnapshotLoadService.class);
-
-    private final StockRepository stockRepository;
-    private final MarketDataPort marketDataPort;
-    private final QuoteSnapshotPersistenceService persistenceService;
+    private final StockRepository stocks;
+    private final QuoteSnapshotRepository snapshots;
+    private final QuoteRefreshCoordinator coordinator;
+    private final QuoteCollectionProperties properties;
     private final Clock clock;
-    private final int universeSize;
+    private final MeterRegistry metrics;
+    private final Map<MarketCountry, Cursor> cursors = new EnumMap<>(MarketCountry.class);
 
-    public QuoteSnapshotLoadService(
-            StockRepository stockRepository,
-            MarketDataPort marketDataPort,
-            QuoteSnapshotPersistenceService persistenceService,
-            Clock clock,
-            @Value("${trading.universe-size}") int universeSize
-    ) {
-        this.stockRepository = stockRepository;
-        this.marketDataPort = marketDataPort;
-        this.persistenceService = persistenceService;
+    public QuoteSnapshotLoadService(StockRepository stocks, QuoteSnapshotRepository snapshots,
+            QuoteRefreshCoordinator coordinator, QuoteCollectionProperties properties, Clock clock, MeterRegistry metrics) {
+        this.stocks = stocks;
+        this.snapshots = snapshots;
+        this.coordinator = coordinator;
+        this.properties = properties;
         this.clock = clock;
-        this.universeSize = universeSize;
+        this.metrics = metrics;
     }
 
-    public int syncQuotes(MarketCountry marketCountry) {
-        List<Stock> stocks = stockRepository.findRankedByMarketCountry(
-                marketCountry,
-                PageRequest.of(0, universeSize)
-        );
-        if (stocks.isEmpty()) {
-            log.debug("동기화할 유니버스 종목이 없습니다: marketCountry={}", marketCountry);
-            return 0;
+    /** 반환값은 저장 완료 건수가 아니라 제출/병합한 대상 수입니다. */
+    public synchronized int syncQuotes(MarketCountry country, Instant sessionUntil) {
+        Instant now = clock.instant();
+        if (!now.isBefore(sessionUntil) || !coordinator.canSubmitBackground()) return 0;
+        Cursor cursor = cursors.computeIfAbsent(country, ignored -> new Cursor());
+        if (now.isBefore(cursor.nextAt)) return 0;
+        if (cursor.startedAt == null) cursor.startedAt = now;
+        List<Stock> page = stocks.findQuoteTargets(country, cursor.after,
+                now.atOffset(ZoneOffset.UTC), PageRequest.of(0, 200));
+        Duration interval = properties.refreshInterval();
+        if (!page.isEmpty()) {
+            Map<Long, QuoteSnapshot> existing = snapshots.findByStockIdIn(page.stream().map(Stock::getStockId).toList())
+                    .stream().collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity()));
+            List<Stock> due = page.stream().filter(stock -> {
+                QuoteSnapshot quote = existing.get(stock.getStockId());
+                // 수집 빈도 조절일 뿐 체결 신선도 판정이 아닙니다. 체결은 원본 quoteAt을 검사합니다.
+                return quote == null || quote.getCollectedAt().toInstant().isBefore(cursor.startedAt)
+                        || quote.getCollectedAt().toInstant().isAfter(now);
+            }).toList();
+            if (!coordinator.submitBackground(due, sessionUntil)) return 0;
+            cursor.after = page.getLast().getStockId();
         }
-
-        List<String> symbols = stocks.stream()
-                .map(Stock::getSymbol)
-                .toList();
-        List<PriceQuote> quotes = marketDataPort.fetchPrices(symbols);
-        if (quotes.isEmpty()) {
-            log.warn(
-                    "외부 시세 응답이 비어 있습니다: marketCountry={}, symbolCount={}",
-                    marketCountry,
-                    symbols.size()
-            );
-            return 0;
+        if (page.size() < 200) {
+            metrics.timer("quote.collection.sweep.submission", "market", country.name())
+                    .record(Duration.between(cursor.startedAt, now).abs());
+            cursor.nextAt = cursor.startedAt.plus(interval);
+            cursor.startedAt = null;
+            cursor.after = 0L;
         }
+        return page.size();
+    }
 
-        OffsetDateTime collectedAt = clock.instant().atOffset(ZoneOffset.UTC);
-        int updatedCount = persistenceService.saveOrUpdate(stocks, quotes, collectedAt);
-        log.info(
-                "시세 스냅샷 동기화 완료: marketCountry={}, updatedCount={}/{}",
-                marketCountry,
-                updatedCount,
-                stocks.size()
-        );
-        return updatedCount;
+    private static final class Cursor {
+        private long after;
+        private Instant startedAt;
+        private Instant nextAt = Instant.MIN;
     }
 }
