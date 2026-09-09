@@ -6,6 +6,7 @@ import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceQuote;
+import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.DailyCandlePersistenceService;
@@ -65,6 +66,7 @@ class StockOnDemandQuoteServiceTest {
     @Mock QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     @Mock DailyCandleRepository dailyCandleRepository;
     @Mock DailyCandlePersistenceService dailyCandlePersistenceService;
+    @Mock CandleAggregateRepository candleAggregateRepository;
     @Mock LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     @Mock Stock stock;
 
@@ -78,6 +80,7 @@ class StockOnDemandQuoteServiceTest {
                 quoteSnapshotPersistenceService,
                 dailyCandleRepository,
                 dailyCandlePersistenceService,
+                candleAggregateRepository,
                 new OnDemandDailyCandleBackfillTracker(),
                 latestCompletedTradingDayResolver,
                 Clock.fixed(NOW, ZoneOffset.UTC), coordinator, java.time.Duration.ofSeconds(5));

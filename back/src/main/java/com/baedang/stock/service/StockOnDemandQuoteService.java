@@ -6,6 +6,7 @@ import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.DailyCandlePersistenceService;
@@ -62,6 +63,7 @@ public class StockOnDemandQuoteService {
     private final QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     private final DailyCandleRepository dailyCandleRepository;
     private final DailyCandlePersistenceService dailyCandlePersistenceService;
+    private final CandleAggregateRepository candleAggregateRepository;
     private final OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker;
     private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     private final Clock clock;
@@ -74,6 +76,7 @@ public class StockOnDemandQuoteService {
             QuoteSnapshotPersistenceService quoteSnapshotPersistenceService,
             DailyCandleRepository dailyCandleRepository,
             DailyCandlePersistenceService dailyCandlePersistenceService,
+            CandleAggregateRepository candleAggregateRepository,
             OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker,
             LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
             Clock clock,
@@ -86,6 +89,7 @@ public class StockOnDemandQuoteService {
         this.quoteSnapshotPersistenceService = quoteSnapshotPersistenceService;
         this.dailyCandleRepository = dailyCandleRepository;
         this.dailyCandlePersistenceService = dailyCandlePersistenceService;
+        this.candleAggregateRepository = candleAggregateRepository;
         this.onDemandDailyCandleBackfillTracker = onDemandDailyCandleBackfillTracker;
         this.latestCompletedTradingDayResolver = latestCompletedTradingDayResolver;
         this.clock = clock;
@@ -151,10 +155,20 @@ public class StockOnDemandQuoteService {
                 onDemandDailyCandleBackfillTracker.markRefreshedThrough(
                         stock.getStockId(), expectedTradeDate.get());
             }
+            refreshWeeklyCandles(stock, candles);
         } catch (RuntimeException exception) {
             log.warn("[on-demand] {} 일봉 백필 실패", stock.getSymbol(), exception);
         } finally {
             lock.unlock();
+        }
+    }
+
+    private void refreshWeeklyCandles(Stock stock, List<Candle> candles) {
+        if (candles == null || candles.isEmpty()) return;
+        try {
+            candleAggregateRepository.refreshWeekly();
+        } catch (RuntimeException exception) {
+            log.warn("[on-demand] {} 주봉 집계 갱신 실패", stock.getSymbol(), exception);
         }
     }
 

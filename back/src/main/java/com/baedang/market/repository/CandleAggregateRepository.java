@@ -3,6 +3,8 @@ package com.baedang.market.repository;
 import com.baedang.stock.model.CandleQueryInterval;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -54,6 +56,26 @@ public class CandleAggregateRepository {
                 .param("count", count)
                 .query(AggregateCandle.class)
                 .list();
+    }
+
+    /**
+     * 주봉 집계 뷰를 즉시 갱신한다. 온디맨드 일봉 백필 직후 호출된다.
+     *
+     * <p>구간을 좁히지 않는 이유: 새로고침은 <b>창 안에 완전히 들어온 버킷만</b> 계산한다.
+     * 백필한 거래일 범위로 창을 잡으면 진행 중인 주(그리고 시작이 잘린 주)의 봉이
+     * 만들어지지 않는다 — 정작 화면 맨 앞에 오는 최신 봉이다.
+     *
+     * <p>비용은 창 넓이가 아니라 그 안의 무효화된 양에 비례하므로, 바뀐 게 없으면
+     * 전 구간을 지정해도 "already up-to-date" 로 끝난다.
+     *
+     * <p>!! {@code refresh_continuous_aggregate} 는 트랜잭션 블록 안에서 실행할 수 없다
+     * (새로고침이 트랜잭션 두 개에 걸쳐 돌기 때문). {@code Propagation.NEVER} 로 강제한다 —
+     * 호출부에 트랜잭션이 있으면 DB 까지 가지 않고 여기서 막힌다.
+     */
+    @Transactional(propagation = Propagation.NEVER)
+    public void refreshWeekly() {
+        jdbcClient.sql("CALL refresh_continuous_aggregate('candle_1w', NULL, NULL)")
+                .update();
     }
 
     private static String sql(String view, String bucketExpression) {
