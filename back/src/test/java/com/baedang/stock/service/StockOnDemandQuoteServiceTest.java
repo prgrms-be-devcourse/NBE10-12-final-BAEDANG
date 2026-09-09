@@ -60,6 +60,7 @@ class StockOnDemandQuoteServiceTest {
     private static final Instant NOW = Instant.parse("2026-08-31T03:00:00Z");
 
     @Mock MarketDataPort marketDataPort;
+    @Mock com.baedang.market.service.QuoteRefreshCoordinator coordinator;
     @Mock QuoteSnapshotRepository quoteSnapshotRepository;
     @Mock QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     @Mock DailyCandleRepository dailyCandleRepository;
@@ -79,7 +80,7 @@ class StockOnDemandQuoteServiceTest {
                 dailyCandlePersistenceService,
                 new OnDemandDailyCandleBackfillTracker(),
                 latestCompletedTradingDayResolver,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                Clock.fixed(NOW, ZoneOffset.UTC), coordinator, java.time.Duration.ofSeconds(5));
         // 테스트마다 실제로 쓰는 stub 조합이 달라서(예: 랭킹 안 종목 조기 반환 경로는
         // symbol/currency를 아예 안 읽는다) 공용 stub은 lenient로 둔다.
         lenient().when(stock.getStockId()).thenReturn(10L);
@@ -107,12 +108,11 @@ class StockOnDemandQuoteServiceTest {
         Candle dailyCandle = candle(LocalDate.of(2026, 8, 28), "236050"); // 어제(평일) 종가
         when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
                 .thenReturn(List.of(dailyCandle));
-        when(marketDataPort.fetchPrices(List.of("005930")))
-                .thenReturn(List.of(new PriceQuote("005930", new BigDecimal("241500"), OffsetDateTime.now(), "KRW")));
+
 
         QuoteSnapshot refreshed = quote(LocalDate.of(2026, 8, 28));
         when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.of(refreshed));
-        when(quoteSnapshotRepository.save(refreshed)).thenReturn(refreshed);
+        when(coordinator.refresh(stock)).thenReturn(refreshed);
         // 백필(존재 확인 → 락 안 재확인) 전까지는 일봉이 하나도 없다가, upsert가 호출된
         // 뒤부터는(이중 확인 락 안에서도 한 번 더 조회한다) 방금 채운 일봉이 보여야 한다 —
         // 언제 몇 번 조회하든 항상 최신 상태를 반영하도록 상태 기반(stateful)으로 stub한다.
@@ -130,42 +130,56 @@ class StockOnDemandQuoteServiceTest {
         QuoteSnapshot result = service.ensureQuote(stock, null);
 
         verify(dailyCandlePersistenceService).upsert(10L, "KRW", List.of(dailyCandle));
-        verify(quoteSnapshotPersistenceService).saveOrUpdate(eq(List.of(stock)), anyList(), any());
+        verify(coordinator).refresh(stock);
         assertThat(result).isSameAs(refreshed);
-        verify(refreshed).updatePrevClose(new BigDecimal("236050"));
-        // findById가 반환하는 스냅샷은 그 시점의 읽기 전용 트랜잭션 밖에서는 detached
-        // 상태라, updatePrevClose만으로는 DB에 반영되지 않는다 — 명시적 save가 꼭 필요하다
-        // (제미나이 코드 리뷰, PR #80).
-        verify(quoteSnapshotRepository).save(refreshed);
+        verify(quoteSnapshotPersistenceService).updatePrevClose(10L, new BigDecimal("236050"));
+        verify(quoteSnapshotRepository, never()).save(any());
     }
 
     @Test
-    void 시세가_오늘_이미_수집됐으면_다시_조회하지_않는다() {
+    void 시세가_5초_내에_수집됐으면_다시_조회하지_않는다() {
         when(stock.getIsRanked()).thenReturn(false);
         when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
-        QuoteSnapshot todayQuote = quoteCollectedAt(OffsetDateTime.parse("2026-08-31T10:00:00+09:00"));
+        QuoteSnapshot todayQuote = quoteCollectedAt(NOW.minusSeconds(1).atOffset(ZoneOffset.UTC));
 
         QuoteSnapshot result = service.ensureQuote(stock, todayQuote);
 
         assertThat(result).isSameAs(todayQuote);
-        verify(marketDataPort, never()).fetchPrices(any());
+        verifyNoInteractions(coordinator);
         // 일봉은 이미 있으므로 백필도 일어나지 않는다.
         verify(marketDataPort, never()).fetchCandles(any(), any(), anyInt());
     }
 
     @Test
-    void 시세가_어제_수집됐으면_오늘_다시_조회한다() {
+    void 배경_수집된_시세도_일봉_기반_전일_종가를_보충한다() {
         when(stock.getIsRanked()).thenReturn(false);
         when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
-        QuoteSnapshot yesterdayQuote = quoteCollectedAt(OffsetDateTime.parse("2026-08-30T10:00:00+09:00"));
-        when(marketDataPort.fetchPrices(List.of("005930")))
-                .thenReturn(List.of(new PriceQuote("005930", new BigDecimal("105"), OffsetDateTime.now(), "KRW")));
+        QuoteSnapshot current = quoteCollectedAt(NOW.atOffset(ZoneOffset.UTC));
+        BigDecimal close = new BigDecimal("100");
+        when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(eq(10L), any()))
+                .thenReturn(List.of(new DailyCandle(10L, LocalDate.of(2026, 8, 28),
+                        close, close, close, close, BigDecimal.ONE)));
+        when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.of(current));
+
+        assertThat(service.ensureQuote(stock, current)).isSameAs(current);
+
+        verify(quoteSnapshotPersistenceService).updatePrevClose(10L, close);
+        verifyNoInteractions(coordinator);
+    }
+
+    @Test
+    void 당일_수집값이어도_5초가_지났으면_다시_조회한다() {
+        when(stock.getIsRanked()).thenReturn(false);
+        when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
+        QuoteSnapshot yesterdayQuote = quoteCollectedAt(NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
+
         when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.of(yesterdayQuote));
+        when(coordinator.refresh(stock)).thenReturn(yesterdayQuote);
 
         service.ensureQuote(stock, yesterdayQuote);
 
-        verify(marketDataPort).fetchPrices(List.of("005930"));
-        verify(quoteSnapshotPersistenceService).saveOrUpdate(eq(List.of(stock)), anyList(), any());
+
+        verify(coordinator).refresh(stock);
     }
 
     @Test
@@ -323,7 +337,7 @@ class StockOnDemandQuoteServiceTest {
     void 시세_조회가_실패해도_예외를_던지지_않고_기존_값을_돌려준다() {
         when(stock.getIsRanked()).thenReturn(false);
         when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
-        when(marketDataPort.fetchPrices(any())).thenThrow(new RuntimeException("Toss 장애"));
+        when(coordinator.refresh(stock)).thenThrow(new RuntimeException("Toss 장애"));
         when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.empty());
 
         QuoteSnapshot result = service.ensureQuote(stock, null);

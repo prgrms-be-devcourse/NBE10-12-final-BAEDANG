@@ -36,13 +36,13 @@ public class QuoteSnapshotSchedulerTest {
                 clock
         );
 
-        when(marketSessionProvider.isOpen(MarketCountry.KR, NOW)).thenReturn(true);
-        when(marketSessionProvider.isOpen(MarketCountry.US, NOW)).thenReturn(false);
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(true, NOW.plusSeconds(60)));
+        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(false, NOW));
 
         scheduler.pollQuotes();
 
-        verify(quoteSnapshotLoadService).syncQuotes(MarketCountry.KR);
-        verify(quoteSnapshotLoadService, never()).syncQuotes(MarketCountry.US);
+        verify(quoteSnapshotLoadService).syncQuotes(MarketCountry.KR, NOW.plusSeconds(60));
+        verify(quoteSnapshotLoadService, never()).syncQuotes(eq(MarketCountry.US), any());
     }
 
     @Test
@@ -54,8 +54,8 @@ public class QuoteSnapshotSchedulerTest {
                 clock
         );
 
-        when(marketSessionProvider.isOpen(MarketCountry.KR, NOW)).thenReturn(false);
-        when(marketSessionProvider.isOpen(MarketCountry.US, NOW)).thenReturn(false);
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(false, NOW));
+        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(false, NOW));
 
         scheduler.pollQuotes();
 

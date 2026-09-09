@@ -84,8 +84,8 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 > **Never hardcode.** Use the `regularMarket` session times from `/market-calendar/US` — the response is already KST, so no conversion needed. Hardcoding would **block trading for an hour after open in the 1st week of Nov.**
 
 > 📌 **How do off-universe stocks (outside top 100) get their prior close?**
-> The scheduler only covers the top 100, so the other ~8,300 stocks have an empty `quote_snapshot`.
-> **On entering the detail page, call `/prices` and `/candles` together, fill it, and UPSERT into `quote_snapshot`.** Once queried, the stock comes from the DB thereafter.
+> Regular-session collection covers ranked stocks and stocks with active limit orders only. Other stocks are refreshed on demand.
+> Detail requests reuse collected prices or share an on-demand `/prices` request through `QuoteRefreshCoordinator`; daily-candle backfill remains separate and supplies the prior close.
 > To show prices in the search result list, fetch 20 rows in **one `/prices` batch call** — calling per-stock means 20 calls and hits the rate limit.
 
 ### Close-Price Data Pipeline
@@ -128,7 +128,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `GET /api/v1/stocks/all` | STOCK_ALL · **1 TPS**          | **every Monday 07:00** | **Full stock list per market.** Returns in one shot without pagination (NASDAQ ~2,800 rows, 30KB gzipped). Calling each of the 7 `market`s (KOSPI·KOSDAQ·NYSE·NASDAQ·AMEX·KR_ETC·US_ETC) gives **all symbols in 7 calls**. Filters fit our design: `commonShare=true` (excl. preferred), `status=ACTIVE` (excl. delisted), `securityType` (STOCK·ETF·ETN·REIT…). |
 | `GET /api/v1/stocks` | STOCK · 5 TPS                  | every Monday 07:00 | `stock` detail — name·currency·ISIN·`security_type`·`is_common_share`·`leverage_factor`·shares outstanding·list date, plus suspension/liquidation flags from `koreanMarketDetail`. Send the `/stocks/all` symbols **in batches of 200** — 8,500 stocks ≈ 43 calls, ~9s. |
 | `GET /api/v1/rankings` | RANKING · 5 TPS                | universe: Mon KR 08:00 · US 21:00 / screen rankings: 30s TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, `prev_close` for newly included (`price.basePrice`). **100 per market, so 1 call each for KR·US completes it.** `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. On weekends there may be no aggregation — **keep last week's universe if empty**. |
-| `GET /api/v1/prices` | MARKET_DATA · **15 TPS**       | **5s** (regular session only) | `quote_snapshot.last_price`, `quote_at`, `currency`. **100 stocks per market in 1 batch call** — even at 5s this is **1.3% of the limit**. KR and US sessions don't overlap, so no concurrent load. **Stop the scheduler when the market closes** → the last value (= close) stays, naturally serving "prior close". Prices arrive as **strings — parse to BigDecimal**. |
+| `GET /api/v1/prices` | MARKET_DATA · **15 TPS shared** | **5s target** during regular sessions | Ranked + active-limit-order stocks only, up to 200 per call. Others on demand. Background 8 TPS; final shared limiter retained. Preserve prior close and price limits. |
 | `GET /api/v1/price-limits` | MARKET_DATA · 15 TPS           | once before session opens | `quote_snapshot.upper_limit`, `lower_limit`. **Set from prior close and fixed all day**, so no realtime polling needed. Single-item call: 100 KR stocks = 100 calls, ~7s. **US stocks have no price limits → NULL.** |
 | `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | KR 15:40~17:10 / US-local 16:10~17:10, retry every 30m | `daily_candle`. Each retry skips stocks already stored for the expected date and fetches only missing rows. A response counts as success only when its candle date matches the calendar date. The finalized `close_price` is copied to `quote_snapshot.prev_close` before the next session. Convert `timestamp` to a KST date. |
 | `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **20 TPS** | **top 100: every minute, sequential 20-stock groups** / other stocks: detail-page on-demand | `minute_candle`. Top-100 calls are scheduled during each regular session. Off-hours or foreign-market stocks call on demand and reuse the last 60 seconds of cached rows. Week 2 adds limit-order fill determination and 5m/10m aggregation. |
@@ -160,18 +160,18 @@ Which endpoint fills which column, and how often — **this table is the collect
 | Mon **08:00** | weekly | **② KR top-100 by trading amount — 1 Toss call.** `/rankings?market=KR&duration=1w&count=100` → update `is_ranked`, `rank_no`, `trading_amount` · `prev_close`·daily backfill for newly included · **keep last week's universe if empty**. |
 | Mon **21:00** | weekly | **③ US top-100 by trading amount — 1 Toss call.** Same as KR. 1.5h before the US open (22:30), so first quote collection starts on the fresh universe.                                                                                     |
 | **08:50** | daily | KR `prev_close` ← prior `daily_candle.close_price` (10 min before open). Fetch price limits too. Not in the confirmed list but required for change rate (explained below).                                                                 |
-| 09:00 ~ 15:30 | 5s | KR top-100 current-price collection — **`/prices` 1 batch call, 1.3% of limit**. Trading opens only in these hours.                                                                                                                        |
+| KR regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, up to 200 per request. |
 | 09:00 ~ 15:30 | 1m | KR top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group.                                                                                                                         |
 | **15:40 ~ 17:10** | 30m | KR daily-candle retries — starts 10 min after calendar close, including delayed-close days; skips stocks already stored for the date.                                                                                                      |
 | **09:00 ET** * | daily | US `prev_close` refresh — 30 min before regular open. 22:00 KST during DST, 23:00 KST during standard time.                                                                                                                                |
-| 22:30 ~ 05:00 * | 5s | US top-100 current-price collection — 1 batch call. 23:30 ~ 06:00 in standard time (winter).                                                                                                                                               |
+| US regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, calendar-based session times. |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group.                                                                                                                         |
 | **US-local 16:10 ~ 17:10** * | 30m | US daily-candle retries — 05:10~06:10 KST in DST, 06:10~07:10 in standard time; skips stocks already stored for the date.                                                                                                                  |
 | every hour on the hour | hourly | **FX storage** — 24 calls/day. Runs on weekends/holidays too (dupes blocked by UNIQUE).                                                                                                                                                    |
 | other times | — | **Quote collection stopped.** Reads still work but show prior close; orders rejected.                                                                                                                                                      |
 
-> ⚠️ **During the regular session, 1 batch call per 5s is all there is — 1.3% of the limit.** The batch API that fetches 200 stocks at once fully decouples user count from external-API call volume — the first problem this project had to solve, solved in one line.
-> **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
+> ⚠️ Current-price background submissions default to 8 TPS; the Toss client enforces the shared MARKET_DATA 15 TPS ceiling including other callers. Sweep intervals are targets, not freshness guarantees. Trading still checks source `quote_at`.
+> Market cursors are independent and selected fairly when both sessions are open. Shared TPS headroom is required regardless of session overlap.
 
 > 📌 **Why `prev_close` refresh is in the list**
 > The Toss current-price response has no change rate (only `symbol·timestamp·lastPrice·currency`). The prior close must be sourced and computed: `(last_price − prev_close) / prev_close`.
@@ -179,7 +179,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 
 > **Not in the scheduler — handled on-demand**
 > · Off-hours minute candles — `/candles?interval=1m` on detail-page entry + 60s cache. Top-100 minute collection is already in the MVP scheduler; week 2 adds limit-order fill determination.
-> · Off-universe quotes — fetch `/prices`·`/candles` on detail entry, UPSERT into `quote_snapshot`. No daily batch over all 8,500 stocks.
+**On-demand supplementation** — stocks outside scheduled collection refresh through the shared coordinator on detail entry, reusing a 5-second collection cache. Daily backfill and minute-candle policies remain unchanged.
 > · Buy cautions (`/warnings`) — 100 stocks ≈ 20s as single calls. Add to the 08:00 batch when needed.
 
 > 💡 **The collector is the only point that talks to Toss.** Screens (channel side) and the ledger (bookkeeping side) only read our DB, never calling Toss directly. So switching quote providers later means swapping one `QuotePort` implementation — ledger and order code stay untouched.
@@ -359,17 +359,17 @@ Internal `stock_id` is the canonical identifier; external symbols are separated 
 | `is_suspended` | BOOLEAN | trading halt. **Immediate reject reason in order validation.** |
 | `is_liquidation` | BOOLEAN | in liquidation — the stage right before delisting, needs a risk notice. |
 | `is_warned` | BOOLEAN | investment-warning/risk designation. Doesn't block orders, just shows a **warning banner**. |
-| `is_ranked` | BOOLEAN | whether in the top 100 by trading amount. **Used to decide quote collection targets.** |
+| `is_ranked` | BOOLEAN | Whether in the top 100 by trading amount. Scheduled current-price membership is ranked OR has an active limit order. |
 | `rank_no` | INT | rank (1~100). **Display only. Don't use as a cursor** — the batch rewrites it wholesale, so right after refresh the same number points at a different stock. NULL outside the top 100. |
 | `trading_amount` | NUMERIC(24,0) | **trailing 1-week cumulative trading amount (`duration=1w`).** The ranking sort key and the cursor's primary key. Showing the selection criterion as the displayed value lets users understand "why this order". **Cursor is a `(trading_amount, stock_id)` tuple** — when amounts tie, `stock_id` uniquely decides order. Index it as `(market_country, trading_amount DESC, stock_id DESC)` — same order, same direction, so it scans without an extra sort. |
 
 #### `quote_snapshot` — current-price snapshot
-**One row per stock — ~8,500 fixed rows.** Continuously UPDATEd, no history — not a time-series table.
+**At most one snapshot row per stock.** Continuously updated, without price history; not a time-series table.
 
 | Target | Refresh | `quote_at` |
 |---|---|---|
-| **top 200** (KR 100 + US 100) | **every 5s** during that market's regular session | just now → **"12:36:59 · realtime"** |
-| remaining ~8,300 | **on-demand** — `/prices`+`/candles` on detail-page entry, then UPSERT | query time → "realtime" or prior-close label per `quote_at` |
+| Ranked stocks + active limit-order stocks | **5s priority target** during their regular session | Actual Toss source timestamp; collection time does not guarantee a fresh price. |
+| Other stocks without active limit orders | On-demand detail refresh, 5s collection cache | Retain source quote_at; a successful fetch does not make an old source price fresh. |
 
 > **This unifies the screen logic.** Detail always queries only this table regardless of top-100 status, and just changes the label based on `quote_at`. **The screen never needs to know "is this stock top 100?".** Tradeability is separate — `stock.is_ranked` AND that market's regular session AND not suspended.
 

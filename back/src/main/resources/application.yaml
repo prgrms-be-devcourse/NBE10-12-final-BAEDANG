@@ -131,9 +131,15 @@ trading:
   # 정상 주문을 막지 않으면서 과도한 BigDecimal 계산과 DB 범위 초과를 방지합니다.
   max-order-quantity: ${MAX_ORDER_QUANTITY:1000000}
 
-  # 시세 수집 주기(초)와 대상 종목 수
-  quote-poll-interval-seconds: ${QUOTE_POLL_INTERVAL_SECONDS:5}
+  # 랭킹과 활성 지정가 주문 종목만 지속 수집하고 그 외 종목은 온디맨드로 조회합니다.
   universe-size: ${QUOTE_UNIVERSE_SIZE:100}
+  quote-collection:
+    refresh-interval: ${QUOTE_REFRESH_INTERVAL:5s}
+    dispatch-interval: ${QUOTE_DISPATCH_INTERVAL:25ms}
+    background-concurrency: ${QUOTE_BACKGROUND_CONCURRENCY:3}
+    background-requests-per-second: ${QUOTE_BACKGROUND_RPS:8}
+    max-in-flight-stocks: ${QUOTE_MAX_IN_FLIGHT_STOCKS:1000}
+    request-timeout: ${QUOTE_REQUEST_TIMEOUT:20s}
 
   # 전체 사용자 공유 가상 호가 정책 (V1)
   orderbook:
