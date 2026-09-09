@@ -1,6 +1,7 @@
 package com.baedang.global.clients.kis;
 
 import java.util.Map;
+import java.util.EnumMap;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.util.LinkedMultiValueMap;
@@ -14,6 +15,8 @@ import com.baedang.global.error.ErrorCode;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 public class KisSecuritiesClient {
 
@@ -25,15 +28,17 @@ public class KisSecuritiesClient {
     private final KisTokenProvider tokenProvider;
     private final ObjectMapper objectMapper;
     private final RetrySleeper retrySleeper;
+    private final EnumMap<KisWhitelist, EnumMap<RequestResult, Counter>> requestCounters;
 
     public KisSecuritiesClient(
             RestClient restClient,
             KisProperties properties,
             KisRateLimiter rateLimiter,
             KisTokenProvider tokenProvider,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            MeterRegistry meterRegistry
     ) {
-        this(restClient, properties, rateLimiter, tokenProvider, objectMapper,
+        this(restClient, properties, rateLimiter, tokenProvider, objectMapper, meterRegistry,
                 KisSecuritiesClient::sleep);
     }
 
@@ -43,6 +48,7 @@ public class KisSecuritiesClient {
             KisRateLimiter rateLimiter,
             KisTokenProvider tokenProvider,
             ObjectMapper objectMapper,
+            MeterRegistry meterRegistry,
             RetrySleeper retrySleeper
     ) {
         this.restClient = restClient;
@@ -51,6 +57,7 @@ public class KisSecuritiesClient {
         this.tokenProvider = tokenProvider;
         this.objectMapper = objectMapper;
         this.retrySleeper = retrySleeper;
+        this.requestCounters = counters(meterRegistry);
     }
 
     public <T> T get(String path, Map<String, String> queryParams, Class<T> responseType) {
@@ -67,21 +74,28 @@ public class KisSecuritiesClient {
             try {
                 JsonNode body = request(endpoint, queryParams, requestToken);
                 validate(body);
-                return objectMapper.treeToValue(body, responseType);
+                T response = objectMapper.treeToValue(body, responseType);
+                record(endpoint, RequestResult.SUCCESS);
+                return response;
             } catch (HttpClientErrorException.Unauthorized
                      | HttpClientErrorException.Forbidden exception) {
+                record(endpoint, RequestResult.ERROR);
                 if (authenticationRetried) {
                     throw new BusinessException(ErrorCode.KIS_API_ERROR);
                 }
                 authenticationRetried = true;
                 requestToken = tokenProvider.refreshIfStillStale(requestToken);
             } catch (HttpClientErrorException.TooManyRequests exception) {
+                record(endpoint, RequestResult.RATE_LIMITED);
                 if (rateLimitRetried) {
                     throw new BusinessException(ErrorCode.KIS_RATE_LIMITED);
                 }
                 rateLimitRetried = true;
                 sleepBeforeRetry();
             } catch (BusinessException exception) {
+                record(endpoint, exception.getErrorCode() == ErrorCode.KIS_RATE_LIMITED
+                        ? RequestResult.RATE_LIMITED
+                        : RequestResult.ERROR);
                 if (exception.getErrorCode() != ErrorCode.KIS_RATE_LIMITED
                         || rateLimitRetried) {
                     throw exception;
@@ -89,8 +103,10 @@ public class KisSecuritiesClient {
                 rateLimitRetried = true;
                 sleepBeforeRetry();
             } catch (JsonProcessingException exception) {
+                record(endpoint, RequestResult.ERROR);
                 throw new BusinessException(ErrorCode.KIS_API_ERROR);
             } catch (RestClientException exception) {
+                record(endpoint, RequestResult.ERROR);
                 throw new BusinessException(ErrorCode.KIS_API_ERROR);
             }
         }
@@ -134,6 +150,40 @@ public class KisSecuritiesClient {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new BusinessException(ErrorCode.KIS_API_ERROR);
+        }
+    }
+
+    private void record(KisWhitelist endpoint, RequestResult result) {
+        requestCounters.get(endpoint).get(result).increment();
+    }
+
+    private static EnumMap<KisWhitelist, EnumMap<RequestResult, Counter>> counters(
+            MeterRegistry meterRegistry
+    ) {
+        EnumMap<KisWhitelist, EnumMap<RequestResult, Counter>> counters =
+                new EnumMap<>(KisWhitelist.class);
+        for (KisWhitelist endpoint : KisWhitelist.values()) {
+            EnumMap<RequestResult, Counter> results = new EnumMap<>(RequestResult.class);
+            for (RequestResult result : RequestResult.values()) {
+                results.put(result, Counter.builder("kis.api.requests")
+                        .tag("endpoint", endpoint.name())
+                        .tag("result", result.tag)
+                        .register(meterRegistry));
+            }
+            counters.put(endpoint, results);
+        }
+        return counters;
+    }
+
+    private enum RequestResult {
+        SUCCESS("success"),
+        ERROR("error"),
+        RATE_LIMITED("rate_limited");
+
+        private final String tag;
+
+        RequestResult(String tag) {
+            this.tag = tag;
         }
     }
 

@@ -44,8 +44,14 @@ public class KisClientConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "kis", name = "enabled", havingValue = "true")
-    KisTokenProvider kisTokenProvider(RestClient restClient, KisProperties properties, Clock clock) {
-        return new KisTokenProvider(restClient, properties, clock);
+    KisTokenProvider kisTokenProvider(
+            RestClient restClient,
+            KisProperties properties,
+            Clock clock,
+            ObjectProvider<MeterRegistry> meterRegistryProvider
+    ) {
+        MeterRegistry meterRegistry = meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new);
+        return new KisTokenProvider(restClient, properties, clock, meterRegistry);
     }
 
     @Bean
@@ -55,10 +61,12 @@ public class KisClientConfiguration {
             KisProperties properties,
             KisRateLimiter rateLimiter,
             KisTokenProvider tokenProvider,
-            ObjectProvider<ObjectMapper> objectMapperProvider
+            ObjectProvider<ObjectMapper> objectMapperProvider,
+            ObjectProvider<MeterRegistry> meterRegistryProvider
     ) {
         ObjectMapper objectMapper = objectMapperProvider.getIfAvailable(ObjectMapper::new);
+        MeterRegistry meterRegistry = meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new);
         return new KisSecuritiesClient(
-                restClient, properties, rateLimiter, tokenProvider, objectMapper);
+                restClient, properties, rateLimiter, tokenProvider, objectMapper, meterRegistry);
     }
 }

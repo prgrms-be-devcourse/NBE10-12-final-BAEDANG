@@ -27,11 +27,15 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
@@ -44,6 +48,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 class KisSecuritiesClientTest {
 
     private static final String PATH = "/uapi/domestic-stock/v1/quotations/search-stock-info";
@@ -66,7 +71,8 @@ class KisSecuritiesClientTest {
         AtomicLong now = new AtomicLong();
         FixedIntervalGate gate = new FixedIntervalGate(1_000, now::get, ignored -> {
         });
-        KisRateLimiter rateLimiter = new KisRateLimiter(gate);
+        SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+        KisRateLimiter rateLimiter = new KisRateLimiter(gate, meterRegistry);
         KisProperties properties = properties(true);
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         RestClient restClient = RestClient.builder()
@@ -75,13 +81,14 @@ class KisSecuritiesClientTest {
                 .build();
         clock = new MutableClock(Instant.parse("2026-09-08T00:00:00Z"));
         retrySleeps = new ArrayList<>();
-        tokenProvider = new KisTokenProvider(restClient, properties, clock);
+        tokenProvider = new KisTokenProvider(restClient, properties, clock, meterRegistry);
         client = new KisSecuritiesClient(
                 restClient,
                 properties,
                 rateLimiter,
                 tokenProvider,
                 new ObjectMapper(),
+                meterRegistry,
                 retrySleeps::add);
     }
 
@@ -114,6 +121,31 @@ class KisSecuritiesClientTest {
                 .withRequestBody(equalToJson("{\"grant_type\":\"client_credentials\",\"appkey\":\""
                         + APP_KEY + "\",\"appsecret\":\"" + APP_SECRET + "\"}")));
     }
+
+    @ParameterizedTest
+    @MethodSource("allowedEndpoints")
+    void every_allowed_endpoint_uses_its_fixed_tr_id(String path, String trId) {
+        stubToken("token");
+        stubFor(get(urlPathEqualTo(path))
+                .willReturn(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
+                        .withBody("{\"rt_cd\":\"0\",\"msg_cd\":\"\",\"msg1\":\"OK\"}")));
+
+        client.get(path, Map.of(), JsonNode.class);
+
+        verify(1, getRequestedFor(urlPathEqualTo(path))
+                .withHeader("tr_id", equalTo(trId)));
+    }
+
+    private static Stream<Arguments> allowedEndpoints() {
+        return Stream.of(
+                Arguments.of("/uapi/domestic-stock/v1/quotations/search-stock-info", "CTPF1002R"),
+                Arguments.of("/uapi/domestic-stock/v1/finance/balance-sheet", "FHKST66430100"),
+                Arguments.of("/uapi/domestic-stock/v1/finance/income-statement", "FHKST66430200"),
+                Arguments.of("/uapi/domestic-stock/v1/finance/financial-ratio", "FHKST66430300"),
+                Arguments.of("/uapi/domestic-stock/v1/finance/profit-ratio", "FHKST66430400")
+        );
+    }
+
 
     @Test
     void unauthorized_request_refreshes_token_and_retries_once() {

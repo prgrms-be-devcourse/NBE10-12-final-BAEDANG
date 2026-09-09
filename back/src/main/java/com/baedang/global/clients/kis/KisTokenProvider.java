@@ -16,6 +16,8 @@ import org.springframework.web.client.RestClientException;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 
 public class KisTokenProvider {
 
@@ -29,14 +31,27 @@ public class KisTokenProvider {
     private final RestClient restClient;
     private final KisProperties properties;
     private final Clock clock;
+    private final Counter issuedSuccessCounter;
+    private final Counter issuedErrorCounter;
 
     private volatile TokenState state;
     private Instant lastFailureAt;
 
-    public KisTokenProvider(RestClient restClient, KisProperties properties, Clock clock) {
+    public KisTokenProvider(
+            RestClient restClient,
+            KisProperties properties,
+            Clock clock,
+            MeterRegistry meterRegistry
+    ) {
         this.restClient = restClient;
         this.properties = properties;
         this.clock = clock;
+        this.issuedSuccessCounter = Counter.builder("kis.token.issued")
+                .tag("result", "success")
+                .register(meterRegistry);
+        this.issuedErrorCounter = Counter.builder("kis.token.issued")
+                .tag("result", "error")
+                .register(meterRegistry);
     }
 
     public synchronized String getToken() {
@@ -78,11 +93,14 @@ public class KisTokenProvider {
             Instant expiresAt = resolveExpiresAt(response, now);
             state = new TokenState(response.accessToken(), expiresAt);
             lastFailureAt = null;
+            issuedSuccessCounter.increment();
             return response.accessToken();
         } catch (BusinessException exception) {
+            issuedErrorCounter.increment();
             lastFailureAt = now;
             throw exception;
         } catch (RestClientException | DateTimeParseException exception) {
+            issuedErrorCounter.increment();
             lastFailureAt = now;
             throw new BusinessException(ErrorCode.KIS_API_ERROR);
         }
