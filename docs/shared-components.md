@@ -301,7 +301,7 @@ The virtual order book module (`com.baedang.orderbook`) supplies a shared synthe
 
 #### 3. TTL and Scheduling Policies
 - **TTL Rules**: Financial statements (annual and quarterly) have a 7-day (7d / 7 days) TTL. Industry classification has a 30-day (30d / 30 days) TTL.
-- **Single-Flight Concurrency**: Concurrent requests for the same stock share a single in-flight `CompletableFuture` managed by a `ConcurrentHashMap` owner/waiter pattern. The map entry is removed only when that same future completes, so a concurrent scheduled force-refresh request cannot be downgraded during owner handoff.
+- **Single-Flight Concurrency**: Concurrent requests for the same stock share a `CompletableFuture` through a `ConcurrentHashMap` owner/waiter pattern. After completing its future, the owner compare-removes only its own map entry in `finally`; a force-refresh waiter that joined a non-forced flight rechecks the outcome and starts a forced flight if the financial groups were not updated.
 - **Weekly Batch Budget**: Scheduled at Monday 08:10 KST for ranked KR non-ETF/ETN stocks (~100 stocks). Calls 4 annual + 4 quarterly endpoints per stock; industry is queried only if missing or expired (max 800 / 900 calls).
 - **Single-Replica Limitation**: In-memory single-flight and rate limiting apply within a single JVM instance. Scaling to multiple replicas requires distributed locks, shared token caches, and central rate limiting before deployment.
 

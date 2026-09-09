@@ -332,8 +332,15 @@ class StockFinancialSyncServiceTest {
             Future<SyncResult> first = executor.submit(
                     () -> service.ensureFresh(stock, SyncTrigger.ON_DEMAND));
             assertThat(annualEntered.await(5, TimeUnit.SECONDS)).isTrue();
-            Future<SyncResult> second = executor.submit(
-                    () -> service.ensureFresh(stock, SyncTrigger.ON_DEMAND));
+            AtomicReference<Thread> secondThread = new AtomicReference<>();
+            CountDownLatch secondStarted = new CountDownLatch(1);
+            Future<SyncResult> second = executor.submit(() -> {
+                secondThread.set(Thread.currentThread());
+                secondStarted.countDown();
+                return service.ensureFresh(stock, SyncTrigger.ON_DEMAND);
+            });
+            assertThat(secondStarted.await(5, TimeUnit.SECONDS)).isTrue();
+            awaitWaiting(secondThread.get());
             releaseAnnual.countDown();
 
             assertThat(second.get(5, TimeUnit.SECONDS))

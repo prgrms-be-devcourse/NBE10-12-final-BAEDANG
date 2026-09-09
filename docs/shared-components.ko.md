@@ -301,7 +301,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 
 #### 3. TTL 및 스케줄링 정책
 - **TTL 규칙**: 재무제표(연간·분기)는 7일(7d / 7 days), 산업분류는 30일(30d / 30 days) TTL을 적용합니다.
-- **Single-Flight 동시성**: 동일 종목에 대한 동시 요청은 `ConcurrentHashMap` 기반 owner/waiter 패턴의 `CompletableFuture`를 공유합니다. 맵 엔트리는 그 동일한 future가 완료될 때만 제거하므로, 동시 주간 배치 강제 갱신 의도가 owner 교체 과정에서 일반 조회로 약화되지 않습니다.
+- **Single-Flight 동시성**: 동일 종목의 동시 요청은 `ConcurrentHashMap` owner/waiter 패턴으로 `CompletableFuture`를 공유합니다. owner는 future 완료 후 `finally`에서 자기 맵 엔트리만 비교 제거하고, 일반 조회 flight에 합류한 강제 갱신 waiter는 결과를 다시 검사하여 재무 그룹이 갱신되지 않았으면 강제 flight를 시작합니다.
 - **주간 배치 호출량**: 매주 월요일 08:10 KST에 국내 상위 100위 비ETF/ETN 종목을 순차 처리합니다. 종목당 연간 4콜 + 분기 4콜을 호출하며 산업분류는 미적재 또는 만료 시에만 1콜 추가합니다 (최대 800 / 900콜).
 - **단일 레플리카 한계**: 현재 인메모리 single-flight와 rate limiter는 단일 JVM 인스턴스 범위입니다. 다중 레플리카로 확장하기 전 분산 락, 공유 토큰 캐시, 중앙 rate limiter가 선행되어야 합니다.
 
