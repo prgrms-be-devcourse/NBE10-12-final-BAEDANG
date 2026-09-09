@@ -5,6 +5,10 @@ import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.orderbook.support.MutableClock;
+import com.baedang.orderbook.entity.OrderBookSide;
+import com.baedang.orderbook.model.GeneratedOrderBook;
+import com.baedang.orderbook.model.GeneratedOrderBookLevel;
+import com.baedang.orderbook.service.OrderBookPublicationService;
 import com.baedang.stock.service.StockTradingStatusService;
 import com.baedang.trading.dto.LimitOrderRequest;
 import com.baedang.trading.entity.OrderStatus;
@@ -19,6 +23,9 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -40,12 +47,16 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -75,6 +86,8 @@ class LimitOrderExecutionIntegrationTest {
     @Autowired LimitOrderService admission;
     @Autowired LimitOrderExecutionService execution;
     @Autowired LimitOrderExecutionTransactionService transactions;
+    @Autowired LimitOrderTransactionService lifecycle;
+    @Autowired OrderBookPublicationService publication;
     @Autowired LimitExecutionBookReader books;
     @Autowired TradeOrderRepository orders;
     @Autowired StockRepository stocks;
@@ -214,6 +227,142 @@ class LimitOrderExecutionIntegrationTest {
         clock.setCurrent(NOW.plusSeconds(3600));
         assertThat(transactions.execute(expiryAttempt).reason()).isEqualTo(LimitExecutionOutcome.Reason.EXPIRED);
         assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id IN (?,?)",order,expiring)).isZero();
+    }
+
+    @ParameterizedTest
+    @CsvSource({"BUY, true", "BUY, false", "SELL, true", "SELL, false"})
+    void 취소와_부분체결의_계좌락_경합은_선행커밋에_따라_한번만_정산한다(OrderSide side, boolean executionFirst) throws Exception {
+        if (side == OrderSide.SELL) {
+            jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,2,0,90,1400,180,252000,?)",
+                    account, stock, NOW.atOffset(ZoneOffset.UTC));
+        }
+        book(side == OrderSide.BUY ? "ASK" : "BID", "100", 1, 1);
+        long order = place(side.name(), "2", "100");
+        LimitExecutionAttempt prepared = attempt(order);
+        AtomicReference<LimitExecutionOutcome> outcome = new AtomicReference<>();
+        Runnable fill = () -> outcome.set(transactions.execute(prepared));
+        Runnable cancel = () -> assertThat(lifecycle.close(user, account, order, false).status()).isEqualTo(OrderStatus.CANCELED);
+
+        runContended(executionFirst ? fill : cancel, executionFirst ? cancel : fill);
+
+        int filled = executionFirst ? 1 : 0;
+        assertThat(outcome.get().reason()).isEqualTo(executionFirst
+                ? LimitExecutionOutcome.Reason.EXECUTED : LimitExecutionOutcome.Reason.INACTIVE);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(number("SELECT filled_quantity FROM trade_order WHERE order_id=?", order)).isEqualByComparingTo(BigDecimal.valueOf(filled));
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?", order)).isEqualByComparingTo(BigDecimal.valueOf(filled));
+        assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?", order)).isEqualByComparingTo(BigDecimal.valueOf(filled));
+        assertThat(number("SELECT reserved_cash FROM trade_order WHERE order_id=?", order)).isZero();
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?", account)).isZero();
+        assertThat(number("SELECT coalesce(sum(locked_quantity),0) FROM holding WHERE account_id=?", account)).isZero();
+        assertThat(number("SELECT coalesce(sum(quantity),0) FROM holding WHERE account_id=? AND stock_id=?", account, stock))
+                .isEqualByComparingTo(BigDecimal.valueOf(side == OrderSide.BUY ? filled : 2 - filled));
+        assertThat(number("SELECT remaining_quantity FROM order_book_level WHERE book_version_id=? AND level_depth=1", version))
+                .isEqualByComparingTo(BigDecimal.valueOf(1 - filled));
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?", version)).isEqualByComparingTo(BigDecimal.valueOf(filled));
+        BigDecimal expectedCash = new BigDecimal("50000000").add((side == OrderSide.BUY
+                ? new BigDecimal("-140014") : new BigDecimal("139972")).multiply(BigDecimal.valueOf(filled)));
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?", account)).isEqualByComparingTo(expectedCash);
+        assertCashConservation();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void 호가교체와_체결의_버전락_경합은_폐쇄버전_추가소비를_막는다(boolean executionFirst) throws Exception {
+        book("ASK", "100", 1, 1);
+        long oldVersion = version;
+        long order = place("BUY", "2", "100");
+        LimitExecutionAttempt prepared = attempt(order);
+        GeneratedOrderBook replacement = replacementBook();
+        AtomicReference<LimitExecutionOutcome> outcome = new AtomicReference<>();
+        AtomicReference<Long> newVersion = new AtomicReference<>();
+        Runnable fill = () -> outcome.set(transactions.execute(prepared));
+        Runnable replace = () -> newVersion.set(publication.publish(replacement, NOW.plusSeconds(3600)).orElseThrow());
+
+        runContended(executionFirst ? fill : replace, executionFirst ? replace : fill);
+
+        int oldFills = executionFirst ? 1 : 0;
+        assertThat(outcome.get().reason()).isEqualTo(executionFirst
+                ? LimitExecutionOutcome.Reason.EXECUTED : LimitExecutionOutcome.Reason.BOOK_CHANGED);
+        assertThat(number("SELECT count(*) FROM order_book_version WHERE stock_id=? AND is_active", stock)).isEqualByComparingTo("1");
+        assertThat(jdbc.queryForObject("SELECT is_active FROM order_book_version WHERE book_version_id=?", Boolean.class, oldVersion)).isFalse();
+        assertThat(number("SELECT remaining_quantity FROM order_book_level WHERE book_version_id=? AND side='ASK' AND level_depth=1", oldVersion))
+                .isEqualByComparingTo(BigDecimal.valueOf(1 - oldFills));
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?", oldVersion))
+                .isEqualByComparingTo(BigDecimal.valueOf(oldFills));
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?", newVersion.get())).isZero();
+        assertThat(number("SELECT count(*) FROM order_book_level WHERE book_version_id=? AND remaining_quantity<>initial_quantity", newVersion.get())).isZero();
+
+        // 다음 정상 시도는 새 호가만 사용하고 이전 체결의 누적 금액을 이어받습니다.
+        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.EXECUTED);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(number("SELECT sum(quantity) FROM trade_execution WHERE order_id=?", order)).isEqualByComparingTo("2");
+        assertThat(number("SELECT coalesce(sum(e.quantity),0) FROM trade_execution e JOIN order_book_level l ON l.level_id=e.book_level_id WHERE e.order_id=? AND l.book_version_id=?", order, oldVersion))
+                .isEqualByComparingTo(BigDecimal.valueOf(oldFills));
+        assertThat(number("SELECT remaining_quantity FROM order_book_level WHERE book_version_id=? AND side='ASK' AND level_depth=1", newVersion.get()))
+                .isEqualByComparingTo(BigDecimal.valueOf(1 + oldFills));
+        assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?", order)).isEqualByComparingTo(BigDecimal.valueOf(oldFills + 1));
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?", account)).isEqualByComparingTo("49719972");
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?", account)).isZero();
+        assertThat(number("SELECT quantity FROM holding WHERE account_id=? AND stock_id=?", account, stock)).isEqualByComparingTo("2");
+        assertCashConservation();
+    }
+
+    private GeneratedOrderBook replacementBook() {
+        List<GeneratedOrderBookLevel> levels = new ArrayList<>();
+        for (OrderBookSide side : List.of(OrderBookSide.ASK, OrderBookSide.BID)) {
+            for (int depth = 1; depth <= 10; depth++) {
+                BigDecimal distance = new BigDecimal("0.01").multiply(BigDecimal.valueOf(depth - 1));
+                BigDecimal price = side == OrderBookSide.ASK ? new BigDecimal("100").add(distance) : new BigDecimal("99.98").subtract(distance);
+                levels.add(new GeneratedOrderBookLevel(side, depth, price, new BigDecimal("3")));
+            }
+        }
+        return new GeneratedOrderBook(stock, new BigDecimal("99.99"), "USD", NOW, NOW, "test", 2L, levels);
+    }
+
+    /** 첫 서비스의 실제 트랜잭션을 유지하고, 두 번째 연결이 그 잠금을 기다린 것을 확인한 뒤 커밋합니다. */
+    private void runContended(Runnable first, Runnable second) throws Exception {
+        CountDownLatch firstReady = new CountDownLatch(1);
+        CountDownLatch secondStarted = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicInteger firstPid = new AtomicInteger();
+        AtomicInteger secondPid = new AtomicInteger();
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<?> one = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
+                firstPid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                first.run();
+                firstReady.countDown();
+                try {
+                    if (!release.await(10, TimeUnit.SECONDS)) throw new IllegalStateException("선행 트랜잭션 해제 시간 초과");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(exception);
+                }
+            }));
+            Future<?> two;
+            try {
+                assertThat(firstReady.await(5, TimeUnit.SECONDS)).as("선행 서비스 실행 완료").isTrue();
+                two = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
+                    secondPid.set(jdbc.queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    secondStarted.countDown();
+                    second.run();
+                }));
+                assertThat(secondStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+                boolean blocked = false;
+                while (System.nanoTime() < deadline) {
+                    blocked = Boolean.TRUE.equals(jdbc.queryForObject("SELECT ? = ANY(pg_blocking_pids(?))",
+                            Boolean.class, firstPid.get(), secondPid.get()));
+                    if (blocked) break;
+                    LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+                }
+                assertThat(blocked).as("후행 DB 연결이 선행 트랜잭션의 잠금을 기다림").isTrue();
+            } finally {
+                release.countDown();
+            }
+            one.get(5, TimeUnit.SECONDS);
+            two.get(5, TimeUnit.SECONDS);
+        }
     }
 
     @Test
