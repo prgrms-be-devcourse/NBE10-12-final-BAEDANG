@@ -25,6 +25,13 @@ export function OrderBookPanel({ symbol, marketCountry }: { symbol: string; mark
   const [loading, setLoading] = useState(true);
   const [unavailable, setUnavailable] = useState(false);
   const inFlightRef = useRef(false);
+  // 이 패널이 지금 어떤 (symbol, marketCountry)를 보여줘야 하는지의 "세대" 번호.
+  // symbol/marketCountry가 바뀌면 증가한다 — 응답이 도착했을 때 그 응답이 요청 당시
+  // 세대와 같은지 비교해서, 늦게 도착한 이전 종목의 응답이 최신 상태를 덮어쓰는 걸
+  // 막는다(리뷰 피드백, PR #147, SOL4R1S님). 지금은 부모(stocks/[symbol]/page.tsx)가
+  // 심볼이 바뀔 때 detail을 null로 바꿔 이 패널 자체를 언마운트/리마운트하므로 실제
+  // 버그로 이어지진 않지만, 컴포넌트 자체의 안전성을 위해 독립적으로 방어한다.
+  const requestIdRef = useRef(0);
 
   // 503(ORDER_BOOK_UNAVAILABLE)이든 네트워크 에러든 이 패널에서는 구분하지 않고
   // 전부 "조회 불가" 안내로 뭉뚱그린다 — 원인을 세분화해서 알려줄 만큼 중요한
@@ -32,19 +39,32 @@ export function OrderBookPanel({ symbol, marketCountry }: { symbol: string; mark
   function load() {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
+    const requestId = ++requestIdRef.current;
     getOrderBook(symbol, marketCountry)
       .then((data) => {
+        if (requestIdRef.current !== requestId) return; // 그 사이 symbol/marketCountry가 바뀐 낡은 응답 — 버린다.
         setBook(data);
         setUnavailable(false);
       })
-      .catch(() => setUnavailable(true))
+      .catch(() => {
+        if (requestIdRef.current !== requestId) return;
+        setUnavailable(true);
+      })
       .finally(() => {
+        // 이미 무효화된 요청이면 inFlightRef/loading을 건드리지 않는다 — 그 사이
+        // 시작된 최신 요청이 이미 그 자리를 맡고 있을 수 있다.
+        if (requestIdRef.current !== requestId) return;
         inFlightRef.current = false;
         setLoading(false);
       });
   }
 
   useEffect(() => {
+    // symbol/marketCountry가 바뀌면 이전 요청의 in-flight 가드를 즉시 풀어준다 —
+    // 안 그러면 이전 요청이 아직 안 끝났을 때 이 effect의 load() 호출이 가드에
+    // 막혀 새 종목 조회 자체가 지연된다. (실제로 덮어쓰는 것을 막는 건 load()
+    // 안의 requestId 비교다.)
+    inFlightRef.current = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     setBook(null);
