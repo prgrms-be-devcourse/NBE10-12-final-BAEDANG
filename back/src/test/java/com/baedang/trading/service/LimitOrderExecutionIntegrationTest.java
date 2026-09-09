@@ -1,0 +1,439 @@
+package com.baedang.trading.service;
+
+import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.orderbook.support.MutableClock;
+import com.baedang.stock.service.StockTradingStatusService;
+import com.baedang.trading.dto.LimitOrderRequest;
+import com.baedang.trading.entity.OrderStatus;
+import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.LimitExecutionAttempt;
+import com.baedang.trading.model.LimitExecutionBook;
+import com.baedang.trading.model.LimitExecutionOutcome;
+import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.repository.TradeOrderRepository;
+import com.baedang.stock.repository.StockRepository;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.trading.entity.OrderSide;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@SpringBootTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.sql.init.mode=never", "toss.enabled=false"})
+class LimitOrderExecutionIntegrationTest {
+    static final Instant NOW = Instant.parse("2026-09-09T01:00:00Z");
+    @Container @ServiceConnection
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(DockerImageName.parse("timescale/timescaledb:latest-pg18").asCompatibleSubstituteFor("postgres"));
+    @TestConfiguration
+    static class Time {
+        @Bean @Primary MutableClock executionTestClock() { return new MutableClock(NOW); }
+    }
+    @MockitoBean MarketSessionProvider sessions;
+    @MockitoBean ExecutionExchangeRateProvider rates;
+    @MockitoBean com.baedang.market.port.MarketCalendarPort calendars;
+    @MockitoBean com.baedang.market.port.MarketDataPort marketData;
+    @MockitoBean StockTradingStatusService statuses;
+    @MockitoBean com.baedang.trading.scheduler.LimitOrderExpirationScheduler expirationTrigger;
+    @MockitoSpyBean LedgerService ledger;
+    @Autowired MutableClock clock;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired LimitOrderService admission;
+    @Autowired LimitOrderExecutionService execution;
+    @Autowired LimitOrderExecutionTransactionService transactions;
+    @Autowired LimitExecutionBookReader books;
+    @Autowired TradeOrderRepository orders;
+    @Autowired StockRepository stocks;
+    @Autowired PlatformTransactionManager manager;
+    @Autowired com.baedang.trading.repository.LimitExecutionCandidateRepository candidates;
+    long user, account, stock, version;
+    String symbol;
+
+    @BeforeEach
+    void setup() {
+        clock.setCurrent(NOW);
+        when(sessions.currentSession(any(),any())).thenReturn(new MarketSessionStatus(true,NOW.plusSeconds(3600)));
+        when(statuses.requireCurrent(any())).thenAnswer(inv -> inv.getArgument(0));
+        rate("1400");
+        symbol = UUID.randomUUID().toString().substring(0,8);
+        user = jdbc.queryForObject("INSERT INTO users(email,password_hash,nickname) VALUES (?,'x',?) RETURNING user_id",Long.class,symbol+"@test.com",symbol);
+        account = jdbc.queryForObject("INSERT INTO account(user_id,initial_cash,cash_balance,opened_at) VALUES (?,50000000,50000000,?) RETURNING account_id",Long.class,user,NOW.minusSeconds(1).atOffset(ZoneOffset.UTC));
+        new TransactionTemplate(manager).executeWithoutResult(tx -> ledger.recordInitialDeposit(
+                account,new BigDecimal("50000000"),1,NOW.minusSeconds(1).atOffset(ZoneOffset.UTC)));
+        stock = jdbc.queryForObject("INSERT INTO stock(symbol,market_country,market,name,currency,security_type,is_ranked) VALUES (?,'US','NASDAQ','test','USD','STOCK',true) RETURNING stock_id",Long.class,symbol);
+        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at) VALUES (?,100,'USD',?,?)",stock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
+    }
+
+    @Test
+    void 미리보기와_여러호가_실체결의_금액이_일치하고_원장별_잔액을_보존한다() {
+        book("ASK", "99", 1, 2);
+        com.baedang.trading.dto.LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","3","100","USD").executionPreview();
+        assertThat(preview.expectedFilledQuantity()).isEqualTo("3");
+        assertThat(preview.avgExecutionPrice()).isEqualTo("99.67");
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
+        long order = place("BUY","3","100");
+        assertThat(execution.execute(order).executionCount()).isEqualTo(2);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?",account)).isZero();
+        assertThat(number("SELECT net_amount FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo(preview.netAmountKrw());
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("49581358");
+        assertThat(jdbc.queryForList("SELECT balance_after FROM ledger_entry WHERE order_id=? ORDER BY entry_id",BigDecimal.class,order))
+                .usingElementComparator(BigDecimal::compareTo).containsExactly(new BigDecimal("49861386"),new BigDecimal("49581358"));
+        assertThat(number("SELECT usd_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("299");
+        assertThat(number("SELECT krw_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("418600");
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isEqualByComparingTo("1");
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=? AND book_level_id IS NOT NULL",order)).isEqualByComparingTo("2");
+        assertCashConservation();
+    }
+
+    @Test
+    void 부분매수는_주문별동결만_사용하고_취소하면_잔여동결만_해제한다() {
+        book("ASK","100",10,10);
+        long order = place("BUY","3","100");
+        long other = place("BUY","1","100");
+        rate("1700");
+        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(orders.findById(order).orElseThrow().getFilledQuantity()).isEqualByComparingTo("2");
+        assertThat(orders.findById(order).orElseThrow().getReservedCash()).isEqualByComparingTo("80008");
+        admission.cancel(user,order);
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?",account)).isEqualByComparingTo("140014");
+        assertThat(orders.findById(other).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?",order)).isEqualByComparingTo("1");
+        assertCashConservation();
+    }
+
+    @Test
+    void 매도는_동결수량을_차감하고_SEC를_한번만_부과한다() {
+        jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,3,0,90,1400,270,378000,?)",account,stock,NOW.atOffset(ZoneOffset.UTC));
+        book("BID","100",1,1);
+        long order = place("SELL","2","99");
+        assertThat(execution.execute(order).executionCount()).isEqualTo(2);
+        assertThat(number("SELECT quantity FROM holding WHERE account_id=?",account)).isEqualByComparingTo("1");
+        assertThat(number("SELECT locked_quantity FROM holding WHERE account_id=?",account)).isZero();
+        assertThat(number("SELECT usd_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("90");
+        assertThat(number("SELECT sum(sec_fee_usd) FROM trade_execution WHERE order_id=?",order)).isEqualByComparingTo("0.01");
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("50278558");
+        assertThat(jdbc.queryForList("SELECT balance_after FROM ledger_entry WHERE order_id=? ORDER BY entry_id",BigDecimal.class,order))
+                .usingElementComparator(BigDecimal::compareTo).containsExactly(new BigDecimal("50139972"),new BigDecimal("50278558"));
+        assertCashConservation();
+        assertThat(number("SELECT locked_quantity FROM holding WHERE account_id=?",account))
+                .isEqualByComparingTo(number("SELECT coalesce(sum(quantity-filled_quantity),0) FROM trade_order WHERE account_id=? AND side='SELL' AND status IN ('PENDING','PARTIALLY_FILLED')",account));
+    }
+
+    @Test
+    void 두번째원장_실패는_앞선체결과_물량까지_모두_롤백한다() {
+        book("ASK","99",1,2);
+        long order = place("BUY","3","100");
+        AtomicInteger calls = new AtomicInteger();
+        doAnswer(inv -> { if (calls.incrementAndGet() == 2) throw new IllegalStateException("원장 저장 실패"); return inv.callRealMethod(); })
+                .when(org.springframework.test.util.AopTestUtils.<LedgerService>getUltimateTargetObject(ledger))
+                .recordBuy(any(),any(),any(),any());
+        assertThatThrownBy(() -> execution.execute(order)).isInstanceOf(IllegalStateException.class);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
+        assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?",order)).isZero();
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
+        assertThat(number("SELECT remaining_quantity FROM order_book_level WHERE book_version_id=? AND level_depth=1",version)).isEqualByComparingTo("1");
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("50000000");
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?",account)).isEqualByComparingTo("420042");
+        assertThat(number("SELECT count(*) FROM holding WHERE account_id=?",account)).isZero();
+    }
+
+    @Test
+    void 동일시도_재실행은_체결횟수_토큰으로_차단한다() {
+        book("ASK","100",1,1);
+        long order = place("BUY","3","100");
+        LimitExecutionAttempt attempt = attempt(order);
+        assertThat(transactions.execute(attempt).executionCount()).isEqualTo(1);
+        assertThat(transactions.execute(attempt).reason()).isEqualTo(LimitExecutionOutcome.Reason.ORDER_CHANGED);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isEqualByComparingTo("1");
+    }
+
+    @Test
+    void 다른계좌가_같은호가를_소비하면_후속시도는_revision불일치로_차단된다() throws Exception {
+        book("ASK","100",3,1);
+        long first = place("BUY","3","100");
+        long user2 = jdbc.queryForObject("INSERT INTO users(email,password_hash,nickname) VALUES (?,'x','second') RETURNING user_id",Long.class,UUID.randomUUID()+"@test.com");
+        long account2 = jdbc.queryForObject("INSERT INTO account(user_id,initial_cash,cash_balance,opened_at) VALUES (?,50000000,50000000,?) RETURNING account_id",Long.class,user2,NOW.minusSeconds(1).atOffset(ZoneOffset.UTC));
+        long second = admission.place(user2,new LimitOrderRequest(account2,UUID.randomUUID().toString(),symbol,"US","BUY","3","100","USD")).orderId();
+        LimitExecutionAttempt a = attempt(first), b = attempt(second);
+        try (java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            CountDownLatch start = new CountDownLatch(1);
+            Future<LimitExecutionOutcome> one = pool.submit(() -> { start.await(); return transactions.execute(a); });
+            Future<LimitExecutionOutcome> two = pool.submit(() -> { start.await(); return transactions.execute(b); });
+            start.countDown();
+            List<LimitExecutionOutcome.Reason> reasons = List.of(one.get(10,TimeUnit.SECONDS).reason(),two.get(10,TimeUnit.SECONDS).reason());
+            assertThat(reasons).containsExactlyInAnyOrder(LimitExecutionOutcome.Reason.EXECUTED,LimitExecutionOutcome.Reason.BOOK_CHANGED);
+        }
+        assertThat(number("SELECT sum(quantity) FROM trade_execution WHERE order_id IN (?,?)",first,second)).isEqualByComparingTo("3");
+        assertThat(number("SELECT remaining_quantity FROM order_book_level WHERE book_version_id=? AND level_depth=1",version)).isZero();
+    }
+
+    @Test
+    void 취소후_준비된시도와_장마감후_시도는_결제하지않는다() {
+        book("ASK","100",3,1);
+        long order = place("BUY","3","100");
+        LimitExecutionAttempt attempt = attempt(order);
+        admission.cancel(user,order);
+        assertThat(transactions.execute(attempt).reason()).isEqualTo(LimitExecutionOutcome.Reason.INACTIVE);
+        long expiring = place("BUY","1","100");
+        LimitExecutionAttempt expiryAttempt = attempt(expiring);
+        clock.setCurrent(NOW.plusSeconds(3600));
+        assertThat(transactions.execute(expiryAttempt).reason()).isEqualTo(LimitExecutionOutcome.Reason.EXPIRED);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id IN (?,?)",order,expiring)).isZero();
+    }
+
+    @Test
+    void 락대기중_시세가_만료되면_결제하지않는다() throws Exception {
+        book("ASK","100",3,1);
+        jdbc.update("UPDATE order_book_version SET quote_at=? WHERE book_version_id=?",NOW.minusSeconds(14).atOffset(ZoneOffset.UTC),version);
+        long order = place("BUY","1","100");
+        LimitExecutionAttempt attempt = attempt(order);
+        CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
+        try (java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<?> blocker = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
+                jdbc.queryForObject("SELECT account_id FROM account WHERE account_id=? FOR UPDATE",Long.class,account);
+                locked.countDown();
+                try { if (!release.await(5,TimeUnit.SECONDS)) throw new IllegalStateException("timeout"); }
+                catch (InterruptedException e) { throw new RuntimeException(e); }
+            }));
+            assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
+            Future<LimitExecutionOutcome> fill = pool.submit(() -> transactions.execute(attempt));
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            boolean waiting = false;
+            while (System.nanoTime() < deadline) {
+                waiting = jdbc.queryForObject("SELECT count(*) > 0 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query ILIKE '%account%'",Boolean.class);
+                if (waiting) break;
+                java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+            }
+            assertThat(waiting).isTrue();
+            clock.setCurrent(NOW.plusSeconds(2));
+            release.countDown();
+            blocker.get(5,TimeUnit.SECONDS);
+            assertThat(fill.get(5,TimeUnit.SECONDS).reason()).isEqualTo(LimitExecutionOutcome.Reason.STALE_BOOK);
+        } finally { release.countDown(); }
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
+    }
+
+    @Test
+    void 국내는_환율포트없이_체결하고_상위트랜잭션은_거부한다() {
+        jdbc.update("UPDATE stock SET market_country='KR',market='KOSPI',currency='KRW' WHERE stock_id=?",stock);
+        jdbc.update("UPDATE quote_snapshot SET currency='KRW' WHERE stock_id=?",stock);
+        book("ASK","99",1,2);
+        jdbc.update("UPDATE order_book_version SET currency='KRW' WHERE book_version_id=?",version);
+        clearInvocations(rates);
+        long order = admission.place(user,new LimitOrderRequest(account,UUID.randomUUID().toString(),symbol,"KR","BUY","3","100","KRW")).orderId();
+        assertThat(execution.execute(order).executionCount()).isEqualTo(2);
+        verifyNoInteractions(rates);
+        assertThatThrownBy(() -> new TransactionTemplate(manager).execute(tx -> execution.execute(order)))
+                .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+    }
+
+    private long place(String side,String quantity,String price) {
+        return admission.place(user,new LimitOrderRequest(account,UUID.randomUUID().toString(),symbol,"US",side,quantity,price,"USD")).orderId();
+    }
+
+    @Test
+    void 나노초_환율근거는_원래시각으로_검증하고_체결은_마이크로초로_저장한다() {
+        book("ASK","100",3,1);
+        long order = place("BUY","1","100");
+        Instant prepared = NOW.plusNanos(789);
+        clock.setCurrent(NOW.plusNanos(900));
+        when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
+                prepared.atOffset(ZoneOffset.UTC),prepared.atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)));
+        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT executed_at FROM trade_execution WHERE order_id=?",java.time.OffsetDateTime.class,order).toInstant()).isEqualTo(NOW);
+    }
+
+    @Test
+    void 체결용환율_원본만료와_미래호가는_체결하지않는다() {
+        book("ASK","100",3,1);
+        long order = place("BUY","1","100");
+        when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
+                NOW.minusSeconds(10).atOffset(ZoneOffset.UTC),NOW.minusSeconds(10).atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC)));
+        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.CONTEXT_EXPIRED);
+        jdbc.update("UPDATE order_book_version SET quote_at=?,generated_at=? WHERE book_version_id=?",NOW.plusSeconds(1).atOffset(ZoneOffset.UTC),NOW.plusSeconds(1).atOffset(ZoneOffset.UTC),version);
+        clearInvocations(rates);
+        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
+        verifyNoInteractions(rates);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
+    }
+
+    @Test
+    void 충분한_대기열에서_가격우선_인덱스를_사용한다() {
+        long sample = place("BUY","1","100");
+        jdbc.update("""
+                INSERT INTO trade_order(account_id,stock_id,client_order_id,side,order_type,quantity,status,
+                  limit_price,requested_limit_price,requested_limit_currency,acceptance_exchange_rate,
+                  reserved_cash,expires_at,ordered_at,gross_amount,fee,tax,net_amount)
+                SELECT account_id,stock_id,gen_random_uuid(),side,order_type,quantity,status,
+                  100 + i % 10,100 + i % 10,requested_limit_currency,acceptance_exchange_rate,
+                  reserved_cash,expires_at,ordered_at,gross_amount,fee,tax,net_amount
+                FROM trade_order CROSS JOIN generate_series(1,4000) i WHERE order_id=?
+                """,sample);
+        jdbc.execute("ANALYZE trade_order");
+        List<String> plan = jdbc.queryForList("""
+                EXPLAIN (ANALYZE, BUFFERS) SELECT order_id,limit_price,ordered_at FROM trade_order
+                WHERE order_type='LIMIT' AND status IN ('PENDING','PARTIALLY_FILLED')
+                  AND quantity > filled_quantity AND expires_at > ? AND order_id <= ?
+                  AND stock_id=? AND side='BUY'
+                ORDER BY limit_price DESC,ordered_at,order_id LIMIT 50
+                """,String.class,NOW.atOffset(ZoneOffset.UTC),candidates.upperBound(),stock);
+        assertThat(String.join("\n",plan)).contains("ix_order_execute_buy").doesNotContain("Seq Scan");
+    }
+
+    @Test
+    void 후보쿼리는_가격시간순으로_페이지를_잇고_새접수는_다음순회에서_처리한다() {
+        long lower = place("BUY","1","99");
+        long high = place("BUY","1","101");
+        long same = place("BUY","1","101");
+        long upper = candidates.upperBound();
+        long newer = place("BUY","1","102");
+        com.baedang.trading.repository.LimitExecutionCandidateRepository.Group group =
+                new com.baedang.trading.repository.LimitExecutionCandidateRepository.Group(stock,OrderSide.BUY);
+        List<com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate> page =
+                candidates.page(group,null,upper,NOW.atOffset(ZoneOffset.UTC),1);
+        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(high);
+        page = candidates.page(group,page.getLast(),upper,NOW.atOffset(ZoneOffset.UTC),50);
+        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(same,lower);
+        assertThat(candidates.page(group,null,candidates.upperBound(),NOW.atOffset(ZoneOffset.UTC),1).getFirst().orderId()).isEqualTo(newer);
+    }
+
+    @Test
+    void 후보쿼리는_매도저가우선과_만료제외를_적용한다() {
+        jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,10,0,90,1400,900,1260000,?)",account,stock,NOW.atOffset(ZoneOffset.UTC));
+        long high = place("SELL","1","101");
+        long low = place("SELL","1","99");
+        com.baedang.trading.repository.LimitExecutionCandidateRepository.Group group =
+                new com.baedang.trading.repository.LimitExecutionCandidateRepository.Group(stock,OrderSide.SELL);
+        assertThat(candidates.page(group,null,candidates.upperBound(),NOW.atOffset(ZoneOffset.UTC),50))
+                .extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(low,high);
+        assertThat(candidates.page(group,null,candidates.upperBound(),NOW.plusSeconds(3600).atOffset(ZoneOffset.UTC),50)).isEmpty();
+    }
+    private void rate(String value) {
+        when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal(value),NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)));
+    }
+
+    @Test
+    void 비랭킹_첫주문은_호가를_기다렸다가_체결하고_수집대상에서_빠진다() {
+        jdbc.update("UPDATE stock SET is_ranked=false WHERE stock_id=?",stock);
+        long order = place("BUY","1","100");
+        clearInvocations(rates);
+        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
+        verifyNoInteractions(rates);
+        assertThat(stocks.isQuoteTarget(stock,NOW.atOffset(ZoneOffset.UTC))).isTrue();
+        book("ASK","100",1,1);
+        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(stocks.isQuoteTarget(stock,NOW.atOffset(ZoneOffset.UTC))).isFalse();
+    }
+
+    @Test
+    void 과거호가가_삭제되어도_다른환율의_추가매도를_누적정산한다() {
+        jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,3,0,90,1400,270,378000,?)",account,stock,NOW.atOffset(ZoneOffset.UTC));
+        book("BID","100",1,1);
+        long order = place("SELL","2","100");
+        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        Long historicalLevel = jdbc.queryForObject("SELECT book_level_id FROM trade_execution WHERE order_id=?",Long.class,order);
+        jdbc.update("UPDATE order_book_version SET is_active=false,closed_at=? WHERE book_version_id=?",NOW.atOffset(ZoneOffset.UTC),version);
+        jdbc.update("DELETE FROM order_book_version WHERE book_version_id=?",version);
+        assertThat(number("SELECT count(*) FROM order_book_level WHERE level_id=?",historicalLevel)).isZero();
+        book("BID","100",1,1);
+        rate("1300");
+        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(number("SELECT tax FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo("14");
+        assertThat(number("SELECT net_amount FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo("269959");
+        assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?",order)).isEqualByComparingTo("2");
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+    }
+
+    @Test
+    void 계산가능한_0주_미리보기는_AVAILABLE이고_DB는_변경하지않는다() {
+        book("ASK","101",1,1);
+        com.baedang.trading.dto.LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","1","100","USD").executionPreview();
+        assertThat(preview.status()).isEqualTo(com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.AVAILABLE);
+        assertThat(preview.reason()).isEqualTo("PRICE_LIMIT");
+        assertThat(preview.expectedFilledQuantity()).isEqualTo("0");
+        assertThat(preview.avgExecutionPrice()).isNull();
+        assertThat(number("SELECT count(*) FROM trade_order WHERE account_id=?",account)).isZero();
+        assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
+    }
+    private LimitExecutionAttempt attempt(long id) {
+        com.baedang.trading.entity.TradeOrder order = orders.findById(id).orElseThrow();
+        LimitExecutionBook book = books.read(stocks.findById(stock).orElseThrow(),order.getSide(),NOW).orElseThrow();
+        return new LimitExecutionAttempt(order.getAccountId(),id,stock,order.getExecutionCount(),book.version(),book.revision(),
+                new OrderMarketContext(MarketCountry.US,true,NOW.plusSeconds(3600),ExecutionRateEvidence.from(rates.currentUsdKrwSnapshot()),NOW));
+    }
+    private void book(String side,String first,int firstQuantity,int secondQuantity) {
+        version = jdbc.queryForObject("INSERT INTO order_book_version(stock_id,base_price,currency,quote_at,generated_at,policy_version,seed) VALUES (?,100,'USD',?,?,'test',1) RETURNING book_version_id",Long.class,stock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
+        for (int depth=1;depth<=10;depth++) {
+            BigDecimal price = new BigDecimal(first).add(BigDecimal.valueOf((side.equals("ASK") ? 1 : -1) * (depth-1)));
+            int quantity = depth==1 ? firstQuantity : depth==2 ? secondQuantity : 5;
+            jdbc.update("INSERT INTO order_book_level(book_version_id,side,level_depth,price,initial_quantity,remaining_quantity) VALUES (?,?,?,?,?,?)",version,side,depth,price,quantity,quantity);
+        }
+    }
+    private BigDecimal number(String sql,Object...args) { return jdbc.queryForObject(sql,BigDecimal.class,args); }
+
+    private void assertCashConservation() {
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account))
+                .isEqualByComparingTo(number("SELECT sum(amount) FROM ledger_entry WHERE account_id=?",account));
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?",account))
+                .isEqualByComparingTo(number("SELECT coalesce(sum(reserved_cash),0) FROM trade_order WHERE account_id=? AND side='BUY' AND status IN ('PENDING','PARTIALLY_FILLED')",account));
+    }
+
+    @Test
+    void 실제_DB락타임아웃은_한번_재시도후_보류하고_커넥션에_설정이_남지않는다() throws Exception {
+        book("ASK","100",3,1);
+        long order = place("BUY","1","100");
+        CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
+        try (java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<?> blocker = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
+                jdbc.queryForObject("SELECT account_id FROM account WHERE account_id=? FOR UPDATE",Long.class,account);
+                locked.countDown();
+                try { if (!release.await(15,TimeUnit.SECONDS)) throw new IllegalStateException("timeout"); }
+                catch (InterruptedException e) { throw new RuntimeException(e); }
+            }));
+            try {
+                assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
+                Future<LimitExecutionOutcome> fill = pool.submit(() -> execution.execute(order));
+                assertThat(fill.get(10,TimeUnit.SECONDS).reason()).isEqualTo(LimitExecutionOutcome.Reason.LOCK_BUSY);
+            } finally { release.countDown(); }
+            blocker.get(5,TimeUnit.SECONDS);
+        }
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
+        assertThat(jdbc.queryForObject("SHOW lock_timeout",String.class)).isEqualTo("0");
+        assertCashConservation();
+    }
+}
