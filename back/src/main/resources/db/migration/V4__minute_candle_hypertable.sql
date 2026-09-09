@@ -9,11 +9,16 @@
 -- !! 트랜잭션 밖이라 롤백이 없다. 중도 실패하면 앞부분만 적용된 채 남는다.
 --    그래서 모든 구문을 재실행 가능하게 짰다(hypertable·뷰·정책 전부
 --    if_not_exists). 복구 절차는 객체를 손으로 지우는 게 아니라:
---      1) flyway repair   — 실패로 기록된 V3 이력을 지운다
---      2) 앱 재기동       — V3 가 다시 돌며 이미 만들어진 것은 건너뛴다
+--      1) flyway repair   — 실패로 기록된 V4 이력을 지운다
+--      2) 앱 재기동       — V4 가 다시 돌며 이미 만들어진 것은 건너뛴다
 --    실측 확인: 재실행 시 "already exists, skipping" NOTICE 만 남고 성공한다.
 --
 -- 주봉(candle_1w)은 V1 에서 이미 만들었으므로 여기서는 다루지 않습니다.
+--
+-- V1 minute_candle 아래에 "2주차에 켤 것" 으로 주석 처리해 둔 하이퍼테이블·
+-- 연속 집계 블록이 있습니다. 그 예고편의 실물이 이 파일입니다. 적용된 마이그
+-- 레이션은 고치지 않는 게 원칙이라 V1 은 그대로 두고 여기서만 다룹니다.
+-- (V1 쪽 5분봉 예시는 candle_5m·candle_10m 로, 압축·보존은 3번으로 옮겨왔음)
 
 -- ────────────────────────────────────────────────────────────────────────────
 --  1. minute_candle → 하이퍼테이블
@@ -123,3 +128,8 @@ SELECT add_continuous_aggregate_policy('candle_10m',
 --      그때는 start_offset 을 늘리고 아래를 한 번 돌려 과거를 채울 것.
 --        CALL refresh_continuous_aggregate('candle_5m',  NULL, NULL);
 --        CALL refresh_continuous_aggregate('candle_10m', NULL, NULL);
+
+
+-- ── 표 주석 갱신 ────────────────────────────────────────────────────────────
+--   V1 의 '1주차는 온디맨드 + 60초 캐시' 설명은 이 마이그레이션으로 낡았다.
+COMMENT ON TABLE minute_candle IS 'TimescaleDB 하이퍼테이블(1일 청크). 5분봉·10분봉은 연속 집계로 파생한다';
