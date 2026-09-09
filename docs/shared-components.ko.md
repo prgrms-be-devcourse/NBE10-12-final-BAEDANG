@@ -295,19 +295,21 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - **시크릿 보호**: KIS `app-key`, `app-secret`, access token은 환경변수/시크릿으로만 주입하며 소스, fixture, 로그, 예외 메시지에 남기지 않습니다. `.env.example`에는 변수명과 빈 기본값만 제공합니다.
 
 #### 2. 아키텍처 및 포트-어댑터 경계
-- **도메인 포트 격리**: 도메인 서비스(`StockFinancialSyncService`, `StockFinancialQueryService`)는 오직 `StockFinancialInfoPort`에만 의존하며 KIS 클라이언트나 어댑터를 직접 참조하지 않습니다.
+- **도메인 포트 격리**: `StockFinancialSyncService`는 `StockFinancialInfoPort`에 의존하고, `StockFinancialQueryService`는 저장소에 의존하면서 캐시 갱신을 `StockFinancialSyncService`에 위임합니다. 두 서비스 모두 KIS 클라이언트나 어댑터를 직접 참조하지 않습니다.
 - **Optional 포트 주입**: `StockFinancialSyncService`는 `Optional<StockFinancialInfoPort>`를 주입받아, `kis.enabled=false` 상태에서도 앱 기동이 깨지지 않고 로컬 캐시로 안전하게 서비스합니다.
 - **트랜잭션 분리**: 외부 KIS HTTP 호출은 절대 활성 DB 트랜잭션 안에서 수행하지 않습니다. 단기 트랜잭션은 파싱된 기간 데이터 저장과 동기화 시각 갱신 시 `StockFinancialPersistenceService`에서만 엽니다.
 
 #### 3. TTL 및 스케줄링 정책
 - **TTL 규칙**: 재무제표(연간·분기)는 7일(7d / 7 days), 산업분류는 30일(30d / 30 days) TTL을 적용합니다.
-- **Single-Flight 동시성**: 동일 종목에 대한 동시 요청은 `ConcurrentHashMap` 기반의 owner/waiter `CompletableFuture`를 공유하며, 완료 및 실패 시 `finally`에서 인덱스를 제거합니다.
+- **Single-Flight 동시성**: 동일 종목에 대한 동시 요청은 `ConcurrentHashMap` 기반 owner/waiter 패턴의 `CompletableFuture`를 공유합니다. 맵 엔트리는 그 동일한 future가 완료될 때만 제거하므로, 동시 주간 배치 강제 갱신 의도가 owner 교체 과정에서 일반 조회로 약화되지 않습니다.
 - **주간 배치 호출량**: 매주 월요일 08:10 KST에 국내 상위 100위 비ETF/ETN 종목을 순차 처리합니다. 종목당 연간 4콜 + 분기 4콜을 호출하며 산업분류는 미적재 또는 만료 시에만 1콜 추가합니다 (최대 800 / 900콜).
 - **단일 레플리카 한계**: 현재 인메모리 single-flight와 rate limiter는 단일 JVM 인스턴스 범위입니다. 다중 레플리카로 확장하기 전 분산 락, 공유 토큰 캐시, 중앙 rate limiter가 선행되어야 합니다.
 
 #### 4. 폴백 및 Negative Cache
 - **Negative Cache**: KIS에서 정상 빈 응답이 오면 해당 동기화 시각을 갱신하고 빈 상태를 유지하여, TTL 기간 동안 불필요한 반복 호출을 방지합니다.
 - **STALE 폴백**: 외부 갱신이 실패하더라도 기존 캐시가 존재하면 `dataStatus="STALE"`로 반환합니다. 기존 캐시가 전혀 없으면 원래 실패 코드(`KIS_RATE_LIMITED` 우선, 그 외 `KIS_API_ERROR`)를 클라이언트에 반환합니다.
+- **그룹 격리**: 산업분류·연간·분기 갱신 그룹은 각각 독립적으로 시도합니다. 내부 저장 실패는 나머지 그룹 실행이 끝날 때까지 보류한 뒤, 첫 실패를 다시 던지고 이후 실패는 suppressed exception으로 보존합니다.
+
 ## 8. 프론트 공용 모듈
 
 ### 금액 계산·표시

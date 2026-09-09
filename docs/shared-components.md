@@ -295,19 +295,21 @@ The virtual order book module (`com.baedang.orderbook`) supplies a shared synthe
 - **Credential Protection**: KIS `app-key`, `app-secret`, and access tokens are injected only through environment variables/secrets. They are never written to source, fixtures, logs, or exception messages. `.env.example` provides variable names with empty defaults.
 
 #### 2. Architecture and Port-Adapter Boundaries
-- **Domain Port Isolation**: Domain services (`StockFinancialSyncService`, `StockFinancialQueryService`) depend only on `StockFinancialInfoPort` and never directly on KIS clients or adapters.
+- **Domain Port Isolation**: `StockFinancialSyncService` depends on `StockFinancialInfoPort`; `StockFinancialQueryService` depends on repositories and delegates cache refresh to `StockFinancialSyncService`. Neither service directly references KIS clients or adapters.
 - **Optional Port Injection**: `StockFinancialSyncService` injects `Optional<StockFinancialInfoPort>` so that the service remains bootable and operational from local cache when `kis.enabled=false`.
 - **Transaction Boundaries**: External KIS HTTP calls MUST execute outside active database transactions. Short transactions are opened only by `StockFinancialPersistenceService` for persisting parsed periods and updating sync timestamps.
 
 #### 3. TTL and Scheduling Policies
 - **TTL Rules**: Financial statements (annual and quarterly) have a 7-day (7d / 7 days) TTL. Industry classification has a 30-day (30d / 30 days) TTL.
-- **Single-Flight Concurrency**: Concurrent requests for the same stock share a single in-flight `CompletableFuture` managed by a `ConcurrentHashMap` owner/waiter pattern, with completed or failed futures removed in `finally`.
+- **Single-Flight Concurrency**: Concurrent requests for the same stock share a single in-flight `CompletableFuture` managed by a `ConcurrentHashMap` owner/waiter pattern. The map entry is removed only when that same future completes, so a concurrent scheduled force-refresh request cannot be downgraded during owner handoff.
 - **Weekly Batch Budget**: Scheduled at Monday 08:10 KST for ranked KR non-ETF/ETN stocks (~100 stocks). Calls 4 annual + 4 quarterly endpoints per stock; industry is queried only if missing or expired (max 800 / 900 calls).
 - **Single-Replica Limitation**: In-memory single-flight and rate limiting apply within a single JVM instance. Scaling to multiple replicas requires distributed locks, shared token caches, and central rate limiting before deployment.
 
 #### 4. Fallback and Negative Caching
 - **Negative Cache**: A normal empty response from KIS persists as an empty record with updated sync timestamps, preventing repeated requests throughout the TTL window.
 - **STALE Fallback**: If an external refresh fails but previously cached data exists, the query service returns existing data with `dataStatus="STALE"`. If no prior cache exists, the original failure (`KIS_RATE_LIMITED` prioritized, else `KIS_API_ERROR`) is propagated to the client.
+- **Group Isolation**: Industry, annual, and quarterly refresh groups are attempted independently. An internal persistence failure is deferred until the remaining groups run; the first failure is then rethrown with any later failures attached as suppressed exceptions.
+
 ## 8. Frontend Shared Modules
 
 ### Amount Calculation and Display
