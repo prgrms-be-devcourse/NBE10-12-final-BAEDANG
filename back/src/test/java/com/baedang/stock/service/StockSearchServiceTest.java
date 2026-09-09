@@ -37,7 +37,7 @@ public class StockSearchServiceTest {
     void t1() {
         StockSearchService service = new StockSearchService(stockRepository);
 
-        when(stockRepository.searchByKeyword("samsungelec"))
+        when(stockRepository.searchByJamo("samsungelec"))
                 .thenReturn(List.of(stock));
 
         when(stock.getSymbol()).thenReturn("005930");

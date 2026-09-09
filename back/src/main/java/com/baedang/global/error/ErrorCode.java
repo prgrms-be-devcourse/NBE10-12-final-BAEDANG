@@ -43,7 +43,7 @@ public enum ErrorCode {
 
     // ── 종목 ────────────────────────────────────────────────────────────────
     STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 종목이에요"),
-    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어는 2자 이상 입력해주세요"),
+    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어를 1자 이상 입력해주세요"),
     INVALID_INTERVAL_RANGE(HttpStatus.BAD_REQUEST, "지원하지 않는 차트 기간 조합이에요"),
     INVALID_CURSOR(HttpStatus.BAD_REQUEST, "잘못된 페이지 정보예요. 처음부터 다시 불러와주세요"),
 

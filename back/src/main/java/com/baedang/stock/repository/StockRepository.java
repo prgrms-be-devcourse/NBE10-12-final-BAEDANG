@@ -52,14 +52,34 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
     List<Stock> findByStockIdIn(Collection<Long> stockIds);
 
 
-    @Query("""
-            select s
-            from Stock s
-            where lower(replace(s.name, ' ', '')) like concat('%', :keyword, '%')
-               or lower(replace(coalesce(s.englishName, ''), ' ', '')) like concat('%', :keyword, '%')
-               or lower(s.symbol) like concat('%', :keyword, '%')
-            """)
-    List<Stock> searchByKeyword(@Param("keyword") String keyword);
+    /**
+     * 종목명·영문명·심볼 부분일치 검색 (#148).
+     *
+     * <p>검색어는 {@code DomainNormalizer.searchKey()} 를 거친 값이어야 합니다 —
+     * {@code stock.name_jamo} 생성 컬럼도 같은 전처리(공백 제거 + 소문자) 후 분해되므로
+     * 전처리가 어긋나면 매칭이 조용히 실패합니다. 자모 분해는 {@code hangul_jamo} 가
+     * 유일한 구현이고, 검색어 쪽도 SQL 에서 같은 함수를 호출합니다 (Java에 중복 구현 금지).
+     */
+    @Query(value = """
+            select s.*
+            from stock s
+            where s.name_jamo like '%' || hangul_jamo(:keyword, true) || '%'
+               or lower(regexp_replace(coalesce(s.english_name, ''), '\\s+', '', 'g')) like '%' || :keyword || '%'
+               or lower(s.symbol) like '%' || :keyword || '%'
+            """, nativeQuery = true)
+    List<Stock> searchByJamo(@Param("keyword") String keyword);
+
+    /**
+     * 독립 초성 검색 (예: {@code ㅅㅅㅈㅈ} → 삼성전자).
+     *
+     * <p>순수 초성 검색어는 영문명·심볼에 걸릴 일이 없으므로 종목명 초성만 봅니다.
+     */
+    @Query(value = """
+            select s.*
+            from stock s
+            where s.name_chosung like '%' || :keyword || '%'
+            """, nativeQuery = true)
+    List<Stock> searchByChosung(@Param("keyword") String keyword);
 
     // 첫 페이지
     @Query("""
