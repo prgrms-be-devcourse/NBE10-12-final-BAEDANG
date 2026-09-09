@@ -554,7 +554,13 @@ trade_order에 접수 후 변경하지 않는 세 컬럼을 추가합니다.
 
 MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 통화의 고정 지정가로 유지합니다. 미국 원화 입력은 접수 환율로 나눈 뒤 HALF_UP 센트 반올림합니다. 멱등 비교는 환산 결과가 아닌 원본 입력을 사용합니다. initial_reserved_cash는 추가하지 않습니다. 최초 동결은 원본 입력으로 계산하고 reserved_cash는 현재 잔여 동결액만 저장합니다.
 
-지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 기존 활성 주문·만료 인덱스를 재사용합니다. 과거 행 보정·마이그레이션은 포함하지 않습니다.
+지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 과거 행 보정은 포함하지 않습니다.
+
+### 지정가 체결 인덱스 (#122)
+
+테이블/컬럼 추가는 없습니다. `V6__limit_execution_indexes.sql`에서 잔여 수량이 있는 활성 LIMIT 주문에 부분 인덱스를 추가합니다. 수집 EXISTS용 `ix_order_quote_target(stock_id, expires_at)`, 매수용 `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)`, 매도용 가격 오름차순 인덱스입니다. 방향별 인덱스는 side 조건을 포함합니다. 만료는 조회 시 범위 조건이며 now()를 인덱스 조건에 넣지 않습니다. 계좌 이력/활성 주문/만료 인덱스는 유지합니다.
+
+develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
 
 ---
 > 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, `V3__order_book.sql`과 함께 보세요

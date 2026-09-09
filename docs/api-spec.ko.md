@@ -1023,7 +1023,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 
 ### 확정 LIMIT 정산 계약 (#119)
 
-계산기와 환율 스냅샷 계약을 제공하며 접수 API(#120), 공유 호가(#121), 엔진/워커/프리뷰(#122)는 별도 구현 단계입니다. 기존 계산기의 `MarketOrderSettlementCalculator` 이름 변경으로 MARKET 동작은 바뀌지 않습니다.
+계산기, 접수 API(#120), 공유 호가(#121), 엔진/워커/프리뷰(#122)를 연결합니다. MARKET은 가상 호가를 소비하지 않는 즉시 정산을 유지합니다.
 
 - 정수 수량만 지원합니다. 지정가 × 전체 수량 × 접수 환율의 원화 반올림값에 수수료 반올림값을 합해 동결합니다. KR은 외부 환율 조회가 없으며 환율 상승 버퍼도 없습니다. 접수 환율은 체결 환율을 고정하지 않습니다.
 - 매수는 해당 주문의 `reservedCash`에서 이번 실제 net만 차감합니다. 누적 net을 다시 빼거나 수량 비례로 동결을 재산정하지 않고 자유 예수금도 사용하지 않습니다. 엔진이 가능한 정수 수량으로 축소하며 1주도 불가능하면 보류합니다. 활성 매수 잔량이 남으면 동결액도 양수여야 합니다.
@@ -1058,7 +1058,7 @@ LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW �
 
 접수 성공은 `POST /orders/limit` 기준 201 OrderDetailResponse: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, 누적 grossAmount/fee/tax/netAmount, rejectReason, orderedAt/expiresAt/closedAt입니다. activeRemainingQuantity는 활성 잔여 수량으로 종료 후 0입니다. 멱등 비교는 원본 가격의 수치와 입력 통화를 사용하고 새 환율로 재환산하지 않습니다. 현재 저장 상태를 반환하며 종료 주문을 재활성화하지 않습니다. 저장된 REJECTED는 같은 오류를 재생합니다. 기존 주문은 외부 조회 전에 확인하고, 잠금 후 회차 검사보다 먼저 재확인합니다.
 
-견적은 acceptable/reason, availableCash/availableQuantity, expiresAt, 원본·환산 지정가, acceptanceExchangeRate, limitEstimate(grossAmount/fee/tax/netAmount/reservedCash), executionPreview(status=UNSUPPORTED)를 제공합니다. 환산 지정가에 전량 한 번 체결하는 가정이며 원화 원본으로 계산한 동결액과 다를 수 있습니다. 동결·물량 소비는 하지 않습니다. 미지원은 예상 체결 0주가 아닙니다. 예상 매도 순금액이 0 이하라는 이유만으로 접수를 막지는 않습니다.
+견적은 acceptable/reason, availableCash/availableQuantity, expiresAt, 원본·환산 지정가, acceptanceExchangeRate, limitEstimate(grossAmount/fee/tax/netAmount/reservedCash), executionPreview(아래 #122 참조)를 제공합니다. 지정가 기준 견적은 환산 지정가에 전량 한 번 체결하는 가정이며 원화 원본으로 계산한 동결액과 다를 수 있습니다. 동결·물량 소비는 하지 않습니다. 예상 매도 순금액이 0 이하라는 이유만으로 접수를 막지는 않습니다.
 
 - GET /orders/{orderId}: 본인 주문 상세, CLOSED 회차 포함.
 - GET /accounts/me/orders: 현재 ACTIVE 회차, orderId 내림차순. size 기본 20/최대 100, 계좌 범위가 포함된 불투명 커서.
@@ -1080,6 +1080,19 @@ LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW �
 
 ### 비랭킹 주문과 호가 공급
 
-지정가는 호가가 아직 없어도 PENDING으로 접수합니다. 커밋 후 랭킹 또는 활성 지정가 주문 종목만 스케줄러가 호가를 생성합니다. 마지막 활성 주문이 종료된 비랭킹 종목은 수집·호가 공급에서 제외되고 기존 활성 호가도 종료됩니다. 시장가 체결은 가상 호가를 소비하지 않습니다. 지정가 견적의 호가 기반 체결 미리보기는 아직 UNSUPPORTED이며 체결 워커는 후속 작업입니다.
+지정가는 호가가 아직 없어도 PENDING으로 접수합니다. 커밋 후 랭킹 또는 활성 지정가 주문 종목만 스케줄러가 호가를 생성합니다. 마지막 활성 주문이 종료된 비랭킹 종목은 수집·호가 공급에서 제외되고 기존 활성 호가도 종료됩니다. 시장가 체결은 가상 호가를 소비하지 않습니다. 지정가 체결 워커는 상시 스케줄링하며 신선한 호가가 없으면 보류합니다.
+
+### 지정가 체결 및 비구속성 미리보기 (#122)
+
+- `executionPreview.status`: `AVAILABLE`은 유효 호가로 평가한 결과이며 예상 0주도 포함합니다. `UNAVAILABLE`은 사용 가능한 신선한 호가/컨텍스트 없음, `NOT_APPLICABLE`은 접수 불가 견적입니다. `acceptable=true`와 `UNAVAILABLE`은 함께 올 수 있습니다. `reason`은 FILLED, PRICE_LIMIT, NO_LIQUIDITY, INSUFFICIENT_RESERVED_CASH, NON_POSITIVE_SETTLEMENT 중 결과를 나타냅니다. 조회 불가에는 NO_USABLE_BOOK/CONTEXT_EXPIRED, 접수 불가에는 거절 코드를 제공합니다.
+- AVAILABLE은 숫자 `bookVersion`, `revision`, UTC `quoteAt`, `generatedAt`, `evaluatedAt`, 문자열 `expectedFilledQuantity`, `remainingQuantity`, `avgExecutionPrice`, `grossAmountKrw`, `feeKrw`, `taxKrw`, `netAmountKrw`, `remainingReservedCash`, `releasedCash`를 제공합니다. 0주이면 평균가는 null입니다. 나머지 상태는 status/reason/evaluatedAt 이외 결과 필드가 null입니다.
+- 평균 체결가는 수량 가중 평균을 **표시용으로만 KRW 0자리 / USD 2자리 HALF_UP** 합니다. 정산은 원본 호가와 누적 반올림 차액을 사용하며 표시 평균가×수량으로 재계산하지 않습니다. USD 99에 1주 + 100에 2주는 평균 `99.67`이지만 거래대금은 정확히 USD 299입니다.
+- 미리보기는 누적 체결 0에서 시작하며 원본 입력 기준 동결액을 사용합니다. 기존 부분체결 주문의 미리보기가 아니며 물량 예약, revision 증가, 호가 생성, 후속 체결 보장을 하지 않습니다.
+- 워커는 전용 단일 스레드에서 3초 fixed delay, 페이지 50건, 틱당 최대 주문 100건, 새 주문 시작 예산 5초로 상시 실행합니다. 활성화 플래그는 없습니다. 실행 중 트랜잭션은 예산 초과 후에도 완료하며 한 주문 시도는 호가 변경/락 경합 시 최대 1회 재시도를 포함합니다.
+- 순회 시작의 orderId 상한과 keyset 커서를 다음 틱에 유지합니다. 종목·방향별 BUY 지정가 내림차순, SELL 오름차순, 동일 가격은 orderedAt/orderId 오름차순입니다. 새로운 ID는 다음 순회 대상이며 늦게 커밋된 행까지 포함한 DB 전체 스냅샷 보장은 아닙니다.
+- 만료/비활성/장외/호가 없음은 환율을 조회하지 않습니다. 상태는 트랜잭션 밖의 공유 5분 캐시를 재사용합니다. 동결액 부족/순금액 0 이하의 정상 보류는 후순위를 진행하지만, 미해결 호가·락·컨텍스트·상태 실패는 이번 순회에서 같은 종목·방향을 건너뛰고 다른 그룹은 계속합니다.
+- 금융 트랜잭션은 계좌 → 주문 → 호가 버전 → 해당 방향 레벨 → 보유 수량 순서로 잠그며 SET LOCAL lock_timeout=2s를 적용합니다. 잠금 후 원래 회차·주문 상태/체결횟수·버전/revision·장 운영·종목 상태·원본 시세 나이·환율 유효기간·만료를 재검증합니다. 락 안에서는 외부 API를 호출하지 않습니다. 기존 접수 흐름과 달리 워커는 세션/상태/환율 준비 시작 전에 checkedAt을 기록하여 준비 지연이 먼저 조회한 근거의 유효 시간을 늘리지 않도록 합니다.
+- 선택한 모든 체결, 체결별 원장 balanceAfter, 주문 누적 금액, 예수금/동결/보유 수량, 공유 잔량을 한 번에 커밋합니다. 실제 체결이 있으면 revision은 트랜잭션당 1번만 증가합니다. 실패하면 전부 롤백하며 과거 이력 보정/재생을 만들지 않습니다.
+- 취소 및 기존 30초 만료 스캔은 계좌 우선 잠금을 공유합니다. 이전 체결 이력은 보존하며 워커가 직접 만료 상태로 바꾸지는 않습니다.
 
 `STOCK_STATUS_UNAVAILABLE`(503)은 상태 누락·알 수 없는 상태·국내 제약 정보 누락 또는 상태 조회 대기 실패입니다. 상태를 거래 가능으로 추정하지 않습니다. 상태 캐시 기본 TTL은 5분이며 미국 응답에는 국내 전용 거래정지·정리매매 정보가 없으므로 기존 값을 유지합니다.
