@@ -42,7 +42,7 @@ public class ExchangeRate {
     @Column(name = "valid_from", nullable = false)
     private OffsetDateTime validFrom;
 
-    /** 원본 validUntil. 도입 전 이력의 누락값은 추정하지 않으며 체결에서 거절합니다. */
+    /** 유효 종료 시각(미포함). */
     @Column(name = "valid_until", nullable = false)
     private OffsetDateTime validUntil;
 
