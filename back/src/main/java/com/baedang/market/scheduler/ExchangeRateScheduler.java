@@ -21,7 +21,7 @@ public class ExchangeRateScheduler {
     /**
      * 매분 환율과 원본 유효기간을 적재합니다. 거래 요청에서는 외부 환율을 조회하지 않습니다.
      */
-    @Scheduled(cron = "0 * * * * *")
+    @Scheduled(cron = "0 * * * * *", scheduler = "exchangeRateTaskScheduler")
     public void collect() {
         try {
             loadService.syncExchangeRate();

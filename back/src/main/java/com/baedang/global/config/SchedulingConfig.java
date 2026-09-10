@@ -19,6 +19,17 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @EnableConfigurationProperties(QuoteCollectionProperties.class)
 public class SchedulingConfig {
 
+    /** 체결 환율 갱신이 분봉·랭킹 등 공용 배치의 지연에 영향받지 않도록 분리합니다. */
+    @Bean(name = "exchangeRateTaskScheduler")
+    public ThreadPoolTaskScheduler exchangeRateTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("exchange-rate-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
+
     /** 체결의 외부 준비/락 대기가 호가 공급이나 만료 처리를 막지 않도록 분리합니다. 항상 실행합니다. */
     @Bean(name = "limitExecutionTaskScheduler")
     public ThreadPoolTaskScheduler limitExecutionTaskScheduler() {
