@@ -78,6 +78,29 @@ class StockJamoSearchIntegrationTest {
     }
 
     /**
+     * 컬럼은 종성 없는 글자에 {@code ^} 를 패딩하므로, 검색어도 같은 규칙
+     * ({@code partialTail = false})으로 분해해야 완전일치가 잡힙니다.
+     * 검색용 규칙({@code true})으로 순위를 매기면 '카카오' 가 rank 0 을 못 받아
+     * '카카오뱅크' 와 동률이 됩니다.
+     */
+    @Test
+    @DisplayName("종성 없이 끝나는 이름도 완전일치가 접두일치보다 위 (#148)")
+    void 완전일치_우선() {
+        save("035720", "카카오");
+        save("323410", "카카오뱅크");
+
+        assertThat(names("카카오")).containsExactly("카카오", "카카오뱅크");
+    }
+
+    @Test
+    @DisplayName("미완성 입력('삼ㅅ')도 접두 일치가 부분 일치보다 위 (#148)")
+    void 미완성_입력_접두_우선() {
+        save("999002", "가나삼성");
+
+        assertThat(names("삼ㅅ")).containsExactly("삼성전자", "가나삼성");
+    }
+
+    /**
      * NFD 로 저장된 이름은 완성형 범위 밖이라 분해되지 않고 통과합니다.
      * 함수 입구의 {@code normalize(txt, NFC)} 가 빠지면 그 종목만 조용히 검색에서 사라집니다.
      */

@@ -132,21 +132,6 @@ public class StockSearchServiceTest {
                 .containsExactly("석삼", "삼성전자");
     }
 
-    @Test
-    @DisplayName("미완성 입력도 접두 일치를 상위로 (#148)")
-    void t6() {
-        StockSearchService service = new StockSearchService(stockRepository);
-
-        Stock prefix = stubStock("삼성전자", null);
-        Stock contains = stubStock("가나삼성", null);
-
-        when(stockRepository.searchByJamo("삼ㅅ")).thenReturn(List.of(contains, prefix));
-
-        assertThat(service.search("삼ㅅ", 10).items())
-                .extracting(StockSearchResponse.Item::name)
-                .containsExactly("삼성전자", "가나삼성");
-    }
-
     private Stock stubStock(String name, String chosung) {
         Stock s = org.mockito.Mockito.mock(Stock.class);
         org.mockito.Mockito.lenient().when(s.getName()).thenReturn(name);
