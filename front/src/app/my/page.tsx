@@ -154,9 +154,13 @@ export default function MyPage() {
   );
   const ordersPollInFlightRef = useRef(false);
   const ordersRef = useRef(orders);
-  ordersRef.current = orders;
+  useEffect(() => {
+    ordersRef.current = orders;
+  }, [orders]);
   const selectedOrderRef = useRef(selectedOrder);
-  selectedOrderRef.current = selectedOrder;
+  useEffect(() => {
+    selectedOrderRef.current = selectedOrder;
+  }, [selectedOrder]);
 
   useVisiblePolling(
     () => {
