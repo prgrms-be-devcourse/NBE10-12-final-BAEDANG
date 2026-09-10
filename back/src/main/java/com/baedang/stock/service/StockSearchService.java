@@ -50,10 +50,11 @@ public class StockSearchService {
 
         if (isValid(keyword)) {
             // 자모 분해는 검색어당 한 번만. 비교자 안에서 부르면 정렬 비교마다 DB를 왕복합니다.
-            String jamoKeyword = stockRepository.hangulJamo(keyword, false);
+            String typed = stockRepository.hangulJamo(keyword, false);
+            String composing = stockRepository.hangulJamo(keyword, true);
 
             return respond(stockRepository.searchByJamo(keyword),
-                    stock -> jamoRank(stock, jamoKeyword), size);
+                    stock -> jamoRank(stock, typed, composing), size);
         }
 
         return new StockSearchResponse(List.of());
@@ -116,15 +117,23 @@ public class StockSearchService {
     /**
      * 자모 검색의 검색어와 검색 결과를 비교해서 순위를 반환합니다.
      *
-     * <p>검색어는 컬럼과 같은 3칸 고정폭({@code partialTail = false})으로 분해한 것을 씁니다.
-     * 검색(LIKE)은 조합 중인 음절을 살리려고 {@code true} 로 관대하게 걸지만, 순위는 그 패딩이
-     * 있어야 글자 경계를 지킵니다 — {@code true}('서' → ㅅㅓ)로 접두를 재면 '성우하이텍'(ㅅㅓㅇ…)이
-     * '서' 의 접두로 잡혀 진짜 접두인 '서울가스' 와 동률이 됩니다.
+     * <p>축이 둘입니다 — <b>타이핑한 글자가 완성형 그대로 맞았는지</b>가 먼저고,
+     * 그 다음이 <b>앞에서 맞았는지</b>입니다. 조합 중인 마지막 글자('김처' → '김천')는
+     * 완성될 글자를 추측한 것이라, 확실한 일치보다 아래에 둡니다.
+     *
+     * <pre>
+     *   '김처' 검색 →  한김처머시기(완성형 부분)  김천에너지(조합중 접두)  가나김천(조합중 부분)
+     * </pre>
+     *
+     * <p>검색어를 두 벌 받는 이유가 이것입니다. {@code typed} 는 컬럼과 같은 3칸 고정폭
+     * ({@code partialTail = false}, 종성 없으면 {@code ^} 패딩)이라 글자 경계를 지키고,
+     * {@code composing} 은 패딩이 없어 조합 중인 글자를 잡습니다. 마지막 글자에 종성이 있거나
+     * 독립 자모('삼ㅅ')면 둘이 같은 값이라 조합중 단계는 자연히 비어 있습니다.
      */
-    private int jamoRank(Stock stock, String keyword) {
+    private int jamoRank(Stock stock, String typed, String composing) {
         String jamo = stock.getNameJamo();
 
-        if (jamo == null) return 2;
+        if (jamo == null) return 4;
 
         List<String> values = List.of(
                 jamo,
@@ -132,14 +141,20 @@ public class StockSearchService {
                 normalize(stock.getSymbol())
         );
 
-        if (values.stream().anyMatch(value -> value.equals(keyword))) {
+        if (values.stream().anyMatch(value -> value.equals(typed))) {
             return 0;
         }
-        if (values.stream().anyMatch(value -> value.startsWith(keyword))) {
+        if (values.stream().anyMatch(value -> value.startsWith(typed))) {
             return 1;
         }
+        if (values.stream().anyMatch(value -> value.contains(typed))) {
+            return 2;
+        }
+        if (values.stream().anyMatch(value -> value.startsWith(composing))) {
+            return 3;
+        }
 
-        return 2;
+        return 4;
     }
 
     private String normalizeQuery(String query) {

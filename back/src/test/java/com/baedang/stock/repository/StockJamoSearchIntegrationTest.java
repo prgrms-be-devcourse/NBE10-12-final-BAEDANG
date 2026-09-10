@@ -52,10 +52,15 @@ class StockJamoSearchIntegrationTest {
         save("036460", "김천에너지");
     }
 
+    /**
+     * 순위는 완성형 축이 위치 축을 이깁니다 — '성우하이텍'(ㅅㅓㅇ…)은 '서' 에 종성이 붙은
+     * 조합중 접두라 완성형 접두인 '서울가스'(ㅅㅓ^…) 아래지만, 중간에 걸린 '삼성전자' 보다는
+     * 위입니다.
+     */
     @Test
     @DisplayName("1자 검색 — 'ㅅㅓ' 는 '성' 의 접두이므로 삼성전자·성우하이텍도 함께 잡힌다")
     void 한글자_검색() {
-        assertThat(names("서")).containsExactly("서울가스", "삼성전자", "성우하이텍");
+        assertThat(names("서")).containsExactly("서울가스", "성우하이텍", "삼성전자");
     }
 
     @Test
@@ -98,6 +103,19 @@ class StockJamoSearchIntegrationTest {
         save("999002", "가나삼성");
 
         assertThat(names("삼ㅅ")).containsExactly("삼성전자", "가나삼성");
+    }
+
+    /**
+     * 조합 중인 마지막 글자('처' → '천')는 완성될 글자를 추측한 것이라, 완성형 그대로의
+     * 일치보다 아래입니다 — 위치(접두/부분)보다 완성형 여부가 먼저입니다.
+     */
+    @Test
+    @DisplayName("조합 중인 음절('김처')은 완성형 일치보다 아래, 그 안에서 접두 우선 (#148)")
+    void 조합중_음절_순위() {
+        save("999003", "한김처머시기");
+        save("999004", "가나김천");
+
+        assertThat(names("김처")).containsExactly("한김처머시기", "김천에너지", "가나김천");
     }
 
     /**
