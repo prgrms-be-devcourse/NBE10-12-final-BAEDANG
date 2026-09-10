@@ -46,7 +46,10 @@ class ReportControllerTest {
                 .andExpect(jsonPath("$.typeCode").value("CKSB"))
                 .andExpect(jsonPath("$.typeLabel").value("집중·국내·개별주·안정형"))
                 .andExpect(jsonPath("$.shares.domestic").value("0.6364"))
-                .andExpect(jsonPath("$.holdingCount").value(2));
+                .andExpect(jsonPath("$.holdingCount").value(2))
+                .andExpect(jsonPath("$.holdingPeriodWeeks").value(4))
+                .andExpect(jsonPath("$.longHeldStocks[0].symbol").value("005930"))
+                .andExpect(jsonPath("$.longHeldStocks[0].returnRate").value("0.0592"));
     }
 
     @Test
@@ -75,6 +78,10 @@ class ReportControllerTest {
                 10L, 1, "50000000", "20000000", "33000000", "53000000", "3000000", "0.06",
                 true, "CKSB", "집중·국내·개별주·안정형",
                 new PersonalityReportResponse.Shares("0.6364", "0.6364", "0.6364", "0"),
-                2, OffsetDateTime.parse("2026-09-09T00:00:00Z"));
+                2, 4,
+                List.of(new PersonalityReportResponse.LongHeldStock(
+                        "005930", "삼성전자", "KRW", "228000", "241500", "0.0592",
+                        OffsetDateTime.parse("2026-08-01T00:00:00Z"))),
+                OffsetDateTime.parse("2026-09-09T00:00:00Z"));
     }
 }

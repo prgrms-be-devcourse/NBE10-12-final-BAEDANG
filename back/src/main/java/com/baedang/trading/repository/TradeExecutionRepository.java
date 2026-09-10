@@ -2,11 +2,13 @@ package com.baedang.trading.repository;
 
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.model.CumulativeSettlementState;
+import com.baedang.trading.model.HoldingReplayEvent;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.Repository;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,4 +38,18 @@ public interface TradeExecutionRepository extends Repository<TradeExecution, Lon
             from TradeExecution e where e.orderId = :orderId
             """)
     CumulativeSettlementState summarizeByOrderId(@Param("orderId") Long orderId);
+
+    /**
+     * 계좌의 특정 종목들에 대한 <b>개별 체결</b>을 체결 시각 오름차순으로 조회합니다.
+     * 방향은 주문이 소유하므로 {@code trade_order} 를 조인합니다. 보유 lot 시작 시점을 체결
+     * 단위로 재생할 때 씁니다({@link HoldingReplayEvent}). 시각 동률은 {@code executionId} 로
+     * 안정 정렬해 접수 순서가 아닌 실제 체결 순서를 보존합니다.
+     */
+    @Query("select new com.baedang.trading.model.HoldingReplayEvent("
+            + "o.stockId, o.side, e.quantity, e.executedAt)"
+            + " from TradeExecution e join TradeOrder o on e.orderId = o.orderId"
+            + " where o.accountId = :accountId and o.stockId in :stockIds"
+            + " order by e.executedAt asc, e.executionId asc")
+    List<HoldingReplayEvent> findHoldingReplayEvents(
+            @Param("accountId") Long accountId, @Param("stockIds") Collection<Long> stockIds);
 }
