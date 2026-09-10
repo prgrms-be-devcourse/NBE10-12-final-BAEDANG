@@ -56,6 +56,9 @@ public class OrderBookQueryService {
         }
 
         Instant now = clock.instant();
+        if (!stockRepository.isQuoteTarget(stock.getStockId(), now.atOffset(java.time.ZoneOffset.UTC))) {
+            throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
+        }
         MarketSessionStatus session = marketSessionProvider.currentSession(marketCountry, now);
         if (!session.open()) {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);

@@ -89,8 +89,8 @@ public class OrderPolicy {
     }
 
     public ErrorCode determineStaticRejection(Stock stock) {
-        if (!Boolean.TRUE.equals(stock.getIsRanked()) || stock.getListingStatus() != ListingStatus.ACTIVE) {
-            return ErrorCode.NOT_IN_UNIVERSE;
+        if (stock.getListingStatus() != ListingStatus.ACTIVE) {
+            return ErrorCode.STOCK_NOT_TRADABLE;
         }
         if (Boolean.TRUE.equals(stock.getIsSuspended())) return ErrorCode.STOCK_SUSPENDED;
         if (Boolean.TRUE.equals(stock.getIsLiquidation())) return ErrorCode.STOCK_LIQUIDATION;
