@@ -95,6 +95,7 @@ export class ApiError extends Error {
 }
 
 type RequestInput = {
+  signal?: AbortSignal;
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   headers?: Record<string, string>;
   body?: unknown;
@@ -114,6 +115,7 @@ async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE_URL}${path}`, {
+      signal: init.signal,
       method: init.method,
       headers,
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
@@ -784,10 +786,10 @@ export type ExchangeRateLatest = {
  * 대문자로 맞춰 보낸다 — `?base=usd`와 `?base=USD`가 서로 다른 캐시 키로 취급돼 캐시가
  * 갈라지는 것을 막기 위해서다(oxcm07님 리뷰, PR #53).
  */
-export function getExchangeRateLatest(base = "USD", quote = "KRW"): Promise<ExchangeRateLatest> {
+export function getExchangeRateLatest(base = "USD", quote = "KRW", signal?: AbortSignal): Promise<ExchangeRateLatest> {
   return request<ExchangeRateLatest>(
     `/api/exchange-rates/latest?base=${encodeURIComponent(base.toUpperCase())}&quote=${encodeURIComponent(quote.toUpperCase())}`,
-    { method: "GET" }
+    { method: "GET", signal }
   );
 }
 
@@ -806,9 +808,9 @@ export type ExchangeRateHistory = {
  * `GET /api/exchange-rates/history` — 환율 추이 그래프. USD/KRW 고정(백엔드가 MVP는
  * 이 통화쌍만 다룬다 — `ExchangeRateService` 참고), `period`는 필수 파라미터다.
  */
-export function getExchangeRateHistory(period: ExchangeRatePeriod): Promise<ExchangeRateHistory> {
+export function getExchangeRateHistory(period: ExchangeRatePeriod, signal?: AbortSignal): Promise<ExchangeRateHistory> {
   return request<ExchangeRateHistory>(
     `/api/exchange-rates/history?period=${encodeURIComponent(period)}`,
-    { method: "GET" }
+    { method: "GET", signal }
   );
 }

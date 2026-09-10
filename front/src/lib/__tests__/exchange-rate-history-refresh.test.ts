@@ -1,7 +1,39 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHistoryRefresh } from "../exchange-rate-history-refresh";
 
 describe("환율 이력 재조회", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("시간 초과로 요청을 취소하고 다음 주기에 복구하며 늦은 응답은 무시한다", async () => {
+    vi.useFakeTimers();
+    let resolve!: (value: number) => void;
+    const fetch = vi.fn<(signal: AbortSignal) => Promise<number>>()
+      .mockImplementationOnce(() => new Promise((done) => { resolve = done; }))
+      .mockResolvedValueOnce(2);
+    const success = vi.fn();
+    const error = vi.fn();
+    const request = createHistoryRefresh(fetch, success, error, vi.fn());
+    const pending = request.refresh();
+    await vi.advanceTimersByTimeAsync(10_000);
+    await pending;
+    expect(fetch.mock.calls[0][0].aborted).toBe(true);
+    expect(error).toHaveBeenCalledOnce();
+    await request.refresh();
+    resolve(1);
+    await Promise.resolve();
+    expect(success).toHaveBeenCalledExactlyOnceWith(2);
+  });
+
+  it("종료 시 응답을 기다리지 않고 취소한다", async () => {
+    const fetch = vi.fn<(signal: AbortSignal) => Promise<number>>(() => new Promise(() => {}));
+    const settled = vi.fn();
+    const request = createHistoryRefresh(fetch, vi.fn(), vi.fn(), settled);
+    const pending = request.refresh();
+    request.dispose();
+    await pending;
+    expect(fetch.mock.calls[0][0].aborted).toBe(true);
+    expect(settled).not.toHaveBeenCalled();
+  });
   it("진행 중 요청을 중복 실행하지 않고 완료 후 다시 조회한다", async () => {
     let resolve!: (value: number) => void;
     const fetch = vi.fn(() => new Promise<number>((done) => { resolve = done; }));

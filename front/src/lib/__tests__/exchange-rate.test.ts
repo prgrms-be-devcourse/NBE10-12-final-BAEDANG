@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fetchExchangeRate, exchangeRateStateAfterRefresh, INITIAL_EXCHANGE_RATE_STATE } from "../exchange-rate";
+import { getExchangeRateHistory } from "../api";
 
 const response = {
   baseCurrency: "USD", quoteCurrency: "KRW", rate: "1400.000000",
@@ -13,6 +14,14 @@ function mockFetch(status: number, body: unknown) {
 beforeEach(() => vi.restoreAllMocks());
 
 describe("환율 조회", () => {
+  it.each(["latest", "history"])("%s HTTP 요청까지 취소 신호를 전달한다", async (kind) => {
+    const controller = new AbortController();
+    mockFetch(200, kind === "latest" ? response : { items: [] });
+    if (kind === "latest") await fetchExchangeRate(controller.signal);
+    else await getExchangeRateHistory("1d", controller.signal);
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.any(String),
+      expect.objectContaining({ signal: controller.signal }));
+  });
   it("정상 환율과 원본 시각을 반환한다", async () => {
     mockFetch(200, response);
     expect(await fetchExchangeRate()).toEqual({

@@ -35,8 +35,8 @@ function parseFiniteNumber(value: unknown): number {
 }
 
 /** 실패를 호출부에 전달합니다. 임의 환율이나 현재 시각으로 대체하지 않습니다. */
-export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
-  const latest = await getExchangeRateLatest();
+export async function fetchExchangeRate(signal?: AbortSignal): Promise<ExchangeRateInfo> {
+  const latest = await getExchangeRateLatest("USD", "KRW", signal);
   const rate = parseFiniteNumber(latest.rate);
   const changeAmount = parseFiniteNumber(latest.changeAmount);
   const changeRate = parseFiniteNumber(latest.changeRate);
