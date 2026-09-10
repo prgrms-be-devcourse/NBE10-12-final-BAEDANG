@@ -7,7 +7,8 @@ import java.math.BigDecimal;
  * 리포트가 "왜 이 유형인지"를 그대로 보여줄 수 있게 한다.
  *
  * <p>보유 종목이 부족하면({@code classified=false}) 유형을 정하지 않는다("미분류/신규").
- * 이때 {@code type} 은 null 이고 비중 필드는 0 이다.
+ * 이때 {@code type} 은 null 이지만, <b>비중은 분류 여부와 무관하게 계산해 담는다</b>(평가액이
+ * 있는 한). 평가액이 없을 때만({@link #unclassified}) 비중이 모두 0 이다.
  *
  * <p>비중은 모두 0~1 (평가금액 가중). {@code top1Share} 는 최대 비중 한 종목의 비중으로
  * 집중/분산 판정에 쓴다.
