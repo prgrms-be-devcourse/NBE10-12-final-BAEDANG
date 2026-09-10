@@ -8,6 +8,8 @@ import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRate
 import { resolveCssColor } from "@/lib/chart-colors";
 import { formatCrosshairTime, formatTickMark, isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
 import { formatNumber } from "@/lib/format";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
+import { createHistoryRefresh } from "@/lib/exchange-rate-history-refresh";
 
 const PERIOD_OPTIONS: { value: ExchangeRatePeriod; label: string }[] = [
   { value: "1d", label: "1일" },
@@ -34,27 +36,28 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+  const fittedRef = useRef(false);
 
   // 로딩/에러 상태 초기화는 기간을 바꾸는 시점(PillTabs onChange)에서 하고, 이 effect는
   // 요청 자체만 담당한다 — effect 본문에서 곧장 setState를 부르면
   // react-hooks/set-state-in-effect 린트가 걸려서 우회 주석이 필요했는데, 상태 초기화를
   // 이벤트 핸들러로 옮기면 그 주석 없이도 깔끔하게 처리된다(제미나이 코드 리뷰 반영).
   useEffect(() => {
-    let cancelled = false;
-    getExchangeRateHistory(period)
-      .then((res) => {
-        if (!cancelled) setItems(res.items);
-      })
-      .catch(() => {
-        if (!cancelled) setLoadError(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const request = createHistoryRefresh(
+      () => getExchangeRateHistory(period),
+      (res) => { setItems(res.items); setLoadError(false); },
+      () => setLoadError(true),
+      () => setLoading(false),
+    );
+    refreshRef.current = request.refresh;
+    void request.refresh();
     return () => {
-      cancelled = true;
+      request.dispose();
+      refreshRef.current = null;
     };
   }, [period]);
+  useVisiblePolling(() => { void refreshRef.current?.(); }, 60_000);
 
   // 차트 인스턴스는 마운트 시 한 번만 만든다 — 기간 전환·테마 변경은 별도 effect가
   // 기존 인스턴스에 반영한다(CandlestickChart와 같은 이유).
@@ -96,6 +99,7 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
       chart.remove();
       chartRef.current = null;
       seriesRef.current = null;
+      fittedRef.current = false;
     };
   }, []);
 
@@ -108,8 +112,17 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
       timeScale: { timeVisible: isTimeVisible(period) },
       localization: { timeFormatter: (time: Time) => formatCrosshairTime(time, period) },
     });
-    seriesRef.current.setData(toLinePoints(items, period));
-    chartRef.current.timeScale().fitContent();
+    const scale = chartRef.current.timeScale();
+    const visibleRange = fittedRef.current ? scale.getVisibleRange() : null;
+    const points = toLinePoints(items, period);
+    seriesRef.current.setData(points);
+    if (!fittedRef.current && points.length > 0) {
+      scale.fitContent();
+      fittedRef.current = true;
+    } else if (visibleRange && points.length > 0) {
+      // 시간 범위를 복원하여 과거 버킷이 조회 범위에서 빠져도 같은 날짜를 유지합니다.
+      scale.setVisibleRange(visibleRange);
+    }
   }, [items, period]);
 
   // 라이트/다크 전환 시 색만 다시 입힌다.
@@ -167,8 +180,11 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
             options={PERIOD_OPTIONS}
             value={period}
             onChange={(v) => {
+              if (v === period) return;
               setLoading(true);
               setLoadError(false);
+              setItems([]);
+              fittedRef.current = false;
               setPeriod(v as ExchangeRatePeriod);
             }}
             trackClassName="w-fit gap-0.5 rounded-full p-[3px]"
@@ -187,10 +203,15 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
               불러오는 중…
             </div>
           )}
-          {!loading && loadError && (
+          {!loading && loadError && items.length < 2 && (
             <div className="absolute inset-0 flex items-center justify-center text-[13px]" style={{ color: "var(--mut2)" }}>
               환율 추이를 불러오지 못했어요. 잠시 후 다시 시도해주세요.
             </div>
+          )}
+          {!loading && loadError && items.length >= 2 && (
+            <p className="text-[12px]" role="status" style={{ color: "var(--mut2)" }}>
+              환율 갱신에 실패했어요. 이전 데이터를 표시하며 다음 주기에 다시 시도합니다.
+            </p>
           )}
           {!loading && !loadError && items.length < 2 && (
             <div className="absolute inset-0 flex items-center justify-center text-[13px]" style={{ color: "var(--mut2)" }}>
