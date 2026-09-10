@@ -179,10 +179,12 @@ export default function RankingsPage() {
     isMarketOpen(market)
   );
 
-  // 2자 이상 입력되면 실제 검색 API를 호출한다. 타이핑마다 바로 쏘지 않도록 살짝 디바운스한다.
+  // 1자부터 실제 검색 API를 호출한다 (#148 — 1자·초성 검색). 타이핑마다 바로 쏘지 않도록
+  // 살짝 디바운스한다. 조합 중(IME)인 텍스트도 그대로 보낸다 — 한글은 마지막 음절이
+  // 커밋되지 않아 compositionend 를 기다리면 '삼성'이 '삼'으로 잘린다.
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) {
+    if (!q) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchResults([]);
       setSearchLoading(false);
@@ -335,7 +337,7 @@ export default function RankingsPage() {
           <input
             className="w-full rounded-xl py-2.5 pr-4 pl-10.5 text-[15px] outline-none"
             style={{ background: theme === "dark" ? "var(--card)" : "#ffffff", color: "var(--ink)" }}
-            placeholder="티커 또는 종목명으로 검색 (2자 이상)"
+            placeholder="티커 또는 종목명으로 검색"
             value={query}
             onFocus={() => setSearchOpen(true)}
             onChange={(e) => {
@@ -397,9 +399,9 @@ export default function RankingsPage() {
                   ))}
                 </div>
               </>
-            ) : query.trim().length < 2 ? (
+            ) : !query.trim() ? (
               <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
-                2자 이상 입력해보세요
+                종목명이나 티커를 입력해보세요
               </div>
             ) : searchLoading ? (
               <div className="px-4 py-3.5" style={{ color: "var(--mut2)" }}>
