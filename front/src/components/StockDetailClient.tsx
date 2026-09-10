@@ -643,8 +643,10 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 {formatUsd(detail.price.lastPrice)}
               </span>
             )}
-            <span className="text-[16px] font-semibold" style={{ color: isUp ? "var(--up)" : "var(--down)" }}>
-              {isUp ? "▲" : "▼"} {formatSigned(changeKrw)} ({formatPercent(detail.price.changeRate)})
+            <span className="text-[16px] font-semibold" style={{ color: changeKrw === null ? "var(--mut2)" : isUp ? "var(--up)" : "var(--down)" }}>
+              {changeKrw === null
+                ? "등락 정보 없음"
+                : <>{isUp ? "▲" : "▼"} {formatSigned(changeKrw)} ({formatPercent(detail.price.changeRate)})</>}
             </span>
           </div>
           <div className="mt-1 text-[12.5px]" style={{ color: "var(--mut2)" }}>
