@@ -431,7 +431,7 @@ export default function MyPage() {
               <span>상태</span>
               <span className="text-right">수량</span>
               <span className="text-right">가격</span>
-              <span>주문시각</span>
+              <span className="text-right">주문시각</span>
               <span />
             </div>
             {orders.map((order) => (
@@ -470,7 +470,7 @@ export default function MyPage() {
                       : `${formatNumber(order.requestedLimitPrice)}원`
                     : "-"}
                 </span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span className="text-right">
