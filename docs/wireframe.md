@@ -161,7 +161,7 @@ USD / KRW  1,398.50  ▲ 2.30 (+0.16%)  15:00 기준  [환율 추이 그래프 �
 - [주문가능금액 부족]
 
 ### Design annotations — Detail + Trading
-10. **Read anytime, trade only in session** — chart and quotes stay visible when closed; only the order button disables. Stopping the scheduler leaves `last_price` at the close, so **prior-close display is automatic**. The screen switches the "실시간/종가" label from `quote_at` + market calendar.
+10. **Read anytime, trade only in session** — retain the last intraday observation until verified daily-close recovery completes. A last sample alone is not an official close. For unavailable changes, detail shows neutral `등락 정보 없음` without a direction arrow; never fabricate 0%.
 11. **Daily / 1-min toggle** — the two charts have **different data sources**. Daily = `daily_candle` (collected after close); ranked top-100 1-min candles are collected every minute in sequential 20-stock groups, while other stocks use on-demand `/candles` + 60s cache. Period selection (1M/6M/1Y) only means anything for daily, so **hide or switch the period toggle when you switch to 1-min**. ⚠️ **The candles API caps at 200**, so a 1-year chart needs `before` pagination.
 12. **Stock classification intro** — choose text by `stock_category` × `leverage_factor` × `is_dividend`. Show a **volatility warning** for leverage/inverse. ⚠️ **Dividend determination is impossible via the Toss API** (no dividend data). Week 1: disable the dividend badge, go with the four categories individual·preferred·ETF·ETN.
 13. **Trading is a panel inside detail, not a separate page** — navigating away lets seconds elapse, so the price the user saw ≠ the fill price.

@@ -100,7 +100,7 @@ GET /api/v1/candles?symbol=005930&interval=1d&count=200
      └ 국내 15:40 / 미국 05:10 · 시장별 100콜 · 약 20초
         ↓ closePrice 를 저장
 daily_candle.close_price          그날 종가 확정
-        ↓ 다음 장 시작 직전 복사 (국내 08:50 KST / 미국 09:00 ET)
+        ↓ match the exact previous trading day of the displayed quote
 quote_snapshot.prev_close
         ↓ 5초마다 갱신되는 last_price 와 함께
 등락률 = (last_price − prev_close) / prev_close
@@ -109,7 +109,7 @@ quote_snapshot.prev_close
 ```
 
 > **토스 현재가 응답에는 등락률이 없습니다.** `symbol · timestamp · lastPrice · currency` 네 필드뿐이라 전일 종가를 따로 확보해서 직접 계산해야 합니다. 그 전일 종가의 원천이 `daily_candle` 이고, 조인 없이 쓰려고 `quote_snapshot` 에 복사해둡니다.
-> **복사 시점이 "마감 직후"가 아니라 "다음 장 시작 직전"** 인 점을 주의하세요. 마감 직후에 복사하면 `prev_close = last_price` 가 되어 장외 시간 내내 등락률이 0% 로 표시됩니다.
+> 기준가는 달력의 오늘이 아니라 표시하는 시세의 거래일에 귀속된다. 금요일 마감 이후에는 금요일 종가 / 목요일 종가를 유지하고, 월요일 시세 수신 시 금요일 종가로 기준가를 변경한다.
 
 > 📌 **수집 범위** — 거래대금 상위 **국내 100 + 해외 100 = 총 200종목**. 랭킹 API 의 `count` 최대값이 100 이라 **시장별 1콜로 완결**됩니다. 선정 기준은 `duration=1w`, 갱신은 **매주 월요일 국내 08:00 · 미국 21:00**(각 시장 장 시작 직전).
 > **메모리 캐시로만 처리하는 것** — `market_calendar`(장 운영 시간), 현재 환율(1분 TTL). 이력을 쌓을 이유가 없기 때문입니다.
@@ -130,10 +130,10 @@ quote_snapshot.prev_close
 | `POST /oauth2/token` | AUTH · 5 TPS                   | 만료 직전 1회 | DB 저장 없음. **토큰은 메모리 캐싱 필수** — 매 요청마다 발급하면 그것만으로 차단됩니다. |
 | `GET /api/v1/stocks/all` | STOCK_ALL · **1 TPS**          | **매주 월요일 07:00** | **마켓별 전체 종목 목록.** 페이지네이션 없이 한 번에 반환(NASDAQ 약 2,800건, gzip 30KB). `market` 7개(KOSPI·KOSDAQ·NYSE·NASDAQ·AMEX·KR_ETC·US_ETC)를 각각 부르면 **7콜로 전 종목 심볼 확보**. 필터가 우리 설계와 맞습니다 — `commonShare=true`(우선주 제외), `status=ACTIVE`(상장폐지 제외), `securityType`(STOCK·ETF·ETN·REIT…). |
 | `GET /api/v1/stocks` | STOCK · 5 TPS                  | 매주 월요일 07:00 | `stock` 상세 — 종목명·통화·ISIN·`security_type`·`is_common_share`·`leverage_factor`·상장주식수·상장일, `koreanMarketDetail` 의 거래정지·정리매매 플래그. `/stocks/all` 심볼을 **200개씩 배치**로 — 8,500종목이면 43콜, 약 9초. |
-| `GET /api/v1/rankings` | RANKING · 5 TPS                | 유니버스: 월요일 KR 08:00 · US 21:00 / 화면 랭킹: 30초 TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, 신규 편입의 `prev_close`(`price.basePrice`). **시장별 100개씩이라 KR·US 각 1콜로 완결**. `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. 주말엔 집계가 없을 수 있으니 **빈 배열이면 지난주 유니버스 유지**. |
+| `GET /api/v1/rankings` | RANKING · 5 TPS                | 유니버스: 월요일 KR 08:00 · US 21:00 / 화면 랭킹: 30초 TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, 멤버십만 갱신하며 랭킹 가격으로 시세를 초기화하지 않음. **시장별 100개씩이라 KR·US 각 1콜로 완결**. `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. 주말엔 집계가 없을 수 있으니 **빈 배열이면 지난주 유니버스 유지**. |
 | `GET /api/v1/prices` | MARKET_DATA · **15 TPS 공유** | 정규장 중 **5초 목표** | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집. 그 외는 온디맨드. 배경 기본 8 TPS, 최종 공유 제한 유지. 전일 종가·상하한가는 보존. |
 | `GET /api/v1/price-limits` | MARKET_DATA · 15 TPS           | 장 시작 전 1회 | `quote_snapshot.upper_limit`, `lower_limit`. **전일 종가 기준으로 정해져 하루 동안 안 바뀌므로** 실시간 폴링 불필요. 단건 조회라 국내 100종목이면 100콜, 약 7초. **미국 종목은 가격제한이 없어 NULL**. |
-| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | 국내 15:40~17:10 / 미국 현지 16:10~17:10, 30분 간격 재시도 | `daily_candle`. 당일 이미 저장된 종목은 건너뛰고 누락 종목만 재시도합니다. 캘린더 거래일과 응답 일봉 날짜가 일치할 때만 성공 처리합니다. 확정된 `close_price` 는 다음 장 시작 전 `quote_snapshot.prev_close` 로 복사합니다. `timestamp` 는 시각이므로 **KST 기준 날짜로 변환**합니다. |
+| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | KR 15:40~17:10 / America/New_York 16:10~17:10; 30m retries + startup recovery | 거래소 현지 거래일로 저장. 요청 시작 시각 기준 정규장 마감 + 10분을 지난 확정 일봉만 차트·기준가에 사용한다. |
 | `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **20 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 5m·10m 봉은 이 테이블에서 파생한 연속 집계 뷰(`candle_5m` · `candle_10m`)로 제공합니다. 2주차에는 지정가 체결 판정을 추가합니다. |
 | `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS                  | **1주차 미사용** · 필요 시 08:00 배치 | `stock.is_warned`. 정리매매·단기과열·투자경고/위험·VI 발동. **단건 조회라 100종목이면 100콜, 약 20초.** **확정 스케줄에는 넣지 않았습니다** — 랭킹 API 의 `excludeInvestmentCaution=true` 로 이미 대부분 걸러지기 때문. |
 | `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS            | 이력 적재: **매시 정각** / 현재 환율: 1분 TTL 캐시 | **두 경로가 다릅니다.** 그래프용 이력은 매시 정각 `exchange_rate` 로 적재(하루 24콜), 체결용 현재 환율은 **1분 TTL 메모리 캐시**. 응답의 `validFrom` 을 `rate_at` 으로, `ON CONFLICT DO NOTHING` 으로 **주말 중복 자동 차단**. |
@@ -163,17 +163,16 @@ quote_snapshot.prev_close
 | 시각 (KST) | 주기 | 하는 일                                                                                                                                                                                                                |
 |---|---|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 월요일 **07:00** | 주 1회 | **① 전체 종목 마스터 갱신** — `/stocks/all` × 마켓 7개 → 전 종목 심볼, `/stocks` 배치 200개씩 → 상세. 신규 상장·상장폐지 반영. **약 50콜, 15초.**                                                                      |
-| 월요일 **08:00** | 주 1회 | **② 국내 거래대금 상위 100 선정 — 토스 1콜.** `/rankings?market=KR&duration=1w&count=100` → `is_ranked`, `rank_no`, `trading_amount` 갱신 · 신규 편입의 `prev_close`·일봉 백필 · **빈 배열이면 지난주 유니버스 유지**. |
+| 월요일 **08:00** | 주 1회 | **② 국내 거래대금 상위 100 선정 — 토스 1콜.** `/rankings?market=KR&duration=1w&count=100` → `is_ranked`, `rank_no`, `trading_amount` 갱신 · **빈 배열이면 지난주 유니버스 유지**. |
 | 월요일 **08:10** | 주 1회 | **국내 거래대금 상위 100 재무정보 갱신 — 종목당 연간 4콜 + 분기 4콜.** 산업분류는 미적재 또는 30일(30d) 경과 시에만 조회(최대 800 / 900콜). 순차 처리 및 종목별 예외 격리. 2026-09-10 KST 이전 3 TPS / 2026-09-10 KST 이후 18 TPS 운영 예정. |
 | 월요일 **21:00** | 주 1회 | **③ 미국 거래대금 상위 100 선정 — 토스 1콜.** 국내와 동일한 처리. 미국장 시작(22:30) **1시간 30분 전**이라 새 유니버스로 첫 시세 수집을 시작할 수 있습니다.                                                            |
-| **08:50** | 일 1회 | 국내 `prev_close` ← 전일 `daily_candle.close_price` (장 시작 10분 전). 상하한가도 이때 함께 받음. **확정 목록에는 없지만 등락률 계산에 필요** (아래 설명).                                                             |
+| 기동 5초 후 · 이후 1분 | fixed delay | KR/US 누락 종가·기준가 복구. 별도 스케줄러, 실패 종목 재시도. |
 | 국내 정규장(캘린더) | 5초 목표 | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집. |
 | 09:00 ~ 15:30 | 1분 | 국내 상위 100 분봉 수집 — 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위 순차 호출.                                                                                                                              |
 | **15:40 ~ 17:10** | 30분 | **국내 일봉 적재 재시도.** 캘린더상 마감 10분 후부터 실행하며 수능일 지연 마감도 반영. 당일 저장 완료 종목은 건너뜀.                                                                                                   |
-| **09:00 ET** * | 일 1회 | **미국 `prev_close` 갱신 — 정규장 시작 30분 전.** KST 기준 서머타임 22:00, 표준시 23:00.                                                                                                                               |
 | 미국 정규장(캘린더) | 5초 목표 | 랭킹·활성 지정가 주문 종목만 수집. 서머타임은 캘린더 적용. |
 | 22:30 ~ 05:00 * | 1분 | 미국 상위 100 분봉 수집 — 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위 순차 호출.                                                                                                                              |
-| **미국 현지 16:10 ~ 17:10** * | 30분 | **미국 일봉 적재 재시도.** KST로 서머타임 05:10~06:10, 표준시 06:10~07:10. 당일 저장 완료 종목은 건너뜀.                                                                                                               |
+| **America/New_York 16:10 ~ 17:10** * | 30분 | **미국 일봉 적재 재시도.** KST로 서머타임 05:10~06:10, 표준시 06:10~07:10. 당일 저장 완료 종목은 건너뜀.                                                                                                               |
 | 매시 정각 | 1시간 | **환율 적재** — 하루 24콜. 주말·휴장에도 그냥 돌림(중복은 UNIQUE 로 자동 차단).                                                                                                                                        |
 | 그 외 시간 | — | **시세 수집 정지.** 조회는 되지만 전일 종가 표시 + 주문 거부.                                                                                                                                                          |
 
@@ -182,7 +181,7 @@ quote_snapshot.prev_close
 
 > 📌 **`prev_close` 갱신을 목록에 넣은 이유**
 > 토스 현재가 응답에는 등락률이 없습니다(`symbol·timestamp·lastPrice·currency` 네 필드뿐). 전일 종가를 직접 확보해 `(last_price − prev_close) / prev_close` 로 계산해야 합니다.
-> 복사 시점이 **"마감 직후"가 아니라 "다음 장 시작 직전"** 이어야 합니다. 마감 직후에 복사하면 `prev_close = last_price` 가 되어 장외 시간 내내 등락률이 0% 로 표시됩니다. **일봉 적재(15:40)와 prev_close 복사(다음날 08:50)를 반드시 분리하세요.**
+> 기준가는 달력의 오늘이 아니라 표시하는 시세의 거래일에 귀속된다. 금요일 마감 이후에는 금요일 종가 / 목요일 종가를 유지하고, 월요일 시세 수신 시 금요일 종가로 기준가를 변경한다.
 
 > **스케줄러에 넣지 않은 것 — 온디맨드로 처리합니다**
 > · 장외 분봉 — 상세 진입 시 `/candles?interval=1m` 호출 + 60초 캐시. 상위 100 분봉 수집은 1주차 스케줄러에 포함하고, 2주차에는 지정가 체결 판정을 추가합니다.
@@ -376,18 +375,19 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 |---|---|---|
 | `stock_id` | BIGINT PK/FK | 종목당 한 행이라 PK=fk (1:1). |
 | `last_price` | NUMERIC(19,4) | 현재가(종목 통화). 토스가 **문자열로 주므로 반드시 BigDecimal 파싱**. double 로 받으면 잔고 어긋남. |
-| `prev_close` | NUMERIC(19,4) | **전일 종가.** 토스 현재가 응답에 등락률이 없어 `(last_price − prev_close)/prev_close` 로 직접 계산. **전일 `daily_candle.close_price` 복사**(국내 08:50 / 미국 22:00, 다음 장 시작 직전). 일봉 수집 실패면 `last_price` 복사 폴백(마감 시점 값이 곧 종가), 신규 편입 종목은 랭킹 `price.basePrice` 로 초기화. **갱신 시점이 "마감 직후"가 아니라 "다음 장 시작 직전"인 이유** — 마감 직후 갱신하면 `prev_close = last_price` 가 되어 장외 시간 내내 등락률이 0% 로 표시. |
+| `prev_close` | NUMERIC(19,4) | `quote_at`에서 파생한 거래소 현지 시세 거래일의 정확한 직전 거래일 `prev_close_date`에 해당하는 확정 일봉 종가. 검증 실패 시 등락률은 null. `last_price` 또는 날짜 미확인 랭킹 기준가로 대체하지 않는다. |
+| `prev_close_date` | DATE | 기준가의 거래일. 시세 거래일은 quote_at과 MarketCountry.zoneId()로 계산한다. 기존 행의 날짜는 NULL로 두고 재조회한다. |
 | `upper_limit` `lower_limit` | NUMERIC(19,4) | 상한가/하한가. **전일 종가 기준으로 하루 동안 안 바뀌므로 장 시작 전 1회만 조회.** 주문 가격 검증. |
 | `currency` | VARCHAR(3) | 가격의 통화. `stock` 과 중복이지만 조인 없이 시세만 조회할 때 편함. |
 | `quote_at` | TIMESTAMPTZ | **토스가 알려준 시세 기준 시각.** 두 곳에 사용 — 화면의 "12:36:59 기준" 표시, 주문 시 유효시간 검증(15초 넘게 오래됐으면 `STALE_QUOTE` 로 거절). |
 | `collected_at` | TIMESTAMPTZ | 우리가 수집한 시각. `quote_at` 과의 차이로 수집 파이프라인 지연 모니터링. |
 
 #### `daily_candle` — 일봉
-용도가 둘 — **일봉 차트**와 **`prev_close` 원천**. 장 마감 직후 수집해 그날 봉을 확정하고, 그 `close_price` 가 다음 장 시작 전 `quote_snapshot.prev_close` 로 복사되어 등락률의 기준이 됩니다. 일봉과 분봉은 **TimescaleDB** 에 저장해 두 차트 시계열을 같은 보존·시간 범위 조회 모델로 관리합니다. 200종목 × 250거래일 = **연 5만 행, 약 3MB**라 일봉 하이퍼테이블은 분봉이 커져도 작게 유지됩니다.
+기존 과거 일봉은 그대로 보존하고 차트·주봉에 포함한다. 새 수집은 확정일 필터를 적용한다. 기준가 검증에는 기존 DB 행의 존재를 증거로 사용하지 않고 토스에서 다시 조회한다.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| `stock_id` + `trade_date` | 복합 PK | 종목 × 거래일로 하루 한 행. 응답의 `timestamp` 는 시각이므로 **KST 기준 날짜로 변환** — UTC 로 자르면 미국 종목이 하루씩 밀립니다. |
+| `stock_id` + `trade_date` | composite PK | 종목 × 거래소 현지 거래일. 봉 시작 `timestamp`를 `MarketCountry.zoneId()`로 변환한다. |
 | `open_price` | NUMERIC(19,4) | 시가. |
 | `high_price` `low_price` | NUMERIC(19,4) | 고가/저가. 캔들 차트의 꼬리. |
 | `close_price` | NUMERIC(19,4) | 종가. 다음 거래일의 `prev_close` 로 복사되어 등락률 계산의 분모. |
@@ -621,3 +621,11 @@ develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·�
 
 ---
 > 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, `V3__order_book.sql`과 함께 보세요
+
+## 정규장 거래일과 기준가 (#173)
+
+미국 시간대 식별자는 `America/New_York`, 한국은 `Asia/Seoul`로 통일한다. 거래일은 거래소 현지 날짜이고 실제 주문·원장 시각은 UTC 저장/KST 표시한다. 일봉·주봉 응답의 KST 자정은 날짜 라벨이다.
+
+등락률은 표시 시세 거래일과 정확한 직전 거래일의 확정 종가를 비교한다. 날짜 검증 실패 시 기준가·등락률은 null이다. 랭킹 집계 시각으로 시세를 초기화하거나 마지막 현재가를 종가로 복사하지 않는다. 휴일·자정에는 기준가를 이동하지 않는다.
+
+기동 5초 후 및 이후 1분 fixed delay로 누락 종가를 복구한다. 정규장 마감 + 10분 이전에 시작한 요청의 당일 일봉은 확정 데이터로 저장하지 않는다. 빈 응답·날짜 누락은 완료로 캐시하지 않는다. V8은 `quote_snapshot.prev_close_date`만 추가한다. 기존 과거 일봉은 차트·주봉에 그대로 포함하되 재검증했다고 간주하지 않는다. 기준가 날짜가 없거나 다르면 DB 일봉 유무와 관계없이 토스에서 다시 받는다. 분봉도 봉 시작 시각으로 정규장만 수용한다.

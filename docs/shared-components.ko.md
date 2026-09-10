@@ -146,7 +146,7 @@ LocalDate marketDate = now.atZone(country.zoneId()).toLocalDate();
 ```
 
 - 새 시간 의존 로직은 `clock.instant()`에서 시작합니다. 테스트는 `Clock.fixed(...)`를 주입합니다.
-- `zoneId()`를 일봉 KST 저장·차트 KST 표현·환율 KST 기준일·KST 기반 캐시 날짜에 무조건 적용하지 않습니다. 현지 날짜와 고정 KST 날짜는 서로 다른 정책입니다.
+- 일봉 및 시세 거래일은 거래소 현지 날짜다. 실제 원장 시각은 UTC로 저장하고 KST로 표시한다. 일봉·주봉 응답의 KST 자정은 날짜 라벨이며 봉 시작 시각이 아니다. 환율 기준일은 기존 KST 정책을 유지한다.
 - 시간대만으로 개장·폐장·휴장 여부를 추정하지 않습니다. 장 운영 정보는 기존 캘린더 / 세션 Port를 사용합니다.
 
 ## 6. 수익률과 주문 금액 계산
@@ -244,7 +244,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [OrderMarketContext](../back/src/main/java/com/baedang/trading/model/OrderMarketContext.java) | `executionRate()`, `isMarketOpenAt(now)` | 시장가 체결·지정가 접수의 공통 외부 시장 스냅샷. 트랜잭션 전에 준비하고 계좌 잠금 후 유효성을 재검증 |
 | [ClientOrderRetryPolicy](../back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java) | `asData()` | `retryPolicy` 키를 담은 Map. SAME_CLIENT_ORDER_ID / NEW_CLIENT_ORDER_ID / NOT_RETRYABLE 계약 |
 | [QuoteRealtimePolicy](../back/src/main/java/com/baedang/stock/service/QuoteRealtimePolicy.java) | `isRealtime(country, quote)`, `isMarketOpen(country)` | 현재·시세 시점 세션을 이용한 판정. 캘린더 조회가 발생할 수 있어 순수 계산 함수가 아님 |
-| [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
+| [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` / `resolve(country, requestedAt)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
 
 | [TickSizePolicy](../back/src/main/java/com/baedang/orderbook/service/TickSizePolicy.java) | `nextValidPriceAbove`, `previousValidPriceBelow`, `isValidPrice`, `tickSizeAt` | 시장·종목 유형별 호가 단위 및 경계를 넘는 유효 가격 계산. NUMERIC(19,4) 최대 범위(999999999999999.9999) 내에서 계산 |
 | [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed)` | 고정 seed와 설정 기반 순수 가상 호가 생성기. V1 깊이 배수·정수 노이즈·tick 상대 라운드 넘버 부스트 적용. ASK 10개와 시장별 BID 깊이(국내 10개, 미국 1~10개)를 생성 |
@@ -380,7 +380,7 @@ QuoteRefreshCoordinator는 정기·온디맨드 현재가 조회의 진행 중 �
 
 거래용 조회는 QuoteRefreshCoordinator를 주입하여 **트랜잭션 밖에서** requireFresh(stock, maxAge)를 호출합니다. 원본 quoteAt이 신선하면 재사용하고 아니면 갱신 후 누락/미래/오래된 시세를 거절합니다. 주문·캔들·세션·환율·거래 상태 조회는 하지 않습니다. OrderMarketDataService가 주문에 연결하고 주문 서비스가 나머지 계약을 검증합니다. refresh(stock)는 화면용 갱신으로 실패 시 기존값 표시 여부는 호출자가 결정합니다. 일봉 백필 정책은 그대로입니다.
 
-QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미래 시각을 검증하고 원자적 JDBC UPSERT를 수행합니다. 오래된 quoteAt 및 같은 quoteAt의 오래된 수집 응답은 최신 값을 덮지 않습니다. 현재가 갱신은 prev_close와 상하한가를 보존하고 updatePrevClose는 해당 컬럼만 변경합니다. 신규 테이블/migration은 없습니다.
+QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규장 시각을 검증한 뒤 짧은 JDBC 트랜잭션으로 시세를 저장한다. 기준가 복구는 새로 조회한 일봉을 별도로 검증하고 시세의 거래소 현지 거래일이 유지될 때만 기준가를 갱신한다. 같은 거래일의 새 시세는 복구를 막지 않는다. 새 거래일에서는 이전 기준가를 폐기하고, 같은 거래일의 검증된 기준가는 보존한다. 역순 응답은 무시한다. V8은 prev_close_date만 추가하며 상하한가는 보존한다.
 
 설정: trading.quote-collection.refresh-interval=5s, dispatch-interval=25ms, background-concurrency=3, background-requests-per-second=8, max-in-flight-stocks=1000, request-timeout=20s. ExternalHttpConfig는 자동 구성 RestClient 빌더에 toss.connect-timeout=2s/read-timeout=5s를 적용해 무응답 I/O가 슬롯을 영구 점유하지 않게 합니다. coordinator 대기 timeout은 전체 큐/HTTP 작업을 합친 총 응답시간 보장이 아닙니다.
 
@@ -403,3 +403,17 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 - `LimitOrderPreviewService`: 같은 선택기를 사용하되 쓰기·자원 예약을 하지 않습니다. `LimitExecutionPreviewResponse.avgExecutionPrice`는 표시용 KRW 0 / USD 2자리이며 금액을 역산하는 데 사용하지 않습니다.
 - `Account.settleReservedBuy`, `Holding.settleReservedSell`: 자유 예수금/매도 가능 수량이 아니라 이미 동결된 자원을 소비합니다. 호출부가 주문별 한도를 검증하고 같은 금융 트랜잭션을 사용합니다. 전량 매수 후 남은 동결액은 명시적으로 해제합니다.
 - `LimitOrderExecutionWorker`: 생성/만료 스케줄러와 분리된 `limitExecutionTaskScheduler`에서 상시 실행합니다. 예산/커서와 미리보기 필드는 `api-spec.ko.md`를 참고합니다.
+
+## 거래일·종가 복구 (#173)
+
+- `MarketTradingDayPolicy`: `calendar(country, date)`, `quoteTradeDate(country, instant)`, `previousTradingDay(country, date)`. 기존 캘린더 Port와 캐시를 재사용한다.
+- `DailyCandlePersistenceService.upsert(stockId, currency, country, candles, requestedAt)`: 외부 요청 전 시각으로 확정일을 검사하고 저장한 `List<DailyCandle>`을 반환한다. 기준가 복구는 이 반환값에서 정확한 날짜를 선택한다. 수집·저장은 공통 조정자 안에서 실행한다.
+- `PrevCloseUpdateService.update(country)` / `recover(stock)`: 최신 확정 일봉과 정확한 직전 거래일의 종가를 확보한다. 배경 대상은 랭킹·활성 지정가 종목이고 상세 조회는 비랭킹도 복구한다. 장 마감 후 일봉으로 복구한 가격의 `quote_at`은 캘린더 종료 시각이다. 복구가 새 정규장 가격을 덮어쓰지 않는다.
+- `trading.reference-recovery.initial-delay=5s`, `interval=1m`: 기동 후 누락 작업을 보충하고 실패를 재시도한다. `referenceRecoveryScheduler` 전용 스레드를 사용한다.
+- `MinuteCandlePersistenceService.upsert(stockId, country, candles)`: 봉 시작 시각이 정규장 `[open, close)`에 해당하는 분봉만 저장한다.
+
+`MarketStatusService`도 시장별 현지 날짜를 사용하고 기존 캘린더 Port 캐시를 공유한다. 상태 응답 시각의 KST 표현은 유지한다.
+
+`QuoteSnapshotPersistenceService.repairReference(stock, expected, reference)`는 이번 외부 조회로 검증한 일봉만 받는다. 직전 거래일을 검증하고 quote_at에서 파생한 거래소 현지 거래일이 그대로일 때 기준가만 갱신한다. 같은 거래일의 새 시세는 허용하며 다른 거래일로 넘어가면 차단한다. 현재가·수집 시각은 보존한다. `saveRecoveredClose`는 조회한 행이 그대로일 때만 확정 종가로 교체한다.
+
+`DailyCandleFetchCoordinator.withStockLock(stockId, operation)`을 정기 수집·시드·상세 백필·기준가 복구에서 공유한다. 외부 요청 시작부터 저장 완료까지 같은 종목을 직렬화한다. 락은 단일 애플리케이션 인스턴스 범위이며 다중 인스턴스 수집에는 별도 분산 조정이 필요하다.
