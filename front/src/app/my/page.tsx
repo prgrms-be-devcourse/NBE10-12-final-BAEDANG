@@ -145,6 +145,45 @@ export default function MyPage() {
     isLoggedIn && !!user && [...heldMarketCountries].some((market) => isMarketOpen(market as MarketCountry))
   );
 
+  // 주문 내역 탭을 보고 있고, 미체결(PENDING / PARTIALLY_FILLED) 상태의 활성 주문이
+  // 존재할 때만 5초 주기로 주문 목록을 다시 조회한다. 모든 주문이 체결·취소·만료로
+  // 종료되었거나 다른 탭을 보고 있을 때는 불필요한 폴링을 돌리지 않는다.
+  const hasActiveOrders = orders.some(
+    (o) => o.status === "PENDING" || o.status === "PARTIALLY_FILLED"
+  );
+  const ordersPollInFlightRef = useRef(false);
+  useVisiblePolling(
+    () => {
+      if (!user || ordersPollInFlightRef.current) return;
+      ordersPollInFlightRef.current = true;
+      getMyOrders()
+        .then((res) => {
+          setOrders(res.items);
+          setOrdersCursor(res.nextCursor);
+          setOrdersHasNext(res.hasNext);
+        })
+        .catch(() => {})
+        .finally(() => {
+          ordersPollInFlightRef.current = false;
+        });
+    },
+    VALUATION_POLL_INTERVAL_MS,
+    isLoggedIn && !!user && tab === "orders" && hasActiveOrders
+  );
+
+  function handleTabChange(nextTab: "holdings" | "ledger" | "orders") {
+    setTab(nextTab);
+    if (nextTab === "orders") {
+      getMyOrders()
+        .then((res) => {
+          setOrders(res.items);
+          setOrdersCursor(res.nextCursor);
+          setOrdersHasNext(res.hasNext);
+        })
+        .catch(() => {});
+    }
+  }
+
   async function handleReset() {
     if (!user || !account || resetting) return;
     setResetting(true);
@@ -319,7 +358,7 @@ export default function MyPage() {
             { value: "ledger", label: "체결 내역" },
           ]}
           value={tab}
-          onChange={(v) => setTab(v as "holdings" | "ledger" | "orders")}
+          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders")}
           trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
           trackStyle={{
             background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
