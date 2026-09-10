@@ -17,6 +17,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.math.BigDecimal;
 import java.text.Normalizer;
 import java.util.List;
 
@@ -119,6 +120,21 @@ class StockJamoSearchIntegrationTest {
     }
 
     /**
+     * 일치 정확도가 같으면 실제 랭킹 순입니다. 셋 다 '테크' 를 중간에 포함해 같은 순위라
+     * 이름순이면 가·나·다 인데, rankNo 가 그걸 뒤집어야 검증이 됩니다.
+     * 랭킹 밖(rankNo = null)은 맨 뒤로 갑니다.
+     */
+    @Test
+    @DisplayName("일치 정확도가 같으면 실제 랭킹(rankNo) 순, 랭킹 밖은 뒤로")
+    void 랭킹순_정렬() {
+        save("999011", "가테크");
+        saveRanked("999012", "나테크", 50);
+        saveRanked("999013", "다테크", 3);
+
+        assertThat(names("테크")).containsExactly("다테크", "나테크", "가테크");
+    }
+
+    /**
      * NFD 로 저장된 이름은 완성형 범위 밖이라 분해되지 않고 통과합니다.
      * 함수 입구의 {@code normalize(txt, NFC)} 가 빠지면 그 종목만 조용히 검색에서 사라집니다.
      */
@@ -137,6 +153,12 @@ class StockJamoSearchIntegrationTest {
 
     private List<String> names(String query) {
         return search.search(query, 10).items().stream().map(StockSearchResponse.Item::name).toList();
+    }
+
+    private void saveRanked(String symbol, String name, int rankNo) {
+        Stock stock = Stock.create(symbol, MarketCountry.KR, "KOSPI", name, null, "KRW", "STOCK", true);
+        stock.applyRanking(rankNo, new BigDecimal("1000"));
+        stocks.saveAndFlush(stock);
     }
 
     private void save(String symbol, String name) {

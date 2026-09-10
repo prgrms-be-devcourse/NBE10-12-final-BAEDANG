@@ -93,6 +93,13 @@ public class StockSearchService {
     private Comparator<Stock> createComparator(ToIntFunction<Stock> getRank) {
         return Comparator
                 .comparingInt(getRank)
+                // rankNo 는 랭킹에서 빠지면 isRanked 와 같이 null 이 되므로(clearRanking),
+                // nullsLast 하나로 "랭킹 종목 먼저, 그 안에서 1위부터"가 처리됩니다.
+                // 시장별로 매기는 순위라 KR 1위와 US 1위는 동률이고, 그때는 이름순입니다.
+                .thenComparing(
+                        Stock::getRankNo,
+                        Comparator.nullsLast(Integer::compareTo)
+                )
                 .thenComparing(
                         Stock::getName,
                         Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
