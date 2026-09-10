@@ -8,9 +8,10 @@ import {
   CrosshairMode,
   type IChartApi,
   type ISeriesApi,
+  type Time,
 } from "lightweight-charts";
 import type { Candle } from "@/lib/api";
-import { formatKstTickMark, toCandlestickData, toVolumeData } from "@/lib/candle-chart-data";
+import { formatKstCrosshairLabel, formatKstTickMark, isIntradayCandles, toCandlestickData, toVolumeData } from "@/lib/candle-chart-data";
 
 /**
  * `lightweight-charts`(TradingView)로 그리는 실제 캔들스틱 + 거래량 차트 (이슈 #76).
@@ -76,12 +77,18 @@ export function CandlestickChart({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  // 크로스헤어(마우스 오버) 라벨이 시:분까지 보여줄지 — 매 렌더마다 새 함수를 만들지
+  // 않고 이 값만 갱신해서, 아래 localization.timeFormatter 클로저가 항상 최신 값을
+  // 읽게 한다(분봉↔일봉 전환처럼 데이터가 바뀔 때만 값이 바뀐다).
+  const intradayRef = useRef(false);
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const line2 = resolveCssColor("--line2", "#e9f2f9");
+    const initialPoints = toCandlestickData(items);
+    intradayRef.current = isIntradayCandles(initialPoints);
     const chart = createChart(container, {
       width: container.clientWidth,
       height,
@@ -89,10 +96,13 @@ export function CandlestickChart({
       grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
       crosshair: { mode: CrosshairMode.Normal },
       rightPriceScale: { borderColor: line2 },
-      // 눈금 라벨은 뷰어의 브라우저 타임존이 아니라 KST로 고정한다 — docs/erd.md의
-      // 거래일 경계 정의(KST)와 일치시켜서, 보는 사람마다 날짜가 달라 보이거나
-      // 미국 종목 날짜가 하루 밀려 보이는 문제를 막는다.
+      // 눈금 라벨(tickMarkFormatter)과 크로스헤어 라벨(localization.timeFormatter)은
+      // lightweight-charts가 완전히 별개로 취급한다 — 하나만 KST로 고정하면 나머지는
+      // 라이브러리 기본값(UTC)으로 남는다. 뷰어의 브라우저 타임존도, UTC도 아니라
+      // docs/erd.md의 거래일 경계 정의(KST)와 일치시켜서, 보는 사람마다 날짜가 달라
+      // 보이거나 미국 종목 날짜가 하루 밀려 보이는 문제를 막는다.
       timeScale: { borderColor: line2, timeVisible: true, secondsVisible: false, tickMarkFormatter: formatKstTickMark },
+      localization: { timeFormatter: (time: Time) => formatKstCrosshairLabel(time, intradayRef.current) },
     });
 
     const upColor = resolveCssColor("--up", "#d33d3d");
@@ -114,7 +124,7 @@ export function CandlestickChart({
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
     volumeSeriesRef.current = volumeSeries;
-    candleSeries.setData(toCandlestickData(items));
+    candleSeries.setData(initialPoints);
     volumeSeries.setData(toVolumeData(items, upColor, downColor));
     chart.timeScale().fitContent();
 
@@ -140,7 +150,11 @@ export function CandlestickChart({
     if (!candleSeriesRef.current || !volumeSeriesRef.current) return;
     const upColor = resolveCssColor("--up", "#d33d3d");
     const downColor = resolveCssColor("--down", "#3366cc");
-    candleSeriesRef.current.setData(toCandlestickData(items));
+    const points = toCandlestickData(items);
+    // 분봉↔일봉/1주봉 전환처럼 간격 자체가 바뀔 수 있어, 크로스헤어 라벨이 시:분을
+    // 붙일지 여부도 새 데이터 기준으로 다시 판단한다.
+    intradayRef.current = isIntradayCandles(points);
+    candleSeriesRef.current.setData(points);
     volumeSeriesRef.current.setData(toVolumeData(items, upColor, downColor));
     chartRef.current?.timeScale().fitContent();
   }, [items]);

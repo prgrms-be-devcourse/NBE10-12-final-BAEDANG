@@ -431,7 +431,7 @@ export default function MyPage() {
               <span>상태</span>
               <span className="text-right">수량</span>
               <span className="text-right">가격</span>
-              <span>주문시각</span>
+              <span className="text-right">주문시각</span>
               <span />
             </div>
             {orders.map((order) => (
@@ -470,7 +470,7 @@ export default function MyPage() {
                       : `${formatNumber(order.requestedLimitPrice)}원`
                     : "-"}
                 </span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span className="text-right">
@@ -508,7 +508,7 @@ export default function MyPage() {
           <div
             className="grid px-5 py-2.5 text-[12px] font-bold"
             style={{
-              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
               columnGap: "20px",
               borderBottom: "1px solid var(--line2)",
               color: "var(--mut2)",
@@ -518,7 +518,7 @@ export default function MyPage() {
             <span>설명</span>
             <span className="text-right">증감액</span>
             <span className="text-right">잔액</span>
-            <span>발생시각</span>
+            <span className="text-right">발생시각</span>
           </div>
           {ledger.map((entry) => {
             const amount = toDecimal(entry.amount);
@@ -528,7 +528,7 @@ export default function MyPage() {
                 key={entry.entryId}
                 className="grid items-center px-5 py-3 text-[15px]"
                 style={{
-                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                  gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
                   columnGap: "20px",
                   borderBottom: "1px solid var(--line2)",
                 }}
@@ -544,7 +544,7 @@ export default function MyPage() {
                   {formatSigned(entry.amount)}
                 </span>
                 <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>
