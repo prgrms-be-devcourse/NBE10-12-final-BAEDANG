@@ -70,7 +70,7 @@ class MarketOrderServiceTest {
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
         when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
         var service = new MarketOrderService(orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request)).isInstanceOf(BusinessException.class);
         var captor = ArgumentCaptor.forClass(OrderMarketContext.class);
@@ -114,7 +114,7 @@ class MarketOrderServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 new MarketOrderResponseAssembler(),
-                clock);
+                clock, preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
@@ -158,7 +158,7 @@ class MarketOrderServiceTest {
                 marketSessionProvider,
                 exchangeRateProvider,
                 new MarketOrderResponseAssembler(),
-                Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC));
+                Clock.fixed(Instant.parse("2026-08-26T01:00:00Z"), ZoneOffset.UTC), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
@@ -175,7 +175,7 @@ class MarketOrderServiceTest {
     void 요청이_null이면_INVALID_INPUT_예외를_던진다() {
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC(), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, null))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -195,7 +195,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC(), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -218,7 +218,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC());
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.systemUTC(), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -243,7 +243,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -267,7 +267,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -292,7 +292,7 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
 
         assertThatThrownBy(() -> service.place(1L, request))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
@@ -326,12 +326,21 @@ class MarketOrderServiceTest {
 
         MarketOrderService service = new MarketOrderService(
                 orderPolicy, transactionService, stockRepository,
-                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC));
+                marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
 
         MarketOrderResponse response = service.place(1L, request);
         assertThat(response).isNotNull();
         assertThat(response.orderId()).isEqualTo(100L);
         assertThat(response.symbol()).isEqualTo("005930");
         assertThat(response.status()).isEqualTo("FILLED");
+    }
+
+    private OrderMarketDataService preparedMarketData() {
+        OrderMarketDataService service = org.mockito.Mockito.mock(OrderMarketDataService.class);
+        org.mockito.Mockito.lenient().when(service.refreshStatus(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.lenient().when(service.prepareEstimate(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        return service;
     }
 }

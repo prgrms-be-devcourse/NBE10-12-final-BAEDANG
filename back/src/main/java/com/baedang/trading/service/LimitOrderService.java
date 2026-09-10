@@ -53,6 +53,7 @@ public class LimitOrderService {
     private final OrderReadService reads;
     private final OrderQuoteQueryService quoteReads;
     private final Clock clock;
+    private final OrderMarketDataService marketData;
 
     public LimitOrderService(
             OrderPolicy policy,
@@ -63,7 +64,8 @@ public class LimitOrderService {
             StockRepository stocks,
             OrderReadService reads,
             OrderQuoteQueryService quoteReads,
-            Clock clock
+            Clock clock,
+            OrderMarketDataService marketData
     ) {
         this.policy = policy;
         this.transactions = transactions;
@@ -74,6 +76,7 @@ public class LimitOrderService {
         this.reads = reads;
         this.quoteReads = quoteReads;
         this.clock = clock;
+        this.marketData = marketData;
     }
 
     public OrderDetailResponse place(Long userId, LimitOrderRequest request) {
@@ -100,11 +103,21 @@ public class LimitOrderService {
 
         Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(base.terms().symbol(), base.terms().marketCountry())
                 .orElseThrow(() -> retry(ErrorCode.STOCK_NOT_FOUND));
+        try {
+            stock = marketData.refreshStatus(stock);
+        } catch (BusinessException e) {
+            throw retry(e.getErrorCode());
+        }
         ErrorCode reason = policy.determineStaticRejection(stock);
         if (reason != null) {
             throw retry(reason);
         }
 
+        try {
+            marketData.requireQuote(stock);
+        } catch (BusinessException e) {
+            throw retry(e.getErrorCode());
+        }
         OrderMarketContext context = prepare(base.terms().marketCountry());
         LimitOrderPricing.Price price;
         try {
@@ -164,7 +177,7 @@ public class LimitOrderService {
         OrderTerms terms = policy.parseTerms(symbol, country, side, quantity);
         String normalizedCurrency = LimitOrderRequestPolicy.currency(currency, terms.marketCountry());
         BigDecimal requested = LimitOrderRequestPolicy.price(price, normalizedCurrency);
-        OrderQuoteQueryContext db = quoteReads.load(userId, terms);
+        OrderQuoteQueryContext db = marketData.prepareEstimate(quoteReads.load(userId, terms));
         OrderMarketContext context = prepare(terms.marketCountry());
         LimitOrderPricing.Price p = pricing.calculate(
                 new LimitOrderCommand(db.account().getAccountId(), null, terms, requested, normalizedCurrency),

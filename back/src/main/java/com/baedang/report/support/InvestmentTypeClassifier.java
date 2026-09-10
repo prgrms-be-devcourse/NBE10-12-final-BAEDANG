@@ -47,31 +47,50 @@ public class InvestmentTypeClassifier {
     public InvestmentProfile classify(List<HoldingSlice> slices) {
         int holdingCount = slices.size();
         BigDecimal total = sum(slices, s -> true);
-        if (holdingCount < MIN_HOLDINGS_FOR_CLASSIFICATION || total.signum() <= 0) {
+        if (total.signum() <= 0) {
+            // 평가액이 없으면(전액 현금 등) 비중을 계산할 수 없다.
             return InvestmentProfile.unclassified(holdingCount);
         }
 
-        BigDecimal domesticShare = share(sum(slices, s -> s.market() == MarketCountry.KR), total);
-        BigDecimal individualShare = share(sum(slices, InvestmentTypeClassifier::isIndividual), total);
-        BigDecimal aggressiveShare = share(sum(slices, InvestmentTypeClassifier::isAggressive), total);
-        BigDecimal top1Share = share(maxEval(slices), total);
+        // 판정은 반올림 전 원금액으로, 표시(share)는 반올림한 값으로 — 둘을 섞지 말 것.
+        BigDecimal domesticAmount = sum(slices, s -> s.market() == MarketCountry.KR);
+        BigDecimal individualAmount = sum(slices, InvestmentTypeClassifier::isIndividual);
+        BigDecimal aggressiveAmount = sum(slices, InvestmentTypeClassifier::isAggressive);
+        BigDecimal top1Amount = maxEval(slices);
+
+        // 비중은 분류 여부와 무관하게 항상 담는다(리포트 계약). 종목 수는 유형 판정에만 쓴다.
+        BigDecimal domesticShare = share(domesticAmount, total);
+        BigDecimal individualShare = share(individualAmount, total);
+        BigDecimal aggressiveShare = share(aggressiveAmount, total);
+        BigDecimal top1Share = share(top1Amount, total);
+
+        if (holdingCount < MIN_HOLDINGS_FOR_CLASSIFICATION) {
+            // 유형은 정하지 않되(미분류/신규) 계산한 비중은 그대로 내려 준다.
+            return new InvestmentProfile(
+                    false, null, domesticShare, individualShare, top1Share, aggressiveShare, holdingCount);
+        }
 
         InvestmentType type = new InvestmentType(
-                top1Share.compareTo(CONCENTRATION_TOP1_CUTOFF) >= 0
+                atLeast(top1Amount, total, CONCENTRATION_TOP1_CUTOFF)
                         ? InvestmentType.Diversification.CONCENTRATED
                         : InvestmentType.Diversification.DIVERSIFIED,
-                domesticShare.compareTo(DOMESTIC_CUTOFF) >= 0
+                atLeast(domesticAmount, total, DOMESTIC_CUTOFF)
                         ? InvestmentType.Market.DOMESTIC
                         : InvestmentType.Market.GLOBAL,
-                individualShare.compareTo(INDIVIDUAL_CUTOFF) >= 0
+                atLeast(individualAmount, total, INDIVIDUAL_CUTOFF)
                         ? InvestmentType.Instrument.INDIVIDUAL
                         : InvestmentType.Instrument.FUND,
-                aggressiveShare.compareTo(AGGRESSIVE_CUTOFF) >= 0
+                atLeast(aggressiveAmount, total, AGGRESSIVE_CUTOFF)
                         ? InvestmentType.Risk.AGGRESSIVE
                         : InvestmentType.Risk.STABLE
         );
         return new InvestmentProfile(
                 true, type, domesticShare, individualShare, top1Share, aggressiveShare, holdingCount);
+    }
+
+    /** 반올림 없이 {@code 비중 >= 컷오프} 판정. {@code part >= total × cutoff} 로 비교한다. */
+    private static boolean atLeast(BigDecimal part, BigDecimal total, BigDecimal cutoff) {
+        return part.compareTo(total.multiply(cutoff)) >= 0;
     }
 
     /** 개별주 축의 개별주(S) 쪽 = 개별주 + 우선주. ETF·ETN 은 펀드(E) 쪽. */

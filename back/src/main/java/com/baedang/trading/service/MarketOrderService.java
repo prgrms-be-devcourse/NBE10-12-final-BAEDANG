@@ -39,6 +39,7 @@ public class MarketOrderService {
     private final ExecutionExchangeRateProvider exchangeRateProvider;
     private final MarketOrderResponseAssembler responseAssembler;
     private final Clock clock;
+    private final OrderMarketDataService marketData;
 
     public MarketOrderService(
             OrderPolicy orderPolicy,
@@ -47,7 +48,8 @@ public class MarketOrderService {
             MarketSessionProvider marketSessionProvider,
             ExecutionExchangeRateProvider exchangeRateProvider,
             MarketOrderResponseAssembler responseAssembler,
-            Clock clock
+            Clock clock,
+            OrderMarketDataService marketData
     ) {
         this.orderPolicy = orderPolicy;
         this.transactionService = transactionService;
@@ -56,6 +58,7 @@ public class MarketOrderService {
         this.exchangeRateProvider = exchangeRateProvider;
         this.responseAssembler = responseAssembler;
         this.clock = clock;
+        this.marketData = marketData;
     }
 
     /** 주문은 다른 업무 트랜잭션에 참여하지 않고 반드시 최상위 유스케이스로 실행합니다. */
@@ -97,11 +100,21 @@ public class MarketOrderService {
                         ErrorCode.STOCK_NOT_FOUND,
                         "symbol=" + command.terms().symbol(),
                         ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
+        try {
+            stock = marketData.refreshStatus(stock);
+        } catch (BusinessException e) {
+            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
+        }
         ErrorCode staticRejection = orderPolicy.determineStaticRejection(stock);
         if (staticRejection != null) {
             // 외부 조회와 주문 저장 전이므로 조건이 바뀐 뒤 같은 clientOrderId로 재시도할 수 있습니다.
             throw new BusinessException(
                     staticRejection, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
+        try {
+            marketData.requireQuote(stock);
+        } catch (BusinessException e) {
+            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
         }
         Instant sessionLookupAt = clock.instant();
         MarketSessionStatus session;

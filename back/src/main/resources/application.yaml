@@ -106,6 +106,7 @@ toss:
 #       sec_fee_usd = max(price_usd x quantity x a-tax-rate, a-tax-min-usd)
 #       a_tax      = sec_fee_usd x 환율
 trading:
+  stock-status-cache-ttl: ${STOCK_STATUS_CACHE_TTL:5m}
   initial-cash: ${INITIAL_CASH:50000000}
 
   # 요율·SEC 최소액은 프로젝트 고정 환경 설정입니다. 활성 주문 중 변경하지 않습니다.
