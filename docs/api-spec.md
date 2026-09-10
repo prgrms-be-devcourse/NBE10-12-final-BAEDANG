@@ -935,6 +935,54 @@ Closing the old account, opening the new account, and inserting its initial-depo
 
 ---
 
+## Reports
+
+### `GET /reports/me` 🔒
+Investment personality report (investment MBTI) for the current active account (round).
+
+```json
+{
+  "accountId": 10,
+  "roundNo": 1,
+  "initialCash": "50000000",
+  "cashBalance": "20000000",
+  "stockValue": "33000000",
+  "totalAsset": "53000000",
+  "totalPnl": "3000000",
+  "returnRate": "0.06",
+  "classified": true,
+  "typeCode": "CKSB",
+  "typeLabel": "집중·국내·개별주·안정형",
+  "shares": {
+    "concentration": "0.6364",
+    "domestic": "0.6364",
+    "individual": "0.6364",
+    "aggressive": "0"
+  },
+  "holdingCount": 2,
+  "holdingPeriodWeeks": 4,
+  "longHeldStocks": [
+    {
+      "symbol": "005930",
+      "name": "삼성전자",
+      "currency": "KRW",
+      "avgBuyPrice": "228000",
+      "lastPrice": "241500",
+      "returnRate": "0.0592",
+      "heldSince": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "asOf": "2026-09-09T00:00:00Z"
+}
+```
+**Return rate is total P&L over the round's starting capital** — `returnRate = (cashBalance + stockValue − initialCash) / initialCash`, so it already includes realized (in cash) and unrealized (in holdings). This differs from `/accounts/me`'s `unrealizedPnlRate` (unrealized / cost). Valuation reuses the single account-valuation pass (same quotes·FX·rounding as `/accounts/me`).
+
+**Investment MBTI — 4 binary axes → 16 types**, value-weighted by evaluation amount: concentration (집중 C / 분산 D, by top-1 weight), market (국내 K / 해외 G), instrument (개별주 S / ETF E), risk (공격 A / 안정 B). `shares` are the deciding 0~1 ratios. **With fewer than 2 holdings the portfolio is `"classified": false`** ("미분류/신규") and `typeCode`·`typeLabel` are null. Axis 4 (risk) is a Phase-1 proxy using leverage/inverse weight only; holding-volatility is deferred.
+
+**`longHeldStocks`** — stocks held at least `holdingPeriodWeeks` (default 4, `report.holding-period-weeks`). "Held since" is the current lot's first buy, reconstructed by replaying filled `trade_order`s (a full sell to zero closes the lot; a later re-buy opens a new one). `returnRate` here is the **per-holding return in the stock's own currency**, `(lastPrice − avgBuyPrice) / avgBuyPrice` (null if no quote). Sorted oldest-held first. Empty until holdings accumulate 4 weeks.
+
+---
+
 ## Screen ↔ API Mapping
 
 | Screen | APIs called |
