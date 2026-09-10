@@ -115,4 +115,17 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
     List<Stock> findByMarketCountryAndSymbolIn(MarketCountry marketCountry, Collection<String> symbols);
 
     Page<Stock> findAllByOrderByStockIdAsc(Pageable pageable);
+    /** KIS 재무 배치 예산 안에서 국내 개별주를 랭킹 순으로 조회합니다. */
+    @Query("""
+            select s from Stock s
+            where s.marketCountry = com.baedang.stock.entity.MarketCountry.KR
+              and s.isRanked = true
+              and s.rankNo is not null
+              and s.stockCategory not in (
+                com.baedang.stock.entity.StockCategory.ETF,
+                com.baedang.stock.entity.StockCategory.ETN)
+            order by s.rankNo asc, s.stockId asc
+            """)
+    List<Stock> findKisFinancialCollectionTargets(Pageable page);
+
 }

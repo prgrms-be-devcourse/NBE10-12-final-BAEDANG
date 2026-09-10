@@ -90,6 +90,10 @@ public enum ErrorCode {
     ACCOUNT_HAS_PENDING_ORDERS(HttpStatus.CONFLICT, "미체결 주문이 있어 포트폴리오를 초기화할 수 없어요"),
 
     // ── 외부 API ────────────────────────────────────────────────────────────
+    FINANCIALS_NOT_SUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 재무정보를 지원하지 않아요"),
+    KIS_API_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "재무정보 서비스를 사용할 수 없어요"),
+    KIS_API_ERROR(HttpStatus.BAD_GATEWAY, "재무정보를 가져올 수 없어요"),
+    KIS_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "재무정보 요청이 너무 많아요. 잠시 후 다시 시도해주세요"),
     TOSS_API_ERROR(HttpStatus.BAD_GATEWAY, "시세 서버와 통신할 수 없어요"),
     TOSS_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많아요. 잠시 후 다시 시도해주세요");
 

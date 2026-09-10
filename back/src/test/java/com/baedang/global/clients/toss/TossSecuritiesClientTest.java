@@ -1,5 +1,6 @@
 package com.baedang.global.clients.toss;
 
+import com.baedang.global.clients.FixedIntervalGate;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.github.tomakehurst.wiremock.WireMockServer;

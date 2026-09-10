@@ -1,6 +1,6 @@
 package com.baedang.global.clients.toss;
 
-
+import com.baedang.global.clients.FixedIntervalGate;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;

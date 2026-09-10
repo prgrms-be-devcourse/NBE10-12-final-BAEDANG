@@ -1,52 +1,30 @@
 # Mock Stock Trading Service
 
-A mock stock trading service for beginners, built on the Toss Securities Open API.
-A tool to help users **understand** trading, not just execute it.
+Beginner-focused mock stock trading service: help users understand trading, not just execute it.
+**Stack:** Java 21 · Spring Boot 3.5.16 · Next.js 16.3 · PostgreSQL 18/TimescaleDB · Testcontainers
+**Java package:** `com.baedang` — do not rename.
 
-- MVP: 2026-08-20 ~ 08-25 · AGILE (weekly sprints) · GitFlow (Main←Develop←Feature)
-
-## Technology and Build / Test
-
-- Java 21 LTS · Spring Boot 3.5.16 · Next.js 16.3 · PostgreSQL 18 + TimescaleDB + Testcontainers
-- External market data: Toss Securities Open API only for the MVP. Do not add the Korea Investment API.
-- Preserve the existing project name and repository/package names when applying design-document updates.
+## Commands
 
 ```bash
-cd back && ./gradlew test      # Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB + Testcontainers
-cd front && npm run dev        # Next.js 16.3
-cd infra/local && docker compose up -d        # local PostgreSQL/TimescaleDB + Redis
+cd back && bash gradlew test
+cd front && npm test
+cd front && npm run dev
+cd infra/local && docker compose up -d
 ```
 
-## Project Structure
+## Guardrails
 
-```text
-back/                                  # Spring Boot backend
-front/                                 # Next.js frontend (planned)
-infra/local/                           # Local database infrastructure (Docker Compose)
-infra/development/                     # Dev-server AWS infrastructure (Terraform)
-docs/                                  # Design documents
-```
+- Broker clients whitelist exact methods/paths; callers cannot supply arbitrary paths or TR IDs. **Never call real order, amend, cancel, or account APIs.**
+- Toss owns quotes, FX, calendars, candles, and trading inputs. KIS is limited to OAuth plus five approved KR industry/financial GETs; never use it for trading decisions or executions.
+- Keep broker credentials/tokens out of source, fixtures, errors, and logs.
+- Flyway owns the schema. **NEVER modify, delete, rename, reorder, or reuse the version of a migration already present on the base branch.** Correct earlier schema only with a new, higher-numbered migration.
 
-The existing Java package is `com.baedang`. Do not rename it.
+## Sources of Truth
 
-## Rules — violations break the project or risk real orders
-
-- External market-data clients (currently `TossSecuritiesClient`) **must whitelist allowed call paths. NEVER call order APIs (e.g.** `POST /orders`**) — real-money order risk.**
-- Amounts/quantities: use `NUMERIC`/`BigDecimal`. API responses return amounts as **strings**. Timestamps: `TIMESTAMPTZ` (store UTC, convert only for display).
-- `ledger_entry` is append-only — no UPDATE/DELETE; offset mistakes with an opposite-sign entry.
-- Trading/balance transactions start by locking the `account` row with `FOR UPDATE` (prevents double-deduction on concurrent orders).
-- Buying power = `cash_balance − locked_cash`; sellable qty = `quantity − locked_quantity`. Lock `net_amount` (incl. fee & tax), never `gross_amount`.
-- Fee/tax: KR sell tax is 0.2%; US sell charge is SEC Fee `0.0000206` with a `$0.01` minimum. Configure rates in `.env`; round US amounts to cents before KRW conversion and final whole-won `HALF_UP` rounding.
-- Rankings provide 100 items per selected market in five pages of 20; use the opaque cursor for each next page.
-- Top-100 minute candles are collected every minute in sequential 20-stock groups under the separate `MARKET_DATA_CHART` 20 TPS group. Other/off-hours charts use on-demand caching.
-- Portfolio reset is NOT a delete — close the account with `CLOSED` and open a new one with `round_no + 1`.
-- Never hardcode US regular-session hours — derive from the `/market-calendar` cache (DST shifts 1 hour).
-- Errors use a single `BusinessException` + error-code table; return both the code and a user-facing message.
-
-## Reference — open `docs/` when implementing
-
-- Endpoints & response shapes → `docs/api-spec.md`
-- Tables, columns, batch schedule → `docs/erd.md`
-- Screens & polling intervals → `docs/wireframe.md`
-- Shared configuration, utilities, domain services & frontend modules → `docs/shared-components.md` (check roles, injection/invocation methods, and caveats before duplicating shared functionality)
-- Branch/commit/issue/PR conventions → `docs/conventions.md` (MUST follow when creating branches, commits, issues, or PRs)
+- User-facing financial vocabulary → `tools/terms.md` (regenerate `front/src/data/wikiTerms.ts` with `python3 tools/wiki/generate_wiki_terms.py`)
+- API, settlement calculations, market jobs → `docs/api-spec.md`
+- Schema, accounting invariants, locks, account lifecycle → `docs/erd.md`
+- Shared clients, errors, services, frontend modules → `docs/shared-components.md`
+- UI and polling → `docs/wireframe.md`
+- Branches, commits, issues, PRs → `docs/conventions.md`

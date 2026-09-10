@@ -1,4 +1,4 @@
-package com.baedang.global.clients.toss;
+package com.baedang.global.clients;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
@@ -13,10 +13,10 @@ import java.util.function.LongSupplier;
  * <p>동일 그룹의 스레드는 공정한 lock 안에서 순서대로 대기한다.
  * permit 반환 시각을 기준으로 burst를 허용하지 않는다.
  */
-class FixedIntervalGate {
+public final class FixedIntervalGate {
 
     @FunctionalInterface
-    interface NanoSleeper {
+    public interface NanoSleeper {
         void sleep(long nanos) throws InterruptedException;
     }
 
@@ -27,11 +27,11 @@ class FixedIntervalGate {
 
     private long nextPermitNanos;
 
-    FixedIntervalGate(int tps) {
+    public FixedIntervalGate(int tps) {
         this(tps, System::nanoTime, TimeUnit.NANOSECONDS::sleep);
     }
 
-    FixedIntervalGate(
+    public FixedIntervalGate(
             int tps,
             LongSupplier nanoTimeSource,
             NanoSleeper sleeper
@@ -50,7 +50,7 @@ class FixedIntervalGate {
         this.nextPermitNanos = nanoTimeSource.getAsLong();
     }
 
-    void acquire() {
+    public void acquire() {
         try {
             lock.lockInterruptibly();
         } catch (InterruptedException exception) {
@@ -84,7 +84,7 @@ class FixedIntervalGate {
         }
     }
 
-    boolean tryAcquire() {
+    public boolean tryAcquire() {
         if (!lock.tryLock()) {
             return false;
         }

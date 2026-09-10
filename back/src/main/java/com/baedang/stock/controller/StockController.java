@@ -4,10 +4,12 @@ import com.baedang.stock.dto.CandleResponse;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.dto.StockSearchResponse;
 import com.baedang.stock.dto.StockDetailResponse;
+import com.baedang.stock.dto.StockFinancialResponse;
 import com.baedang.stock.service.CandleQueryService;
 import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.StockSearchService;
 import com.baedang.stock.service.StockDetailService;
+import com.baedang.stock.service.StockFinancialQueryService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,17 +25,20 @@ public class StockController {
     private final RankingService rankingService;
     private final CandleQueryService candleQueryService;
     private final StockDetailService stockDetailService;
+    private final StockFinancialQueryService stockFinancialQueryService;
 
     public StockController(
             StockSearchService stockSearchService,
             RankingService rankingService,
             CandleQueryService candleQueryService,
-            StockDetailService stockDetailService
+            StockDetailService stockDetailService,
+            StockFinancialQueryService stockFinancialQueryService
     ) {
         this.stockSearchService = stockSearchService;
         this.rankingService = rankingService;
         this.candleQueryService = candleQueryService;
         this.stockDetailService = stockDetailService;
+        this.stockFinancialQueryService = stockFinancialQueryService;
     }
 
     @GetMapping("/{symbol}")
@@ -42,6 +47,14 @@ public class StockController {
             @RequestParam String marketCountry
     ) {
         return ResponseEntity.ok(stockDetailService.getDetail(symbol, marketCountry));
+    }
+
+    @GetMapping("/{symbol}/financials")
+    public ResponseEntity<StockFinancialResponse> financials(
+            @PathVariable String symbol,
+            @RequestParam String marketCountry
+    ) {
+        return ResponseEntity.ok(stockFinancialQueryService.getFinancials(symbol, marketCountry));
     }
 
     @GetMapping("/search")
