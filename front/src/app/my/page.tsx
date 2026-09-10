@@ -145,22 +145,73 @@ export default function MyPage() {
     isLoggedIn && !!user && [...heldMarketCountries].some((market) => isMarketOpen(market as MarketCountry))
   );
 
-  // 주문 내역 탭을 보고 있고, 미체결(PENDING / PARTIALLY_FILLED) 상태의 활성 주문이
-  // 존재할 때만 5초 주기로 주문 목록을 다시 조회한다. 모든 주문이 체결·취소·만료로
-  // 종료되었거나 다른 탭을 보고 있을 때는 불필요한 폴링을 돌리지 않는다.
+  // 미체결(PENDING / PARTIALLY_FILLED) 상태의 활성 주문이 존재할 때 5초 주기로
+  // 주문 목록을 다시 조회한다. 백엔드 체결 작업으로 주문 상태나 체결 수량이 변하면
+  // 계좌 요약(예수금·자산), 보유 종목, 체결 내역(원장)도 함께 즉시 갱신한다.
+  // 모든 주문이 체결·취소·만료로 종료되면 hasActiveOrders가 false가 되어 자동으로 폴링을 중단한다.
   const hasActiveOrders = orders.some(
     (o) => o.status === "PENDING" || o.status === "PARTIALLY_FILLED"
   );
   const ordersPollInFlightRef = useRef(false);
+  const ordersRef = useRef(orders);
+  ordersRef.current = orders;
+  const selectedOrderRef = useRef(selectedOrder);
+  selectedOrderRef.current = selectedOrder;
+
   useVisiblePolling(
     () => {
       if (!user || ordersPollInFlightRef.current) return;
       ordersPollInFlightRef.current = true;
       getMyOrders()
         .then((res) => {
-          setOrders(res.items);
-          setOrdersCursor(res.nextCursor);
-          setOrdersHasNext(res.hasNext);
+          const prev = ordersRef.current;
+          const prevMap = new Map(prev.map((o) => [o.orderId, o]));
+
+          // 이전에 미체결이었던 주문 중 상태가 변했거나 체결 수량이 증가한 주문이 있는지 감지
+          const hasExecutionOrClosure = res.items.some((fresh) => {
+            const p = prevMap.get(fresh.orderId);
+            if (!p) return false;
+            const wasActive = p.status === "PENDING" || p.status === "PARTIALLY_FILLED";
+            return wasActive && (fresh.status !== p.status || fresh.filledQuantity !== p.filledQuantity);
+          });
+
+          // 체결 또는 취소/만료로 자산·보유주식·원장이 변했으면 즉시 동기화
+          if (hasExecutionOrClosure) {
+            Promise.all([getAccountSummary(), getHoldings(), getLedger()])
+              .then(([acc, holdingsRes, ledgerRes]) => {
+                setAccount(acc);
+                setHoldings(holdingsRes.items);
+                setLedger(ledgerRes.items);
+              })
+              .catch(() => {});
+          }
+
+          // 상세 모달이 열려 있는 주문이 갱신되었다면 모달 내용도 즉시 반영
+          if (selectedOrderRef.current) {
+            const currentSelectedId = selectedOrderRef.current.orderId;
+            const updatedSelected = res.items.find((o) => o.orderId === currentSelectedId);
+            if (
+              updatedSelected &&
+              (updatedSelected.status !== selectedOrderRef.current.status ||
+                updatedSelected.filledQuantity !== selectedOrderRef.current.filledQuantity)
+            ) {
+              setSelectedOrder(updatedSelected);
+            }
+          }
+
+          // 페이징 보존: 더보기를 눌러 1페이지(20건)보다 많은 주문이 로드된 상태라면
+          // 전체 덮어쓰기 대신 orderId 기준으로 머지하고 커서를 보존한다.
+          setOrders((currentOrders) => {
+            if (currentOrders.length <= res.items.length) {
+              setOrdersCursor(res.nextCursor);
+              setOrdersHasNext(res.hasNext);
+              return res.items;
+            }
+            const existingIds = new Set(currentOrders.map((o) => o.orderId));
+            const newItems = res.items.filter((o) => !existingIds.has(o.orderId));
+            const updateMap = new Map(res.items.map((item) => [item.orderId, item]));
+            return [...newItems, ...currentOrders.map((order) => updateMap.get(order.orderId) ?? order)];
+          });
         })
         .catch(() => {})
         .finally(() => {
@@ -168,7 +219,7 @@ export default function MyPage() {
         });
     },
     VALUATION_POLL_INTERVAL_MS,
-    isLoggedIn && !!user && tab === "orders" && hasActiveOrders
+    isLoggedIn && !!user && hasActiveOrders
   );
 
   function handleTabChange(nextTab: "holdings" | "ledger" | "orders") {
@@ -179,6 +230,19 @@ export default function MyPage() {
           setOrders(res.items);
           setOrdersCursor(res.nextCursor);
           setOrdersHasNext(res.hasNext);
+        })
+        .catch(() => {});
+    } else if (nextTab === "holdings") {
+      Promise.all([getAccountSummary(), getHoldings()])
+        .then(([acc, holdingsRes]) => {
+          setAccount(acc);
+          setHoldings(holdingsRes.items);
+        })
+        .catch(() => {});
+    } else if (nextTab === "ledger") {
+      getLedger()
+        .then((ledgerRes) => {
+          setLedger(ledgerRes.items);
         })
         .catch(() => {});
     }
@@ -211,7 +275,11 @@ export default function MyPage() {
     setOrdersLoadingMore(true);
     getMyOrders({ cursor: ordersCursor })
       .then((res) => {
-        setOrders((prev) => [...prev, ...res.items]);
+        setOrders((prev) => {
+          const existingIds = new Set(prev.map((o) => o.orderId));
+          const additions = res.items.filter((o) => !existingIds.has(o.orderId));
+          return [...prev, ...additions];
+        });
         setOrdersCursor(res.nextCursor);
         setOrdersHasNext(res.hasNext);
       })
@@ -220,11 +288,17 @@ export default function MyPage() {
   }
 
   // 주문 취소가 성공하면(모달 안에서) 목록의 해당 행과 모달 둘 다 최신 상태로
-  // 바꾸고, 잠겨 있던 예약금이 풀렸을 수 있으니 계좌 요약도 다시 조회한다.
+  // 바꾸고, 잠겨 있던 예약금/주식 수량이 풀렸으므로 계좌 요약과 보유주식도 다시 조회한다.
   function handleOrderUpdated(updated: OrderDetailResponse) {
     setOrders((prev) => prev.map((o) => (o.orderId === updated.orderId ? updated : o)));
     setSelectedOrder(updated);
-    getAccountSummary().then(setAccount).catch(() => {});
+    Promise.all([getAccountSummary(), getHoldings(), getLedger()])
+      .then(([acc, holdingsRes, ledgerRes]) => {
+        setAccount(acc);
+        setHoldings(holdingsRes.items);
+        setLedger(ledgerRes.items);
+      })
+      .catch(() => {});
   }
 
   async function handleChangeNickname(e: React.FormEvent) {
