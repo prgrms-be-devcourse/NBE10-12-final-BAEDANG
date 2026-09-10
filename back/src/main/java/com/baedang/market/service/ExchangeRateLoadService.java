@@ -39,12 +39,12 @@ public class ExchangeRateLoadService {
 
         OffsetDateTime collectedAt = clock.instant().atOffset(ZoneOffset.UTC);
 
-        boolean inserted = exchangeRatePersistenceService.saveIfValid(quote, collectedAt);
+        boolean saved = exchangeRatePersistenceService.saveIfValid(quote, collectedAt);
 
-        log.info("환율 동기화 완료: base={}, quote={}, rateAt={}, inserted={}",
-                quote.baseCurrency(), quote.quoteCurrency(), quote.validFrom(), inserted);
+        log.info("환율 동기화 완료: base={}, quote={}, validFrom={}, saved={}",
+                quote.baseCurrency(), quote.quoteCurrency(), quote.validFrom(), saved);
 
-        return inserted;
+        return saved;
     }
 
 }

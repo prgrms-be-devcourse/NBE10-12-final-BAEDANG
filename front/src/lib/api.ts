@@ -753,7 +753,7 @@ export type ExchangeRateLatest = {
   changeAmount: string;
   /** 전일 자정(00:00 KST) 대비 등락률 (0.0016 = +0.16%). */
   changeRate: string;
-  rateAt: string;
+  validFrom: string;
 };
 
 /**
@@ -773,7 +773,7 @@ export function getExchangeRateLatest(base = "USD", quote = "KRW"): Promise<Exch
 export type ExchangeRatePeriod = "1d" | "1w" | "1m" | "3m" | "1y";
 
 export type ExchangeRateHistoryItem = {
-  rateAt: string;
+  validFrom: string;
   rate: string;
 };
 

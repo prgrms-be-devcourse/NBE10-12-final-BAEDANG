@@ -3,9 +3,9 @@
  * 프론트에서 환율을 곱해 원화로 환산해 보여주기로 결정했습니다 (건우님 회의 기록,
  * 2026-08-26 — 주식 랭킹·마이페이지의 미국 종목 표시가 대상).
  *
- * <p>환율은 1시간에 한 번 갱신되는 정책이라({@code docs/erd.md} 참고),
+ * <p>환율은 1분에 한 번 갱신되는 정책이라({@code docs/erd.md} 참고),
  * {@link import("@/components/ExchangeRateProvider").ExchangeRateProvider} 가
- * 이 함수를 최초 1회 + 매 1시간마다 다시 호출해서 값을 갱신합니다.
+ * 이 함수를 최초 1회 + 매 1분마다 다시 호출해서 값을 갱신합니다.
  *
  * <p>`GET /api/exchange-rates/latest`(back/src/main/java/com/baedang/market)를 호출합니다.
  * 백엔드가 안 떠 있거나 아직 환율 데이터가 없을 때는(EXCHANGE_RATE_NOT_FOUND 등)
@@ -57,7 +57,7 @@ export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
     if ([rate, changeAmount, changeRate].some((n) => Number.isNaN(n))) {
       throw new Error(`환율 응답 형식이 올바르지 않아요: ${JSON.stringify(latest)}`);
     }
-    return { rate, changeAmount, changeRate, updatedAt: new Date(latest.rateAt) };
+    return { rate, changeAmount, changeRate, updatedAt: new Date(latest.validFrom) };
   } catch (err) {
     // 아직 데이터가 없는 경우(EXCHANGE_RATE_NOT_FOUND — 서비스 초기 등)는 예상 가능한
     // 실패라 조용히 기본값으로 대체하지만, 그 외 예상 못한 에러는 콘솔에 남겨서

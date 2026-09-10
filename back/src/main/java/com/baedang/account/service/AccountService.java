@@ -179,7 +179,7 @@ public class AccountService {
     /** 응답에 노출하고 외화 평가에도 쓰는 최신 USD/KRW 환율. 표시용 mid_rate 우선. */
     private BigDecimal latestUsdKrwRate() {
         return exchangeRateRepository
-                .findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc(USD, KRW)
+                .findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc(USD, KRW)
                 .map(this::displayRate)
                 .orElse(null);
     }

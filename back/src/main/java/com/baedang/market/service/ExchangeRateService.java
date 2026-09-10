@@ -52,7 +52,7 @@ public class ExchangeRateService {
      * 고정되는 기준점 방식). 서비스 초기 등 그 시점 이전 데이터가 아직 없으면
      * 등락을 0으로 보고 최신 환율 자체는 그대로 내려준다 — 기준값이 없다고
      * 요청 전체를 실패시키지 않는다. 이 경우는 정상 운영 중이라면 사실상
-     * 일어나면 안 되는 상황(매시 정각 적재)이라 WARN 로그를 남긴다.
+     * 일어나면 안 되는 상황(매분 적재)이라 WARN 로그를 남긴다.
      *
      * <p>base/quote는 대소문자를 가리지 않는다 — 저장은 항상 대문자(USD/KRW)라
      * 소문자로 들어와도 매치되도록 여기서 정규화한다.
@@ -62,13 +62,13 @@ public class ExchangeRateService {
         String quote = DomainNormalizer.currency(quoteCurrency);
 
         ExchangeRate latest = exchangeRateRepository
-                .findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc(base, quote)
+                .findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc(base, quote)
                 .orElseThrow(() -> new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
         BigDecimal latestRate = displayRate(latest);
 
         OffsetDateTime todayMidnightKst = todayMidnightKst();
         BigDecimal referenceRate = exchangeRateRepository
-                .findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(base, quote, todayMidnightKst)
+                .findTopByBaseCurrencyAndQuoteCurrencyAndValidFromLessThanEqualOrderByValidFromDesc(base, quote, todayMidnightKst)
                 .map(this::displayRate)
                 .orElseGet(() -> {
                     log.warn("[{}/{}] 전일 자정({}) 이전 환율이 없어 등락을 0으로 처리합니다.", base, quote, todayMidnightKst);
@@ -86,19 +86,19 @@ public class ExchangeRateService {
                 rate(latestRate),
                 plain(changeAmount),
                 plain(changeRate),
-                latest.getRateAt());
+                latest.getValidFrom());
     }
 
     public ExchangeRateHistoryResponse getHistory(String period) {
         OffsetDateTime from = periodStart(period);
 
         List<ExchangeRateHistoryResponse.Item> items =
-                exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+                exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
                         DEFAULT_BASE_CURRENCY, DEFAULT_QUOTE_CURRENCY, from
                 )
                         .stream()
                         .map(exchangeRate -> new ExchangeRateHistoryResponse.Item(
-                                exchangeRate.getRateAt(), rate(displayRate(exchangeRate)))
+                                exchangeRate.getValidFrom(), rate(displayRate(exchangeRate)))
                         ).toList();
         return new ExchangeRateHistoryResponse(items);
     }

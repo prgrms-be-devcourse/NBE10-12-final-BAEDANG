@@ -55,7 +55,7 @@ class ExchangeRateServiceTest {
         return new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), new BigDecimal("1400.000000"),
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"), COLLECTED_AT);
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"),OffsetDateTime.parse("2026-08-26T15:00:00+09:00").plusHours(1), COLLECTED_AT);
     }
 
     private static Stream<Arguments> historyPeriods() {
@@ -76,11 +76,11 @@ class ExchangeRateServiceTest {
         ExchangeRate reference = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1399.500000"), new BigDecimal("1398.000000"),
-                TODAY_MIDNIGHT_KST, COLLECTED_AT);
+                TODAY_MIDNIGHT_KST,TODAY_MIDNIGHT_KST.plusHours(1), COLLECTED_AT);
 
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latest));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndValidFromLessThanEqualOrderByValidFromDesc(
                 "USD", "KRW", TODAY_MIDNIGHT_KST))
                 .thenReturn(Optional.of(reference));
 
@@ -101,7 +101,7 @@ class ExchangeRateServiceTest {
     @Test
     @DisplayName("최신 환율이 없으면 EXCHANGE_RATE_NOT_FOUND를 던진다")
     void t2_최신_환율_없음() {
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.getLatest("USD", "KRW"))
@@ -114,9 +114,9 @@ class ExchangeRateServiceTest {
     void t3_기준값_없음() {
         ExchangeRate latest = sampleLatest();
 
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latest));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndValidFromLessThanEqualOrderByValidFromDesc(
                 "USD", "KRW", TODAY_MIDNIGHT_KST))
                 .thenReturn(Optional.empty());
 
@@ -134,11 +134,11 @@ class ExchangeRateServiceTest {
         ExchangeRate latestWithoutMidRate = new ExchangeRate(
                 "USD", "KRW",
                 new BigDecimal("1401.500000"), null,
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"), COLLECTED_AT);
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"),OffsetDateTime.parse("2026-08-26T15:00:00+09:00").plusHours(1), COLLECTED_AT);
 
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latestWithoutMidRate));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndValidFromLessThanEqualOrderByValidFromDesc(
                 "USD", "KRW", TODAY_MIDNIGHT_KST))
                 .thenReturn(Optional.empty());
 
@@ -153,9 +153,9 @@ class ExchangeRateServiceTest {
     void t5_대소문자_정규화() {
         ExchangeRate latest = sampleLatest();
 
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.of(latest));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndRateAtLessThanEqualOrderByRateAtDesc(
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyAndValidFromLessThanEqualOrderByValidFromDesc(
                 "USD", "KRW", TODAY_MIDNIGHT_KST))
                 .thenReturn(Optional.empty());
 
@@ -176,7 +176,7 @@ class ExchangeRateServiceTest {
                 "KRW",
                 new BigDecimal("1400.000000"),
                 new BigDecimal("1398.000000"),
-                OffsetDateTime.parse("2026-08-25T07:00:00Z"),
+                OffsetDateTime.parse("2026-08-25T07:00:00Z"),OffsetDateTime.parse("2026-08-25T07:00:00Z").plusHours(1),
                 COLLECTED_AT
         );
 
@@ -185,11 +185,11 @@ class ExchangeRateServiceTest {
                 "KRW",
                 new BigDecimal("1402.000000"),
                 new BigDecimal("1400.000000"),
-                OffsetDateTime.parse("2026-08-26T07:00:00Z"),
+                OffsetDateTime.parse("2026-08-26T07:00:00Z"),OffsetDateTime.parse("2026-08-26T07:00:00Z").plusHours(1),
                 COLLECTED_AT
         );
 
-        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
                 "USD", "KRW", from
         )).thenReturn(List.of(first, second));
 
@@ -216,11 +216,11 @@ class ExchangeRateServiceTest {
                 "KRW",
                 new BigDecimal("1401.500000"),
                 null,
-                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"),
+                OffsetDateTime.parse("2026-08-26T15:00:00+09:00"),OffsetDateTime.parse("2026-08-26T15:00:00+09:00").plusHours(1),
                 COLLECTED_AT
         );
 
-        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
                 "USD", "KRW", OffsetDateTime.parse("2026-08-25T06:00:00Z")
         )).thenReturn(List.of(exchangeRate));
 
@@ -233,7 +233,7 @@ class ExchangeRateServiceTest {
     @MethodSource("historyPeriods")
     @DisplayName("지원하는 period를 조회 시작 시각으로 변환한다")
     void t9_지원하는_period_조회(String period, OffsetDateTime expectedFrom) {
-        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndRateAtGreaterThanEqualOrderByRateAtAsc(
+        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
                 "USD", "KRW", expectedFrom
         )).thenReturn(List.of());
 

@@ -117,7 +117,7 @@ describe('getExchangeRateLatest — 성공', () => {
       rate: '1400.000000',
       changeAmount: '2.000000',
       changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
+      validFrom: '2026-08-26T15:00:00+09:00',
     };
     const fetchSpy = mockFetch(200, rateData);
     const rate = await getExchangeRateLatest();
@@ -131,7 +131,7 @@ describe('getExchangeRateLatest — 성공', () => {
   it('base/quote 파라미터를 그대로 쿼리스트링에 반영', async () => {
     const fetchSpy = mockFetch(200, {
       baseCurrency: 'EUR', quoteCurrency: 'KRW', rate: '1500', changeAmount: '0', changeRate: '0',
-      rateAt: '2026-08-26T15:00:00+09:00',
+      validFrom: '2026-08-26T15:00:00+09:00',
     });
     await getExchangeRateLatest('EUR', 'KRW');
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -143,7 +143,7 @@ describe('getExchangeRateLatest — 성공', () => {
   it('소문자로 넘겨도 대문자로 정규화해서 쿼리스트링을 만든다 (캐시 키 분산 방지)', async () => {
     const fetchSpy = mockFetch(200, {
       baseCurrency: 'USD', quoteCurrency: 'KRW', rate: '1400', changeAmount: '0', changeRate: '0',
-      rateAt: '2026-08-26T15:00:00+09:00',
+      validFrom: '2026-08-26T15:00:00+09:00',
     });
     await getExchangeRateLatest('usd', 'krw');
     expect(fetchSpy).toHaveBeenCalledWith(
@@ -157,8 +157,8 @@ describe('getExchangeRateHistory — 성공', () => {
   it('200 → 이력 목록 반환, period를 쿼리스트링에 반영', async () => {
     const historyData = {
       items: [
-        { rateAt: '2026-08-25T00:00:00+09:00', rate: '1395.20' },
-        { rateAt: '2026-08-26T00:00:00+09:00', rate: '1398.50' },
+        { validFrom: '2026-08-25T00:00:00+09:00', rate: '1395.20' },
+        { validFrom: '2026-08-26T00:00:00+09:00', rate: '1398.50' },
       ],
     };
     const fetchSpy = mockFetch(200, historyData);
@@ -563,4 +563,3 @@ describe('auth: true 요청 — accessToken 만료 시 조용히 재발급 후 �
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
-

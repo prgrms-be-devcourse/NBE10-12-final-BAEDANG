@@ -27,19 +27,19 @@ export function isTimeVisible(period: ExchangeRatePeriod): boolean {
 }
 
 /**
- * `{rateAt, rate}[]` → `lightweight-charts` LineSeries가 요구하는 숫자 포맷으로 변환하면서,
+ * `{validFrom, rate}[]` → `lightweight-charts` LineSeries가 요구하는 숫자 포맷으로 변환하면서,
  * 기간에 맞는 버킷 단위로 다운샘플링한다.
  *
  * <p>같은 버킷에 여러 원본 값이 있으면 그 구간에서 가장 나중(최신) 값을 대표값으로 쓴다 —
- * 캔들의 "종가"와 같은 의미다. 백엔드가 이미 `rateAt` 오름차순으로 내려주지만
- * (`OrderByRateAtAsc`), 순서에 기대지 않고 각 버킷 안에서 원본 시각을 직접 비교해 결정한다.
+ * 캔들의 "종가"와 같은 의미다. 백엔드가 이미 `validFrom` 오름차순으로 내려주지만
+ * (`OrderByValidFromAsc`), 순서에 기대지 않고 각 버킷 안에서 원본 시각을 직접 비교해 결정한다.
  */
 export function toLinePoints(items: ExchangeRateHistoryItem[], period: ExchangeRatePeriod): LinePoint[] {
   const bucketSeconds = BUCKET_SECONDS[period];
   const byBucket = new Map<UTCTimestamp, { rawTime: number; value: number }>();
 
   for (const item of items) {
-    const rawTime = Math.floor(new Date(item.rateAt).getTime() / 1000);
+    const rawTime = Math.floor(new Date(item.validFrom).getTime() / 1000);
     const value = Number(item.rate);
     if (!Number.isFinite(rawTime) || !Number.isFinite(value)) continue;
 

@@ -25,7 +25,7 @@ describe('fetchExchangeRate — 성공', () => {
       rate: '1400.000000',
       changeAmount: '2.000000',
       changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
+      validFrom: '2026-08-26T15:00:00+09:00',
     });
 
     const info = await fetchExchangeRate();
@@ -67,7 +67,7 @@ describe('fetchExchangeRate — 예상 못한 실패', () => {
       rate: 'not-a-number',
       changeAmount: '2.000000',
       changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
+      validFrom: '2026-08-26T15:00:00+09:00',
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -85,7 +85,7 @@ describe('fetchExchangeRate — 예상 못한 실패', () => {
       rate: '',
       changeAmount: '2.000000',
       changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
+      validFrom: '2026-08-26T15:00:00+09:00',
     });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { DEFAULT_USD_KRW_RATE, fetchExchangeRate } from "@/lib/exchange-rate";
 
-const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // 1시간마다 갱신 (docs/erd.md 환율 수집 주기와 동일)
+const REFRESH_INTERVAL_MS = 60 * 1000; // DB 환율 수집과 동일하게 1분마다 화면 값을 갱신합니다.
 
 type ExchangeRateState = {
   rate: number;

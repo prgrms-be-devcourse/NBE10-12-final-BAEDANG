@@ -81,7 +81,7 @@ class AccountServiceTest {
         givenAccount(1L, "50000000", "50000000", 1);
         when(holdingRepository.findByAccountIdAndQuantityGreaterThan(1L, BigDecimal.ZERO))
                 .thenReturn(List.of());
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.empty());
 
         AccountSummaryResponse response = service.getSummary(1L);
@@ -110,7 +110,7 @@ class AccountServiceTest {
                 .thenReturn(List.of(krHolding, usHolding));
         when(quoteSnapshotRepository.findByStockIdIn(any()))
                 .thenReturn(List.of(quote(101L, "241500", "KRW"), quote(202L, "90.00", "USD")));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.of(rate("1401", "1400")));
 
         AccountSummaryResponse response = service.getSummary(1L);
@@ -137,7 +137,7 @@ class AccountServiceTest {
                 .thenReturn(List.of(usHolding));
         when(quoteSnapshotRepository.findByStockIdIn(any()))
                 .thenReturn(List.of(quote(202L, "90.00", "USD")));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.empty());
 
         AccountSummaryResponse response = service.getSummary(1L);
@@ -169,7 +169,7 @@ class AccountServiceTest {
                 .thenReturn(List.of(
                         stock(101L, "005930", "삼성전자", MarketCountry.KR, "KRW"),
                         stock(202L, "AAPL", "애플", MarketCountry.US, "USD")));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.of(rate("1401", "1400")));
 
         HoldingsResponse response = service.getHoldings(1L);
@@ -215,7 +215,7 @@ class AccountServiceTest {
                         OffsetDateTime.ofInstant(NOW.minusSeconds(3600), ZoneOffset.UTC))));
         when(stockRepository.findByStockIdIn(any()))
                 .thenReturn(List.of(stock(101L, "005930", "삼성전자", MarketCountry.KR, "KRW")));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.empty());
 
         HoldingsResponse response = service.getHoldings(1L);
@@ -244,7 +244,7 @@ class AccountServiceTest {
                 .thenReturn(List.of(krHolding));
         when(quoteSnapshotRepository.findByStockIdIn(any()))
                 .thenReturn(List.of(quote(101L, "241500", "KRW")));
-        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("USD", "KRW"))
+        when(exchangeRateRepository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(Optional.empty());
         // 데이터 정합성 오류 재현: 보유는 있는데 종목 마스터가 조회되지 않는다.
         when(stockRepository.findByStockIdIn(any()))
@@ -292,13 +292,13 @@ class AccountServiceTest {
     }
 
     private ExchangeRate rate(String rate, String midRate) {
-        OffsetDateTime rateAt = fresh();
+        OffsetDateTime validFrom = fresh();
         return new ExchangeRate(
                 "USD",
                 "KRW",
                 new BigDecimal(rate),
                 new BigDecimal(midRate),
-                rateAt,
-                rateAt);
+                validFrom,validFrom.plusHours(1),
+                validFrom);
     }
 }

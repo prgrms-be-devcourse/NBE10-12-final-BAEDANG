@@ -8,8 +8,8 @@ function localTime(year: number, month: number, day: number, hour = 0, minute = 
   return (new Date(year, month - 1, day, hour, minute, 0).getTime() / 1000) as UTCTimestamp;
 }
 
-function item(rateAt: string, rate: string): ExchangeRateHistoryItem {
-  return { rateAt, rate };
+function item(validFrom: string, rate: string): ExchangeRateHistoryItem {
+  return { validFrom, rate };
 }
 
 describe("isTimeVisible", () => {

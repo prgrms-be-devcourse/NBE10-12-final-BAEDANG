@@ -333,11 +333,11 @@ FX banner on the rankings page
   "quoteCurrency": "KRW",
   "rate": "1398.5",
   "changeRate": "0.0016",
-  "rateAt": "2026-08-11T15:00:00+09:00"
+  "validFrom": "2026-08-11T15:00:00+09:00"
 }
 ```
-Served from the latest `exchange_rate` row. **Stored hourly, so hourly frontend polling is enough** — more frequent calls return the same value. FX moves only 0.3–0.5%/day.
-**The execution rate is a different path.** Orders use a separate **1-min TTL memory cache** — never fill against a rate up to an hour old.
+Served from the latest `exchange_rate` row, collected every minute; the frontend also polls every minute. `validFrom` is the source validity start, not our receipt time.
+**Execution shares this DB source**, but uses `rate` instead of display `midRate`. It validates source validity and future receipt time before use and under financial locks, with no memory TTL or request-path external fallback.
 
 ### `GET /exchange-rates/history`
 FX trend chart
@@ -349,12 +349,12 @@ FX trend chart
 ```json
 {
   "items": [
-    { "rateAt": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
-    { "rateAt": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
+    { "validFrom": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
+    { "validFrom": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
   ]
 }
 ```
-Aggregated from the `exchange_rate` table (stored every hour on the hour).
+Read from the `exchange_rate` table (collected every minute). The response uses `validFrom`; chart display groups observations into its existing time buckets.
 
 ---
 
@@ -967,7 +967,7 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 | US regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, calendar-based session times. |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group      |
 | US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks       |
-| every hour on the hour | hourly | FX storage — 24 calls/day                                                                                   |
+| every minute | 1 minute | FX storage — 1,440 scheduled calls/day, shared MARKET_INFO limit, including closed days. |
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
 \* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.
@@ -981,7 +981,7 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 | stock detail | 5s | `/stocks/{symbol}` |
 | my page | 10s | `/accounts/me` + `/holdings` |
 | chart | 60s | `/stocks/{symbol}/candles` |
-| FX banner | 1h | `/exchange-rates/latest` |
+| FX banner | 1m | `/exchange-rates/latest` |
 
 **Three must-haves.**
 ① **Pause polling in background tabs** — checking `document.visibilityState` alone cuts real traffic nearly in half.
