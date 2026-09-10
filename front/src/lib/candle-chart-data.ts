@@ -127,3 +127,26 @@ export function formatKstTickMark(time: Time, tickMarkType: TickMarkType): strin
       return getTickFormat({ hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
   }
 }
+
+/**
+ * 마우스를 올렸을 때 뜨는 크로스헤어 시간 라벨 전용 KST 포맷터.
+ * `tickMarkFormatter`와는 `lightweight-charts`가 부르는 옵션 자체가 다르다
+ * (`localization.timeFormatter`) — 축 눈금처럼 확대 단계별 `tickMarkType`을 안 주고,
+ * 가리키는 그 시점 값 하나만 넘어온다. 그래서 눈금과 똑같은 KST 변환이 필요하지만,
+ * "지금 보고 있는 게 분봉 계열인지"는 호출부(`CandlestickChart`)가 데이터 간격을 보고
+ * 판단해 `includeTimeOfDay`로 넘겨준다 — 일봉·1주봉처럼 하루 안의 시:분이 의미 없는
+ * 데이터에 시:분을 붙이면 오히려 혼란만 준다.
+ */
+export function formatKstCrosshairLabel(time: Time, includeTimeOfDay: boolean): string {
+  const date = new Date((time as UTCTimestamp) * 1000);
+  return includeTimeOfDay
+    ? getTickFormat({ month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date)
+    : getTickFormat({ year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+/** 연속된 두 캔들의 시간 간격이 하루보다 좁으면 분봉 계열(1분·5분·10분봉)로 본다 —
+ * 일봉은 최소 하루, 1주봉은 7일 간격이라 이 기준으로 항상 구분된다. */
+export function isIntradayCandles(items: { time: UTCTimestamp }[]): boolean {
+  if (items.length < 2) return false;
+  return items[1].time - items[0].time < 24 * 60 * 60;
+}
