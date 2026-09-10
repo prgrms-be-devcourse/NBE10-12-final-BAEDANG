@@ -1,7 +1,12 @@
 package com.baedang.market.event.config;
 
 import com.baedang.market.event.client.kind.KindHttpClient;
+import com.baedang.market.event.client.kind.KindMarketEventAdapter;
+import com.baedang.market.event.client.kind.KindMarketEventDetailParser;
+import com.baedang.market.event.client.kind.KindRssParser;
 import com.baedang.market.event.client.kind.KindUriPolicy;
+import com.baedang.market.event.client.kind.KindViewerParser;
+import com.baedang.market.event.port.MarketEventSourcePort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -9,6 +14,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
+import java.time.Clock;
 import java.net.http.HttpClient;
 
 @Configuration(proxyBeanMethods = false)
@@ -34,5 +40,41 @@ public class KindClientConfiguration {
                 .requestFactory(factory)
                 .build();
         return new KindHttpClient(restClient);
+    }
+
+    @Bean
+    public KindRssParser kindRssParser(KindUriPolicy uriPolicy) {
+        return new KindRssParser(uriPolicy);
+    }
+
+    @Bean
+    public KindViewerParser kindViewerParser(KindUriPolicy uriPolicy) {
+        return new KindViewerParser(uriPolicy);
+    }
+
+    @Bean
+    public KindMarketEventDetailParser kindMarketEventDetailParser(KindUriPolicy uriPolicy) {
+        return new KindMarketEventDetailParser(uriPolicy);
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "krx.market-events", name = "enabled", havingValue = "true")
+    public MarketEventSourcePort kindMarketEventAdapter(
+            KindHttpClient httpClient,
+            KindUriPolicy uriPolicy,
+            KindRssParser rssParser,
+            KindViewerParser viewerParser,
+            KindMarketEventDetailParser detailParser,
+            org.springframework.beans.factory.ObjectProvider<Clock> clockProvider
+    ) {
+        Clock clock = clockProvider.getIfAvailable(Clock::systemUTC);
+        return new KindMarketEventAdapter(
+                httpClient,
+                uriPolicy,
+                rssParser,
+                viewerParser,
+                detailParser,
+                clock
+        );
     }
 }

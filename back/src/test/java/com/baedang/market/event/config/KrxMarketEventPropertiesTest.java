@@ -1,8 +1,8 @@
 package com.baedang.market.event.config;
 
+import com.baedang.global.config.TimeConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-
 import java.net.URI;
 import java.time.Duration;
 
@@ -11,8 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class KrxMarketEventPropertiesTest {
 
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-            .withUserConfiguration(KindClientConfiguration.class);
-
+            .withUserConfiguration(TimeConfig.class, KindClientConfiguration.class);
     @Test
     void defaults_match_the_approved_contract() {
         contextRunner.run(context -> {
