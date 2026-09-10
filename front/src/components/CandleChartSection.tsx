@@ -3,10 +3,10 @@
 import { PillTabs } from "./PillTabs";
 import { CandlestickChart } from "./CandlestickChart";
 import { CHART_TIME_ZONE } from "@/lib/candle-chart-data";
+import { CANDLE_UNIT_DEFAULT_PERIOD, CANDLE_UNIT_PERIODS, type CandlePeriod, type CandleUnit } from "@/lib/candle-query";
 import type { Candle } from "@/lib/api";
 
-export type CandleUnit = "일봉" | "1분봉";
-export type CandlePeriod = "1개월" | "6개월" | "1년";
+export type { CandlePeriod, CandleUnit };
 
 /**
  * `lastCandleAt`은 백엔드가 ISO 8601 문자열로 내려준다고 가정하지만, 형식이
@@ -66,29 +66,42 @@ export function CandleChartSection({
     border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
   };
   const lastCandleDateLabel = lastCandleAt ? formatLastCandleDate(lastCandleAt) : null;
+  const availablePeriods = CANDLE_UNIT_PERIODS[candleUnit];
+  // 봉 단위마다 고를 수 있는 기간이 하나뿐이면(1분봉→1일, 10분봉→1주일) 토글 자체가
+  // 무의미하므로 숨긴다 — 기존 1분봉 처리와 같은 규칙을 5개 단위 전체로 일반화한 것.
+  const hasPeriodChoice = availablePeriods.length > 1;
+  // 일봉·1주봉은 "지난 기록을 훑어보는" 차트라 마지막 봉 날짜(종가 기준)를 같이
+  // 보여주는 게 유용하지만, 분봉 계열은 "최근 N봉" 표기가 더 직관적이다.
+  const showsLastCandleDate = candleUnit === "일봉" || candleUnit === "1주봉";
 
   return (
     <>
       <div className="my-4.5 flex flex-wrap items-center gap-2.5" data-tour={tourIds?.toggle}>
         <PillTabs
           options={[
-            { value: "일봉", label: "일봉" },
             { value: "1분봉", label: "1분봉" },
+            { value: "5분봉", label: "5분봉" },
+            { value: "10분봉", label: "10분봉" },
+            { value: "일봉", label: "일봉" },
+            { value: "1주봉", label: "1주봉" },
           ]}
           value={candleUnit}
-          onChange={(v) => onCandleUnitChange(v as CandleUnit)}
+          onChange={(v) => {
+            const nextUnit = v as CandleUnit;
+            onCandleUnitChange(nextUnit);
+            // 봉 단위를 바꾸면 이전 기간이 새 단위에서 유효하지 않을 수 있다(예: 일봉의
+            // "1년"은 5분봉엔 없다) — 백엔드가 허용하는 조합(CandleQueryPolicy)에 맞춰
+            // 그 단위의 기본 기간으로 되돌린다.
+            onPeriodChange(CANDLE_UNIT_DEFAULT_PERIOD[nextUnit]);
+          }}
           trackClassName="w-fit rounded-full p-[3px]"
           trackStyle={trackStyle}
           buttonClassName="rounded-full px-4 py-1.5 text-[13.5px] font-bold"
           inactiveTextStyle={{ color: "var(--mut)" }}
         />
-        {candleUnit === "일봉" && (
+        {hasPeriodChoice && (
           <PillTabs
-            options={[
-              { value: "1개월", label: "1개월" },
-              { value: "6개월", label: "6개월" },
-              { value: "1년", label: "1년" },
-            ]}
+            options={availablePeriods.map((p) => ({ value: p, label: p }))}
             value={period}
             onChange={(v) => onPeriodChange(v as CandlePeriod)}
             trackClassName="w-fit rounded-full p-[3px]"
@@ -98,9 +111,9 @@ export function CandleChartSection({
           />
         )}
         <span className="ml-auto text-[12.5px]" style={{ color: "var(--mut2)" }}>
-          {candleUnit === "일봉"
-            ? `일봉 · ${period}${lastCandleDateLabel ? ` · ${lastCandleDateLabel} 종가까지` : ""}`
-            : `1분봉 · 최근 ${candleItems.length}봉`}
+          {hasPeriodChoice
+            ? `${candleUnit} · ${period}${showsLastCandleDate && lastCandleDateLabel ? ` · ${lastCandleDateLabel} 종가까지` : ""}`
+            : `${candleUnit} · 최근 ${candleItems.length}봉`}
         </span>
         {onExpand && (
           <button
