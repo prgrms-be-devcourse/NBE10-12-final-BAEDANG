@@ -2,7 +2,7 @@
 
 > **Version**: Week-3 MVP · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 13 tables · append-only ledger and market-event history · round-based reset
+> - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 21 tables · append-only ledger and market-event history · round-based reset
 
 ## Contents
 - [Overview](#overview)
@@ -47,7 +47,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
 
-### Table Map (19)
+### Table Map (21)
 
 | Group | Table | Note |
 |---|---|---|
@@ -63,12 +63,14 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `daily_candle` | daily candles · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | minute time-series · top-100 scheduler + off-universe on-demand |
 | | `exchange_rate` | FX history · regular table · no FK relations |
+| | `market_calendar` | optional persisted market-session calendar · currently read through the market-calendar port/cache |
 | **Synthetic Order Book** | `order_book_version` | synthetic order book set header refreshed every 3s based on current price |
 | | `order_book_level` | Up to 20 levels per version (10 ASK / 10 KR BID / 1–10 US BID) with prices and quantities |
 | **Financial · Industry (KIS)** | `stock_industry` | industry classification (standard / large / medium / small) |
 | | `stock_financial_period` | annual/quarterly statement period balance sheet, income, ratios |
 | | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
 | **Market Events** | `market_event` | KRX KIND circuit-breaker/sidecar history · append-only |
+| **Learning Content** | `wiki_term` | beginner-facing financial term dictionary |
 
 ### MVP Behavior Matrix (confirmed)
 
@@ -647,4 +649,4 @@ No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial inde
 V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
 
 ---
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V7__market_event.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V8__market_event.sql`

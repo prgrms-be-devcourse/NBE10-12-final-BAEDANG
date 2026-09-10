@@ -2,7 +2,7 @@
 
 > **버전**: 3주차 MVP 기준 · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 13 tables · append-only 원장·시장조치 이력 · 회차 기반 초기화
+> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 21 tables · append-only 원장·시장조치 이력 · 회차 기반 초기화
 
 ## 목차
 - [전체 관계도](#전체-관계도)
@@ -47,7 +47,7 @@
 | order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: ASK 10, KR BID 10, US BID 1~10, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
 
-### 테이블 맵 (19개)
+### 테이블 맵 (21개)
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
@@ -63,12 +63,14 @@
 | | `daily_candle` | 일봉 · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드 |
 | | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
+| | `market_calendar` | 선택적 장 운영일 저장 테이블 · 현재는 시장 캘린더 포트/캐시로 조회 |
 | **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
 | | `order_book_level` | 버전당 최대 20개 레벨(ASK 10 / KR BID 10 / US BID 1~10) 가격·수량 |
 | **산업 · 재무 (KIS)** | `stock_industry` | 표준산업분류 및 지수업종(대·중·소) 분류 |
 | | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율 |
 | | `stock_financial_sync` | 그룹별 동기화 시각 및 TTL(negative cache 지원) |
 | **시장조치** | `market_event` | KRX KIND 서킷브레이커·사이드카 이력 · append-only |
+| **학습 콘텐츠** | `wiki_term` | 초보 투자자를 위한 금융 용어 사전 |
 
 ### MVP 동작 매트릭스 (확정)
 
@@ -642,4 +644,4 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
 
 ---
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V7__market_event.sql`까지 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V8__market_event.sql`까지 함께 보세요

@@ -18,6 +18,19 @@ class MarketEventTest {
             "https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
 
     @Test
+    void stock_market_names_are_normalized_to_supported_krx_markets() {
+        assertThat(KrMarket.fromStockMarket(" kospi ")).contains(KrMarket.KOSPI);
+        assertThat(KrMarket.fromStockMarket("KoSdAq")).contains(KrMarket.KOSDAQ);
+    }
+
+    @Test
+    void null_and_unsupported_stock_markets_are_not_mapped() {
+        assertThat(KrMarket.fromStockMarket(null)).isEmpty();
+        assertThat(KrMarket.fromStockMarket("KR_ETC")).isEmpty();
+        assertThat(KrMarket.fromStockMarket("NASDAQ")).isEmpty();
+    }
+
+    @Test
     void circuit_breaker_requires_stage_and_no_sidecar_direction() {
         assertThatThrownBy(() -> MarketEvent.circuitBreaker(
                 MarketEventSource.KRX_KIND,

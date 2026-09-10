@@ -21,17 +21,19 @@ CREATE TABLE market_event (
     CONSTRAINT ck_market_event_time CHECK (triggered_at < halt_until),
     CONSTRAINT ck_market_event_payload CHECK (
         (event_type = 'CIRCUIT_BREAKER'
+            AND circuit_breaker_stage IS NOT NULL
             AND circuit_breaker_stage BETWEEN 1 AND 3
             AND sidecar_direction IS NULL)
         OR
         (event_type = 'SIDECAR'
             AND circuit_breaker_stage IS NULL
+            AND sidecar_direction IS NOT NULL
             AND sidecar_direction IN ('BUY', 'SELL'))
     )
 );
 
 CREATE INDEX ix_market_event_active
-    ON market_event (market, event_type, halt_until DESC, triggered_at DESC);
+    ON market_event (market, event_type, halt_until DESC, market_event_id DESC);
 
 CREATE INDEX ix_market_event_history
     ON market_event (market, triggered_at DESC, market_event_id DESC);
