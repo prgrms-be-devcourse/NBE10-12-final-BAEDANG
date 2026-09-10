@@ -3,12 +3,15 @@ package com.baedang.market.service;
 import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.port.MarketCalendarPort;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
+import com.baedang.global.error.BusinessException;
+import java.time.Duration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -17,7 +20,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -38,14 +40,41 @@ class ExchangeRateLoadServiceTest {
     private ExchangeRatePersistenceService persistenceService;
 
     private ExchangeRateLoadService loadService;
+    private ExecutorService worker;
 
     @BeforeEach
     void setUp() {
+        worker = Executors.newSingleThreadExecutor();
         loadService = new ExchangeRateLoadService(
                 marketCalendarPort,
                 persistenceService,
-                Clock.fixed(NOW, ZoneOffset.UTC)
+                Clock.fixed(NOW, ZoneOffset.UTC), worker, Duration.ofSeconds(5)
         );
+    }
+
+    @AfterEach
+    void tearDown() throws InterruptedException {
+        worker.shutdownNow();
+        assertThat(worker.awaitTermination(3, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void 최초_호출도_대기시간을_넘기면_실패하지만_공유작업은_유지한다() {
+        AtomicReference<Runnable> queued = new AtomicReference<>();
+        java.util.concurrent.Executor executor = mock(java.util.concurrent.Executor.class);
+        doAnswer(invocation -> { queued.set(invocation.getArgument(0)); return null; })
+                .when(executor).execute(any(Runnable.class));
+        loadService = new ExchangeRateLoadService(marketCalendarPort, persistenceService,
+                Clock.fixed(NOW, ZoneOffset.UTC), executor, Duration.ofMillis(20));
+        org.assertj.core.api.Assertions.assertThatThrownBy(loadService::syncExchangeRate)
+                .isInstanceOf(BusinessException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(loadService::syncExchangeRate)
+                .isInstanceOf(BusinessException.class);
+        verify(executor).execute(any(Runnable.class));
+        verifyNoInteractions(marketCalendarPort);
+        queued.get().run();
+        assertThat(loadService.syncExchangeRate()).isFalse();
+        verify(marketCalendarPort).fetchExchangeRate();
     }
 
     @Test
@@ -96,8 +125,8 @@ class ExchangeRateLoadServiceTest {
     @Test
     void 실패_직후_연속_호출은_외부_API를_반복하지_않는다() {
         when(marketCalendarPort.fetchExchangeRate()).thenThrow(new IllegalStateException());
-        org.assertj.core.api.Assertions.assertThatThrownBy(loadService::syncExchangeRate).isInstanceOf(IllegalStateException.class);
-        assertThat(loadService.syncExchangeRate()).isFalse();
+        org.assertj.core.api.Assertions.assertThatThrownBy(loadService::syncExchangeRate).isInstanceOf(BusinessException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(loadService::syncExchangeRate).isInstanceOf(BusinessException.class);
         verify(marketCalendarPort).fetchExchangeRate();
     }
 
