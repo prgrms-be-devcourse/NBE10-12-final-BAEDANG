@@ -2,21 +2,16 @@ package com.baedang.account.service;
 
 import com.baedang.account.dto.AccountSummaryResponse;
 import com.baedang.account.dto.HoldingsResponse;
+import com.baedang.account.support.AccountValuation;
 import com.baedang.account.support.HoldingValuation;
 import com.baedang.account.support.ReturnRateCalculator;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
-import com.baedang.market.entity.ExchangeRate;
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.repository.ExchangeRateRepository;
-import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.Holding;
-import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.user.entity.Account;
-import com.baedang.user.entity.AccountStatus;
-import com.baedang.user.repository.AccountRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,9 +37,6 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class AccountService {
 
-    private static final String USD = "USD";
-    private static final String KRW = "KRW";
-
     /**
      * 시세가 "실시간"으로 갱신 중인지 판정하는 신선도 임계값.
      *
@@ -58,32 +50,20 @@ public class AccountService {
      */
     private static final Duration REALTIME_STALE_THRESHOLD = Duration.ofMinutes(2);
 
-    private final AccountRepository accountRepository;
-    private final HoldingRepository holdingRepository;
-    private final QuoteSnapshotRepository quoteSnapshotRepository;
-    private final ExchangeRateRepository exchangeRateRepository;
+    private final AccountValuationService accountValuationService;
     private final StockRepository stockRepository;
-    private final HoldingValuator holdingValuator;
     private final Clock clock;
 
-    public AccountService(AccountRepository accountRepository,
-                          HoldingRepository holdingRepository,
-                          QuoteSnapshotRepository quoteSnapshotRepository,
-                          ExchangeRateRepository exchangeRateRepository,
+    public AccountService(AccountValuationService accountValuationService,
                           StockRepository stockRepository,
-                          HoldingValuator holdingValuator,
                           Clock clock) {
-        this.accountRepository = accountRepository;
-        this.holdingRepository = holdingRepository;
-        this.quoteSnapshotRepository = quoteSnapshotRepository;
-        this.exchangeRateRepository = exchangeRateRepository;
+        this.accountValuationService = accountValuationService;
         this.stockRepository = stockRepository;
-        this.holdingValuator = holdingValuator;
         this.clock = clock;
     }
 
     public AccountSummaryResponse getSummary(Long userId) {
-        AccountValuation valued = valuateActiveAccount(userId);
+        AccountValuation valued = accountValuationService.valuateActiveAccount(userId);
         Account account = valued.account();
 
         BigDecimal stockValue = sum(valued.valuations(), HoldingValuation::evalWon);
@@ -98,7 +78,7 @@ public class AccountService {
     }
 
     public HoldingsResponse getHoldings(Long userId) {
-        AccountValuation valued = valuateActiveAccount(userId);
+        AccountValuation valued = accountValuationService.valuateActiveAccount(userId);
         Map<Long, Stock> stocks = stocksByStockId(valued.holdings());
         Instant now = clock.instant();
 
@@ -113,39 +93,6 @@ public class AccountService {
 
         OffsetDateTime asOf = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
         return new HoldingsResponse(items, asOf);
-    }
-
-    /** 요약(#1)·보유 목록(#2)이 공유하는 조회·평가 패스: 계좌 → 보유 → 시세 → 환율 → 평가. */
-    private AccountValuation valuateActiveAccount(Long userId) {
-        Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
-
-        List<Holding> holdings =
-                holdingRepository.findByAccountIdAndQuantityGreaterThan(account.getAccountId(), BigDecimal.ZERO);
-
-        Map<Long, QuoteSnapshot> quotes = quotesByStockId(holdings);
-        BigDecimal usdKrwRate = latestUsdKrwRate();
-        List<HoldingValuation> valuations = holdingValuator.valuate(holdings, quotes, usdKrwRate);
-
-        return new AccountValuation(account, holdings, quotes, valuations, usdKrwRate);
-    }
-
-    private record AccountValuation(
-            Account account,
-            List<Holding> holdings,
-            Map<Long, QuoteSnapshot> quotes,
-            List<HoldingValuation> valuations,
-            BigDecimal usdKrwRate
-    ) {
-    }
-
-    private Map<Long, QuoteSnapshot> quotesByStockId(List<Holding> holdings) {
-        if (holdings.isEmpty()) {
-            return Map.of();
-        }
-        List<Long> stockIds = holdings.stream().map(Holding::getStockId).toList();
-        return quoteSnapshotRepository.findByStockIdIn(stockIds).stream()
-                .collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity()));
     }
 
     private Map<Long, Stock> stocksByStockId(List<Holding> holdings) {
@@ -174,18 +121,6 @@ public class AccountService {
     private boolean isRealtime(QuoteSnapshot quote, Instant now) {
         return quote != null
                 && quote.getQuoteAt().toInstant().isAfter(now.minus(REALTIME_STALE_THRESHOLD));
-    }
-
-    /** 응답에 노출하고 외화 평가에도 쓰는 최신 USD/KRW 환율. 표시용 mid_rate 우선. */
-    private BigDecimal latestUsdKrwRate() {
-        return exchangeRateRepository
-                .findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc(USD, KRW)
-                .map(this::displayRate)
-                .orElse(null);
-    }
-
-    private BigDecimal displayRate(ExchangeRate exchangeRate) {
-        return exchangeRate.getMidRate() != null ? exchangeRate.getMidRate() : exchangeRate.getRate();
     }
 
     private BigDecimal sum(List<HoldingValuation> valuations, Function<HoldingValuation, BigDecimal> field) {
