@@ -2,6 +2,7 @@ package com.baedang.stock.model;
 
 public enum CandleRange {
     ONE_DAY("1D"),
+    ONE_WEEK("1W"),
     ONE_MONTH("1M"),
     SIX_MONTHS("6M"),
     ONE_YEAR("1Y");

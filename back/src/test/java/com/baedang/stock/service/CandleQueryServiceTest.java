@@ -5,6 +5,8 @@ import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
+import com.baedang.stock.model.CandleQueryInterval;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -41,6 +43,7 @@ class CandleQueryServiceTest {
 
     @Mock StockRepository stockRepository;
     @Mock DailyCandleRepository dailyCandleRepository;
+    @Mock CandleAggregateRepository candleAggregateRepository;
     @Mock MinuteCandleRepository minuteCandleRepository;
     @Mock MarketDataPort marketDataPort;
     @Mock MinuteCandlePersistenceService persistenceService;
@@ -55,6 +58,7 @@ class CandleQueryServiceTest {
                 new CandleQueryPolicy(),
                 stockRepository,
                 dailyCandleRepository,
+                candleAggregateRepository,
                 minuteCandleRepository,
                 marketDataPort,
                 persistenceService,
@@ -160,6 +164,51 @@ class CandleQueryServiceTest {
 
         verify(persistenceService, never()).upsert(
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+
+    @Test
+    void 오분봉은_집계뷰에서_읽고_분봉_백필은_한_번만_한다() {
+        OffsetDateTime bucket = OffsetDateTime.ofInstant(NOW.minusSeconds(300), ZoneOffset.UTC);
+        when(minuteCandleRepository.findTopByStockIdOrderByCandleAtDesc(10L))
+                .thenReturn(Optional.empty());
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_MINUTE, 200))
+                .thenReturn(List.of());
+        when(candleAggregateRepository.findLatest(CandleQueryInterval.FIVE_MINUTES, 10L, 78))
+                .thenReturn(List.of(aggregate(bucket, "105")));
+
+        var response = service.getCandles("005930", "KR", "5m", "1D");
+        service.getCandles("005930", "KR", "5m", "1D");
+
+        assertThat(response.interval()).isEqualTo("5m");
+        assertThat(response.items()).extracting(item -> item.close()).containsExactly("105");
+        // 뷰를 두 번 읽어도 원본 적재는 60초 캐시 덕에 한 번뿐이다.
+        verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_MINUTE, 200);
+        verify(stockOnDemandQuoteService, never()).ensureDailyCandles(stock);
+    }
+
+    @Test
+    void 주봉은_일봉만_백필하고_토스_분봉은_부르지_않는다() {
+        OffsetDateTime bucket = OffsetDateTime.parse("2026-08-24T00:00:00+09:00");
+        when(candleAggregateRepository.findLatest(CandleQueryInterval.ONE_WEEK, 10L, 26))
+                .thenReturn(List.of(aggregate(bucket, "130")));
+
+        var response = service.getCandles("005930", "KR", "1w", "6M");
+
+        assertThat(response.interval()).isEqualTo("1w");
+        assertThat(response.items()).extracting(item -> item.close()).containsExactly("130");
+        verify(stockOnDemandQuoteService).ensureDailyCandles(stock);
+        verify(marketDataPort, never()).fetchCandles(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    private CandleAggregateRepository.AggregateCandle aggregate(
+            OffsetDateTime bucket, String close) {
+        BigDecimal price = new BigDecimal(close);
+        return new CandleAggregateRepository.AggregateCandle(
+                bucket, price, price, price, price, new BigDecimal("1000"));
     }
 
     private DailyCandle daily(LocalDate date, String close) {
