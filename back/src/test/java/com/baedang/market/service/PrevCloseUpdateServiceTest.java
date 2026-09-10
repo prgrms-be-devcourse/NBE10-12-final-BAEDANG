@@ -46,7 +46,7 @@ class PrevCloseUpdateServiceTest {
     }
     @Test void repeatedRecoveryDoesNotRewriteVerifiedClose() {
         setup();
-        var quote = new QuoteSnapshot(null, new BigDecimal("110"), "USD", closeAt, closeAt);
+        QuoteSnapshot quote = new QuoteSnapshot(null, new BigDecimal("110"), "USD", closeAt, closeAt);
         quote.applyReference(friday.minusDays(1), new BigDecimal("100"));
         when(snapshots.findById(1L)).thenReturn(Optional.of(quote));
         when(policy.quoteTradeDate(MarketCountry.US, closeAt.toInstant())).thenReturn(Optional.of(friday));
@@ -61,7 +61,7 @@ class PrevCloseUpdateServiceTest {
         verifyNoInteractions(prices, data, candles);
     }
     private DailyCandle candle(LocalDate date, String value) {
-        var p = new BigDecimal(value);
+        BigDecimal p = new BigDecimal(value);
         return new DailyCandle(null, date, p, p, p, p, BigDecimal.ONE);
     }
 }

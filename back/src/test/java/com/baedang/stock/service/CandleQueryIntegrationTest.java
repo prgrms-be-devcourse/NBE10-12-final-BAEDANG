@@ -82,7 +82,7 @@ class CandleQueryIntegrationTest {
         when(marketCalendarPort.fetchUsMarketCalendar(ArgumentMatchers.any()))
                 .thenAnswer(call -> {
                     LocalDate date = call.getArgument(0);
-                    var open = date.atTime(9, 30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
+                    OffsetDateTime open = date.atTime(9, 30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
                     return new MarketCalendarDay(MarketCountry.US, date, true, open, open.plusHours(6).plusMinutes(30), null);
                 });
     }

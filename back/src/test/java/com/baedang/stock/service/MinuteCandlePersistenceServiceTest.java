@@ -17,11 +17,11 @@ import static org.mockito.Mockito.*;
 
 class MinuteCandlePersistenceServiceTest {
     @Test void excludePreAndPostMarketBarsIncludingCloseBoundary() {
-        var calendars = mock(MarketCalendarPort.class);
-        var repository = mock(MinuteCandleBatchRepository.class);
-        var service = new MinuteCandlePersistenceService(repository,new MarketTradingDayPolicy(calendars));
-        var open = OffsetDateTime.parse("2026-11-27T09:30:00-05:00");
-        var close = OffsetDateTime.parse("2026-11-27T13:00:00-05:00");
+        MarketCalendarPort calendars = mock(MarketCalendarPort.class);
+        MinuteCandleBatchRepository repository = mock(MinuteCandleBatchRepository.class);
+        MinuteCandlePersistenceService service = new MinuteCandlePersistenceService(repository,new MarketTradingDayPolicy(calendars));
+        OffsetDateTime open = OffsetDateTime.parse("2026-11-27T09:30:00-05:00");
+        OffsetDateTime close = OffsetDateTime.parse("2026-11-27T13:00:00-05:00");
         when(calendars.fetchUsMarketCalendar(open.toLocalDate())).thenReturn(new MarketCalendarDay(MarketCountry.US,open.toLocalDate(),true,open,close,null));
         service.upsert(1L,MarketCountry.US,List.of(candle(open.minusMinutes(1)),candle(open),candle(close.minusMinutes(1)),candle(close)));
         ArgumentCaptor<List<MinuteCandle>> rows = ArgumentCaptor.captor();

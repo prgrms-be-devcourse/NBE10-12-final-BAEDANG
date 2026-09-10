@@ -1,11 +1,12 @@
 package com.baedang.market.service;
 
 import com.baedang.global.normalizer.DomainNormalizer;
-import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.port.PriceQuote;
 import com.baedang.market.entity.DailyCandle;
-import com.baedang.stock.entity.MarketCountry;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.port.MarketCalendarDay;
+import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotBatchRepository;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,6 +21,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -56,7 +58,7 @@ public class QuoteSnapshotPersistenceService {
             QuoteSnapshot candidate = new QuoteSnapshot(stock.getStockId(), quote.lastPrice(),
                     DomainNormalizer.currency(quote.currency()), quote.quoteAt(), collectedAt);
             try {
-                var tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), quote.quoteAt().toInstant());
+                Optional<LocalDate> tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), quote.quoteAt().toInstant());
                 if (tradeDate.isEmpty()) continue;
                 // Price ingestion never trusts pre-existing daily rows as reference evidence.
             } catch (RuntimeException unavailableSession) {
@@ -82,7 +84,7 @@ public class QuoteSnapshotPersistenceService {
     @Transactional(propagation = Propagation.NEVER)
     public int repairReference(Stock stock, QuoteSnapshot expected, DailyCandle reference) {
         if (reference == null) return 0;
-        var tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), expected.getQuoteAt().toInstant());
+        Optional<LocalDate> tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), expected.getQuoteAt().toInstant());
         if (tradeDate.isEmpty() || !tradingDays.previousTradingDay(stock.getMarketCountry(), tradeDate.get())
                 .filter(reference.getTradeDate()::equals).isPresent()) return 0;
         return repository.repairReference(expected, stock.getMarketCountry(), reference.getTradeDate(), reference.getClosePrice());
@@ -92,9 +94,9 @@ public class QuoteSnapshotPersistenceService {
     @Transactional(propagation = Propagation.NEVER)
     public int saveRecoveredClose(Stock stock, QuoteSnapshot expected, DailyCandle close, DailyCandle reference,
             OffsetDateTime collectedAt) {
-        var day = tradingDays.calendar(stock.getMarketCountry(), close.getTradeDate());
+        MarketCalendarDay day = tradingDays.calendar(stock.getMarketCountry(), close.getTradeDate());
         if (!day.isOpen() || day.regularCloseAt() == null) return 0;
-        var candidate = new QuoteSnapshot(stock.getStockId(), close.getClosePrice(), stock.getCurrency(),
+        QuoteSnapshot candidate = new QuoteSnapshot(stock.getStockId(), close.getClosePrice(), stock.getCurrency(),
                 day.regularCloseAt(), collectedAt);
         if (reference != null && tradingDays.previousTradingDay(stock.getMarketCountry(), close.getTradeDate())
                 .filter(reference.getTradeDate()::equals).isPresent()) {

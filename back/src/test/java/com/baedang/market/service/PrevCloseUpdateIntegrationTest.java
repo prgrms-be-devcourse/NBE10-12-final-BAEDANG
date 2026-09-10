@@ -20,7 +20,9 @@ import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -53,18 +55,18 @@ class PrevCloseUpdateIntegrationTest {
     }
     MarketCalendarDay day(MarketCountry country, LocalDate date) {
         boolean open = date.getDayOfWeek().getValue() < 6 && !date.equals(LocalDate.of(2026,9,7));
-        var start = date.atTime(country == MarketCountry.US ? LocalTime.of(9,30) : LocalTime.of(9,0)).atZone(country.zoneId()).toOffsetDateTime();
+        OffsetDateTime start = date.atTime(country == MarketCountry.US ? LocalTime.of(9,30) : LocalTime.of(9,0)).atZone(country.zoneId()).toOffsetDateTime();
         return new MarketCalendarDay(country,date,open,open?start:null,open?start.plusHours(6).plusMinutes(30):null,null);
     }
     Stock stock(MarketCountry country) {
-        var stock = Stock.create(UUID.randomUUID().toString().substring(0,6), country,
+        Stock stock = Stock.create(UUID.randomUUID().toString().substring(0,6), country,
                 country==MarketCountry.US?"NASDAQ":"KOSPI", "test", null, country.defaultCurrency(), "STOCK", true);
         stock.applyRanking(1, BigDecimal.TEN);
         return stocks.saveAndFlush(stock);
     }
     Candle candle(Stock stock, String date, String price) {
-        var at=day(stock.getMarketCountry(),LocalDate.parse(date)).regularOpenAt();
-        var p=new BigDecimal(price);
+        OffsetDateTime at=day(stock.getMarketCountry(),LocalDate.parse(date)).regularOpenAt();
+        BigDecimal p=new BigDecimal(price);
         return new Candle(at,p,p,p,p,BigDecimal.ONE,stock.getCurrency());
     }
     void seed(Stock stock) {
@@ -74,9 +76,9 @@ class PrevCloseUpdateIntegrationTest {
                 candle(stock,"2026-09-10","100"),candle(stock,"2026-09-11","110")), clock.instant());
     }
     @Test void weekendAndMidnightKeepTenPercentAndRecoveryIsIdempotent() {
-        var stock=stock(MarketCountry.US); seed(stock);
+        Stock stock=stock(MarketCountry.US); seed(stock);
         assertThat(recovery.recover(stock)).isTrue();
-        var q=snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot q=snapshots.findById(stock.getStockId()).orElseThrow();
         assertThat(q.getQuoteAt().atZoneSameInstant(stock.getMarketCountry().zoneId()).toLocalDate()).isEqualTo("2026-09-11");
         assertThat(q.getPrevCloseDate()).isEqualTo("2026-09-10");
         assertThat(q.changeRate()).isEqualByComparingTo("0.1");
@@ -86,7 +88,7 @@ class PrevCloseUpdateIntegrationTest {
         verify(data, times(1)).fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200);
     }
     @Test void nineAmStartupFetchesMissingCloseAndDoesNotOverwriteTodaysQuote() {
-        var stock=stock(MarketCountry.KR);
+        Stock stock=stock(MarketCountry.KR);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:05:00Z"));
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),
                 clock.instant().atOffset(ZoneOffset.UTC),stock.getCurrency())),clock.instant().atOffset(ZoneOffset.UTC));
@@ -95,18 +97,18 @@ class PrevCloseUpdateIntegrationTest {
                 candle(stock,"2026-09-10","100"),candle(stock,"2026-09-11","110")));
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:05:01Z"));
         assertThat(recovery.recover(stock)).isTrue();
-        var q=snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot q=snapshots.findById(stock.getStockId()).orElseThrow();
         assertThat(q.getLastPrice()).isEqualByComparingTo("112");
         assertThat(q.getPrevClose()).isEqualByComparingTo("110");
         assertThat(q.getQuoteAt().atZoneSameInstant(stock.getMarketCountry().zoneId()).toLocalDate()).isEqualTo("2026-09-14");
     }
     @Test void newSessionClearsOldReferenceAndLatePreviousSessionCannotRevertIt() {
-        var stock=stock(MarketCountry.US); seed(stock); recovery.recover(stock);
+        Stock stock=stock(MarketCountry.US); seed(stock); recovery.recover(stock);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T14:00:00Z"));
-        var at=clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime at=clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),at,"USD")),at);
         recovery.recover(stock);
-        var q=snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot q=snapshots.findById(stock.getStockId()).orElseThrow();
         assertThat(q.getPrevClose()).isEqualByComparingTo("110");
         assertThat(q.changeRate()).isEqualByComparingTo("0.018182");
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("999"),
@@ -114,11 +116,11 @@ class PrevCloseUpdateIntegrationTest {
         assertThat(snapshots.findById(stock.getStockId()).orElseThrow().getLastPrice()).isEqualByComparingTo("112");
     }
     @Test void afterHoursQuoteIsRejectedAndUnfinishedDailyCandleIsNotStored() {
-        var stock=stock(MarketCountry.US);
+        Stock stock=stock(MarketCountry.US);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-11T18:00:00Z"));
         daily.upsert(stock.getStockId(),"USD",MarketCountry.US,List.of(candle(stock,"2026-09-10","100"),candle(stock,"2026-09-11","105")), clock.instant());
         assertThat(candles.findByStockIdAndTradeDate(stock.getStockId(),LocalDate.of(2026,9,11))).isEmpty();
-        var at=OffsetDateTime.parse("2026-09-11T12:00:00Z");
+        OffsetDateTime at=OffsetDateTime.parse("2026-09-11T12:00:00Z");
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("999"),at,"USD")),clock.instant().atOffset(ZoneOffset.UTC));
         assertThat(snapshots.findById(stock.getStockId())).isEmpty();
         when(clock.instant()).thenReturn(Instant.parse("2026-09-11T20:11:00Z"));
@@ -126,8 +128,8 @@ class PrevCloseUpdateIntegrationTest {
         assertThat(candles.findByStockIdAndTradeDate(stock.getStockId(),LocalDate.of(2026,9,11))).isPresent();
     }
     @Test void lateUnfinishedResponseCannotOverwriteFinalClose() {
-        var stock = stock(MarketCountry.US);
-        var startedBeforeClose = Instant.parse("2026-09-11T19:00:00Z");
+        Stock stock = stock(MarketCountry.US);
+        Instant startedBeforeClose = Instant.parse("2026-09-11T19:00:00Z");
         when(clock.instant()).thenReturn(Instant.parse("2026-09-11T20:11:00Z"));
         daily.upsert(stock.getStockId(), "USD", MarketCountry.US,
                 List.of(candle(stock, "2026-09-11", "110")), clock.instant());
@@ -138,7 +140,7 @@ class PrevCloseUpdateIntegrationTest {
     }
 
     @Test void legacyCandleRemainsVisibleButCannotSuppressReferenceRefetch() {
-        var stock = stock(MarketCountry.KR);
+        Stock stock = stock(MarketCountry.KR);
         jdbc.update("INSERT INTO daily_candle(stock_id,trade_date,open_price,high_price,low_price,close_price) VALUES (?,DATE '2026-09-11',90,90,90,90)", stock.getStockId());
         assertThat(candles.findByStockIdAndTradeDate(stock.getStockId(),LocalDate.of(2026,9,11))).isPresent();
         when(data.fetchCandles(stock.getSymbol(),CandleInterval.ONE_DAY,200)).thenReturn(List.of(
@@ -148,26 +150,26 @@ class PrevCloseUpdateIntegrationTest {
     }
 
     @Test void missingExactReferenceDoesNotUseOlderDailyClose() {
-        var stock = stock(MarketCountry.US);
+        Stock stock = stock(MarketCountry.US);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T14:00:00Z"));
         daily.upsert(stock.getStockId(), "USD", MarketCountry.US,
                 List.of(candle(stock, "2026-09-10", "100")), clock.instant());
-        var at = clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime at = clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),at,"USD")),at);
         assertThat(snapshots.findById(stock.getStockId()).orElseThrow().changeRate()).isNull();
     }
 
     @Test void referenceRepairPreservesConcurrentSameTimestampPriceCorrection() {
-        var stock = stock(MarketCountry.KR);
+        Stock stock = stock(MarketCountry.KR);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:05:00Z"));
-        var at = clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime at = clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock), List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),at,"KRW")),at);
-        var expected = snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot expected = snapshots.findById(stock.getStockId()).orElseThrow();
         prices.saveOrUpdate(List.of(stock), List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("113"),at,"KRW")),at.plusSeconds(1));
         daily.upsert(stock.getStockId(), "KRW", MarketCountry.KR,
                 List.of(candle(stock, "2026-09-11", "110")), clock.instant());
         assertThat(prices.repairReference(stock, expected, candles.findByStockIdAndTradeDate(stock.getStockId(), LocalDate.of(2026,9,11)).orElseThrow())).isEqualTo(1);
-        var repaired = snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot repaired = snapshots.findById(stock.getStockId()).orElseThrow();
         assertThat(repaired.getLastPrice()).isEqualByComparingTo("113");
         assertThat(repaired.getCollectedAt().toInstant()).isEqualTo(at.plusSeconds(1).toInstant());
         assertThat(repaired.getPrevClose()).isEqualByComparingTo("110");
@@ -175,29 +177,29 @@ class PrevCloseUpdateIntegrationTest {
     }
 
     @Test void newTradingDayWithoutReferenceClearsPreviousDaysBaseline() {
-        var stock = stock(MarketCountry.US);
+        Stock stock = stock(MarketCountry.US);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-11T18:00:00Z"));
         daily.upsert(stock.getStockId(), "USD", MarketCountry.US,
                 List.of(candle(stock, "2026-09-10", "100")), clock.instant());
-        var friday = clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime friday = clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("110"),friday,"USD")),friday);
-        var previous = snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot previous = snapshots.findById(stock.getStockId()).orElseThrow();
         prices.repairReference(stock, previous, candles.findByStockIdAndTradeDate(stock.getStockId(), LocalDate.of(2026,9,10)).orElseThrow());
         assertThat(snapshots.findById(stock.getStockId()).orElseThrow().changeRate()).isEqualByComparingTo("0.1");
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T14:00:00Z"));
-        var monday = clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime monday = clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock),List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),monday,"USD")),monday);
-        var quote = snapshots.findById(stock.getStockId()).orElseThrow();
+        QuoteSnapshot quote = snapshots.findById(stock.getStockId()).orElseThrow();
         assertThat(quote.getPrevCloseDate()).isNull();
         assertThat(quote.changeRate()).isNull();
         assertThat(prices.repairReference(stock, new QuoteSnapshot(stock.getStockId(),BigDecimal.ONE,"USD",friday,friday), candles.findByStockIdAndTradeDate(stock.getStockId(), LocalDate.of(2026,9,10)).orElseThrow())).isZero();
     }
 
     @Test void oldDailyRowCannotSupplyMissingReferenceWhenFetchOmitsIt() {
-        var stock = stock(MarketCountry.KR);
+        Stock stock = stock(MarketCountry.KR);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:05:00Z"));
         jdbc.update("INSERT INTO daily_candle(stock_id,trade_date,open_price,high_price,low_price,close_price) VALUES (?,DATE '2026-09-11',90,90,90,90)", stock.getStockId());
-        var at = clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime at = clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock), List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),at,"KRW")),at);
         when(data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200)).thenReturn(List.of());
         assertThat(recovery.recover(stock)).isFalse();
@@ -209,9 +211,9 @@ class PrevCloseUpdateIntegrationTest {
     }
 
     @Test void mismatchedDateIsHiddenEvenIfRefetchFails() {
-        var stock = stock(MarketCountry.KR);
+        Stock stock = stock(MarketCountry.KR);
         when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:05:00Z"));
-        var at = clock.instant().atOffset(ZoneOffset.UTC);
+        OffsetDateTime at = clock.instant().atOffset(ZoneOffset.UTC);
         prices.saveOrUpdate(List.of(stock), List.of(new PriceQuote(stock.getSymbol(),new BigDecimal("112"),at,"KRW")),at);
         jdbc.update("UPDATE quote_snapshot SET prev_close=90,prev_close_date=DATE '2026-09-10' WHERE stock_id=?",stock.getStockId());
         when(data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200)).thenThrow(new IllegalStateException("unavailable"));
@@ -221,11 +223,11 @@ class PrevCloseUpdateIntegrationTest {
 
     @Test void seedAndReferenceRecoverySerializeExternalFetchThroughCommittedStorage() throws Exception {
         jdbc.update("UPDATE stock SET is_ranked=false");
-        var stock = stock(MarketCountry.US);
-        var firstEntered = new CountDownLatch(1);
-        var releaseFirst = new CountDownLatch(1);
-        var secondEntered = new CountDownLatch(1);
-        var sequence = new AtomicInteger();
+        Stock stock = stock(MarketCountry.US);
+        CountDownLatch firstEntered = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        CountDownLatch secondEntered = new CountDownLatch(1);
+        AtomicInteger sequence = new AtomicInteger();
         when(data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200)).thenAnswer(call -> {
             if (sequence.incrementAndGet() == 1) {
                 firstEntered.countDown();
@@ -237,11 +239,11 @@ class PrevCloseUpdateIntegrationTest {
                     .get().extracting(DailyCandle::getClosePrice).isEqualTo(new BigDecimal("100.0000"));
             return List.of(candle(stock,"2026-09-10","100"),candle(stock,"2026-09-11","110"));
         });
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var first = executor.submit(() -> seeder.seed(MarketCountry.US));
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<DailyCandleSeedService.SeedResult> first = executor.submit(() -> seeder.seed(MarketCountry.US));
             try {
                 assertThat(firstEntered.await(5, TimeUnit.SECONDS)).isTrue();
-                var second = executor.submit(() -> recovery.recover(stock));
+                Future<Boolean> second = executor.submit(() -> recovery.recover(stock));
                 assertThat(secondEntered.await(100, TimeUnit.MILLISECONDS)).isFalse();
                 releaseFirst.countDown();
                 assertThat(first.get(5, TimeUnit.SECONDS).success()).isEqualTo(1);
@@ -255,26 +257,26 @@ class PrevCloseUpdateIntegrationTest {
     }
 
     @Test void referenceRecoverySurvivesNewerQuotesWithinSameExchangeTradingDay() {
-        for (var country : MarketCountry.values()) {
-            var stock = stock(country);
+        for (MarketCountry country : MarketCountry.values()) {
+            Stock stock = stock(country);
             // US crosses KST midnight while remaining on Monday in New York.
-            var started = country == MarketCountry.KR
+            Instant started = country == MarketCountry.KR
                     ? Instant.parse("2026-09-14T00:05:00Z") : Instant.parse("2026-09-14T14:59:59Z");
             when(clock.instant()).thenReturn(started);
-            var before = started.atOffset(ZoneOffset.UTC);
+            OffsetDateTime before = started.atOffset(ZoneOffset.UTC);
             prices.saveOrUpdate(List.of(stock), List.of(new PriceQuote(stock.getSymbol(),
                     new BigDecimal("112"), before, stock.getCurrency())), before);
             when(data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200)).thenAnswer(call -> {
-                var advanced = started.plusSeconds(10);
+                Instant advanced = started.plusSeconds(10);
                 when(clock.instant()).thenReturn(advanced);
-                var after = advanced.atOffset(ZoneOffset.UTC);
+                OffsetDateTime after = advanced.atOffset(ZoneOffset.UTC);
                 prices.saveOrUpdate(List.of(stock), List.of(new PriceQuote(stock.getSymbol(),
                         new BigDecimal("113"), after, stock.getCurrency())), after);
                 return List.of(candle(stock, "2026-09-11", "110"));
             });
 
             assertThat(recovery.recover(stock)).isTrue();
-            var repaired = snapshots.findById(stock.getStockId()).orElseThrow();
+            QuoteSnapshot repaired = snapshots.findById(stock.getStockId()).orElseThrow();
             assertThat(repaired.getLastPrice()).isEqualByComparingTo("113");
             assertThat(repaired.getQuoteAt().toInstant()).isEqualTo(started.plusSeconds(10));
             assertThat(repaired.getCollectedAt().toInstant()).isEqualTo(started.plusSeconds(10));

@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.model.PrevCloseUpdateResult;
 import com.baedang.market.port.*;
@@ -13,7 +14,9 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
@@ -75,17 +78,17 @@ public class PrevCloseUpdateService {
     }
 
     private boolean recoverLocked(Stock stock) {
-        var country = stock.getMarketCountry();
-        var completed = completedDays.resolve(country).orElse(null);
+        MarketCountry country = stock.getMarketCountry();
+        LocalDate completed = completedDays.resolve(country).orElse(null);
         if (completed == null) return false;
-        var closeAt = tradingDays.calendar(country, completed).regularCloseAt();
+        OffsetDateTime closeAt = tradingDays.calendar(country, completed).regularCloseAt();
         if (closeAt == null) return false;
         QuoteSnapshot current = snapshots.findById(stock.getStockId()).orElse(null);
-        var currentDate = current == null ? Optional.<LocalDate>empty()
+        Optional<LocalDate> currentDate = current == null ? Optional.<LocalDate>empty()
                 : tradingDays.quoteTradeDate(country, current.getQuoteAt().toInstant());
         boolean retainCurrent = currentDate.isPresent() && !current.getQuoteAt().isBefore(closeAt);
-        var quoteDate = retainCurrent ? currentDate.get() : completed;
-        var referenceDate = tradingDays.previousTradingDay(country, quoteDate).orElse(null);
+        LocalDate quoteDate = retainCurrent ? currentDate.get() : completed;
+        LocalDate referenceDate = tradingDays.previousTradingDay(country, quoteDate).orElse(null);
         if (referenceDate == null) return false;
         if (retainCurrent && referenceDate.equals(current.getPrevCloseDate()) && current.getPrevClose() != null) return false;
 
@@ -93,12 +96,12 @@ public class PrevCloseUpdateService {
             quotePersistence.clearMismatchedReference(current, referenceDate);
         }
         // Always refetch missing/mismatched reference evidence, even when old DB rows exist.
-        var requestedAt = clock.instant();
-        var fetched = data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200);
-        var verified = dailyPersistence.upsert(stock.getStockId(), stock.getCurrency(), country, fetched, requestedAt);
-        var reference = verified.stream().filter(row -> referenceDate.equals(row.getTradeDate())).findFirst().orElse(null);
+        Instant requestedAt = clock.instant();
+        List<Candle> fetched = data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200);
+        List<DailyCandle> verified = dailyPersistence.upsert(stock.getStockId(), stock.getCurrency(), country, fetched, requestedAt);
+        DailyCandle reference = verified.stream().filter(row -> referenceDate.equals(row.getTradeDate())).findFirst().orElse(null);
         if (retainCurrent) return quotePersistence.repairReference(stock, current, reference) > 0;
-        var close = verified.stream().filter(row -> completed.equals(row.getTradeDate())).findFirst().orElse(null);
+        DailyCandle close = verified.stream().filter(row -> completed.equals(row.getTradeDate())).findFirst().orElse(null);
         if (close == null) return false;
         return quotePersistence.saveRecoveredClose(stock, current, close, reference,
                 clock.instant().atOffset(ZoneOffset.UTC)) > 0;

@@ -8,7 +8,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 public class ReferenceRecoveryConfig {
     @Bean
     public ThreadPoolTaskScheduler referenceRecoveryScheduler() {
-        var scheduler = new ThreadPoolTaskScheduler();
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);
         scheduler.setThreadNamePrefix("reference-recovery-");
         return scheduler;

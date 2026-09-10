@@ -18,8 +18,8 @@ class MarketTradingDayPolicyTest {
     @CsvSource({"2026-03-06,14:30:00", "2026-03-09,13:30:00", "2026-10-30,13:30:00", "2026-11-02,14:30:00"})
     void dstUsesNewYorkDateAndCalendarBoundaries(String dateText, String utcOpen) {
         LocalDate date = LocalDate.parse(dateText);
-        var open = date.atTime(9,30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
-        var close = open.plusHours(6).plusMinutes(30);
+        OffsetDateTime open = date.atTime(9,30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
+        OffsetDateTime close = open.plusHours(6).plusMinutes(30);
         when(calendars.fetchUsMarketCalendar(date)).thenReturn(new MarketCalendarDay(MarketCountry.US,date,true,open,close,null));
         assertThat(open.toInstant()).isEqualTo(Instant.parse(dateText+"T"+utcOpen+"Z"));
         assertThat(policy.quoteTradeDate(MarketCountry.US,open.toInstant().minusSeconds(1))).isEmpty();
@@ -30,7 +30,7 @@ class MarketTradingDayPolicyTest {
 
     @Test void earlyCloseAndHolidayUseCalendar() {
         LocalDate friday = LocalDate.of(2026,11,27);
-        var open = friday.atTime(9,30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
+        OffsetDateTime open = friday.atTime(9,30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
         when(calendars.fetchUsMarketCalendar(friday)).thenReturn(new MarketCalendarDay(MarketCountry.US,friday,true,open,open.plusHours(3).plusMinutes(30),null));
         assertThat(policy.quoteTradeDate(MarketCountry.US,open.plusHours(4).toInstant())).isEmpty();
         LocalDate holiday = friday.minusDays(1);

@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.List;
@@ -31,9 +32,9 @@ public class MinuteCandlePersistenceService {
         Map<LocalDate, MarketCalendarDay> calendars = new HashMap<>();
         List<MinuteCandle> rows = candles.stream()
                 .filter(candle -> {
-                    var at = candle.candleAt().toInstant();
-                    var date = at.atZone(country.zoneId()).toLocalDate();
-                    var day = calendars.computeIfAbsent(date, value -> tradingDays.calendar(country, value));
+                    Instant at = candle.candleAt().toInstant();
+                    LocalDate date = at.atZone(country.zoneId()).toLocalDate();
+                    MarketCalendarDay day = calendars.computeIfAbsent(date, value -> tradingDays.calendar(country, value));
                     // Bar timestamps are opening instants: a bar at close belongs to extended hours.
                     return day.isOpen() && day.regularOpenAt() != null && day.regularCloseAt() != null
                             && !at.isBefore(day.regularOpenAt().toInstant())

@@ -150,7 +150,7 @@ class MarketOrderIntegrationTest {
         // This integration suite simulates an open session independent of wall-clock execution time.
         when(marketCalendarPort.fetchKrMarketCalendar(any())).thenAnswer(invocation -> {
             LocalDate date = invocation.getArgument(0);
-            var start = date.atStartOfDay(MarketCountry.KR.zoneId()).toOffsetDateTime();
+            OffsetDateTime start = date.atStartOfDay(MarketCountry.KR.zoneId()).toOffsetDateTime();
             return new MarketCalendarDay(MarketCountry.KR, date, true,
                     start, start.plusDays(1), null);
         });
