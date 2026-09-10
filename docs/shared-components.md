@@ -347,7 +347,7 @@ API and exchange-rate lookup modules are HTTP clients, not pure helpers. Reuse t
 | --- | --- | --- |
 | [api.ts](../front/src/lib/api.ts) | `ApiError`, endpoint functions such as `getRankings`, `getCandles`, `placeOrder` | Reuse API calls and code/message/data handling; internal `request()` is private |
 | [order-retry-policy.ts](../front/src/lib/order-retry-policy.ts) | `generateClientOrderId()`, `nextClientOrderId(policy, currentId)` | SAME or no policy: retain ID; NEW: generate ID; NOT_RETRYABLE: null. An idempotency key, not an authentication nonce |
-| [exchange-rate.ts](../front/src/lib/exchange-rate.ts) | `fetchExchangeRate()` | Display-rate lookup with default fallback on failure; not a source for execution exchange rates |
+| [exchange-rate.ts](../front/src/lib/exchange-rate.ts) | `fetchExchangeRate()` | Display-rate lookup; errors propagate to the provider, which preserves the last successful value/time and exposes failure. No fabricated default; not a source for execution exchange rates |
 | [candle-chart-data.ts](../front/src/lib/candle-chart-data.ts) | `toCandlestickData`, `toVolumeData` | Convert to numeric chart data, sort by time, and deduplicate; not for settlement calculations |
 | [exchange-rate-chart-data.ts](../front/src/lib/exchange-rate-chart-data.ts) | `toLinePoints`, `isTimeVisible`, `formatTickMark` | Downsample and format exchange-rate chart time axes; does not change stored source data |
 | [chart-colors.ts](../front/src/lib/chart-colors.ts) | `resolveCssColor(name, fallback)` | Convert CSS variables to chart colors; returns fallback when no DOM is available |

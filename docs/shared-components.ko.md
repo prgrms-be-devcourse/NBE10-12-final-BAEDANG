@@ -347,7 +347,7 @@ API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 �
 | --- | --- | --- |
 | [api.ts](../front/src/lib/api.ts) | `ApiError`, `getRankings`, `getCandles`, `placeOrder` 등 API별 함수 | API 호출과 code/message/data 처리 재사용. 내부 `request()`는 private |
 | [order-retry-policy.ts](../front/src/lib/order-retry-policy.ts) | `generateClientOrderId()`, `nextClientOrderId(policy, currentId)` | SAME 또는 정책 없음: 기존 ID, NEW: 새 ID, NOT_RETRYABLE: null. 멱등성 키이며 인증용 난수가 아님 |
-| [exchange-rate.ts](../front/src/lib/exchange-rate.ts) | `fetchExchangeRate()` | 화면용 환율 조회. 실패 시 기본값으로 대체하므로 체결용 환율 근거로 사용하지 않음 |
+| [exchange-rate.ts](../front/src/lib/exchange-rate.ts) | `fetchExchangeRate()` | 실패를 Provider에 전달하며 마지막 정상값·시각을 보존하고 실패 상태를 표시합니다. 임의 기본값은 없으며 체결 환율의 출처가 아닙니다 |
 | [candle-chart-data.ts](../front/src/lib/candle-chart-data.ts) | `toCandlestickData`, `toVolumeData` | 차트 숫자 데이터 변환·시간 정렬·중복 제거. 정산용 계산이 아님 |
 | [exchange-rate-chart-data.ts](../front/src/lib/exchange-rate-chart-data.ts) | `toLinePoints`, `isTimeVisible`, `formatTickMark` | 환율 차트 다운샘플링·시간축 표시. 원본 저장 데이터는 변경하지 않음 |
 | [chart-colors.ts](../front/src/lib/chart-colors.ts) | `resolveCssColor(name, fallback)` | CSS 변수를 차트용 색상으로 변환. DOM이 없는 환경에서는 fallback |

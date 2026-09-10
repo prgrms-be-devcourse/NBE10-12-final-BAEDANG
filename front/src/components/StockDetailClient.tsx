@@ -17,7 +17,7 @@ import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { calculateOrderAmount, maxAffordableQuantity } from "@/lib/order-amount";
 import { sanitizeLimitPriceInput } from "@/lib/limit-price-input";
 import { toCandleQuery, type CandlePeriod, type CandleUnit } from "@/lib/candle-query";
-import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal } from "@/lib/format";
+import { formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
 import {
   ApiError,
   getAccountSummary,
@@ -112,7 +112,7 @@ const INTRADAY_CANDLE_UNITS: readonly CandleUnit[] = ["1분봉", "5분봉", "10�
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const { isLoggedIn, user } = useAuth();
-  const { rate: usdKrwRate, updatedAt: exchangeRateUpdatedAt } = useExchangeRate();
+  const { rate: usdKrwRate, updatedAt: exchangeRateUpdatedAt, hasError: exchangeRateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [account, setAccount] = useState<AccountSummary | null>(null);
@@ -273,10 +273,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 매수 입력의 상한 — 주문가능금액(availableCash)으로 실제 살 수 있는 최대 수량.
   // 매도는 보유 수량이 이미 자연스러운 상한이라(availableQuantity) 별도 계산이
   // 필요 없다.
-  const buyMaxQuantity = maxAffordableQuantity({
+  const pricingRate = detail.currency === "USD" ? usdKrwRate : 1;
+  const buyMaxQuantity = pricingRate === null ? 0 : maxAffordableQuantity({
     price: detail.price.lastPrice ?? 0,
     currency: detail.currency === "USD" ? "USD" : "KRW",
-    usdKrwRate,
+    usdKrwRate: pricingRate,
     availableCash,
   });
 
@@ -292,34 +293,36 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 자동으로 바뀌면, 그 ID로 제출했을 때 "같은 ID인데 다른 내용"으로
   // DUPLICATE_ORDER 거절을 받을 수 있다(아래 side 전환 핸들러와 같은 이유).
   useEffect(() => {
-    if (orderType === "시장가" && side === "매수" && quantity > buyMaxQuantity) {
+    if (pricingRate !== null && orderType === "시장가" && side === "매수" && quantity > buyMaxQuantity) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuantityInput(String(buyMaxQuantity));
       setClientOrderId(null);
       setOrderError(null);
     }
-  }, [orderType, side, quantity, buyMaxQuantity]);
+  }, [orderType, side, quantity, buyMaxQuantity, pricingRate]);
 
   const lastCandleAt = candleItems.length > 0 ? candleItems[candleItems.length - 1].at : null;
 
-  const amount = calculateOrderAmount({
+  const amount = pricingRate === null ? null : calculateOrderAmount({
     side,
     quantity,
     price: detail.price.lastPrice ?? 0,
     currency: detail.currency === "USD" ? "USD" : "KRW",
-    usdKrwRate,
+    usdKrwRate: pricingRate,
   });
 
   // 정책상 거래는 원화로만 이뤄지므로(rankings/my 화면과 동일한 원칙), 미국 종목도
   // 원화 환산액을 먼저 크게 보여주고 원래 달러 값은 보조 텍스트로 뒤에 붙인다.
   const isUsdStock = detail.currency === "USD";
-  const lastPriceKrw = isUsdStock ? toDecimal(detail.price.lastPrice)?.times(usdKrwRate) ?? null : toDecimal(detail.price.lastPrice);
-  const changeKrw = isUsdStock ? changeDecimal?.times(usdKrwRate) ?? null : changeDecimal;
+  const lastPriceKrw = toKrw(detail.price.lastPrice, detail.currency, usdKrwRate);
+  const changeKrw = toKrw(changeDecimal, detail.currency, usdKrwRate);
   const priceLabel = formatNumber(lastPriceKrw);
 
   let blockReason: string | null = null;
   if (!detail.tradable) {
     blockReason = detail.tradableReason ? TRADABLE_REASON_LABEL[detail.tradableReason] ?? "지금은 거래할 수 없어요" : "지금은 거래할 수 없어요";
+  } else if (amount === null) {
+    blockReason = "환율 정보를 불러온 후 주문해주세요";
   } else if (quantity <= 0) {
     blockReason = "수량은 1주 이상의 정수로 입력해주세요";
   } else if (side === "매도" && quantity > availableQuantity) {
@@ -339,21 +342,21 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       ? isUsdStock
         ? limitCurrency === "USD"
           ? limitPriceDecimal.toNumber()
-          : usdKrwRate > 0
+          : usdKrwRate !== null && usdKrwRate > 0
             ? limitPriceDecimal.dividedBy(usdKrwRate).toNumber()
             : null
         : limitPriceDecimal.toNumber()
       : null;
 
   const limitBuyMaxQuantity =
-    limitPriceInStockCurrency != null
-      ? maxAffordableQuantity({ price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate, availableCash })
+    limitPriceInStockCurrency != null && pricingRate !== null
+      ? maxAffordableQuantity({ price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate: pricingRate, availableCash })
       : 0;
 
   const limitAmount =
-    limitPriceInStockCurrency != null
-      ? calculateOrderAmount({ side, quantity, price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate })
-      : { grossAmount: 0, fee: 0, tax: 0, netAmount: 0 };
+    limitPriceInStockCurrency != null && pricingRate !== null
+      ? calculateOrderAmount({ side, quantity, price: limitPriceInStockCurrency, currency: isUsdStock ? "USD" : "KRW", usdKrwRate: pricingRate })
+      : { grossAmount: null, fee: null, tax: null, netAmount: null };
 
   // 확정 정산식(HALF_UP 원 단위 등)은 서버만 정확히 계산할 수 있으므로, 미리보기 조회가
   // 끝나 있으면 그 값을 그대로 보여준다 — limitAmount(클라이언트 근사치)는 조회 전
@@ -379,13 +382,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   // 클램프 effect 주석 참고) — 다만 여기 상한은 현재가가 아니라 사용자가 입력한
   // 지정가를 기준으로 한다.
   useEffect(() => {
-    if (orderType === "지정가" && side === "매수" && quantity > limitBuyMaxQuantity) {
+    if (pricingRate !== null && orderType === "지정가" && side === "매수" && quantity > limitBuyMaxQuantity) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuantityInput(String(limitBuyMaxQuantity));
       setClientOrderId(null);
       setOrderError(null);
     }
-  }, [orderType, side, quantity, limitBuyMaxQuantity]);
+  }, [orderType, side, quantity, limitBuyMaxQuantity, pricingRate]);
 
   // 지정가 접수 가능 여부(acceptable/reason)와 예약금·만료시각은 클라이언트가 흉내낼 수
   // 없는 서버 전용 판단이라(시장 세션·시세 최신성·환율 스냅샷 등), 입력이 바뀌고 잠시
@@ -840,7 +843,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   // 화면에 비현실적인 금액이 그대로 보이는 문제가 있었다. 지정가는
                   // 현재가가 아니라 사용자가 입력한 지정가 기준 상한을 쓴다.
                   const maxForCap = orderType === "지정가" ? limitBuyMaxQuantity : buyMaxQuantity;
-                  const capped = side === "매수" && Number(digitsOnly || 0) > maxForCap ? String(maxForCap) : digitsOnly;
+                  const capped = pricingRate !== null && side === "매수" && Number(digitsOnly || 0) > maxForCap ? String(maxForCap) : digitsOnly;
                   setQuantityInput(capped);
                   setClientOrderId(null);
                   setOrderError(null);
@@ -859,7 +862,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           )}
           {side === "매수" && (
             <div className="mb-3.5 text-[12.5px]" style={{ color: "var(--mut2)" }}>
-              최대 {formatNumber(orderType === "지정가" ? limitBuyMaxQuantity : buyMaxQuantity)}주까지 살 수 있어요
+              {pricingRate === null ? "환율 정보가 없어 최대 매수 수량을 계산할 수 없어요" : `최대 ${formatNumber(orderType === "지정가" ? limitBuyMaxQuantity : buyMaxQuantity)}주까지 살 수 있어요`}
             </div>
           )}
 
@@ -935,16 +938,17 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                 {orderType === "지정가" && limitQuote
                   ? <>접수 환율 {formatNumber(limitQuote.acceptanceExchangeRate)}원 — 실제 체결 시점 환율은 달라질 수 있어요</>
                   : <>적용 환율 {formatNumber(usdKrwRate)}원{" "}
-                      ({exchangeRateUpdatedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} 기준)</>}
+                      {exchangeRateUpdatedAt ? `(${exchangeRateUpdatedAt.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })} 기준)` : "(환율 정보 없음)"}</>}
+                {exchangeRateError && " · 화면 환율 갱신 실패, 마지막 정상값이 있으면 유지"}
               </div>
             )}
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>주문 금액</span>
-              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.grossAmount : amount.grossAmount)}</b>
+              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.grossAmount : amount?.grossAmount)}</b>
             </div>
             <div className="mb-1 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>수수료 0.01%</span>
-              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.fee : amount.fee)}</span>
+              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.fee : amount?.fee)}</span>
             </div>
             <div className="mb-1.5 flex justify-between text-[13.5px]">
               <span style={{ color: "var(--mut)" }}>
@@ -953,7 +957,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   ({side === "매수" ? "매수는 없음" : detail.marketCountry === "KR" ? "증권거래세 0.2%" : "SEC Fee"})
                 </span>
               </span>
-              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.tax : amount.tax)}</span>
+              <span style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.tax : amount?.tax)}</span>
             </div>
             <div className="flex justify-between pt-1.5 text-[14px]" style={{ borderTop: "1px solid var(--line)" }}>
               <b style={{ color: "var(--ink)" }}>
@@ -965,7 +969,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                     ? "총 차감액"
                     : "총 입금액"}
               </b>
-              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.netAmount : amount.netAmount)}</b>
+              <b style={{ color: "var(--ink)" }}>{formatNumber(orderType === "지정가" ? limitDisplayAmount.netAmount : amount?.netAmount)}</b>
             </div>
             {orderType === "지정가" && (
               <>

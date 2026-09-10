@@ -1,17 +1,10 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { DEFAULT_USD_KRW_RATE, fetchExchangeRate } from "@/lib/exchange-rate";
+import { INITIAL_EXCHANGE_RATE_STATE, exchangeRateStateAfterRefresh, fetchExchangeRate, type ExchangeRateState } from "@/lib/exchange-rate";
+import { createHistoryRefresh } from "@/lib/exchange-rate-history-refresh";
 
 const REFRESH_INTERVAL_MS = 60 * 1000; // DB 환율 수집과 동일하게 1분마다 화면 값을 갱신합니다.
-
-type ExchangeRateState = {
-  rate: number;
-  changeAmount: number;
-  changeRate: number;
-  updatedAt: Date;
-  isLoading: boolean;
-};
 
 const ExchangeRateContext = createContext<ExchangeRateState | null>(null);
 
@@ -21,33 +14,18 @@ const ExchangeRateContext = createContext<ExchangeRateState | null>(null);
  * 원화 환산액이 미묘하게 달라지는 문제가 생기므로, 이 컨텍스트 하나만 쓰세요.
  */
 export function ExchangeRateProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<ExchangeRateState>({
-    rate: DEFAULT_USD_KRW_RATE,
-    changeAmount: 0,
-    changeRate: 0,
-    updatedAt: new Date(),
-    isLoading: true,
-  });
+  const [state, setState] = useState<ExchangeRateState>(INITIAL_EXCHANGE_RATE_STATE);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      const info = await fetchExchangeRate();
-      if (cancelled) return;
-      setState({
-        rate: info.rate,
-        changeAmount: info.changeAmount,
-        changeRate: info.changeRate,
-        updatedAt: info.updatedAt,
-        isLoading: false,
-      });
-    }
-
-    load();
-    const intervalId = setInterval(load, REFRESH_INTERVAL_MS);
+    const request = createHistoryRefresh(fetchExchangeRate,
+      (info) => setState((previous) => exchangeRateStateAfterRefresh(previous, info)),
+      () => setState((previous) => exchangeRateStateAfterRefresh(previous, null)),
+      () => {},
+    );
+    void request.refresh();
+    const intervalId = setInterval(request.refresh, REFRESH_INTERVAL_MS);
     return () => {
-      cancelled = true;
+      request.dispose();
       clearInterval(intervalId);
     };
   }, []);
