@@ -184,6 +184,16 @@ trading:
     closed-version-retention: 1m
     retention-initial-delay: ${ORDERBOOK_RETENTION_INITIAL_DELAY:0s}
 
+# ── 투자 성향 리포트 / 리더보드 ──────────────────────────────────────────────
+report:
+  seed:
+    # 개발/데모용 합성 포트폴리오 시딩 관리자 트리거 활성 플래그(기본 false, #152 검증 게이트).
+    #   true 일 때만 POST /internal/admin/seed/portfolios 가 등록됩니다.
+    #   프로덕션에는 켜지 마세요 — 시드는 개발/데모 전용이며 실 리더보드엔 노출되지 않습니다.
+    enabled: ${REPORT_SEED_ENABLED:false}
+    account-count: ${REPORT_SEED_ACCOUNT_COUNT:50}
+    max-holdings: ${REPORT_SEED_MAX_HOLDINGS:8}
+
 auth:
   jwt:
     issuer: baedang
