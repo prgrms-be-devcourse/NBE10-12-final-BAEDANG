@@ -24,12 +24,6 @@ public interface ExchangeRateRepository extends JpaRepository<ExchangeRate, Long
     Optional<ExchangeRate> findTopByBaseCurrencyAndQuoteCurrencyAndValidFromLessThanEqualOrderByValidFromDesc(
             String baseCurrency, String quoteCurrency, OffsetDateTime validFrom);
 
-    /**
-     * 지정 시점 이후 환율 이력을 오래된 순서로 조회합니다.
-     */
-    List<ExchangeRate> findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
-            String baseCurrency, String quoteCurrency, OffsetDateTime from);
-
     /** KST 자정 기준 버킷별 마지막 원본 행만 반환합니다. 평균/반올림 없이 표시율 정밀도를 보존합니다. */
     @Query(value = """
             SELECT exchange_rate_id, base_currency, quote_currency, rate, mid_rate,

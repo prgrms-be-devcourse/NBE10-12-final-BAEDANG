@@ -168,10 +168,10 @@ class ExchangeRateRepositoryIntegrationTest {
 
         List<ExchangeRate> rows =
                 exchangeRateRepository
-                        .findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
+                        .findHistoryBuckets(
                                 "USD",
                                 "KRW",
-                                firstAt.minusHours(1)
+                                firstAt.minusHours(1), secondAt, 60
                         );
 
         assertThat(rows.stream()
