@@ -6,21 +6,40 @@ import com.baedang.market.entity.ExchangeRate;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.repository.ExchangeRateRepository;
+import com.baedang.market.service.ExchangeRateLoadService;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.ZoneOffset;
 
-/** 1분 주기로 DB에 적재된 최신 환율을 거래 스냅샷으로 제공합니다. 외부 호출·메모리 캐시는 없습니다. */
+/** 기본 조회는 DB 전용입니다. 시장가의 명시적 복구 경로만 외부 갱신을 허용합니다. */
 @Component
 public class ExecutionExchangeRateProviderBridge implements ExecutionExchangeRateProvider {
     private final ExchangeRateRepository repository;
     private final Clock clock;
+    private final ExchangeRateLoadService loadService;
 
-    public ExecutionExchangeRateProviderBridge(ExchangeRateRepository repository, Clock clock) {
+    public ExecutionExchangeRateProviderBridge(ExchangeRateRepository repository, Clock clock, ExchangeRateLoadService loadService) {
         this.repository = repository;
         this.clock = clock;
+        this.loadService = loadService;
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.NEVER)
+    public void refreshUnavailableForMarketOrder() {
+        ExchangeRate row = repository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW").orElse(null);
+        // 다른 요청이 이미 복구했다면 호출하지 않습니다. 미래/손상 데이터도 외부 갱신으로 우회하지 않습니다.
+        if (row != null && (row.getValidUntil() == null
+                || clock.instant().isBefore(row.getValidUntil().toInstant()))) return;
+        try {
+            loadService.syncExchangeRate();
+        } catch (RuntimeException exception) {
+            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+        }
     }
 
     @Override

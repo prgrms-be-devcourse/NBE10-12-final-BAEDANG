@@ -877,6 +877,36 @@ class MarketOrderIntegrationTest {
         verifyNoInteractions(exchangeRateProvider, marketSessionProvider);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void 만료환율_복구는_트랜잭션밖에서_한번만_수행하고_성공한_경우에만_체결한다(boolean recovered) {
+        Fixture fixture = createUsFixture(new BigDecimal("500000"), new BigDecimal("100"));
+        MarketOrderRequest request = request(fixture, "BUY", "1");
+        if (recovered) {
+            when(exchangeRateProvider.currentUsdKrwSnapshot())
+                    .thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND))
+                    .thenAnswer(invocation -> snapshot(new BigDecimal("1383.60")));
+        } else {
+            when(exchangeRateProvider.currentUsdKrwSnapshot()).thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        }
+        org.mockito.Mockito.doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return null;
+        }).when(exchangeRateProvider).refreshUnavailableForMarketOrder();
+        if (recovered) {
+            assertThat(marketOrderService.place(fixture.userId(), request)).isNotNull();
+        } else {
+            assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                    .isInstanceOfSatisfying(BusinessException.class, error -> {
+                        assertThat(error.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+                        assertThat(error.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                    });
+        }
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(recovered ? 1 : 0);
+        org.mockito.Mockito.verify(exchangeRateProvider).refreshUnavailableForMarketOrder();
+        org.mockito.Mockito.verify(exchangeRateProvider, org.mockito.Mockito.times(2)).currentUsdKrwSnapshot();
+    }
+
     @Test
     void 미국_시장가_스냅샷은_트랜잭션밖에서_조회하고_멱등요청은_재조회하지_않는다() {
         var fixture = createUsFixture(new BigDecimal("500000"), new BigDecimal("100"));

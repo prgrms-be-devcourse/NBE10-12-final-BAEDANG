@@ -875,6 +875,8 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 
 US market orders also carry FX receipt time, `validFrom` and `validUntil` into the transaction and execution factory. After acquiring the account lock, new orders revalidate source validity and future receipt timestamps (without a separate receipt TTL) independently of context freshness; execution creation also checks the same validation time and agreement with the settlement rate. Missing, expired or future FX evidence results in EXCHANGE_RATE_NOT_FOUND (404, SAME_CLIENT_ORDER_ID), without saving an order/execution/ledger or making an external call inside the transaction. KR uses 1 without an FX lookup. Existing-order idempotent responses return stored results before this check; only the applied rate is persisted.
 
+Market-order preparation reads DB FX first. On missing/expired FX it may request one shared refresh outside the financial transaction and then reread DB validity; quotes and limit workers do not trigger this recovery. A still-unusable snapshot fails with EXCHANGE_RATE_NOT_FOUND / SAME_CLIENT_ORDER_ID. Lock-time expiry still fails without an HTTP call or automatic transaction replay.
+
 Market settlement rounds US unit prices to cents using HALF_UP before checking storage bounds. Prices and settlement amounts must fit NUMERIC(19,4), and quantities/FX rates must fit NUMERIC(19,6); FX rates are not rounded. Storage overflow returns INVALID_SETTLEMENT_AMOUNT with SAME_CLIENT_ORDER_ID without saving an order/execution/ledger. A representable calculation whose net settlement is non-positive still saves a REJECTED order and returns NEW_CLIENT_ORDER_ID.
 
 ---

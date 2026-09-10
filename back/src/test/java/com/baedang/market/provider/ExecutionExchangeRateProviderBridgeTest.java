@@ -22,12 +22,13 @@ class ExecutionExchangeRateProviderBridgeTest {
     private static final OffsetDateTime AT = OffsetDateTime.parse("2026-09-04T01:00:00Z");
     private final ExchangeRateRepository repository = mock(ExchangeRateRepository.class);
     private final Clock clock = mock(Clock.class);
+    private final com.baedang.market.service.ExchangeRateLoadService loadService = mock(com.baedang.market.service.ExchangeRateLoadService.class);
     private ExecutionExchangeRateProviderBridge provider;
 
     @BeforeEach
     void setup() {
         when(clock.instant()).thenReturn(AT.toInstant());
-        provider = new ExecutionExchangeRateProviderBridge(repository, clock);
+        provider = new ExecutionExchangeRateProviderBridge(repository, clock, loadService);
     }
 
     @Test
@@ -83,6 +84,42 @@ class ExecutionExchangeRateProviderBridgeTest {
         }
         when(repository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("USD", "KRW"))
                 .thenReturn(kind.equals("absent") ? Optional.empty() : Optional.of(row(rate, from, until, collected)));
+        assertUnavailable();
+    }
+
+    @Test
+    void 시장가_복구는_만료행을_갱신하고_DB에_저장된_새환율을_사용한다() {
+        given(row("1400", AT.minusHours(1), AT, AT.minusHours(1)));
+        when(loadService.syncExchangeRate()).thenAnswer(invocation -> {
+            given(row("1401", AT, AT.plusHours(1), AT));
+            return true;
+        });
+        provider.refreshUnavailableForMarketOrder();
+        assertThat(provider.currentUsdKrwSnapshot().rate()).isEqualByComparingTo("1401");
+        verify(loadService).syncExchangeRate();
+    }
+
+    @Test
+    void 시장가_복구도_유효한_행이_있으면_외부조회하지_않는다() {
+        given(row("1400", AT, AT.plusHours(1), AT));
+        provider.refreshUnavailableForMarketOrder();
+        verifyNoInteractions(loadService);
+    }
+
+    @Test
+    void 시장가_복구는_누락행에도_한번_시도하지만_실패를_환율오류로_변환한다() {
+        when(loadService.syncExchangeRate()).thenThrow(new IllegalStateException("upstream failed"));
+        assertThatThrownBy(provider::refreshUnavailableForMarketOrder)
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        verify(loadService).syncExchangeRate();
+    }
+
+    @Test
+    void 성공응답이어도_DB환율이_계속_만료상태이면_거절한다() {
+        given(row("1400", AT.minusHours(1), AT, AT.minusHours(1)));
+        when(loadService.syncExchangeRate()).thenReturn(true);
+        provider.refreshUnavailableForMarketOrder();
         assertUnavailable();
     }
 

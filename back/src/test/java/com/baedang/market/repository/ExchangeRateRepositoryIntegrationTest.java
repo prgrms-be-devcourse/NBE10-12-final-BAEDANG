@@ -90,17 +90,18 @@ class ExchangeRateRepositoryIntegrationTest {
         persistence.saveIfValid(new ExchangeRateQuote("USD", "KRW", new BigDecimal("1400.123456"),
                 new BigDecimal("1398.123456"), from, until), COLLECTED_AT);
         Clock clock = Clock.fixed(COLLECTED_AT.plusMinutes(5).toInstant(), ZoneOffset.UTC);
-        ExecutionExchangeRateSnapshot snapshot = new ExecutionExchangeRateProviderBridge(exchangeRateRepository, clock).currentUsdKrwSnapshot();
+        com.baedang.market.service.ExchangeRateLoadService loader = org.mockito.Mockito.mock(com.baedang.market.service.ExchangeRateLoadService.class);
+        ExecutionExchangeRateSnapshot snapshot = new ExecutionExchangeRateProviderBridge(exchangeRateRepository, clock, loader).currentUsdKrwSnapshot();
         assertThat(snapshot.rate()).isEqualByComparingTo("1400.123456");
         assertThat(new ExchangeRateService(exchangeRateRepository, clock).getLatest("USD", "KRW").rate()).isEqualTo("1398.123456");
         assertThatThrownBy(() -> new ExecutionExchangeRateProviderBridge(exchangeRateRepository,
-                Clock.fixed(until.toInstant(), ZoneOffset.UTC)).currentUsdKrwSnapshot()).isInstanceOf(BusinessException.class);
+                Clock.fixed(until.toInstant(), ZoneOffset.UTC), loader).currentUsdKrwSnapshot()).isInstanceOf(BusinessException.class);
 
         persistence.saveIfValid(new ExchangeRateQuote("USD", "KRW", new BigDecimal("1401.654321"),
                 null, from, until.plusHours(1)), until);
         entityManager.clear();
         assertThat(new ExecutionExchangeRateProviderBridge(exchangeRateRepository,
-                Clock.fixed(until.toInstant(), ZoneOffset.UTC)).currentUsdKrwRate()).isEqualByComparingTo("1401.654321");
+                Clock.fixed(until.toInstant(), ZoneOffset.UTC), loader).currentUsdKrwRate()).isEqualByComparingTo("1401.654321");
         assertThat(snapshot.rate()).isEqualByComparingTo("1400.123456");
         assertThat(exchangeRateRepository.count()).isEqualTo(1);
     }

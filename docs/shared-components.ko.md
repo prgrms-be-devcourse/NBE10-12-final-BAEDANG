@@ -400,7 +400,7 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 - `ExchangeRateRepository.findHistoryBuckets`: SQL에서 KST 자정 기준 버킷별 마지막 원본 행만 선택하며 정밀도와 원본 시각을 보존합니다. 표시 이력 전용이며 체결은 집계하지 않은 최신 행을 사용합니다.
 
 - `ExchangeRateScheduler` / `ExchangeRateLoadService` / `ExchangeRatePersistenceService`: 매분 Toss 환율을 수집·검증하여 DB에 갱신합니다. `valid_from`, `valid_until`, `collected_at`, `rate`, `mid_rate`를 보존하며 같은 시작 시각의 오래된 수신 응답은 최신 관측값을 덮어쓰지 않습니다.
-- `ExecutionExchangeRateProviderBridge`: HTTP·메모리 캐시 없이 DB 최신 행을 읽습니다. `rate`를 사용하고 원본 유효기간과 미래 수신 시각을 검증하며 누락/만료 환율을 대체 사용하지 않습니다. 금융 트랜잭션은 잠금 후 전달받은 스냅샷을 재검증합니다. `ExchangeRateService`와 계좌 평가는 같은 DB를 쓰되 `midRate` 우선 표시 정책을 유지합니다. 최신/이력 API는 `validFrom`을 제공하며 프론트 최신 환율 폴링은 1분입니다.
+- `ExecutionExchangeRateProviderBridge`: 기본 조회는 캐시 없이 DB 최신 행을 읽습니다. MarketOrderService만 누락/만료 시 금융 트랜잭션 밖에서 `refreshUnavailableForMarketOrder()`를 호출하고 DB를 한 번 재조회합니다. `rate`를 사용하고 원본 유효기간과 미래 수신 시각을 검증하며 누락/만료 환율을 대체 사용하지 않습니다. 금융 트랜잭션은 잠금 후 전달받은 스냅샷을 재검증합니다. `ExchangeRateService`와 계좌 평가는 같은 DB를 쓰되 `midRate` 우선 표시 정책을 유지합니다. 최신/이력 API는 `validFrom`을 제공하며 프론트 최신 환율 폴링은 1분입니다. 정기 수집과 복구는 `ExchangeRateLoadService`의 단일 수집 락을 공유합니다. 대기 최대 5초, 완료 후 재호출 제한 5초이며 이는 환율 TTL이 아닙니다. 실패·동일 만료 응답이면 시장가 요청은 SAME_CLIENT_ORDER_ID로 실패하고 기동 수집은 추가하지 않습니다.
 
 - `LimitOrderExecutionPlanner.plan(...)`: 체결과 미리보기에서 공유하는 순수 호가 선택기입니다. 누적 차액은 `LimitOrderSettlementCalculator`를 사용하고 매수 가능 정수 수량은 이진 탐색합니다. DB/HTTP 의존성을 넣지 않습니다.
 - `LimitOrderExecutionService.prepare(stockId, side)` / `execute(orderId, selectedPreparation)`: NEVER 경계입니다. 후보 선정 전에 준비하고 선정 당시 버전/환율을 실행에 전달합니다. 실행은 컨텍스트를 새로 준비하며 근거가 바뀌면 PRIORITY_CHANGED를 반환합니다. 같은 버전의 revision/금융 락 충돌만 최대 1회 재시도하며 후순위를 새 버전/환율에서 자동 재시도하지 않습니다.

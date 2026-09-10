@@ -19,7 +19,7 @@ public class ExchangeRateScheduler {
     }
 
     /**
-     * 매분 환율과 원본 유효기간을 적재합니다. 거래 요청에서는 외부 환율을 조회하지 않습니다.
+     * 매분 환율과 원본 유효기간을 적재합니다. 시장가 복구와 같은 수집 조정 경로를 사용합니다.
      */
     @Scheduled(cron = "0 * * * * *", scheduler = "exchangeRateTaskScheduler")
     public void collect() {
