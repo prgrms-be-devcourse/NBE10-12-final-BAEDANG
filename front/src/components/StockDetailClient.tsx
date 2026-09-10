@@ -993,8 +993,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                             <div className="flex justify-between text-[11.5px]" style={{ color: "var(--mut2)" }}>
                               <span>예상 평균 체결가</span>
                               <span>
-                                {formatNumber(limitQuote.executionPreview.avgExecutionPrice)}
-                                {detail.currency === "USD" ? "$" : "원"}
+                                {detail.currency === "USD"
+                                  ? formatUsd(limitQuote.executionPreview.avgExecutionPrice)
+                                  : `${formatNumber(limitQuote.executionPreview.avgExecutionPrice)}원`}
                               </span>
                             </div>
                             {Number(limitQuote.executionPreview.remainingQuantity || 0) > 0 && (
