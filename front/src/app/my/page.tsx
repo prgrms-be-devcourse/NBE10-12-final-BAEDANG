@@ -48,6 +48,9 @@ export default function MyPage() {
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
+  const [ledgerCursor, setLedgerCursor] = useState<string | null>(null);
+  const [ledgerHasNext, setLedgerHasNext] = useState(false);
+  const [ledgerLoadingMore, setLedgerLoadingMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -102,6 +105,8 @@ export default function MyPage() {
         setAccount(acc);
         setHoldings(holdingsRes.items);
         setLedger(ledgerRes.items);
+        setLedgerCursor(ledgerRes.nextCursor);
+        setLedgerHasNext(ledgerRes.hasNext);
         setOrders(ordersRes.items);
         setOrdersCursor(ordersRes.nextCursor);
         setOrdersHasNext(ordersRes.hasNext);
@@ -185,7 +190,16 @@ export default function MyPage() {
               .then(([acc, holdingsRes, ledgerRes]) => {
                 setAccount(acc);
                 setHoldings(holdingsRes.items);
-                setLedger(ledgerRes.items);
+                setLedger((prev) => {
+                  if (prev.length <= ledgerRes.items.length) {
+                    setLedgerCursor(ledgerRes.nextCursor);
+                    setLedgerHasNext(ledgerRes.hasNext);
+                    return ledgerRes.items;
+                  }
+                  const existingIds = new Set(prev.map((l) => l.entryId));
+                  const newItems = ledgerRes.items.filter((l) => !existingIds.has(l.entryId));
+                  return [...newItems, ...prev];
+                });
               })
               .catch(() => {});
           }
@@ -247,6 +261,8 @@ export default function MyPage() {
       getLedger()
         .then((ledgerRes) => {
           setLedger(ledgerRes.items);
+          setLedgerCursor(ledgerRes.nextCursor);
+          setLedgerHasNext(ledgerRes.hasNext);
         })
         .catch(() => {});
     }
@@ -266,6 +282,8 @@ export default function MyPage() {
       setAccount(freshAccount);
       setHoldings(freshHoldings.items);
       setLedger(freshLedger.items);
+      setLedgerCursor(freshLedger.nextCursor);
+      setLedgerHasNext(freshLedger.hasNext);
       setResetModalOpen(false);
     } catch {
       setResetError("초기화에 실패했어요. 잠시 후 다시 시도해주세요.");
@@ -291,6 +309,23 @@ export default function MyPage() {
       .finally(() => setOrdersLoadingMore(false));
   }
 
+  function loadMoreLedger() {
+    if (ledgerLoadingMore || !ledgerCursor) return;
+    setLedgerLoadingMore(true);
+    getLedger({ cursor: ledgerCursor })
+      .then((res) => {
+        setLedger((prev) => {
+          const existingIds = new Set(prev.map((l) => l.entryId));
+          const additions = res.items.filter((l) => !existingIds.has(l.entryId));
+          return [...prev, ...additions];
+        });
+        setLedgerCursor(res.nextCursor);
+        setLedgerHasNext(res.hasNext);
+      })
+      .catch(() => {})
+      .finally(() => setLedgerLoadingMore(false));
+  }
+
   // 주문 취소가 성공하면(모달 안에서) 목록의 해당 행과 모달 둘 다 최신 상태로
   // 바꾸고, 잠겨 있던 예약금/주식 수량이 풀렸으므로 계좌 요약과 보유주식도 다시 조회한다.
   function handleOrderUpdated(updated: OrderDetailResponse) {
@@ -300,7 +335,16 @@ export default function MyPage() {
       .then(([acc, holdingsRes, ledgerRes]) => {
         setAccount(acc);
         setHoldings(holdingsRes.items);
-        setLedger(ledgerRes.items);
+        setLedger((prev) => {
+          if (prev.length <= ledgerRes.items.length) {
+            setLedgerCursor(ledgerRes.nextCursor);
+            setLedgerHasNext(ledgerRes.hasNext);
+            return ledgerRes.items;
+          }
+          const existingIds = new Set(prev.map((l) => l.entryId));
+          const newItems = ledgerRes.items.filter((l) => !existingIds.has(l.entryId));
+          return [...newItems, ...prev];
+        });
       })
       .catch(() => {});
   }
@@ -621,53 +665,66 @@ export default function MyPage() {
           체결 내역이 없어요
         </div>
       ) : (
-        <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
-          <div
-            className="grid px-5 py-2.5 text-[12px] font-bold"
-            style={{
-              gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
-              columnGap: "20px",
-              borderBottom: "1px solid var(--line2)",
-              color: "var(--mut2)",
-            }}
-          >
-            <span>구분</span>
-            <span>설명</span>
-            <span className="text-right">증감액</span>
-            <span className="text-right">잔액</span>
-            <span className="text-right">발생시각</span>
-          </div>
-          {ledger.map((entry) => {
-            const amount = toDecimal(entry.amount);
-            const isPositive = !amount || amount.greaterThanOrEqualTo(0);
-            return (
-              <div
-                key={entry.entryId}
-                className="grid items-center px-5 py-3 text-[15px]"
-                style={{
-                  gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
-                  columnGap: "20px",
-                  borderBottom: "1px solid var(--line2)",
-                }}
-              >
-                <span>
-                  <LedgerBadge type={entry.entryType} />
-                </span>
-                <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
-                <span
-                  className="text-right tabular-nums font-semibold"
-                  style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
+        <>
+          <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            <div
+              className="grid px-5 py-2.5 text-[12px] font-bold"
+              style={{
+                gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
+                columnGap: "20px",
+                borderBottom: "1px solid var(--line2)",
+                color: "var(--mut2)",
+              }}
+            >
+              <span>구분</span>
+              <span>설명</span>
+              <span className="text-right">증감액</span>
+              <span className="text-right">잔액</span>
+              <span className="text-right">발생시각</span>
+            </div>
+            {ledger.map((entry) => {
+              const amount = toDecimal(entry.amount);
+              const isPositive = !amount || amount.greaterThanOrEqualTo(0);
+              return (
+                <div
+                  key={entry.entryId}
+                  className="grid items-center px-5 py-3 text-[15px]"
+                  style={{
+                    gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
+                    columnGap: "20px",
+                    borderBottom: "1px solid var(--line2)",
+                  }}
                 >
-                  {formatSigned(entry.amount)}
-                </span>
-                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
-                  {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                </span>
-              </div>
-            );
-          })}
-        </div>
+                  <span>
+                    <LedgerBadge type={entry.entryType} />
+                  </span>
+                  <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                  <span
+                    className="text-right tabular-nums font-semibold"
+                    style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
+                  >
+                    {formatSigned(entry.amount)}
+                  </span>
+                  <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
+                  <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                    {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {ledgerHasNext && (
+            <button
+              type="button"
+              onClick={loadMoreLedger}
+              disabled={ledgerLoadingMore}
+              className="mt-2.5 w-full cursor-pointer rounded-xl py-2.5 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--card)", color: "var(--ink)" }}
+            >
+              {ledgerLoadingMore ? "불러오는 중…" : "더 보기"}
+            </button>
+          )}
+        </>
       )}
       </Reveal>
 
