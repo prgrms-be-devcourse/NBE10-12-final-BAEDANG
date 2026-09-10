@@ -21,7 +21,7 @@ public enum MarketCountry {
         this.defaultCurrency = defaultCurrency;
     }
 
-    /** 거래소 현지 날짜 계산용입니다. 일봉 저장·표시 등 KST 고정 정책에는 대체 적용하지 않습니다. */
+    /** 시세·일봉의 거래소 현지 거래일 계산용입니다. 실제 시각의 KST 표시는 별도 변환합니다. */
     public ZoneId zoneId() {
         return zoneId;
     }

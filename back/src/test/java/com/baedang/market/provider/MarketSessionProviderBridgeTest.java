@@ -83,8 +83,6 @@ class MarketSessionProviderBridgeTest {
     void KR과_US는_서로_다른_캐시_키라_한쪽_캐싱이_다른쪽_호출에_영향을_주지_않는다() {
         when(marketCalendarPort.fetchKrMarketCalendar(DATE))
                 .thenReturn(openDay(MarketCountry.KR, KR_OPEN, KR_CLOSE));
-        when(marketCalendarPort.fetchUsMarketCalendar(DATE))
-                .thenReturn(closedDay(MarketCountry.US, null));
         when(marketCalendarPort.fetchUsMarketCalendar(DATE.minusDays(1)))
                 .thenReturn(closedDay(MarketCountry.US, null));
 
@@ -94,20 +92,19 @@ class MarketSessionProviderBridgeTest {
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
 
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(DATE);
-        verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE);
-        // US는 오늘이 닫혀 있으면 전날도 확인하는 기존 로직 그대로 — 그 전날 조회도 캐싱된다.
+        verify(marketCalendarPort, org.mockito.Mockito.never()).fetchUsMarketCalendar(DATE);
+        // 한국 날짜와 무관하게 America/New_York 현지 날짜만 조회한다.
         verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE.minusDays(1));
     }
 
     @Test
-    void US_전날_확인도_캐싱된다() {
-        when(marketCalendarPort.fetchUsMarketCalendar(DATE)).thenReturn(closedDay(MarketCountry.US, null));
+    void US_현지_날짜만_조회하고_캐싱한다() {
         when(marketCalendarPort.fetchUsMarketCalendar(DATE.minusDays(1))).thenReturn(closedDay(MarketCountry.US, null));
 
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
 
-        verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE);
+        verify(marketCalendarPort, org.mockito.Mockito.never()).fetchUsMarketCalendar(DATE);
         verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE.minusDays(1));
     }
 

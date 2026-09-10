@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 
 /**
  * {@link MarketSessionProvider}의 구현체.
@@ -29,8 +28,6 @@ import java.time.ZoneId;
 @Component
 public class MarketSessionProviderBridge implements MarketSessionProvider {
 
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
-
     private final MarketCalendarPort marketCalendarPort;
 
     public MarketSessionProviderBridge(MarketCalendarPort marketCalendarPort) {
@@ -39,19 +36,8 @@ public class MarketSessionProviderBridge implements MarketSessionProvider {
 
     @Override
     public MarketSessionStatus currentSession(MarketCountry marketCountry, Instant now) {
-        LocalDate today = now.atZone(KST).toLocalDate();
-
-        if (marketCountry == MarketCountry.KR) {
-            return statusOf(krCalendar(today), now);
-        }
-
-        // 미국 정규장은 KST 기준 자정을 넘기므로(예: 22:30~익일 05:00),
-        // 오늘 날짜 조회만으로는 자정 이후 시간대를 놓칠 수 있어 전날 조회분도 함께 확인한다.
-        MarketSessionStatus todayStatus = statusOf(usCalendar(today), now);
-        if (todayStatus.open()) {
-            return todayStatus;
-        }
-        return statusOf(usCalendar(today.minusDays(1)), now);
+        LocalDate today = now.atZone(marketCountry.zoneId()).toLocalDate();
+        return statusOf(marketCountry == MarketCountry.KR ? krCalendar(today) : usCalendar(today), now);
     }
 
     private MarketCalendarDay krCalendar(LocalDate date) {
