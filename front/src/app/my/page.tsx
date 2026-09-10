@@ -518,7 +518,7 @@ export default function MyPage() {
             <span>설명</span>
             <span className="text-right">증감액</span>
             <span className="text-right">잔액</span>
-            <span>발생시각</span>
+            <span className="text-right">발생시각</span>
           </div>
           {ledger.map((entry) => {
             const amount = toDecimal(entry.amount);
@@ -544,7 +544,7 @@ export default function MyPage() {
                   {formatSigned(entry.amount)}
                 </span>
                 <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>
