@@ -16,7 +16,15 @@ import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.LimitExecutionAttempt;
 import com.baedang.trading.model.LimitExecutionBook;
 import com.baedang.trading.model.LimitExecutionOutcome;
+import com.baedang.trading.model.LimitExecutionPreparation;
+import com.baedang.trading.model.LimitOrderCommand;
+import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.repository.LimitExecutionCandidateRepository;
+import com.baedang.trading.repository.LimitExecutionCandidateRepository.Group;
+import com.baedang.trading.scheduler.LimitExecutionProgress;
+import com.baedang.trading.scheduler.LimitOrderExecutionWorker;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -45,10 +53,13 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.UUID;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
@@ -88,6 +99,8 @@ class LimitOrderExecutionIntegrationTest {
     @Autowired LimitOrderExecutionTransactionService transactions;
     @Autowired LimitOrderTransactionService lifecycle;
     @Autowired OrderBookPublicationService publication;
+    @Autowired LimitExecutionProgress progress;
+    @Autowired LimitOrderPricing pricing;
     @Autowired LimitExecutionBookReader books;
     @Autowired TradeOrderRepository orders;
     @Autowired StockRepository stocks;
@@ -119,7 +132,7 @@ class LimitOrderExecutionIntegrationTest {
         assertThat(preview.avgExecutionPrice()).isEqualTo("99.67");
         assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
         long order = place("BUY","3","100");
-        assertThat(execution.execute(order).executionCount()).isEqualTo(2);
+        assertThat(execute(order).executionCount()).isEqualTo(2);
         assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
         assertThat(number("SELECT locked_cash FROM account WHERE account_id=?",account)).isZero();
         assertThat(number("SELECT net_amount FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo(preview.netAmountKrw());
@@ -139,7 +152,7 @@ class LimitOrderExecutionIntegrationTest {
         long order = place("BUY","3","100");
         long other = place("BUY","1","100");
         rate("1700");
-        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(execute(order).executionCount()).isEqualTo(1);
         assertThat(orders.findById(order).orElseThrow().getFilledQuantity()).isEqualByComparingTo("2");
         assertThat(orders.findById(order).orElseThrow().getReservedCash()).isEqualByComparingTo("80008");
         admission.cancel(user,order);
@@ -154,7 +167,7 @@ class LimitOrderExecutionIntegrationTest {
         jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,3,0,90,1400,270,378000,?)",account,stock,NOW.atOffset(ZoneOffset.UTC));
         book("BID","100",1,1);
         long order = place("SELL","2","99");
-        assertThat(execution.execute(order).executionCount()).isEqualTo(2);
+        assertThat(execute(order).executionCount()).isEqualTo(2);
         assertThat(number("SELECT quantity FROM holding WHERE account_id=?",account)).isEqualByComparingTo("1");
         assertThat(number("SELECT locked_quantity FROM holding WHERE account_id=?",account)).isZero();
         assertThat(number("SELECT usd_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("90");
@@ -175,7 +188,7 @@ class LimitOrderExecutionIntegrationTest {
         doAnswer(inv -> { if (calls.incrementAndGet() == 2) throw new IllegalStateException("원장 저장 실패"); return inv.callRealMethod(); })
                 .when(org.springframework.test.util.AopTestUtils.<LedgerService>getUltimateTargetObject(ledger))
                 .recordBuy(any(),any(),any(),any());
-        assertThatThrownBy(() -> execution.execute(order)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> execute(order)).isInstanceOf(IllegalStateException.class);
         assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
         assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?",order)).isZero();
         assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
@@ -294,7 +307,7 @@ class LimitOrderExecutionIntegrationTest {
         assertThat(number("SELECT count(*) FROM order_book_level WHERE book_version_id=? AND remaining_quantity<>initial_quantity", newVersion.get())).isZero();
 
         // 다음 정상 시도는 새 호가만 사용하고 이전 체결의 누적 금액을 이어받습니다.
-        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.EXECUTED);
+        assertThat(execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.EXECUTED);
         assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
         assertThat(number("SELECT sum(quantity) FROM trade_execution WHERE order_id=?", order)).isEqualByComparingTo("2");
         assertThat(number("SELECT coalesce(sum(e.quantity),0) FROM trade_execution e JOIN order_book_level l ON l.level_id=e.book_level_id WHERE e.order_id=? AND l.book_version_id=?", order, oldVersion))
@@ -309,15 +322,20 @@ class LimitOrderExecutionIntegrationTest {
     }
 
     private GeneratedOrderBook replacementBook() {
+        return replacementBook("100");
+    }
+
+    private GeneratedOrderBook replacementBook(String firstAsk) {
+        BigDecimal bestAsk = new BigDecimal(firstAsk);
         List<GeneratedOrderBookLevel> levels = new ArrayList<>();
         for (OrderBookSide side : List.of(OrderBookSide.ASK, OrderBookSide.BID)) {
             for (int depth = 1; depth <= 10; depth++) {
                 BigDecimal distance = new BigDecimal("0.01").multiply(BigDecimal.valueOf(depth - 1));
-                BigDecimal price = side == OrderBookSide.ASK ? new BigDecimal("100").add(distance) : new BigDecimal("99.98").subtract(distance);
+                BigDecimal price = side == OrderBookSide.ASK ? bestAsk.add(distance) : bestAsk.subtract(new BigDecimal("0.02")).subtract(distance);
                 levels.add(new GeneratedOrderBookLevel(side, depth, price, new BigDecimal("3")));
             }
         }
-        return new GeneratedOrderBook(stock, new BigDecimal("99.99"), "USD", NOW, NOW, "test", 2L, levels);
+        return new GeneratedOrderBook(stock, bestAsk.subtract(new BigDecimal("0.01")), "USD", NOW, NOW, "test", 2L, levels);
     }
 
     /** 첫 서비스의 실제 트랜잭션을 유지하고, 두 번째 연결이 그 잠금을 기다린 것을 확인한 뒤 커밋합니다. */
@@ -405,10 +423,16 @@ class LimitOrderExecutionIntegrationTest {
         jdbc.update("UPDATE order_book_version SET currency='KRW' WHERE book_version_id=?",version);
         clearInvocations(rates);
         long order = admission.place(user,new LimitOrderRequest(account,UUID.randomUUID().toString(),symbol,"KR","BUY","3","100","KRW")).orderId();
-        assertThat(execution.execute(order).executionCount()).isEqualTo(2);
+        assertThat(execute(order).executionCount()).isEqualTo(2);
         verifyNoInteractions(rates);
-        assertThatThrownBy(() -> new TransactionTemplate(manager).execute(tx -> execution.execute(order)))
+        assertThatThrownBy(() -> new TransactionTemplate(manager).execute(tx -> execute(order)))
                 .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+    }
+
+    private LimitExecutionOutcome execute(long orderId) {
+        com.baedang.trading.entity.TradeOrder order = orders.findById(orderId).orElseThrow();
+        com.baedang.trading.model.LimitExecutionPreparation prepared = execution.prepare(order.getStockId(), order.getSide());
+        return prepared.available() ? execution.execute(orderId, prepared) : LimitExecutionOutcome.deferred(prepared.reason());
     }
 
     private long place(String side,String quantity,String price) {
@@ -423,7 +447,7 @@ class LimitOrderExecutionIntegrationTest {
         clock.setCurrent(NOW.plusNanos(900));
         when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
                 prepared.atOffset(ZoneOffset.UTC),prepared.atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)));
-        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(execute(order).executionCount()).isEqualTo(1);
         assertThat(jdbc.queryForObject("SELECT executed_at FROM trade_execution WHERE order_id=?",java.time.OffsetDateTime.class,order).toInstant()).isEqualTo(NOW);
     }
 
@@ -433,10 +457,10 @@ class LimitOrderExecutionIntegrationTest {
         long order = place("BUY","1","100");
         when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
                 NOW.minusSeconds(10).atOffset(ZoneOffset.UTC),NOW.minusSeconds(10).atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC)));
-        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.CONTEXT_EXPIRED);
+        assertThat(execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.CONTEXT_EXPIRED);
         jdbc.update("UPDATE order_book_version SET quote_at=?,generated_at=? WHERE book_version_id=?",NOW.plusSeconds(1).atOffset(ZoneOffset.UTC),NOW.plusSeconds(1).atOffset(ZoneOffset.UTC),version);
         clearInvocations(rates);
-        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
+        assertThat(execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
         verifyNoInteractions(rates);
         assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
     }
@@ -457,28 +481,27 @@ class LimitOrderExecutionIntegrationTest {
         List<String> plan = jdbc.queryForList("""
                 EXPLAIN (ANALYZE, BUFFERS) SELECT order_id,limit_price,ordered_at FROM trade_order
                 WHERE order_type='LIMIT' AND status IN ('PENDING','PARTIALLY_FILLED')
-                  AND quantity > filled_quantity AND expires_at > ? AND order_id <= ?
+                  AND quantity > filled_quantity AND expires_at > ?
                   AND stock_id=? AND side='BUY'
                 ORDER BY limit_price DESC,ordered_at,order_id LIMIT 50
-                """,String.class,NOW.atOffset(ZoneOffset.UTC),candidates.upperBound(),stock);
+                """,String.class,NOW.atOffset(ZoneOffset.UTC),stock);
         assertThat(String.join("\n",plan)).contains("ix_order_execute_buy").doesNotContain("Seq Scan");
     }
 
     @Test
-    void 후보쿼리는_가격시간순으로_페이지를_잇고_새접수는_다음순회에서_처리한다() {
+    void 후보쿼리는_가격시간순으로_페이지를_잇고_새선순위도_즉시_포함한다() {
         long lower = place("BUY","1","99");
         long high = place("BUY","1","101");
         long same = place("BUY","1","101");
-        long upper = candidates.upperBound();
         long newer = place("BUY","1","102");
         com.baedang.trading.repository.LimitExecutionCandidateRepository.Group group =
                 new com.baedang.trading.repository.LimitExecutionCandidateRepository.Group(stock,OrderSide.BUY);
         List<com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate> page =
-                candidates.page(group,null,upper,NOW.atOffset(ZoneOffset.UTC),1);
-        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(high);
-        page = candidates.page(group,page.getLast(),upper,NOW.atOffset(ZoneOffset.UTC),50);
-        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(same,lower);
-        assertThat(candidates.page(group,null,candidates.upperBound(),NOW.atOffset(ZoneOffset.UTC),1).getFirst().orderId()).isEqualTo(newer);
+                candidates.page(group,null,NOW.atOffset(ZoneOffset.UTC),1);
+        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(newer);
+        page = candidates.page(group,page.getLast(),NOW.atOffset(ZoneOffset.UTC),50);
+        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(high,same,lower);
+        assertThat(candidates.page(group,null,NOW.atOffset(ZoneOffset.UTC),1).getFirst().orderId()).isEqualTo(newer);
     }
 
     @Test
@@ -488,12 +511,101 @@ class LimitOrderExecutionIntegrationTest {
         long low = place("SELL","1","99");
         com.baedang.trading.repository.LimitExecutionCandidateRepository.Group group =
                 new com.baedang.trading.repository.LimitExecutionCandidateRepository.Group(stock,OrderSide.SELL);
-        assertThat(candidates.page(group,null,candidates.upperBound(),NOW.atOffset(ZoneOffset.UTC),50))
+        assertThat(candidates.page(group,null,NOW.atOffset(ZoneOffset.UTC),50))
                 .extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(low,high);
-        assertThat(candidates.page(group,null,candidates.upperBound(),NOW.plusSeconds(3600).atOffset(ZoneOffset.UTC),50)).isEmpty();
+        assertThat(candidates.page(group,null,NOW.plusSeconds(3600).atOffset(ZoneOffset.UTC),50)).isEmpty();
     }
     private void rate(String value) {
         when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal(value),NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)));
+    }
+
+    @Test
+    void 새호가물량은_다음틱에도_부분체결된_선순위에게_먼저_배정한다() {
+        book("ASK", "100", 1, 1);
+        long high = place("BUY", "2", "100");
+        long low = place("BUY", "1", "99");
+        LimitOrderExecutionWorker worker = scopedWorker();
+        worker.tick();
+        assertThat(orders.findById(high).orElseThrow().getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
+        publication.publish(replacementBook("99"), NOW.plusSeconds(3600)).orElseThrow();
+        worker.tick();
+        assertThat(orders.findById(high).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(orders.findById(low).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        worker.tick();
+        assertThat(orders.findById(low).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(number("SELECT sum(quantity) FROM trade_execution WHERE order_id IN (?,?)", high, low)).isEqualByComparingTo("3");
+        assertCashConservation();
+    }
+
+    @Test
+    void 동일호가라도_환율하락시_동결부족인_선순위_잔여분을_먼저_체결한다() {
+        book("ASK", "100", 3, 1);
+        long high = place("BUY", "2", "101");
+        long low = place("BUY", "1", "100");
+        LimitOrderExecutionWorker worker = scopedWorker();
+        rate("2500");
+        worker.tick();
+        assertThat(orders.findById(high).orElseThrow().getFilledQuantity()).isEqualByComparingTo("1");
+        rate("300");
+        worker.tick();
+        assertThat(orders.findById(high).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(orders.findById(low).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(number("SELECT count(DISTINCT exchange_rate) FROM trade_execution WHERE order_id=?", high)).isEqualByComparingTo("2");
+        assertCashConservation();
+    }
+
+    @Test
+    void 접수롤백은_커서를_유지하고_새선순위_접수커밋은_다음틱에_반영한다() {
+        book("ASK", "101", 3, 1);
+        long low = place("BUY", "1", "100");
+        LimitOrderExecutionWorker worker = scopedWorker();
+        worker.tick();
+        Group group = new Group(stock, OrderSide.BUY);
+        LimitExecutionPreparation market = execution.prepare(stock, OrderSide.BUY);
+        LimitExecutionProgress.Position before = progress.position(group, market);
+        assertThat(before.after().orderId()).isEqualTo(low);
+        LimitOrderCommand rolledBack = new LimitOrderCommand(account, UUID.randomUUID(),
+                new OrderTerms(symbol, MarketCountry.US, OrderSide.BUY, BigDecimal.ONE), new BigDecimal("103"), "USD");
+        new TransactionTemplate(manager).executeWithoutResult(tx -> {
+            lifecycle.accept(user, rolledBack, market.context(), pricing.calculate(rolledBack, market.context().executionRate()));
+            tx.setRollbackOnly();
+        });
+        assertThat(progress.isCurrent(group, before)).isTrue();
+        assertThat(number("SELECT count(*) FROM trade_order WHERE client_order_id=?", rolledBack.clientOrderId())).isZero();
+
+        long high = place("BUY", "1", "102");
+        assertThat(progress.isCurrent(group, before)).isFalse();
+        worker.tick();
+        assertThat(orders.findById(high).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(orders.findById(low).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertCashConservation();
+    }
+
+    @Test
+    void 구버전에서_선정된_후순위는_새호가로_자동체결하지않는다() {
+        book("ASK", "100", 1, 1);
+        long high = place("BUY", "1", "101");
+        long low = place("BUY", "1", "100");
+        LimitExecutionPreparation oldMarket = execution.prepare(stock, OrderSide.BUY);
+        publication.publish(replacementBook(), NOW.plusSeconds(3600)).orElseThrow();
+        assertThat(execution.execute(low, oldMarket).reason()).isEqualTo(LimitExecutionOutcome.Reason.PRIORITY_CHANGED);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?", low)).isZero();
+        scopedWorker().tick();
+        assertThat(orders.findById(high).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(orders.findById(low).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+    }
+
+    private LimitOrderExecutionWorker scopedWorker() {
+        // 다른 테스트의 종목은 제외하되 후보 페이지·체결·접수 이벤트는 실제 DB/서비스를 사용합니다.
+        Group group = new Group(stock, OrderSide.BUY);
+        LimitExecutionCandidateRepository scoped = new LimitExecutionCandidateRepository(jdbc) {
+            @Override
+            public Optional<Group> nextGroup(Group after, OffsetDateTime now) {
+                return after == null ? Optional.of(group) : Optional.empty();
+            }
+        };
+        return new LimitOrderExecutionWorker(scoped, execution, progress, new SimpleMeterRegistry(), clock,
+                50, 1, 1, Duration.ofSeconds(5));
     }
 
     @Test
@@ -501,11 +613,11 @@ class LimitOrderExecutionIntegrationTest {
         jdbc.update("UPDATE stock SET is_ranked=false WHERE stock_id=?",stock);
         long order = place("BUY","1","100");
         clearInvocations(rates);
-        assertThat(execution.execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
+        assertThat(execute(order).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
         verifyNoInteractions(rates);
         assertThat(stocks.isQuoteTarget(stock,NOW.atOffset(ZoneOffset.UTC))).isTrue();
         book("ASK","100",1,1);
-        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(execute(order).executionCount()).isEqualTo(1);
         assertThat(stocks.isQuoteTarget(stock,NOW.atOffset(ZoneOffset.UTC))).isFalse();
     }
 
@@ -514,14 +626,14 @@ class LimitOrderExecutionIntegrationTest {
         jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,3,0,90,1400,270,378000,?)",account,stock,NOW.atOffset(ZoneOffset.UTC));
         book("BID","100",1,1);
         long order = place("SELL","2","100");
-        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(execute(order).executionCount()).isEqualTo(1);
         Long historicalLevel = jdbc.queryForObject("SELECT book_level_id FROM trade_execution WHERE order_id=?",Long.class,order);
         jdbc.update("UPDATE order_book_version SET is_active=false,closed_at=? WHERE book_version_id=?",NOW.atOffset(ZoneOffset.UTC),version);
         jdbc.update("DELETE FROM order_book_version WHERE book_version_id=?",version);
         assertThat(number("SELECT count(*) FROM order_book_level WHERE level_id=?",historicalLevel)).isZero();
         book("BID","100",1,1);
         rate("1300");
-        assertThat(execution.execute(order).executionCount()).isEqualTo(1);
+        assertThat(execute(order).executionCount()).isEqualTo(1);
         assertThat(number("SELECT tax FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo("14");
         assertThat(number("SELECT net_amount FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo("269959");
         assertThat(number("SELECT count(*) FROM ledger_entry WHERE order_id=?",order)).isEqualByComparingTo("2");
@@ -576,7 +688,7 @@ class LimitOrderExecutionIntegrationTest {
             }));
             try {
                 assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
-                Future<LimitExecutionOutcome> fill = pool.submit(() -> execution.execute(order));
+                Future<LimitExecutionOutcome> fill = pool.submit(() -> execute(order));
                 assertThat(fill.get(10,TimeUnit.SECONDS).reason()).isEqualTo(LimitExecutionOutcome.Reason.LOCK_BUSY);
             } finally { release.countDown(); }
             blocker.get(5,TimeUnit.SECONDS);

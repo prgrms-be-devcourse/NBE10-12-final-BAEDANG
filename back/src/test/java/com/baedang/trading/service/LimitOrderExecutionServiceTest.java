@@ -42,6 +42,13 @@ class LimitOrderExecutionServiceTest {
     private final LimitOrderExecutionService service = new LimitOrderExecutionService(orders,stocks,statuses,sessions,rates,books,
             transactions,policy,Clock.fixed(now,ZoneOffset.UTC));
 
+    private com.baedang.trading.model.LimitExecutionPreparation selected() {
+        return com.baedang.trading.model.LimitExecutionPreparation.available(2L, OrderSide.BUY,
+                new LimitExecutionBook(3L, 0L, now, now, List.of()),
+                new com.baedang.trading.model.OrderMarketContext(MarketCountry.KR, true, now.plusSeconds(3600),
+                        com.baedang.trading.model.ExecutionRateEvidence.krw(now.atOffset(ZoneOffset.UTC)), now));
+    }
+
     @BeforeEach
     void setup() {
         when(orders.findById(1L)).thenReturn(Optional.of(order));
@@ -66,7 +73,7 @@ class LimitOrderExecutionServiceTest {
                 Optional.of(new LimitExecutionBook(3L,1L,now,now,List.of())));
         when(transactions.execute(any())).thenReturn(
                 LimitExecutionOutcome.deferred(LimitExecutionOutcome.Reason.BOOK_CHANGED),new LimitExecutionOutcome(1,LimitExecutionOutcome.Reason.EXECUTED));
-        assertThat(service.execute(1L).executionCount()).isEqualTo(1);
+        assertThat(service.execute(1L, selected()).executionCount()).isEqualTo(1);
         ArgumentCaptor<com.baedang.trading.model.LimitExecutionAttempt> attempts = ArgumentCaptor.forClass(com.baedang.trading.model.LimitExecutionAttempt.class);
         verify(transactions,times(2)).execute(attempts.capture());
         assertThat(attempts.getAllValues()).extracting(com.baedang.trading.model.LimitExecutionAttempt::revision).containsExactly(0L,1L);
@@ -76,8 +83,30 @@ class LimitOrderExecutionServiceTest {
     @Test
     void 락충돌이_반복되어도_두번까지만_실행한다() {
         when(transactions.execute(any())).thenThrow(new org.springframework.dao.CannotAcquireLockException("busy"));
-        assertThat(service.execute(1L).reason()).isEqualTo(LimitExecutionOutcome.Reason.LOCK_BUSY);
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.LOCK_BUSY);
         verify(transactions,times(2)).execute(any());
+    }
+
+    @Test
+    void 락후_호가충돌의_원인이_새버전이면_재시도_체결없이_재선정한다() {
+        when(books.read(stock, OrderSide.BUY, now)).thenReturn(
+                Optional.of(new LimitExecutionBook(3L, 0L, now, now, List.of())),
+                Optional.of(new LimitExecutionBook(4L, 0L, now, now, List.of())));
+        when(transactions.execute(any())).thenReturn(LimitExecutionOutcome.deferred(LimitExecutionOutcome.Reason.BOOK_CHANGED));
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.PRIORITY_CHANGED);
+        verify(transactions, times(1)).execute(any());
+    }
+
+    @Test
+    void 후보선정후_환율변경은_체결전에_재선정을_요청한다() {
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
+        when(rates.currentUsdKrwSnapshot()).thenReturn(new com.baedang.market.port.ExecutionExchangeRateSnapshot(
+                new java.math.BigDecimal("1400"), now.atOffset(ZoneOffset.UTC), now.atOffset(ZoneOffset.UTC), now.plusSeconds(60).atOffset(ZoneOffset.UTC)));
+        com.baedang.trading.model.LimitExecutionPreparation prepared = service.prepare(2L, OrderSide.BUY);
+        when(rates.currentUsdKrwSnapshot()).thenReturn(new com.baedang.market.port.ExecutionExchangeRateSnapshot(
+                new java.math.BigDecimal("1300"), now.atOffset(ZoneOffset.UTC), now.atOffset(ZoneOffset.UTC), now.plusSeconds(60).atOffset(ZoneOffset.UTC)));
+        assertThat(service.execute(1L, prepared).reason()).isEqualTo(LimitExecutionOutcome.Reason.PRIORITY_CHANGED);
+        verifyNoInteractions(transactions);
     }
 
     @Test
@@ -86,7 +115,7 @@ class LimitOrderExecutionServiceTest {
             when(order.getExecutionCount()).thenReturn(1);
             return LimitExecutionOutcome.deferred(LimitExecutionOutcome.Reason.BOOK_CHANGED);
         });
-        assertThat(service.execute(1L).reason()).isEqualTo(LimitExecutionOutcome.Reason.ORDER_CHANGED);
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.ORDER_CHANGED);
         verify(transactions,times(1)).execute(any());
     }
 
@@ -100,7 +129,7 @@ class LimitOrderExecutionServiceTest {
             return stock;
         });
         when(transactions.execute(any())).thenReturn(LimitExecutionOutcome.deferred(LimitExecutionOutcome.Reason.CONTEXT_EXPIRED));
-        delayed.execute(1L);
+        delayed.execute(1L, selected());
         ArgumentCaptor<com.baedang.trading.model.LimitExecutionAttempt> attempt = ArgumentCaptor.forClass(com.baedang.trading.model.LimitExecutionAttempt.class);
         verify(transactions).execute(attempt.capture());
         assertThat(attempt.getValue().context().checkedAt()).isEqualTo(now);
@@ -117,21 +146,21 @@ class LimitOrderExecutionServiceTest {
     @Test
     void 장외와_호가없음은_상태나_환율을_호출하지않는다() {
         when(sessions.currentSession(any(),any())).thenReturn(MarketSessionStatus.closed());
-        assertThat(service.execute(1L).reason()).isEqualTo(LimitExecutionOutcome.Reason.MARKET_CLOSED);
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.MARKET_CLOSED);
         verifyNoInteractions(statuses,rates,transactions);
         when(sessions.currentSession(any(),any())).thenReturn(new MarketSessionStatus(true,now.plusSeconds(3600)));
         when(books.read(stock,OrderSide.BUY,now)).thenReturn(Optional.empty());
-        assertThat(service.execute(1L).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.NO_BOOK);
         verifyNoInteractions(statuses,rates,transactions);
     }
 
     @Test
     void 상태불명이나_환율누락을_정상값으로_보정하지않는다() {
         when(statuses.requireCurrent(stock)).thenThrow(new com.baedang.global.error.BusinessException(com.baedang.global.error.ErrorCode.STOCK_STATUS_UNAVAILABLE));
-        assertThat(service.execute(1L).reason()).isEqualTo(LimitExecutionOutcome.Reason.STATUS_UNAVAILABLE);
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.STATUS_UNAVAILABLE);
         doReturn(stock).when(statuses).requireCurrent(stock);
         when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
-        assertThat(service.execute(1L).reason()).isEqualTo(LimitExecutionOutcome.Reason.CONTEXT_EXPIRED);
+        assertThat(service.execute(1L, selected()).reason()).isEqualTo(LimitExecutionOutcome.Reason.CONTEXT_EXPIRED);
         verifyNoInteractions(transactions);
     }
 }
