@@ -189,8 +189,8 @@ class ExchangeRateServiceTest {
                 COLLECTED_AT
         );
 
-        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
-                "USD", "KRW", from
+        when(exchangeRateRepository.findHistoryBuckets(
+                "USD", "KRW", from, NOW.atOffset(ZoneOffset.UTC), 3600
         )).thenReturn(List.of(first, second));
 
         ExchangeRateHistoryResponse response = service.getHistory("1d");
@@ -220,8 +220,8 @@ class ExchangeRateServiceTest {
                 COLLECTED_AT
         );
 
-        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
-                "USD", "KRW", OffsetDateTime.parse("2026-08-25T06:00:00Z")
+        when(exchangeRateRepository.findHistoryBuckets(
+                "USD", "KRW", OffsetDateTime.parse("2026-08-25T06:00:00Z"), NOW.atOffset(ZoneOffset.UTC), 3600
         )).thenReturn(List.of(exchangeRate));
 
         ExchangeRateHistoryResponse response = service.getHistory("1d");
@@ -233,8 +233,9 @@ class ExchangeRateServiceTest {
     @MethodSource("historyPeriods")
     @DisplayName("지원하는 period를 조회 시작 시각으로 변환한다")
     void t9_지원하는_period_조회(String period, OffsetDateTime expectedFrom) {
-        when(exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
-                "USD", "KRW", expectedFrom
+        when(exchangeRateRepository.findHistoryBuckets(
+                "USD", "KRW", expectedFrom, NOW.atOffset(ZoneOffset.UTC),
+                period.equals("1d") ? 3600 : period.equals("1y") ? 604800 : 86400
         )).thenReturn(List.of());
 
         ExchangeRateHistoryResponse response = service.getHistory(period);

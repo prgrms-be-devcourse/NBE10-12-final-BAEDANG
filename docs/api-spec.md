@@ -354,7 +354,7 @@ FX trend chart
   ]
 }
 ```
-Read from the `exchange_rate` table (collected every minute). The response uses `validFrom`; chart display groups observations into its existing time buckets.
+The database selects the last observation per bucket: `1d` uses 1 hour, `1w`/`1m`/`3m` use 1 day, and `1y` uses 7 days. Buckets use UTC Unix epoch alignment, matching the existing chart (7-day buckets are not ISO weeks). Only the requested start through now is included; empty buckets are omitted. The response preserves the selected original `validFrom` and unrounded display rate. At most 25/8/32/93/54 points respectively; no raw minute-history transfer to the browser.
 
 ---
 

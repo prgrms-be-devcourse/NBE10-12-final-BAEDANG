@@ -30,6 +30,26 @@ public interface ExchangeRateRepository extends JpaRepository<ExchangeRate, Long
     List<ExchangeRate> findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
             String baseCurrency, String quoteCurrency, OffsetDateTime from);
 
+    /** UTC epoch 기준 버킷별 마지막 원본 행만 반환합니다. 평균/반올림 없이 표시율 정밀도를 보존합니다. */
+    @Query(value = """
+            SELECT exchange_rate_id, base_currency, quote_currency, rate, mid_rate,
+                   valid_from, valid_until, collected_at
+            FROM (
+                SELECT DISTINCT ON (bucket) *
+                FROM (
+                    SELECT fx.*, floor(extract(epoch FROM valid_from) / :bucketSeconds) AS bucket
+                    FROM exchange_rate fx
+                    WHERE base_currency = :baseCurrency AND quote_currency = :quoteCurrency
+                      AND valid_from >= :from AND valid_from <= :until
+                ) observations
+                ORDER BY bucket, valid_from DESC
+            ) points
+            ORDER BY valid_from
+            """, nativeQuery = true)
+    List<ExchangeRate> findHistoryBuckets(@Param("baseCurrency") String baseCurrency,
+            @Param("quoteCurrency") String quoteCurrency, @Param("from") OffsetDateTime from,
+            @Param("until") OffsetDateTime until, @Param("bucketSeconds") int bucketSeconds);
+
     /**
      * 같은 원본 시각은 최신 수신 응답으로 갱신합니다. 늦게 저장된 과거 응답은 덮어쓰지 않습니다.
      * @return 1 이면 저장/갱신, 0 이면 더 오래되거나 동일한 수신 응답으로 무시

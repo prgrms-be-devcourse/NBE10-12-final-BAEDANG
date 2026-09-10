@@ -49,6 +49,26 @@ class ExchangeRateRepositoryIntegrationTest {
     @Autowired
     private EntityManager entityManager;
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(ints = {3600, 86400, 604800})
+    void 버킷별_마지막원본만_반환하고_조회범위밖과_미래값을_제외한다(int seconds) {
+        long epoch = COLLECTED_AT.toEpochSecond();
+        OffsetDateTime start = java.time.Instant.ofEpochSecond(Math.floorDiv(epoch, seconds) * seconds).atOffset(ZoneOffset.UTC);
+        int[] offsets = {-1, 0, 10, seconds - 1, seconds, seconds + 10, seconds + 11};
+        for (int offset : offsets) {
+            OffsetDateTime at = start.plusSeconds(offset);
+            exchangeRateRepository.upsertLatestObservation("USD", "KRW", new BigDecimal("1400.123456"),
+                    new BigDecimal("1398.654321"), at, at.plusHours(1), at);
+        }
+        List<ExchangeRate> points = exchangeRateRepository.findHistoryBuckets("USD", "KRW", start,
+                start.plusSeconds(seconds + 10), seconds);
+        assertThat(points).extracting(ExchangeRate::getValidFrom)
+                .containsExactly(start.plusSeconds(seconds - 1), start.plusSeconds(seconds + 10));
+        assertThat(points).extracting(ExchangeRate::getMidRate)
+                .containsOnly(new BigDecimal("1398.654321"));
+        assertThat(exchangeRateRepository.count()).isEqualTo(offsets.length);
+    }
+
     @Test
     void 오래된수신은_최신환율과_유효기간을_덮어쓰지않는다() {
         OffsetDateTime from = COLLECTED_AT.minusSeconds(5);

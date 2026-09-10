@@ -90,11 +90,18 @@ public class ExchangeRateService {
     }
 
     public ExchangeRateHistoryResponse getHistory(String period) {
-        OffsetDateTime from = periodStart(period);
+        OffsetDateTime now = clock.instant().atOffset(ZoneOffset.UTC);
+        String normalized = period == null ? "" : DomainNormalizer.lowerCode(period);
+        OffsetDateTime from = periodStart(normalized, now);
+        int bucketSeconds = switch (normalized) {
+            case "1d" -> 3600;
+            case "1y" -> 604800;
+            default -> 86400;
+        };
 
         List<ExchangeRateHistoryResponse.Item> items =
-                exchangeRateRepository.findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
-                        DEFAULT_BASE_CURRENCY, DEFAULT_QUOTE_CURRENCY, from
+                exchangeRateRepository.findHistoryBuckets(
+                        DEFAULT_BASE_CURRENCY, DEFAULT_QUOTE_CURRENCY, from, now, bucketSeconds
                 )
                         .stream()
                         .map(exchangeRate -> new ExchangeRateHistoryResponse.Item(
@@ -116,18 +123,14 @@ public class ExchangeRateService {
         return today.atStartOfDay(KST).toOffsetDateTime();
     }
 
-    private OffsetDateTime periodStart(String period) {
-        OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-
-        String normalized = period == null ? "" : DomainNormalizer.lowerCode(period);
-
+    private OffsetDateTime periodStart(String normalized, OffsetDateTime now) {
         return switch (normalized){
             case "1d" -> now.minusDays(1);
             case "1w" -> now.minusWeeks(1);
             case "1m" -> now.minusMonths(1);
             case "3m" -> now.minusMonths(3);
             case "1y" -> now.minusYears(1);
-            default -> throw new BusinessException(ErrorCode.INVALID_INPUT,"period="+period);
+            default -> throw new BusinessException(ErrorCode.INVALID_INPUT,"period="+normalized);
         };
     }
 }
