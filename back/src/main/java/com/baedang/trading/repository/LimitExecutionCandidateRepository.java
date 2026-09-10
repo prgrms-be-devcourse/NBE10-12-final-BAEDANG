@@ -37,13 +37,13 @@ public class LimitExecutionCandidateRepository {
         boolean buy = group.side() == OrderSide.BUY;
         String cursor = after == null ? "" : " AND (limit_price " + (buy ? "<" : ">")
                 + " ? OR (limit_price = ? AND (ordered_at, order_id) > (?, ?))) ";
-        List<Object> args = new ArrayList<>(List.of(now, group.stockId()));
+        List<Object> args = new ArrayList<>(List.of(now, group.stockId(), group.side().name()));
         if (after != null) {
             args.add(after.price()); args.add(after.price()); args.add(after.orderedAt()); args.add(after.orderId());
         }
         args.add(size);
         return jdbc.query("SELECT order_id, limit_price, ordered_at FROM trade_order WHERE " + ACTIVE
-                + " AND stock_id = ? AND side = '" + group.side().name() + "'" + cursor
+                + " AND stock_id = ? AND side = ?" + cursor
                 + " ORDER BY limit_price " + (buy ? "DESC" : "ASC") + ", ordered_at, order_id LIMIT ?",
                 (row, index) -> new Candidate(row.getLong("order_id"), row.getBigDecimal("limit_price"),
                         row.getObject("ordered_at", OffsetDateTime.class)), args.toArray());
