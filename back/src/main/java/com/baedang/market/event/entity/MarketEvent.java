@@ -39,8 +39,7 @@ public class MarketEvent {
     @Column(name = "event_type", nullable = false, length = 30)
     private MarketEventType eventType;
 
-    @Column(name = "circuit_breaker_stage")
-    private Integer circuitBreakerStage;
+    private Short circuitBreakerStage;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "sidecar_direction", length = 4)
@@ -75,7 +74,7 @@ public class MarketEvent {
             String sourceEventId,
             KrMarket market,
             MarketEventType eventType,
-            Integer circuitBreakerStage,
+            Short circuitBreakerStage,
             SidecarDirection sidecarDirection,
             Instant triggeredAt,
             Instant haltUntil,
@@ -117,7 +116,7 @@ public class MarketEvent {
             throw new IllegalArgumentException("circuit breaker stage must be between 1 and 3");
         }
         return new MarketEvent(source, sourceEventId, market, MarketEventType.CIRCUIT_BREAKER,
-                stage, null, triggeredAt, haltUntil, publishedAt, receivedAt, title, sourceUrl);
+                (short) stage, null, triggeredAt, haltUntil, publishedAt, receivedAt, title, sourceUrl);
     }
 
     public static MarketEvent sidecar(
@@ -172,7 +171,7 @@ public class MarketEvent {
     public String getSourceEventId() { return sourceEventId; }
     public KrMarket getMarket() { return market; }
     public MarketEventType getEventType() { return eventType; }
-    public Integer getCircuitBreakerStage() { return circuitBreakerStage; }
+    public Short getCircuitBreakerStage() { return circuitBreakerStage; }
     public SidecarDirection getSidecarDirection() { return sidecarDirection; }
     public OffsetDateTime getTriggeredAt() { return triggeredAt; }
     public OffsetDateTime getHaltUntil() { return haltUntil; }
