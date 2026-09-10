@@ -508,7 +508,7 @@ export default function MyPage() {
           <div
             className="grid px-5 py-2.5 text-[12px] font-bold"
             style={{
-              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
               columnGap: "20px",
               borderBottom: "1px solid var(--line2)",
               color: "var(--mut2)",
@@ -528,7 +528,7 @@ export default function MyPage() {
                 key={entry.entryId}
                 className="grid items-center px-5 py-3 text-[15px]"
                 style={{
-                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                  gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
                   columnGap: "20px",
                   borderBottom: "1px solid var(--line2)",
                 }}
