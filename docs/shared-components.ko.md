@@ -367,7 +367,8 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 ### 지정가 체결 공통 구성요소 (#122)
 
 - `LimitOrderExecutionPlanner.plan(...)`: 체결과 미리보기에서 공유하는 순수 호가 선택기입니다. 누적 차액은 `LimitOrderSettlementCalculator`를 사용하고 매수 가능 정수 수량은 이진 탐색합니다. DB/HTTP 의존성을 넣지 않습니다.
-- `LimitOrderExecutionService.execute(orderId)`: NEVER 경계에서 상태 캐시·세션·체결 환율을 준비한 뒤 DB 서비스를 호출합니다. 호가/락 충돌은 새 준비를 거쳐 최대 1회 재시도합니다.
+- `LimitOrderExecutionService.prepare(stockId, side)` / `execute(orderId, selectedPreparation)`: NEVER 경계입니다. 후보 선정 전에 준비하고 선정 당시 버전/환율을 실행에 전달합니다. 실행은 컨텍스트를 새로 준비하며 근거가 바뀌면 PRIORITY_CHANGED를 반환합니다. 같은 버전의 revision/금융 락 충돌만 최대 1회 재시도하며 후순위를 새 버전/환율에서 자동 재시도하지 않습니다.
+- `LimitExecutionProgress`: 단일 인스턴스의 종목·방향별 가격 커서를 bookVersion/환율 값에 연결하며 revision은 초기화 키가 아닙니다. `LimitOrderTransactionService`가 발행하는 `LimitOrderAcceptedEvent`의 AFTER_COMMIT 리스너는 읽어 둔 페이지를 무효화하고 새 주문이 커서보다 선순위일 때만 처음으로 돌아갑니다. 토큰으로 실행 중 시도가 오래된 진행 위치를 복원하지 못하게 합니다. 워커는 전체 순회 후 관찰되지 않은 그룹을 제거합니다. 다중 인스턴스 잠금이나 영속 주문 상태로 사용하지 않습니다.
 - `LimitOrderExecutionTransactionService.execute(attempt)`: 계좌 우선 REQUIRED 경계에서 공유 호가 잔량과 모든 금융 상태를 원자적으로 변경합니다. 상위 트랜잭션에서 직접 호출하지 않고 NEVER 오케스트레이터를 사용합니다. `LimitExecutionAttempt`는 기대 체결횟수와 버전/revision을 전달하며 사용자 가격/가변 잔액을 신뢰하는 입력이 아닙니다.
 - `LimitOrderPreviewService`: 같은 선택기를 사용하되 쓰기·자원 예약을 하지 않습니다. `LimitExecutionPreviewResponse.avgExecutionPrice`는 표시용 KRW 0 / USD 2자리이며 금액을 역산하는 데 사용하지 않습니다.
 - `Account.settleReservedBuy`, `Holding.settleReservedSell`: 자유 예수금/매도 가능 수량이 아니라 이미 동결된 자원을 소비합니다. 호출부가 주문별 한도를 검증하고 같은 금융 트랜잭션을 사용합니다. 전량 매수 후 남은 동결액은 명시적으로 해제합니다.
