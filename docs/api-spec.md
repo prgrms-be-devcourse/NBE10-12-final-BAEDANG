@@ -356,7 +356,7 @@ FX trend chart
 ```
 The database selects the last observation per bucket: `1d` uses 1 minute, `1w` 30 minutes, `1m` 2 hours, `3m` 6 hours, and `1y` 1 day. Buckets align to midnight in Asia/Seoul (KST). Only the requested start through now is included; empty buckets are omitted. The response preserves the selected original `validFrom` and unrounded display rate. Longer periods do not transfer raw minute history. Time-axis and crosshair labels use KST without a timezone suffix: `1d` crosshairs show `YYYY-MM-DD HH:mm`, while other periods show only `YYYY-MM-DD`, independently of graph granularity. Stored timestamps remain UTC.
 
-The history modal refreshes every minute while open and visible. Requests do not overlap; responses from a previous period or a closed modal are ignored. Refresh preserves the visible time range; failure retains the last chart with a warning and retries next cycle. Initial load and period changes fit the chart to the data.
+The history modal refreshes every minute while open and visible. Latest/history requests time out and abort after 10 seconds; disposal also aborts them. Requests do not overlap; late responses are ignored. Refresh follows new points only when the latest point was visible, preserving the zoom width; historical browsing retains its time range. Failure retains the last chart with a warning and retries next cycle. Initial load and period changes fit the chart to the data.
 
 ---
 

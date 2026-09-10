@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createChart, LineSeries, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
+import { createChart, LineSeries, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
 import { PillTabs } from "./PillTabs";
 import { useTheme } from "./ThemeProvider";
 import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRatePeriod } from "@/lib/api";
 import { resolveCssColor } from "@/lib/chart-colors";
-import { formatCrosshairTime, formatTickMark, isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
+import { formatCrosshairTime, formatTickMark, isTimeVisible, nextExchangeRateRange, toLinePoints } from "@/lib/exchange-rate-chart-data";
 import { formatNumber } from "@/lib/format";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
 import { createHistoryRefresh } from "@/lib/exchange-rate-history-refresh";
@@ -38,6 +38,7 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
   const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const fittedRef = useRef(false);
+  const lastPointRef = useRef<UTCTimestamp | undefined>(undefined);
 
   // 로딩/에러 상태 초기화는 기간을 바꾸는 시점(PillTabs onChange)에서 하고, 이 effect는
   // 요청 자체만 담당한다 — effect 본문에서 곧장 setState를 부르면
@@ -45,7 +46,7 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
   // 이벤트 핸들러로 옮기면 그 주석 없이도 깔끔하게 처리된다(제미나이 코드 리뷰 반영).
   useEffect(() => {
     const request = createHistoryRefresh(
-      () => getExchangeRateHistory(period),
+      (signal) => getExchangeRateHistory(period, signal),
       (res) => { setItems(res.items); setLoadError(false); },
       () => setLoadError(true),
       () => setLoading(false),
@@ -119,10 +120,13 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
     if (!fittedRef.current && points.length > 0) {
       scale.fitContent();
       fittedRef.current = true;
-    } else if (visibleRange && points.length > 0) {
-      // 시간 범위를 복원하여 과거 버킷이 조회 범위에서 빠져도 같은 날짜를 유지합니다.
-      scale.setVisibleRange(visibleRange);
+    } else if (visibleRange && points.length > 0
+        && typeof visibleRange.from === "number" && typeof visibleRange.to === "number") {
+      scale.setVisibleRange(nextExchangeRateRange(
+        { from: visibleRange.from, to: visibleRange.to }, lastPointRef.current, points[points.length - 1].time,
+      ));
     }
+    lastPointRef.current = points.at(-1)?.time;
   }, [items, period]);
 
   // 라이트/다크 전환 시 색만 다시 입힌다.

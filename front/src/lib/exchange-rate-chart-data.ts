@@ -3,6 +3,17 @@ import type { ExchangeRateHistoryItem, ExchangeRatePeriod } from "./api";
 
 export type LinePoint = { time: UTCTimestamp; value: number };
 
+/** 최신 점이 보이던 화면만 새 시각을 따라갑니다. 확대 폭과 과거 탐색 범위는 보존합니다. */
+export function nextExchangeRateRange(
+  range: { from: UTCTimestamp; to: UTCTimestamp },
+  previousLast: UTCTimestamp | undefined,
+  nextLast: UTCTimestamp,
+): { from: UTCTimestamp; to: UTCTimestamp } {
+  const shift = previousLast !== undefined && range.to >= previousLast
+    ? Math.max(0, nextLast - previousLast) : 0;
+  return { from: (range.from + shift) as UTCTimestamp, to: (range.to + shift) as UTCTimestamp };
+}
+
 /**
  * 기간별로 화면에 보여줄 데이터 간격(버킷 크기, 초 단위).
  *
