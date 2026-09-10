@@ -18,6 +18,7 @@ import java.util.Set;
 public class LimitExecutionProgress {
     public record Position(long token, Long bookVersion, BigDecimal rate, Candidate after) {}
     private final Map<Group, Position> positions = new HashMap<>();
+    private final Map<Group, Candidate> pendingAcceptances = new HashMap<>();
     private long sequence;
 
     public synchronized Position position(Group group, LimitExecutionPreparation market) {
@@ -28,6 +29,13 @@ public class LimitExecutionProgress {
         if (current == null || !current.bookVersion().equals(market.book().version())
                 || current.rate().compareTo(market.context().executionRate()) != 0) {
             current = new Position(++sequence, market.book().version(), market.context().executionRate(), null);
+            positions.put(group, current);
+        }
+        Candidate accepted = pendingAcceptances.remove(group);
+        if (accepted != null) {
+            Candidate after = current.after();
+            if (after != null && precedes(group, accepted, after)) after = null;
+            current = new Position(++sequence, current.bookVersion(), current.rate(), after);
             positions.put(group, current);
         }
         return current;
@@ -44,26 +52,33 @@ public class LimitExecutionProgress {
         return true;
     }
 
-    public synchronized void reset(Group group) { positions.remove(group); }
+    public synchronized void reset(Group group) {
+        positions.remove(group);
+        pendingAcceptances.remove(group);
+    }
 
-    public synchronized void retainGroups(Set<Group> activeGroups) { positions.keySet().retainAll(activeGroups); }
+    public synchronized void retainGroups(Set<Group> activeGroups) {
+        positions.keySet().retainAll(activeGroups);
+        pendingAcceptances.keySet().retainAll(activeGroups);
+    }
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public synchronized void onAccepted(LimitOrderAcceptedEvent event) {
         Group group = new Group(event.stockId(), event.side());
-        Position current = positions.get(group);
-        if (current == null) return;
-        Candidate after = current.after();
-        // 이미 지난 위치보다 선순위일 때만 처음으로 돌아갑니다. 후순위 접수는 읽어 둔 페이지만 무효화합니다.
-        if (after != null) {
-            int priceOrder = event.price().compareTo(after.price());
-            boolean precedes = event.side() == com.baedang.trading.entity.OrderSide.BUY ? priceOrder > 0 : priceOrder < 0;
-            if (priceOrder == 0) {
-                int timeOrder = event.orderedAt().toInstant().compareTo(after.orderedAt().toInstant());
-                precedes = timeOrder < 0 || (timeOrder == 0 && event.orderId() < after.orderId());
-            }
-            if (precedes) after = null;
+        if (!positions.containsKey(group)) return;
+        // 선정 중/실행 중인 한 건은 중단하지 않습니다. 다음 선정 경계에서만 알림을 반영합니다.
+        // 커서 재평가에는 가장 앞선 접수 한 건이면 충분하며, 실제 후보는 DB에서 조회합니다.
+        Candidate accepted = new Candidate(event.orderId(), event.price(), event.orderedAt());
+        pendingAcceptances.merge(group, accepted,
+                (previous, added) -> precedes(group, added, previous) ? added : previous);
+    }
+
+    private boolean precedes(Group group, Candidate candidate, Candidate other) {
+        int priceOrder = candidate.price().compareTo(other.price());
+        if (priceOrder != 0) {
+            return group.side() == com.baedang.trading.entity.OrderSide.BUY ? priceOrder > 0 : priceOrder < 0;
         }
-        positions.put(group, new Position(++sequence, current.bookVersion(), current.rate(), after));
+        int timeOrder = candidate.orderedAt().toInstant().compareTo(other.orderedAt().toInstant());
+        return timeOrder < 0 || (timeOrder == 0 && candidate.orderId() < other.orderId());
     }
 }

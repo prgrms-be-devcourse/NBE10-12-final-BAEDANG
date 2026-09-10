@@ -571,10 +571,12 @@ class LimitOrderExecutionIntegrationTest {
             tx.setRollbackOnly();
         });
         assertThat(progress.isCurrent(group, before)).isTrue();
+        assertThat(progress.position(group, market)).isEqualTo(before);
         assertThat(number("SELECT count(*) FROM trade_order WHERE client_order_id=?", rolledBack.clientOrderId())).isZero();
 
         long high = place("BUY", "1", "102");
-        assertThat(progress.isCurrent(group, before)).isFalse();
+        // 접수 커밋 자체는 진행 중 선정을 무효화하지 않고 다음 선정 경계에 반영됩니다.
+        assertThat(progress.isCurrent(group, before)).isTrue();
         worker.tick();
         assertThat(orders.findById(high).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
         assertThat(orders.findById(low).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);

@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -26,6 +27,9 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -102,7 +106,7 @@ class LimitOrderExecutionWorkerTest {
     }
 
     @Test
-    void 접수알림은_같은페이지의_후순위진행과_오래된커서_저장을_막는다() {
+    void 접수알림은_실행중인_한건을_마친뒤_같은틱에서_선순위를_재선정한다() {
         LimitOrderExecutionWorker worker = worker(100, 10);
         Candidate newer = new Candidate(3L, new BigDecimal("20"), NOW.atOffset(ZoneOffset.UTC));
         when(service.execute(eq(1L), any())).thenAnswer(invocation -> {
@@ -112,8 +116,59 @@ class LimitOrderExecutionWorkerTest {
         });
         worker.tick();
         verify(service, never()).execute(eq(2L), any());
+        InOrder sequence = inOrder(service);
+        sequence.verify(service).execute(eq(1L), any());
+        sequence.verify(service).execute(eq(3L), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void 조회중이나_체결중에_선순위접수가_계속되어도_매선정마다_한건은_진행한다(boolean duringQuery) {
+        LimitOrderExecutionWorker worker = worker(10, 10);
+        List<Candidate> active = new ArrayList<>(List.of(first, second));
+        List<Long> executed = new ArrayList<>();
+        AtomicLong nextId = new AtomicLong(3);
+        Runnable accept = () -> {
+            long id = nextId.getAndIncrement();
+            Candidate added = new Candidate(id, BigDecimal.valueOf(20 + id), NOW.atOffset(ZoneOffset.UTC));
+            active.add(added);
+            progress.onAccepted(new LimitOrderAcceptedEvent(1L, OrderSide.BUY, id, added.price(), added.orderedAt()));
+        };
+        Comparator<Candidate> priority = Comparator.comparing(Candidate::price).reversed()
+                .thenComparing(Candidate::orderedAt).thenComparing(Candidate::orderId);
+        when(repository.page(eq(group), any(), any(), anyInt())).thenAnswer(invocation -> {
+            Candidate after = invocation.getArgument(1);
+            List<Candidate> selected = active.stream()
+                    .filter(candidate -> after == null || priority.compare(candidate, after) > 0)
+                    .sorted(priority).toList();
+            if (duringQuery) accept.run();
+            return selected;
+        });
+        when(service.execute(anyLong(), any())).thenAnswer(invocation -> {
+            Long id = invocation.getArgument(0);
+            executed.add(id);
+            active.removeIf(candidate -> candidate.orderId().equals(id));
+            if (!duringQuery) accept.run();
+            return new LimitExecutionOutcome(1, LimitExecutionOutcome.Reason.EXECUTED);
+        });
+
         worker.tick();
-        verify(service).execute(eq(3L), any());
+
+        assertThat(executed).containsExactly(1L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L, 11L);
+    }
+
+    @Test
+    void 매체결마다_후순위접수가_와도_같은틱에서_기존후보를_진행한다() {
+        LimitOrderExecutionWorker worker = worker(2, 2);
+        when(service.execute(anyLong(), any())).thenAnswer(invocation -> {
+            progress.onAccepted(new LimitOrderAcceptedEvent(1L, OrderSide.BUY, 3L,
+                    new BigDecimal("0.5"), NOW.atOffset(ZoneOffset.UTC)));
+            return new LimitExecutionOutcome(1, LimitExecutionOutcome.Reason.EXECUTED);
+        });
+        worker.tick();
+        InOrder sequence = inOrder(service);
+        sequence.verify(service).execute(eq(1L), any());
+        sequence.verify(service).execute(eq(2L), any());
     }
 
     @Test

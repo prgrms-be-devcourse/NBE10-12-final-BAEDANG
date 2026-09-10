@@ -98,35 +98,39 @@ public class LimitOrderExecutionWorker {
                 meters.counter("trading.limit.execution.preparation", "reason", market.reason().name()).increment();
                 return 0;
             }
-            Position position = progress.position(group, market);
-            Candidate after = position.after();
-            while (attempts < allowance && withinBudget(started) && progress.isCurrent(group, position)) {
-                List<Candidate> page = candidates.page(group, after, clock.instant().atOffset(ZoneOffset.UTC), pageSize);
-                if (page.isEmpty()) return attempts;
-                for (Candidate candidate : page) {
-                    if (attempts >= allowance || !withinBudget(started) || !progress.isCurrent(group, position)) return attempts;
-                    attempts++;
-                    Duration queued = Duration.between(candidate.orderedAt().toInstant(), clock.instant());
-                    if (!queued.isNegative()) meters.timer("trading.limit.execution.queue.age").record(queued);
-                    LimitExecutionOutcome result = service.execute(candidate.orderId(), market);
-                    meters.counter("trading.limit.execution.attempt", "reason", result.reason().name()).increment();
-                    if (result.executionCount() > 0) {
-                        meters.counter("trading.limit.execution.fills").increment(result.executionCount());
-                        log.info("지정가 체결: orderId={} fills={}", candidate.orderId(), result.executionCount());
-                    }
-                    boolean stopDirection = switch (result.reason()) {
-                        case PRIORITY_CHANGED, BOOK_CHANGED, LOCK_BUSY, ORDER_CHANGED, STATUS_UNAVAILABLE, CONTEXT_EXPIRED,
-                                NO_BOOK, STALE_BOOK, MARKET_CLOSED, NOT_TRADABLE -> true;
-                        default -> false;
-                    };
-                    if (stopDirection) {
-                        progress.reset(group);
-                        return attempts;
-                    }
-                    // 준비/정산 중 새 주문이 커밋되었다면 오래된 커서로 덮어쓰지 않습니다.
-                    if (!progress.advance(group, position, candidate)) return attempts;
-                    after = candidate;
+            List<Candidate> page = List.of();
+            int pageIndex = 0;
+            long pageToken = -1;
+            while (attempts < allowance && withinBudget(started)) {
+                // 한 건의 선정 경계입니다. 이후 도착하는 접수는 다음 경계에서 반영합니다.
+                Position position = progress.position(group, market);
+                if (pageToken != position.token() || pageIndex >= page.size()) {
+                    page = candidates.page(group, position.after(), clock.instant().atOffset(ZoneOffset.UTC), pageSize);
+                    pageIndex = 0;
+                    pageToken = position.token();
                 }
+                if (page.isEmpty() || !withinBudget(started)) return attempts;
+                Candidate candidate = page.get(pageIndex++);
+                attempts++;
+                Duration queued = Duration.between(candidate.orderedAt().toInstant(), clock.instant());
+                if (!queued.isNegative()) meters.timer("trading.limit.execution.queue.age").record(queued);
+                LimitExecutionOutcome result = service.execute(candidate.orderId(), market);
+                meters.counter("trading.limit.execution.attempt", "reason", result.reason().name()).increment();
+                if (result.executionCount() > 0) {
+                    meters.counter("trading.limit.execution.fills").increment(result.executionCount());
+                    log.info("지정가 체결: orderId={} fills={}", candidate.orderId(), result.executionCount());
+                }
+                boolean stopDirection = switch (result.reason()) {
+                    case PRIORITY_CHANGED, BOOK_CHANGED, LOCK_BUSY, ORDER_CHANGED, STATUS_UNAVAILABLE, CONTEXT_EXPIRED,
+                            NO_BOOK, STALE_BOOK, MARKET_CLOSED, NOT_TRADABLE -> true;
+                    default -> false;
+                };
+                if (stopDirection) {
+                    progress.reset(group);
+                    return attempts;
+                }
+                // 접수 알림은 보류되어 있으므로 이번 진행을 저장한 뒤 다음 선정 때 함께 반영합니다.
+                if (!progress.advance(group, position, candidate)) return attempts;
             }
         } catch (RuntimeException exception) {
             progress.reset(group);
