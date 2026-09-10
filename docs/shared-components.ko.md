@@ -256,7 +256,7 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [StockFinancialQueryService](../back/src/main/java/com/baedang/stock/service/StockFinancialQueryService.java) | `getFinancials(symbol, marketCountry)` | 캐시 우선 재무 조회 서비스. 국내 비ETF/ETN 종목 검증, 조회 시점 영업이익률 계산, FRESH/STALE 판정 및 폴백 처리 |
 현재 구현의 설정 가능한 가상 호가 V1 기본값은 다음과 같습니다: `enabled=false`, `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V1 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 10레벨이고 인접 레벨은 유효 호가 1틱 간격이며, 미국 BID는 `$0.01`에서 조기 종료할 수 있습니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
 
-`trading.orderbook.enabled`는 #121 가상 호가 생성·조회만 제어합니다. #120의 지정가 신규 접수 플래그와 기존 지정가 주문의 취소·만료·복구 처리는 별도 플래그와 유스케이스가 소유하며, 호가 플래그로 함께 켜거나 끄지 않습니다. #122 체결 워커 활성화도 별도 경계입니다. #122 통합 검증 전 지정가 신규 접수 기본값은 계속 비활성입니다.
+`trading.orderbook.enabled`는 가상 호가 생성·조회만 제어합니다. 지정가 접수·취소·만료·체결은 별도 유스케이스이며 호가 플래그로 함께 켜거나 끄지 않습니다. 신규 접수와 #122 체결 워커는 상시 활성입니다. 사용 가능한 호가가 없으면 워커는 물량을 만들지 않고 보류합니다.
 
 캘린더가 필요한 로직은 기존 [MarketCalendarPort](../back/src/main/java/com/baedang/market/port/MarketCalendarPort.java)와 [MarketSessionProvider](../back/src/main/java/com/baedang/market/port/MarketSessionProvider.java)를 주입받아 사용하세요. 외부 호출이나 캐시를 별도로 복제하지 않습니다.
 
@@ -392,4 +392,14 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 - `StockTradingStatusService`: 주문 준비와 호가 스케줄러가 공유합니다. `requireCurrent`(단건), `refreshBatch`(최대 200개)를 제공합니다. SymbolInfoPort 조회를 5분 TTL·최대 1,000종목 인메모리 캐시로 공유하며 갱신 락 대기는 최대 5초입니다. HTTP 실패는 성공으로 캐시하지 않습니다. TTL은 거래소 상태의 실시간 보장이 아닙니다. `trading.stock-status-cache-ttl`로 설정합니다.
 - `StockTradingStatusPersistenceService`: 상태 컬럼만 별도 DB 트랜잭션에서 갱신합니다. 랭킹·종목명·경고는 보존합니다. KR은 상장/거래정지/정리매매, US는 상장 상태를 갱신합니다.
 - 외부 준비 서비스는 `NEVER`이며 금융 트랜잭션 안에서 호출하지 않습니다. API 경로는 기존 Port/Adapter 및 전역 RateLimiter를 그대로 사용합니다.
-- `StockRepository.findQuoteTargets/isQuoteTarget`는 ACTIVE ∩ (랭킹 ∪ 미만료 LIMIT PENDING/PARTIALLY_FILLED, 잔여 수량 > 0)를 모든 사용자 기준으로 조회합니다. 호가 게시 직전에도 대상을 재검증합니다. 인덱스 추가는 체결 워커 작업에서 일괄 검토합니다.
+- `StockRepository.findQuoteTargets/isQuoteTarget`는 ACTIVE ∩ (랭킹 ∪ 미만료 LIMIT PENDING/PARTIALLY_FILLED, 잔여 수량 > 0)를 모든 사용자 기준으로 조회합니다. 호가 게시 직전에도 대상을 재검증합니다. 체결 워커 마이그레이션에서 이 조건용 종목/만료 부분 인덱스를 추가합니다.
+
+### 지정가 체결 공통 구성요소 (#122)
+
+- `LimitOrderExecutionPlanner.plan(...)`: 체결과 미리보기에서 공유하는 순수 호가 선택기입니다. 누적 차액은 `LimitOrderSettlementCalculator`를 사용하고 매수 가능 정수 수량은 이진 탐색합니다. DB/HTTP 의존성을 넣지 않습니다.
+- `LimitOrderExecutionService.prepare(stockId, side)` / `execute(orderId, selectedPreparation)`: NEVER 경계입니다. 후보 선정 전에 준비하고 선정 당시 버전/환율을 실행에 전달합니다. 실행은 컨텍스트를 새로 준비하며 근거가 바뀌면 PRIORITY_CHANGED를 반환합니다. 같은 버전의 revision/금융 락 충돌만 최대 1회 재시도하며 후순위를 새 버전/환율에서 자동 재시도하지 않습니다.
+- `LimitExecutionProgress`: 단일 인스턴스의 종목·방향별 가격 커서를 bookVersion/환율 값에 연결하며 revision은 초기화 키가 아닙니다. `LimitOrderTransactionService`가 발행하는 `LimitOrderAcceptedEvent`의 AFTER_COMMIT 리스너는 실행 중 선정을 무효화하지 않고 대기 알림을 가장 선순위 한 건으로 합칩니다. `advance` 후 다음 `position`에서 갱신된 커서와 알림을 비교해 페이지 토큰을 변경하며 선순위 접수일 때만 처음으로 돌아갑니다. 워커는 접수가 멈추길 기다리지 않고 방문 예산 안에서 계속 진행합니다. 전체 순회 후 관찰되지 않은 그룹의 커서와 대기 알림을 함께 제거합니다. 다중 인스턴스 잠금이나 영속 주문 상태로 사용하지 않습니다.
+- `LimitOrderExecutionTransactionService.execute(attempt)`: 계좌 우선 REQUIRED 경계에서 공유 호가 잔량과 모든 금융 상태를 원자적으로 변경합니다. 상위 트랜잭션에서 직접 호출하지 않고 NEVER 오케스트레이터를 사용합니다. `LimitExecutionAttempt`는 기대 체결횟수와 버전/revision을 전달하며 사용자 가격/가변 잔액을 신뢰하는 입력이 아닙니다.
+- `LimitOrderPreviewService`: 같은 선택기를 사용하되 쓰기·자원 예약을 하지 않습니다. `LimitExecutionPreviewResponse.avgExecutionPrice`는 표시용 KRW 0 / USD 2자리이며 금액을 역산하는 데 사용하지 않습니다.
+- `Account.settleReservedBuy`, `Holding.settleReservedSell`: 자유 예수금/매도 가능 수량이 아니라 이미 동결된 자원을 소비합니다. 호출부가 주문별 한도를 검증하고 같은 금융 트랜잭션을 사용합니다. 전량 매수 후 남은 동결액은 명시적으로 해제합니다.
+- `LimitOrderExecutionWorker`: 생성/만료 스케줄러와 분리된 `limitExecutionTaskScheduler`에서 상시 실행합니다. 예산/커서와 미리보기 필드는 `api-spec.ko.md`를 참고합니다.

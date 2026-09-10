@@ -122,6 +122,16 @@ kis:
 #       sec_fee_usd = max(price_usd x quantity x a-tax-rate, a-tax-min-usd)
 #       a_tax      = sec_fee_usd x 환율
 trading:
+  # 항상 실행하는 지정가 워커. 예산은 새로운 주문 시작을 제한하고 진행 중 트랜잭션은 완료합니다.
+  limit-execution:
+    interval: 3s
+    initial-delay: 3s
+    page-size: 50
+    max-attempts: 100
+    # 한 종목·방향이 실행 기회를 독점하지 않도록 다른 그룹으로 전환합니다.
+    group-attempts: 10
+    start-budget: 5s
+    lock-timeout: 2s
   stock-status-cache-ttl: ${STOCK_STATUS_CACHE_TTL:5m}
   initial-cash: ${INITIAL_CASH:50000000}
 

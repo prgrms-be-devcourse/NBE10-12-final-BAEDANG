@@ -3,7 +3,6 @@ package com.baedang.trading.dto;
 import com.baedang.global.error.ErrorCode;
 
 import java.time.OffsetDateTime;
-import java.util.Map;
 
 public record LimitOrderQuoteResponse(
         String requestedLimitPrice,
@@ -16,7 +15,7 @@ public record LimitOrderQuoteResponse(
         String availableQuantity,
         OffsetDateTime expiresAt,
         Estimate limitEstimate,
-        Map<String, String> executionPreview
+        LimitExecutionPreviewResponse executionPreview
 ) {
 
     public record Estimate(

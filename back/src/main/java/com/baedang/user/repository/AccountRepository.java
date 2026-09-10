@@ -12,6 +12,11 @@ import java.util.Optional;
 
 public interface AccountRepository extends JpaRepository<Account, Long> {
 
+    /** 워커는 주문에 저장된 회차를 잠그며 새 ACTIVE 계좌로 대체하지 않습니다. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from Account a where a.accountId = :accountId")
+    Optional<Account> findForUpdate(@Param("accountId") Long accountId);
+
     /** 회원당 ACTIVE 계좌는 부분 유니크 인덱스로 하나만 존재합니다. */
     Optional<Account> findByUserIdAndStatus(Long userId, AccountStatus status);
 

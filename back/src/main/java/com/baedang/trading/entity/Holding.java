@@ -174,6 +174,20 @@ public class Holding {
         if (availableQuantity().compareTo(sellQty) < 0) {
             throw new IllegalStateException("매도 가능 수량보다 많이 차감할 수 없습니다");
         }
+        applySell(sellQty, updatedAt);
+    }
+
+    /** 같은 트랜잭션에서 동결 수량과 실제 수량을 함께 차감합니다. */
+    public void settleReservedSell(BigDecimal sellQty, OffsetDateTime at) {
+        if (sellQty == null || sellQty.signum() <= 0 || !isRepresentableAtScale(sellQty, 0) || at == null
+                || lockedQuantity.compareTo(sellQty) < 0 || quantity.compareTo(sellQty) < 0) {
+            throw new IllegalStateException("동결 수량으로 결제할 수 없습니다");
+        }
+        lockedQuantity = lockedQuantity.subtract(sellQty);
+        applySell(sellQty, at);
+    }
+
+    private void applySell(BigDecimal sellQty, OffsetDateTime updatedAt) {
         BigDecimal previousQuantity = this.quantity;
         BigDecimal remainingQuantity = previousQuantity.subtract(sellQty);
         if (remainingQuantity.signum() == 0) {

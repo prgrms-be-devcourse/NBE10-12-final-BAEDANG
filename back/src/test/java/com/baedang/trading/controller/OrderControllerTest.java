@@ -145,7 +145,10 @@ class OrderControllerTest {
                         "0",
                         OffsetDateTime.parse("2026-08-11T15:30:00+09:00"),
                         new LimitOrderQuoteResponse.Estimate("2400000", "240", "0", "2400240", "2400240"),
-                        Map.of("status", "UNSUPPORTED")
+                        com.baedang.trading.dto.LimitExecutionPreviewResponse.unavailable(
+                                com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.UNAVAILABLE,
+                                "NO_USABLE_BOOK",
+                                java.time.Instant.parse("2026-08-11T06:00:00Z"))
                 ));
 
         mockMvc.perform(get("/api/orders/quote/limit")

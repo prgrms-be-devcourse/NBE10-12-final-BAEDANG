@@ -343,6 +343,27 @@ export type LimitOrderRequest = {
   limitCurrency: "KRW" | "USD";
 };
 
+export type LimitExecutionPreviewStatus = "AVAILABLE" | "UNAVAILABLE" | "NOT_APPLICABLE";
+
+export type LimitExecutionPreview = {
+  status: LimitExecutionPreviewStatus;
+  reason: string;
+  bookVersion: number | null;
+  revision: number | null;
+  quoteAt: string | null;
+  generatedAt: string | null;
+  evaluatedAt: string;
+  expectedFilledQuantity: string | null;
+  remainingQuantity: string | null;
+  avgExecutionPrice: string | null;
+  grossAmountKrw: string | null;
+  feeKrw: string | null;
+  taxKrw: string | null;
+  netAmountKrw: string | null;
+  remainingReservedCash: string | null;
+  releasedCash: string | null;
+};
+
 export type LimitOrderQuoteResponse = {
   requestedLimitPrice: string;
   requestedLimitCurrency: "KRW" | "USD";
@@ -362,7 +383,7 @@ export type LimitOrderQuoteResponse = {
     netAmount: string;
     reservedCash: string;
   };
-  executionPreview: Record<string, string>;
+  executionPreview: LimitExecutionPreview;
 };
 
 /** `GET /api/orders/quote/limit` — 지정가 주문 접수 가능 여부·예상 예약금 미리보기. */

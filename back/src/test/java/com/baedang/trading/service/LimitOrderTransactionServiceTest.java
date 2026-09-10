@@ -85,7 +85,8 @@ class LimitOrderTransactionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new LimitOrderTransactionService(accounts, orders, holdings, stocks, quotes, policy, clock);
+        service = new LimitOrderTransactionService(accounts, orders, holdings, stocks, quotes, policy, clock,
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
         krStock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);

@@ -1,3 +1,8 @@
 auth:
   jwt:
     secret: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+
+# 테스트는 tick을 명시 호출하여 실제 정산과 경합 시점을 제어합니다.
+trading:
+  limit-execution:
+    initial-delay: 1h

@@ -54,6 +54,7 @@ public class LimitOrderService {
     private final OrderQuoteQueryService quoteReads;
     private final Clock clock;
     private final OrderMarketDataService marketData;
+    private final LimitOrderPreviewService previews;
 
     public LimitOrderService(
             OrderPolicy policy,
@@ -65,7 +66,8 @@ public class LimitOrderService {
             OrderReadService reads,
             OrderQuoteQueryService quoteReads,
             Clock clock,
-            OrderMarketDataService marketData
+            OrderMarketDataService marketData,
+            LimitOrderPreviewService previews
     ) {
         this.policy = policy;
         this.transactions = transactions;
@@ -77,6 +79,7 @@ public class LimitOrderService {
         this.quoteReads = quoteReads;
         this.clock = clock;
         this.marketData = marketData;
+        this.previews = previews;
     }
 
     public OrderDetailResponse place(Long userId, LimitOrderRequest request) {
@@ -213,7 +216,7 @@ public class LimitOrderService {
                 plain(db.availableQuantity()),
                 context.marketOpenUntil() == null ? null : context.marketOpenUntil().atOffset(ZoneOffset.UTC),
                 new LimitOrderQuoteResponse.Estimate(krw(a.grossAmount()), krw(a.fee()), krw(a.tax()), krw(a.netAmount()), krw(p.reserve())),
-                Map.of("status", "UNSUPPORTED")
+                previews.preview(db.stock(), terms, p, context, reason)
         );
     }
 

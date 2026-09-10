@@ -19,6 +19,17 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @EnableConfigurationProperties(QuoteCollectionProperties.class)
 public class SchedulingConfig {
 
+    /** 체결의 외부 준비/락 대기가 호가 공급이나 만료 처리를 막지 않도록 분리합니다. 항상 실행합니다. */
+    @Bean(name = "limitExecutionTaskScheduler")
+    public ThreadPoolTaskScheduler limitExecutionTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("limit-execution-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
+
     /** 배경 현재가 HTTP/DB 작업: 대기열 없이 제한된 요청만 제출합니다. */
     @Bean(name = "quoteCollectionExecutor")
     public ThreadPoolTaskExecutor quoteCollectionExecutor(

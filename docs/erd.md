@@ -616,7 +616,13 @@ Three immutable acceptance columns are added to trade_order:
 
 All three are NULL for MARKET and required for LIMIT. limit_price remains the fixed stock-currency price (USD for US); US KRW input is divided by acceptance FX and rounded to cents HALF_UP. Original inputs, not converted prices, are the idempotency comparison basis. No initial_reserved_cash column is added. Initial reserve comes from original input; reserved_cash continues to represent only current remainder.
 
-Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. Existing active-order and expiry indexes are reused. No legacy row corrections or migrations are included.
+Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. No legacy row corrections are included.
+
+### LIMIT execution indexes (#122)
+
+No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
+
+V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
 
 ---
 > Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, and `V3__order_book.sql`

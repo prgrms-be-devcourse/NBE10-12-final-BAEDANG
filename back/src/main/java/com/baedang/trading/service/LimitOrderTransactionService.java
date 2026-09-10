@@ -14,6 +14,7 @@ import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.LimitOrderCommand;
+import com.baedang.trading.model.LimitOrderAcceptedEvent;
 import com.baedang.trading.model.OrderClosureResult;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
@@ -25,6 +26,7 @@ import com.baedang.user.repository.AccountRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
 import org.springframework.stereotype.Service;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -48,6 +50,7 @@ public class LimitOrderTransactionService {
     private final QuoteSnapshotRepository quotes;
     private final OrderPolicy policy;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
     public LimitOrderTransactionService(
             AccountRepository accounts,
@@ -56,7 +59,8 @@ public class LimitOrderTransactionService {
             StockRepository stocks,
             QuoteSnapshotRepository quotes,
             OrderPolicy policy,
-            Clock clock
+            Clock clock,
+            ApplicationEventPublisher events
     ) {
         this.accounts = accounts;
         this.orders = orders;
@@ -65,6 +69,7 @@ public class LimitOrderTransactionService {
         this.quotes = quotes;
         this.policy = policy;
         this.clock = clock;
+        this.events = events;
     }
 
     @Transactional(readOnly = true)
@@ -146,10 +151,13 @@ public class LimitOrderTransactionService {
         } else {
             holding.reserveQuantity(t.quantity(), at);
         }
-        return OrderDetailResponse.from(orders.save(TradeOrder.pendingLimitOrder(
+        TradeOrder accepted = orders.save(TradeOrder.pendingLimitOrder(
                 account.getAccountId(), stock.getStockId(), c.clientOrderId(), t.side(), t.quantity(),
                 price.limitPrice(), price.reserve(), at, context.marketOpenUntil().atOffset(ZoneOffset.UTC),
-                c.requestedPrice(), c.currency(), context.executionRate())), stock);
+                c.requestedPrice(), c.currency(), context.executionRate()));
+        events.publishEvent(new LimitOrderAcceptedEvent(stock.getStockId(), t.side(), accepted.getOrderId(),
+                accepted.getLimitPrice(), accepted.getOrderedAt()));
+        return OrderDetailResponse.from(accepted, stock);
     }
 
     /** 만료 경합 결과를 예외가 아닌 값으로 반환하여 종료 및 동결 해제를 먼저 커밋합니다. */
