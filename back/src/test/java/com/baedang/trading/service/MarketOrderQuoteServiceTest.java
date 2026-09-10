@@ -73,7 +73,7 @@ class MarketOrderQuoteServiceTest {
                 orderPolicy,
                 new MarketOrderPolicy(orderPolicy),
                 Clock.fixed(NOW, ZoneOffset.UTC)
-        );
+        , preparedMarketData());
     }
 
     @Test
@@ -189,29 +189,11 @@ class MarketOrderQuoteServiceTest {
     }
 
     @Test
-    void 랭킹외_종목은_다른_실행불가_사유보다_우선한다() {
-        when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
-                .thenReturn(Optional.of(account));
-        when(account.availableCash()).thenReturn(new BigDecimal("50000000"));
-        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
-                .thenReturn(Optional.of(stock));
-        when(stock.getStockId()).thenReturn(101L);
-        when(stock.getSymbol()).thenReturn("005930");
-        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
-        when(stock.getCurrency()).thenReturn("KRW");
-        when(stock.getIsRanked()).thenReturn(false);
-        QuoteSnapshot quote = new QuoteSnapshot(
-                101L,
-                new BigDecimal("241500"),
-                "KRW",
-                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC),
-                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
-        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
-
+    void 비랭킹_종목도_시장가_견적을_허용한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
         MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
-
-        assertThat(result.reason()).isEqualTo(ErrorCode.NOT_IN_UNIVERSE.name());
-        verifyNoInteractions(marketSessionProvider);
+        assertThat(result.executable()).isTrue();
+        assertThat(result.reason()).isNull();
     }
 
     @ParameterizedTest
@@ -234,7 +216,6 @@ class MarketOrderQuoteServiceTest {
         when(stock.getSymbol()).thenReturn("005930");
         when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
         when(stock.getCurrency()).thenReturn("KRW");
-        when(stock.getIsRanked()).thenReturn(true);
         when(stock.getListingStatus()).thenReturn(ListingStatus.ACTIVE);
         when(stock.getIsSuspended()).thenReturn(false);
         when(stock.getIsLiquidation()).thenReturn(false);
@@ -260,5 +241,14 @@ class MarketOrderQuoteServiceTest {
                 NOW.minusSeconds(5).atOffset(ZoneOffset.UTC),
                 NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
+    }
+
+    private OrderMarketDataService preparedMarketData() {
+        OrderMarketDataService service = org.mockito.Mockito.mock(OrderMarketDataService.class);
+        org.mockito.Mockito.lenient().when(service.refreshStatus(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.lenient().when(service.prepareEstimate(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        return service;
     }
 }

@@ -66,6 +66,20 @@ import static org.mockito.Mockito.when;
         "spring.sql.init.mode=never"
 })
 class LimitOrderLifecycleIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.market.port.MarketDataPort currentPricePort;
+
+    @org.junit.jupiter.api.BeforeEach
+    void prepareTradingStatusBoundary() {
+        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
 
     static final Instant NOW = Instant.parse("2026-09-07T01:00:00Z");
     static final AtomicReference<Instant> time = new AtomicReference<>(NOW);
@@ -141,6 +155,26 @@ class LimitOrderLifecycleIntegrationTest {
         return jdbc.queryForObject("SELECT locked_cash FROM account WHERE account_id=?", BigDecimal.class, account);
     }
 
+    @Autowired com.baedang.stock.repository.StockRepository stocks;
+
+    @Test
+    void 비랭킹_지정가는_호가없이_접수하고_마지막_주문_종료시_수집에서_제외한다() {
+        jdbc.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", stock);
+        assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isFalse();
+        com.baedang.trading.dto.OrderDetailResponse first = service.place(user, request("BUY", "1", "100", "USD"));
+        com.baedang.trading.dto.OrderDetailResponse second = service.place(user, request("BUY", "1", "99", "USD"));
+        assertThat(first.status()).isEqualTo(OrderStatus.PENDING);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM order_book_version WHERE stock_id=?", Long.class, stock)).isZero();
+        assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isTrue();
+        service.cancel(user, first.orderId());
+        assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isTrue();
+        service.cancel(user, second.orderId());
+        assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isFalse();
+        assertThat(locked()).isZero();
+        jdbc.update("UPDATE stock SET is_ranked=true WHERE stock_id=?", stock);
+        assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isTrue();
+    }
+
     private void assertNoOrderEffects() {
         assertThat(locked()).isZero();
         assertThat(jdbc.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, account)).isZero();
@@ -148,12 +182,12 @@ class LimitOrderLifecycleIntegrationTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"NOT_IN_UNIVERSE,BUY", "STOCK_SUSPENDED,BUY", "MARKET_CLOSED,BUY",
+    @CsvSource({"STOCK_NOT_TRADABLE,BUY", "STOCK_SUSPENDED,BUY", "MARKET_CLOSED,BUY",
             "QUOTE_CURRENCY_MISMATCH,BUY", "STALE_QUOTE,BUY", "FUTURE_QUOTE,BUY",
             "INSUFFICIENT_CASH,BUY", "INSUFFICIENT_QUANTITY,SELL"})
     void 실행불가_견적은_사유와_추정액을_반환하되_자원을_변경하지_않는다(ErrorCode expected, String side) {
         switch (expected) {
-            case NOT_IN_UNIVERSE -> jdbc.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", stock);
+            case STOCK_NOT_TRADABLE -> jdbc.update("UPDATE stock SET listing_status='DELISTED' WHERE stock_id=?", stock);
             case STOCK_SUSPENDED -> jdbc.update("UPDATE stock SET is_suspended=true WHERE stock_id=?", stock);
             case MARKET_CLOSED -> when(sessions.currentSession(any(), any())).thenReturn(new MarketSessionStatus(false, null));
             case QUOTE_CURRENCY_MISMATCH -> jdbc.update("UPDATE quote_snapshot SET currency='KRW' WHERE stock_id=?", stock);
@@ -657,4 +691,6 @@ class LimitOrderLifecycleIntegrationTest {
                 .isInstanceOf(IllegalTransactionStateException.class);
         verifyNoInteractions(rates, sessions);
     }
+
+
 }

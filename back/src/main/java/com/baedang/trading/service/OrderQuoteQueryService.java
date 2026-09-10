@@ -48,9 +48,7 @@ public class OrderQuoteQueryService {
                         terms.symbol(), terms.marketCountry())
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
-        QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
-                .orElseThrow(() -> new BusinessException(
-                        ErrorCode.QUOTE_NOT_FOUND, "stockId=" + stock.getStockId()));
+        QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
         BigDecimal availableQuantity = terms.side() == OrderSide.SELL
                 ? holdingRepository.findByAccountIdAndStockId(account.getAccountId(), stock.getStockId())
                     .map(Holding::availableQuantity)
