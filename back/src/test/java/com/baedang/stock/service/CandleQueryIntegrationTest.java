@@ -32,7 +32,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -71,6 +70,18 @@ class CandleQueryIntegrationTest {
     @Autowired CandleAggregateRepository candleAggregateRepository;
     @Autowired MinuteCandleRepository minuteCandleRepository;
     @Autowired JdbcClient jdbcClient;
+
+    @org.junit.jupiter.api.BeforeEach
+    void configureCalendar() {
+        when(latestCompletedTradingDayResolver.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(LocalDate.of(2026, 9, 15)));
+        when(marketCalendarPort.fetchUsMarketCalendar(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(call -> {
+                    LocalDate date = call.getArgument(0);
+                    var open = date.atTime(9, 30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
+                    return new com.baedang.market.port.MarketCalendarDay(MarketCountry.US, date, true, open, open.plusHours(6).plusMinutes(30), null);
+                });
+    }
 
     @BeforeAll
     static void disableAutomaticPolicies(@Autowired JdbcClient jdbcClient) {
@@ -135,7 +146,7 @@ class CandleQueryIntegrationTest {
     @Test
     void 분봉_외부조회는_트랜잭션밖에서_실행하고_중복키를_UPSERT한다() {
         Stock stock = saveStock(MarketCountry.US, "USD");
-        OffsetDateTime at = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(2);
+        OffsetDateTime at = OffsetDateTime.parse("2026-09-10T10:00:00-04:00");
         Candle first = candle(at, "100", "USD");
         Candle corrected = candle(at, "105", "USD");
         AtomicBoolean externalCallInTransaction = new AtomicBoolean(true);
@@ -148,7 +159,7 @@ class CandleQueryIntegrationTest {
 
         var response = candleQueryService.getCandles(
                 stock.getSymbol(), "US", "1m", "1D");
-        persistenceService.upsert(stock.getStockId(), List.of(corrected));
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), List.of(corrected));
 
         assertThat(externalCallInTransaction).isFalse();
         assertThat(response.items()).hasSize(1);
@@ -300,8 +311,9 @@ class CandleQueryIntegrationTest {
 
     private DailyCandle daily(Stock stock, LocalDate date, String close) {
         BigDecimal price = new BigDecimal(close);
-        return new DailyCandle(
+        DailyCandle row = new DailyCandle(
                 stock.getStockId(), date, price, price, price, price, new BigDecimal("1000"));
+        return row;
     }
 
     private Candle candle(OffsetDateTime at, String close, String currency) {
@@ -310,6 +322,6 @@ class CandleQueryIntegrationTest {
     }
 
     private Candle dailyCandle(LocalDate date, String close, String currency) {
-        return candle(date.atStartOfDay(ZoneId.of("Asia/Seoul")).toOffsetDateTime(), close, currency);
+        return candle(date.atTime(9, 30).atZone(currency.equals("USD") ? MarketCountry.US.zoneId() : MarketCountry.KR.zoneId()).toOffsetDateTime(), close, currency);
     }
 }

@@ -140,6 +140,13 @@ class MarketOrderIntegrationTest {
 
     @Test
     void 비랭킹_시세없는_종목은_외부조회후_체결하고_멱등재요청은_외부조회를_생략한다() {
+        // This integration suite simulates an open session independent of wall-clock execution time.
+        when(marketCalendarPort.fetchKrMarketCalendar(any())).thenAnswer(invocation -> {
+            java.time.LocalDate date = invocation.getArgument(0);
+            var start = date.atStartOfDay(MarketCountry.KR.zoneId()).toOffsetDateTime();
+            return new com.baedang.market.port.MarketCalendarDay(MarketCountry.KR, date, true,
+                    start, start.plusDays(1), null);
+        });
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         jdbcTemplate.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", fixture.stockId());
         quoteSnapshotRepository.deleteById(fixture.stockId());

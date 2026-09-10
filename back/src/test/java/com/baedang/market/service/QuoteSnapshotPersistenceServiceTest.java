@@ -14,18 +14,21 @@ import org.mockito.ArgumentCaptor;
 
 class QuoteSnapshotPersistenceServiceTest {
     private final QuoteSnapshotBatchRepository repository = mock(QuoteSnapshotBatchRepository.class);
-    private final QuoteSnapshotPersistenceService service = new QuoteSnapshotPersistenceService(repository);
+    private final MarketTradingDayPolicy policy = mock(MarketTradingDayPolicy.class);
+    private final com.baedang.market.repository.DailyCandleRepository candles = mock(com.baedang.market.repository.DailyCandleRepository.class);
+    private final QuoteSnapshotPersistenceService service = new QuoteSnapshotPersistenceService(repository, policy);
     private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-09-09T01:00:00Z");
 
     @Test
     void 정규화하고_동일종목_최신응답을_원본정밀도로_저장한다() {
         Stock stock = stock();
-        when(repository.savePrices(anyList())).thenReturn(1);
+        when(policy.quoteTradeDate(any(), any())).thenReturn(java.util.Optional.of(NOW.toLocalDate()));
+        when(repository.savePrices(anyList(), any())).thenReturn(1);
         int count = service.saveOrUpdate(List.of(stock), List.of(
                 new PriceQuote("aapl", new BigDecimal("100.1234"), NOW, " usd "),
                 new PriceQuote("AAPL", new BigDecimal("99"), NOW.minusSeconds(1), "USD")), NOW);
         ArgumentCaptor<List<QuoteSnapshot>> captor = ArgumentCaptor.captor();
-        verify(repository).savePrices(captor.capture());
+        verify(repository).savePrices(captor.capture(), eq(com.baedang.stock.entity.MarketCountry.US));
         assertThat(count).isEqualTo(1);
         assertThat(captor.getValue()).singleElement().satisfies(q -> {
             assertThat(q.getLastPrice()).isEqualByComparingTo("100.1234");
@@ -44,11 +47,12 @@ class QuoteSnapshotPersistenceServiceTest {
                 new PriceQuote("AAPL", new BigDecimal("1.00001"), NOW, "USD"),
                 new PriceQuote("AAPL", BigDecimal.ONE, NOW, "KRW"),
                 new PriceQuote("OTHER", BigDecimal.ONE, NOW, "USD")), NOW);
-        verify(repository).savePrices(List.of());
+        verifyNoInteractions(repository);
     }
 
     private Stock stock() {
         Stock stock = mock(Stock.class);
+        when(stock.getMarketCountry()).thenReturn(com.baedang.stock.entity.MarketCountry.US);
         when(stock.getStockId()).thenReturn(1L);
         when(stock.getSymbol()).thenReturn("AAPL");
         when(stock.getCurrency()).thenReturn("USD");

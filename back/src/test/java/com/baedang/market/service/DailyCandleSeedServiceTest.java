@@ -46,7 +46,7 @@ class DailyCandleSeedServiceTest {
     private DailyCandleSeedService service() {
         return new DailyCandleSeedService(
                 marketDataPort, stockRepository, persistenceService,
-                dailyCandleRepository, 100);
+                dailyCandleRepository, java.time.Clock.fixed(java.time.Instant.parse("2026-09-15T22:00:00Z"), java.time.ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 100);
     }
 
     @Test
@@ -65,8 +65,8 @@ class DailyCandleSeedServiceTest {
         SeedResult result = service().seed(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles(eq("005930"), any(), anyInt());
-        verify(persistenceService).upsert(2L, "KRW", candles);
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService).upsert(2L, "KRW", com.baedang.stock.entity.MarketCountry.KR, candles, java.time.Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(1);
         assertThat(result.skipped()).isEqualTo(1);
@@ -100,8 +100,8 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seed(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any(), any(), any());
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
         assertThat(result.success()).isEqualTo(1);
         assertThat(result.failure()).isEqualTo(1);
     }
@@ -118,7 +118,7 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seed(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
         assertThat(result.success()).isZero();
         assertThat(result.failure()).isEqualTo(1);
     }
@@ -156,8 +156,8 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seedAll();
 
-        verify(persistenceService).upsert(1L, "KRW", List.of(candle("KRW")));
-        verify(persistenceService).upsert(2L, "USD", List.of(candle("USD")));
+        verify(persistenceService).upsert(1L, "KRW", com.baedang.stock.entity.MarketCountry.KR, List.of(candle("KRW")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService).upsert(2L, "USD", com.baedang.stock.entity.MarketCountry.US, List.of(candle("USD")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(2);
     }

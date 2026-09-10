@@ -16,6 +16,8 @@ public interface DailyCandleRepository extends JpaRepository<DailyCandle, DailyC
 
     List<DailyCandle> findByStockIdOrderByTradeDateDesc(Long stockId, Pageable pageable);
 
+    Optional<DailyCandle> findByStockIdAndTradeDate(Long stockId, LocalDate tradeDate);
+
     /** 전체 개수를 세지 않고 필요한 마지막 위치의 행 하나만 조회해 최소 이력 충족 여부를 확인한다. */
     default boolean hasAtLeastCandles(Long stockId, int requiredCount) {
         if (requiredCount <= 0) return true;

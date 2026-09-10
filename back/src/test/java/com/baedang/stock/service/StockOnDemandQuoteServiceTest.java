@@ -5,7 +5,6 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
-import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
@@ -61,6 +60,8 @@ class StockOnDemandQuoteServiceTest {
     // 2026-08-31 12:00 KST.
     private static final Instant NOW = Instant.parse("2026-08-31T03:00:00Z");
 
+    @Mock com.baedang.market.service.PrevCloseUpdateService referenceRecovery;
+    @Mock com.baedang.market.port.MarketSessionProvider sessions;
     @Mock MarketDataPort marketDataPort;
     @Mock com.baedang.market.service.QuoteRefreshCoordinator coordinator;
     @Mock QuoteSnapshotRepository quoteSnapshotRepository;
@@ -78,15 +79,15 @@ class StockOnDemandQuoteServiceTest {
         service = new StockOnDemandQuoteService(
                 marketDataPort,
                 quoteSnapshotRepository,
-                quoteSnapshotPersistenceService,
                 dailyCandleRepository,
                 dailyCandlePersistenceService,
                 candleAggregateRepository,
                 new OnDemandDailyCandleBackfillTracker(),
                 latestCompletedTradingDayResolver,
-                Clock.fixed(NOW, ZoneOffset.UTC), coordinator, java.time.Duration.ofSeconds(5));
+                Clock.fixed(NOW, ZoneOffset.UTC), new com.baedang.market.service.DailyCandleFetchCoordinator(), referenceRecovery, sessions, coordinator, java.time.Duration.ofSeconds(5));
         // 테스트마다 실제로 쓰는 stub 조합이 달라서(예: 랭킹 안 종목 조기 반환 경로는
         // symbol/currency를 아예 안 읽는다) 공용 stub은 lenient로 둔다.
+        lenient().when(sessions.isOpen(any(), any())).thenReturn(true);
         lenient().when(stock.getStockId()).thenReturn(10L);
         lenient().when(stock.getSymbol()).thenReturn("005930");
         lenient().when(stock.getCurrency()).thenReturn("KRW");
@@ -117,26 +118,12 @@ class StockOnDemandQuoteServiceTest {
         QuoteSnapshot refreshed = quote(LocalDate.of(2026, 8, 28));
         when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.of(refreshed));
         when(coordinator.refresh(stock)).thenReturn(refreshed);
-        // 백필(존재 확인 → 락 안 재확인) 전까지는 일봉이 하나도 없다가, upsert가 호출된
-        // 뒤부터는(이중 확인 락 안에서도 한 번 더 조회한다) 방금 채운 일봉이 보여야 한다 —
-        // 언제 몇 번 조회하든 항상 최신 상태를 반영하도록 상태 기반(stateful)으로 stub한다.
-        AtomicBoolean backfilled = new AtomicBoolean(false);
-        DailyCandle backfilledCandle = new DailyCandle(10L, LocalDate.of(2026, 8, 28),
-                new BigDecimal("236050"), new BigDecimal("236050"),
-                new BigDecimal("236050"), new BigDecimal("236050"), new BigDecimal("1000"));
-        when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(eq(10L), any()))
-                .thenAnswer(invocation -> backfilled.get() ? List.of(backfilledCandle) : List.of());
-        doAnswer(invocation -> {
-            backfilled.set(true);
-            return null;
-        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), any());
-
         QuoteSnapshot result = service.ensureQuote(stock, null);
 
-        verify(dailyCandlePersistenceService).upsert(10L, "KRW", List.of(dailyCandle));
+        verify(dailyCandlePersistenceService).upsert(10L, "KRW", com.baedang.stock.entity.MarketCountry.KR, List.of(dailyCandle), NOW);
         verify(coordinator).refresh(stock);
         assertThat(result).isSameAs(refreshed);
-        verify(quoteSnapshotPersistenceService).updatePrevClose(10L, new BigDecimal("236050"));
+        verify(referenceRecovery).recover(stock);
         verify(quoteSnapshotRepository, never()).save(any());
     }
 
@@ -159,15 +146,11 @@ class StockOnDemandQuoteServiceTest {
         when(stock.getIsRanked()).thenReturn(false);
         when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
         QuoteSnapshot current = quoteCollectedAt(NOW.atOffset(ZoneOffset.UTC));
-        BigDecimal close = new BigDecimal("100");
-        when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(eq(10L), any()))
-                .thenReturn(List.of(new DailyCandle(10L, LocalDate.of(2026, 8, 28),
-                        close, close, close, close, BigDecimal.ONE)));
         when(quoteSnapshotRepository.findById(10L)).thenReturn(Optional.of(current));
 
         assertThat(service.ensureQuote(stock, current)).isSameAs(current);
 
-        verify(quoteSnapshotPersistenceService).updatePrevClose(10L, close);
+        verify(referenceRecovery).recover(stock);
         verifyNoInteractions(coordinator);
     }
 
@@ -212,11 +195,11 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), any());
+        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
     }
 
     @Test
-    void 같은_확정_거래일의_최신화가_성공했으면_DB가_아직_과거여도_다시_호출하지_않는다() {
+    void 최신_거래일이_응답에_없으면_완료로_기록하지_않고_재시도한다() {
         LocalDate expectedTradeDate = LocalDate.of(2026, 8, 31);
         when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenReturn(true);
         when(latestCompletedTradingDayResolver.resolve(MarketCountry.KR))
@@ -231,8 +214,8 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
         service.ensureDailyCandles(stock);
 
-        verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), any());
+        verify(marketDataPort, times(2)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
+        verify(dailyCandlePersistenceService, times(2)).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
     }
 
     @Test
@@ -271,7 +254,7 @@ class StockOnDemandQuoteServiceTest {
         doAnswer(invocation -> {
             backfilled.set(true);
             return null;
-        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), any());
+        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
 
         int threadCount = 5;
         ExecutorService pool = Executors.newFixedThreadPool(threadCount);
@@ -307,7 +290,7 @@ class StockOnDemandQuoteServiceTest {
 
         assertThat(result).isSameAs(existing);
         verify(marketDataPort).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), any());
+        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
         verify(marketDataPort, never()).fetchPrices(any());
     }
 
@@ -321,7 +304,7 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), any());
+        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
     }
 
     @Test
@@ -398,6 +381,9 @@ class StockOnDemandQuoteServiceTest {
         stubBackfillNeeded(expectedTradeDate);
         when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
                 .thenReturn(List.of(candle(expectedTradeDate, "100")));
+        when(dailyCandleRepository.findByStockIdAndTradeDate(10L, expectedTradeDate))
+                .thenReturn(Optional.of(new DailyCandle(10L, expectedTradeDate,
+                        BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)));
         doThrow(new RuntimeException("refresh 실패"))
                 .when(candleAggregateRepository).refreshWeekly();
 
@@ -405,7 +391,7 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), any());
+        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
     }
 
     /** 일봉 200개는 있지만 최신 확정 거래일보다 오래돼서 백필이 필요한 상태. */

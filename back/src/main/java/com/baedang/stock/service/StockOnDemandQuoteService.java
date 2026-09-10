@@ -4,22 +4,21 @@ import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
-import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.DailyCandlePersistenceService;
 import com.baedang.market.service.LatestCompletedTradingDayResolver;
-import com.baedang.market.service.QuoteSnapshotPersistenceService;
+import com.baedang.market.service.PrevCloseUpdateService;
+import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.stock.entity.Stock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -60,12 +59,14 @@ public class StockOnDemandQuoteService {
     private final QuoteRefreshCoordinator quoteRefreshCoordinator;
     private final MarketDataPort marketDataPort;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
-    private final QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     private final DailyCandleRepository dailyCandleRepository;
     private final DailyCandlePersistenceService dailyCandlePersistenceService;
     private final CandleAggregateRepository candleAggregateRepository;
     private final OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker;
     private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
+    private final PrevCloseUpdateService referenceRecovery;
+    private final MarketSessionProvider sessions;
+    private final com.baedang.market.service.DailyCandleFetchCoordinator dailyCoordinator;
     private final Clock clock;
     private final Duration displayCacheTtl;
     private final ReentrantLock[] refreshLocks = createRefreshLocks();
@@ -73,26 +74,30 @@ public class StockOnDemandQuoteService {
     public StockOnDemandQuoteService(
             MarketDataPort marketDataPort,
             QuoteSnapshotRepository quoteSnapshotRepository,
-            QuoteSnapshotPersistenceService quoteSnapshotPersistenceService,
             DailyCandleRepository dailyCandleRepository,
             DailyCandlePersistenceService dailyCandlePersistenceService,
             CandleAggregateRepository candleAggregateRepository,
             OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker,
             LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
             Clock clock,
+            com.baedang.market.service.DailyCandleFetchCoordinator dailyCoordinator,
+            PrevCloseUpdateService referenceRecovery,
+            MarketSessionProvider sessions,
             QuoteRefreshCoordinator quoteRefreshCoordinator,
             @Value("${trading.quote-collection.refresh-interval:5s}") Duration displayCacheTtl
     ) {
         this.quoteRefreshCoordinator = quoteRefreshCoordinator;
         this.marketDataPort = marketDataPort;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
-        this.quoteSnapshotPersistenceService = quoteSnapshotPersistenceService;
         this.dailyCandleRepository = dailyCandleRepository;
         this.dailyCandlePersistenceService = dailyCandlePersistenceService;
         this.candleAggregateRepository = candleAggregateRepository;
         this.onDemandDailyCandleBackfillTracker = onDemandDailyCandleBackfillTracker;
         this.latestCompletedTradingDayResolver = latestCompletedTradingDayResolver;
         this.clock = clock;
+        this.dailyCoordinator = dailyCoordinator;
+        this.referenceRecovery = referenceRecovery;
+        this.sessions = sessions;
         this.displayCacheTtl = displayCacheTtl;
     }
 
@@ -104,13 +109,16 @@ public class StockOnDemandQuoteService {
      */
     public QuoteSnapshot ensureQuote(Stock stock, QuoteSnapshot existing) {
         ensureDailyCandles(stock);
-        if (Boolean.TRUE.equals(stock.getIsRanked())) {
-            return existing;
+        try {
+            if (!Boolean.TRUE.equals(stock.getIsRanked())
+                    && sessions.isOpen(stock.getMarketCountry(), clock.instant()) && isStale(existing)) {
+                refreshQuoteIfStillStale(stock);
+            }
+            referenceRecovery.recover(stock);
+        } catch (RuntimeException exception) {
+            log.warn("[on-demand] regular quote recovery deferred: stockId={}", stock.getStockId());
         }
-        if (!isStale(existing)) {
-            return withPrevClose(stock, existing);
-        }
-        return withPrevClose(stock, refreshQuoteIfStillStale(stock));
+        return quoteSnapshotRepository.findById(stock.getStockId()).orElse(existing);
     }
 
     /**
@@ -124,6 +132,13 @@ public class StockOnDemandQuoteService {
      * 실제 Toss 호출과 저장은 한 번만 일어나게 하기 위해서다.
      */
     public void ensureDailyCandles(Stock stock) {
+        dailyCoordinator.withStockLock(stock.getStockId(), () -> {
+            ensureDailyCandlesLocked(stock);
+            return null;
+        });
+    }
+
+    private void ensureDailyCandlesLocked(Stock stock) {
         boolean initialDailyCandleBackfillSatisfied =
                 isInitialDailyCandleBackfillSatisfied(stock.getStockId());
         boolean tradingDayResolved = initialDailyCandleBackfillSatisfied;
@@ -147,11 +162,14 @@ public class StockOnDemandQuoteService {
                 if (isLatestRefreshSatisfied(stock.getStockId(), expectedTradeDate)) return;
             }
 
+            Instant requestedAt = clock.instant();
             List<Candle> candles = marketDataPort.fetchCandles(
                     stock.getSymbol(), CandleInterval.ONE_DAY, DAILY_CANDLE_BACKFILL_COUNT);
-            dailyCandlePersistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
+            dailyCandlePersistenceService.upsert(stock.getStockId(), stock.getCurrency(), stock.getMarketCountry(), candles, requestedAt);
+            if (candles.isEmpty()) return;
             onDemandDailyCandleBackfillTracker.markInitialBackfillCompleted(stock.getStockId());
-            if (expectedTradeDate.isPresent()) {
+            if (expectedTradeDate.isPresent() && dailyCandleRepository.findByStockIdAndTradeDate(
+                    stock.getStockId(), expectedTradeDate.get()).isPresent()) {
                 onDemandDailyCandleBackfillTracker.markRefreshedThrough(
                         stock.getStockId(), expectedTradeDate.get());
             }
@@ -248,30 +266,4 @@ public class StockOnDemandQuoteService {
         return snapshot;
     }
 
-    /** 배경 수집이 먼저 현재가를 채웠어도 일봉 기반 전일 종가는 별도로 보충합니다. */
-    private QuoteSnapshot withPrevClose(Stock stock, QuoteSnapshot snapshot) {
-        if (snapshot == null) return null;
-        BigDecimal prevClose = derivePrevClose(stock);
-        if (prevClose != null && (snapshot.getPrevClose() == null
-                || prevClose.compareTo(snapshot.getPrevClose()) != 0)) {
-            quoteSnapshotPersistenceService.updatePrevClose(stock.getStockId(), prevClose);
-            return quoteSnapshotRepository.findById(stock.getStockId()).orElse(snapshot);
-        }
-        return snapshot;
-    }
-
-    /** 방금 채운(또는 이미 있던) 일봉 중, "오늘"(그 시장 기준) 이전의 가장 최신 종가를 고른다. */
-    private BigDecimal derivePrevClose(Stock stock) {
-        LocalDate marketToday = clock.instant()
-                .atZone(stock.getMarketCountry().zoneId())
-                .toLocalDate();
-
-        return dailyCandleRepository
-                .findByStockIdOrderByTradeDateDesc(stock.getStockId(), PageRequest.of(0, DAILY_CANDLE_BACKFILL_COUNT))
-                .stream()
-                .filter(candle -> candle.getTradeDate().isBefore(marketToday))
-                .findFirst()
-                .map(DailyCandle::getClosePrice)
-                .orElse(null);
-    }
 }

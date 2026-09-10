@@ -14,7 +14,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
@@ -51,7 +50,7 @@ class DailyCandleCollectionServiceTest {
         return new DailyCandleCollectionService(
                 marketDataPort, stockRepository, persistenceService,
                 dailyCandleRepository, marketCalendarPort,
-                Clock.fixed(NOW, ZoneOffset.UTC), 2);
+                Clock.fixed(NOW, ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 2);
     }
 
     // ── collect ──────────────────────────────────────────────────────────────
@@ -69,7 +68,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService).upsert(1L, "KRW", candles);
+        verify(persistenceService).upsert(1L, "KRW", com.baedang.stock.entity.MarketCountry.KR, candles, NOW);
     }
 
     @Test
@@ -87,8 +86,8 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any(), any(), any());
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
     }
 
     @Test
@@ -130,7 +129,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -170,7 +169,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -191,7 +190,7 @@ class DailyCandleCollectionServiceTest {
         service().collect(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles("DONE", CandleInterval.ONE_DAY, 1);
-        verify(persistenceService).upsert(2L, "KRW", candles);
+        verify(persistenceService).upsert(2L, "KRW", com.baedang.stock.entity.MarketCountry.KR, candles, NOW);
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {

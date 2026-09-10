@@ -67,6 +67,7 @@ class DailyCandleSeedIntegrationTest {
     // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort(정기 수집
     // 서비스가 요구)를 목으로 채워 full-context 로딩이 실패하지 않도록 한다.
     @MockitoBean MarketCalendarPort marketCalendarPort;
+    @MockitoBean LatestCompletedTradingDayResolver resolver;
 
     @Autowired DailyCandleSeedService seedService;
     @Autowired DailyCandleRepository dailyCandleRepository;
@@ -75,6 +76,8 @@ class DailyCandleSeedIntegrationTest {
 
     @BeforeEach
     void cleanUp() {
+        org.mockito.Mockito.when(resolver.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(java.util.Optional.of(LocalDate.of(2026, 9, 15)));
         jdbcTemplate.execute("TRUNCATE TABLE daily_candle");
         jdbcTemplate.execute("DELETE FROM stock");
     }

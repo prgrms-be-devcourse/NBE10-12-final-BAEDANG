@@ -31,7 +31,10 @@ public class LatestCompletedTradingDayResolver {
     }
 
     public Optional<LocalDate> resolve(MarketCountry marketCountry) {
-        Instant now = clock.instant();
+        return resolve(marketCountry, clock.instant());
+    }
+
+    public Optional<LocalDate> resolve(MarketCountry marketCountry, Instant now) {
         LocalDate today = now.atZone(marketCountry.zoneId()).toLocalDate();
 
         if (!isWeekend(today)) {

@@ -69,6 +69,7 @@ class CandleQueryServiceTest {
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(10L);
         when(stock.getSymbol()).thenReturn("005930");
+        org.mockito.Mockito.lenient().when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
         when(stock.getCurrency()).thenReturn("KRW");
     }
 
@@ -143,7 +144,7 @@ class CandleQueryServiceTest {
         service.getCandles("005930", "KR", "1m", "1D");
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_MINUTE, 200);
-        verify(persistenceService, times(1)).upsert(10L, List.of(fetched));
+        verify(persistenceService, times(1)).upsert(10L, MarketCountry.KR, List.of(fetched));
     }
 
     @Test
@@ -163,7 +164,7 @@ class CandleQueryServiceTest {
                 .isEqualTo(com.baedang.global.error.ErrorCode.QUOTE_CURRENCY_MISMATCH);
 
         verify(persistenceService, never()).upsert(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
 

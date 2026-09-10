@@ -3,12 +3,18 @@ package com.baedang.market.service;
 import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.PriceQuote;
+import com.baedang.market.entity.DailyCandle;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.market.repository.QuoteSnapshotBatchRepository;
 import com.baedang.stock.entity.Stock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -21,14 +27,17 @@ import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableA
 
 @Service
 public class QuoteSnapshotPersistenceService {
+    private static final Logger log = LoggerFactory.getLogger(QuoteSnapshotPersistenceService.class);
     private static final BigDecimal PRICE_LIMIT = new BigDecimal("1000000000000000");
     private final QuoteSnapshotBatchRepository repository;
+    private final MarketTradingDayPolicy tradingDays;
 
-    public QuoteSnapshotPersistenceService(QuoteSnapshotBatchRepository repository) {
+    public QuoteSnapshotPersistenceService(QuoteSnapshotBatchRepository repository, MarketTradingDayPolicy tradingDays) {
         this.repository = repository;
+        this.tradingDays = tradingDays;
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.NEVER)
     public int saveOrUpdate(List<Stock> stocks, List<PriceQuote> quotes, OffsetDateTime collectedAt) {
         Map<String, Stock> bySymbol = stocks.stream().collect(Collectors.toMap(
                 stock -> DomainNormalizer.symbol(stock.getSymbol()), Function.identity()));
@@ -46,18 +55,56 @@ public class QuoteSnapshotPersistenceService {
             }
             QuoteSnapshot candidate = new QuoteSnapshot(stock.getStockId(), quote.lastPrice(),
                     DomainNormalizer.currency(quote.currency()), quote.quoteAt(), collectedAt);
+            try {
+                var tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), quote.quoteAt().toInstant());
+                if (tradeDate.isEmpty()) continue;
+                // Price ingestion never trusts pre-existing daily rows as reference evidence.
+            } catch (RuntimeException unavailableSession) {
+                log.warn("Session validation failed: stockId={} type={}", stock.getStockId(), unavailableSession.getClass().getSimpleName());
+                continue;
+            }
             snapshots.merge(stock.getStockId(), candidate,
                     (left, right) -> left.getQuoteAt().isAfter(right.getQuoteAt()) ? left : right);
         }
         // 겹친 배치도 동일한 순서로 저장하여 행 잠금의 순환 대기를 피합니다.
         List<QuoteSnapshot> ordered = snapshots.values().stream()
                 .sorted(Comparator.comparing(QuoteSnapshot::getStockId)).toList();
-        return repository.savePrices(ordered);
+        int updated = 0;
+        Map<Long, MarketCountry> countries = stocks.stream().collect(Collectors.toMap(Stock::getStockId, Stock::getMarketCountry));
+        for (MarketCountry country : MarketCountry.values()) {
+            List<QuoteSnapshot> group = ordered.stream().filter(q -> countries.get(q.getStockId()) == country).toList();
+            if (!group.isEmpty()) updated += repository.savePrices(group, country);
+        }
+        return updated;
     }
 
-    /** 현재가와 별도 컬럼만 갱신하여 detached 엔티티 merge가 최신 현재가를 덮지 않게 합니다. */
-    @Transactional
-    public void updatePrevClose(Long stockId, BigDecimal price) {
-        repository.updatePrevClose(stockId, price);
+    /** Only pass a reference returned by this recovery's validated external fetch. */
+    @Transactional(propagation = Propagation.NEVER)
+    public int repairReference(Stock stock, QuoteSnapshot expected, DailyCandle reference) {
+        if (reference == null) return 0;
+        var tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), expected.getQuoteAt().toInstant());
+        if (tradeDate.isEmpty() || !tradingDays.previousTradingDay(stock.getMarketCountry(), tradeDate.get())
+                .filter(reference.getTradeDate()::equals).isPresent()) return 0;
+        return repository.repairReference(expected, stock.getMarketCountry(), reference.getTradeDate(), reference.getClosePrice());
     }
+
+    /** Only pass rows returned by this recovery's validated external fetch, never a legacy DB lookup. */
+    @Transactional(propagation = Propagation.NEVER)
+    public int saveRecoveredClose(Stock stock, QuoteSnapshot expected, DailyCandle close, DailyCandle reference,
+            OffsetDateTime collectedAt) {
+        var day = tradingDays.calendar(stock.getMarketCountry(), close.getTradeDate());
+        if (!day.isOpen() || day.regularCloseAt() == null) return 0;
+        var candidate = new QuoteSnapshot(stock.getStockId(), close.getClosePrice(), stock.getCurrency(),
+                day.regularCloseAt(), collectedAt);
+        if (reference != null && tradingDays.previousTradingDay(stock.getMarketCountry(), close.getTradeDate())
+                .filter(reference.getTradeDate()::equals).isPresent()) {
+            candidate.applyReference(reference.getTradeDate(), reference.getClosePrice());
+        }
+        return repository.saveRecoveredClose(candidate, expected);
+    }
+
+    public int clearMismatchedReference(QuoteSnapshot expected, LocalDate requiredDate) {
+        return repository.clearMismatchedReference(expected, requiredDate);
+    }
+
 }
