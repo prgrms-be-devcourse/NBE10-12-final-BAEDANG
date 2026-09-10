@@ -94,8 +94,10 @@ public class ExchangeRateService {
         String normalized = period == null ? "" : DomainNormalizer.lowerCode(period);
         OffsetDateTime from = periodStart(normalized, now);
         int bucketSeconds = switch (normalized) {
-            case "1d" -> 3600;
-            case "1y" -> 604800;
+            case "1d" -> 60;
+            case "1w" -> 1800;
+            case "1m" -> 7200;
+            case "3m" -> 21600;
             default -> 86400;
         };
 

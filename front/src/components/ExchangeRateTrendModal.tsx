@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createChart, LineSeries, type IChartApi, type ISeriesApi } from "lightweight-charts";
+import { createChart, LineSeries, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
 import { PillTabs } from "./PillTabs";
 import { useTheme } from "./ThemeProvider";
 import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRatePeriod } from "@/lib/api";
 import { resolveCssColor } from "@/lib/chart-colors";
-import { formatTickMark, isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
+import { formatCrosshairTime, formatTickMark, isTimeVisible, toLinePoints } from "@/lib/exchange-rate-chart-data";
 import { formatNumber } from "@/lib/format";
 
 const PERIOD_OPTIONS: { value: ExchangeRatePeriod; label: string }[] = [
@@ -69,6 +69,7 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
       layout: { background: { color: "transparent" }, textColor: resolveCssColor("--ink", "#071829") },
       grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
       rightPriceScale: { borderColor: line2 },
+      localization: { locale: "ko-KR" },
       timeScale: {
         borderColor: line2,
         timeVisible: false,
@@ -103,7 +104,10 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
   // 그렇지 않으면 "1개월"처럼 넓은 기간에서도 "08:59"류의 시각 단위 눈금이 찍힌다.
   useEffect(() => {
     if (!chartRef.current || !seriesRef.current) return;
-    chartRef.current.applyOptions({ timeScale: { timeVisible: isTimeVisible(period) } });
+    chartRef.current.applyOptions({
+      timeScale: { timeVisible: isTimeVisible(period) },
+      localization: { timeFormatter: (time: Time) => formatCrosshairTime(time, period) },
+    });
     seriesRef.current.setData(toLinePoints(items, period));
     chartRef.current.timeScale().fitContent();
   }, [items, period]);

@@ -367,7 +367,7 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 ### 지정가 체결 공통 구성요소 (#122)
 
 - `exchangeRateTaskScheduler`: 분 단위 환율 수집 전용 단일 스레드입니다. 공용 시장 배치와 분리하지만 Toss 클라이언트의 공유 TPS 제한은 유지합니다.
-- `ExchangeRateRepository.findHistoryBuckets`: SQL에서 UTC epoch 버킷별 마지막 원본 행만 선택하며 정밀도와 원본 시각을 보존합니다. 표시 이력 전용이며 체결은 집계하지 않은 최신 행을 사용합니다.
+- `ExchangeRateRepository.findHistoryBuckets`: SQL에서 KST 자정 기준 버킷별 마지막 원본 행만 선택하며 정밀도와 원본 시각을 보존합니다. 표시 이력 전용이며 체결은 집계하지 않은 최신 행을 사용합니다.
 
 - `ExchangeRateScheduler` / `ExchangeRateLoadService` / `ExchangeRatePersistenceService`: 매분 Toss 환율을 수집·검증하여 DB에 갱신합니다. `valid_from`, `valid_until`, `collected_at`, `rate`, `mid_rate`를 보존하며 같은 시작 시각의 오래된 수신 응답은 최신 관측값을 덮어쓰지 않습니다.
 - `ExecutionExchangeRateProviderBridge`: HTTP·메모리 캐시 없이 DB 최신 행을 읽습니다. `rate`를 사용하고 원본 유효기간과 미래 수신 시각을 검증하며 누락/만료 환율을 대체 사용하지 않습니다. 금융 트랜잭션은 잠금 후 전달받은 스냅샷을 재검증합니다. `ExchangeRateService`와 계좌 평가는 같은 DB를 쓰되 `midRate` 우선 표시 정책을 유지합니다. 최신/이력 API는 `validFrom`을 제공하며 프론트 최신 환율 폴링은 1분입니다.

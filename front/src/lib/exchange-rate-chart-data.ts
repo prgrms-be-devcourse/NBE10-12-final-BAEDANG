@@ -6,21 +6,22 @@ export type LinePoint = { time: UTCTimestamp; value: number };
 /**
  * 기간별로 화면에 보여줄 데이터 간격(버킷 크기, 초 단위).
  *
- * <p>백엔드는 동일한 UTC epoch 버킷별 마지막 원본 한 건만 내려줍니다.
+ * <p>백엔드는 동일한 KST 자정 기준 버킷별 마지막 원본 한 건만 내려줍니다.
  * 여기서는 원본 validFrom을 버킷 시작 시각으로 매핑하여 차트 축을 정렬합니다.
  * 여러 값이 주어져도 마지막 원본을 고르는 처리는 동일하며 환율을 평균내지 않습니다.
  */
 const BUCKET_SECONDS: Record<ExchangeRatePeriod, number> = {
-  "1d": 60 * 60, // 1시간
-  "1w": 24 * 60 * 60, // 1일
-  "1m": 24 * 60 * 60, // 1일
-  "3m": 24 * 60 * 60, // 1일
-  "1y": 7 * 24 * 60 * 60, // 1주
+  "1d": 60, // 1분
+  "1w": 30 * 60, // 30분
+  "1m": 2 * 60 * 60, // 2시간
+  "3m": 6 * 60 * 60, // 6시간
+  "1y": 24 * 60 * 60, // 1일
 };
+const KST_OFFSET_SECONDS = 9 * 60 * 60;
 
-/** 시간 단위 버킷("1일" 기간)에서만 축에 시:분까지 보여준다. 그 밖엔 날짜만으로 충분하다. */
+/** 분 단위 버킷("1일" 기간)에서만 축에 시:분까지 보여준다. 그 밖엔 날짜만으로 충분하다. */
 export function isTimeVisible(period: ExchangeRatePeriod): boolean {
-  return BUCKET_SECONDS[period] < 24 * 60 * 60;
+  return period === "1d";
 }
 
 /**
@@ -40,7 +41,8 @@ export function toLinePoints(items: ExchangeRateHistoryItem[], period: ExchangeR
     const value = Number(item.rate);
     if (!Number.isFinite(rawTime) || !Number.isFinite(value)) continue;
 
-    const bucketTime = (Math.floor(rawTime / bucketSeconds) * bucketSeconds) as UTCTimestamp;
+    const bucketTime = (Math.floor((rawTime + KST_OFFSET_SECONDS) / bucketSeconds)
+      * bucketSeconds - KST_OFFSET_SECONDS) as UTCTimestamp;
     const existing = byBucket.get(bucketTime);
     if (!existing || rawTime >= existing.rawTime) {
       byBucket.set(bucketTime, { rawTime, value });
@@ -60,13 +62,29 @@ export function toLinePoints(items: ExchangeRateHistoryItem[], period: ExchangeR
  */
 export function formatTickMark(time: Time, tickMarkType: TickMarkType): string {
   if (typeof time !== "number") return String(time);
-  const date = new Date(time * 1000);
+  const parts = kstParts(time);
 
   if (tickMarkType === TickMarkType.Time || tickMarkType === TickMarkType.TimeWithSeconds) {
-    const hh = String(date.getHours()).padStart(2, "0");
-    const mm = String(date.getMinutes()).padStart(2, "0");
-    return `${hh}:${mm}`;
+    return `${parts.hour}:${parts.minute}`;
   }
 
-  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+  return `${Number(parts.month)}월 ${Number(parts.day)}일`;
+}
+
+const kstFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+function kstParts(time: number): Record<string, string> {
+  return Object.fromEntries(kstFormatter.formatToParts(new Date(time * 1000))
+    .map(({ type, value }) => [type, value]));
+}
+
+/** 십자선 시간 라벨도 축과 동일한 KST로 표시합니다. 원본 UTC timestamp는 바꾸지 않습니다. */
+export function formatCrosshairTime(time: Time, period: ExchangeRatePeriod): string {
+  if (typeof time !== "number") return String(time);
+  const parts = kstParts(time);
+  const date = `${parts.year}-${parts.month}-${parts.day}`;
+  return period === "1d" ? `${date} ${parts.hour}:${parts.minute}` : date;
 }

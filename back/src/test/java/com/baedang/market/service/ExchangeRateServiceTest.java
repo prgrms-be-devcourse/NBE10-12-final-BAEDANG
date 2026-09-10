@@ -190,7 +190,7 @@ class ExchangeRateServiceTest {
         );
 
         when(exchangeRateRepository.findHistoryBuckets(
-                "USD", "KRW", from, NOW.atOffset(ZoneOffset.UTC), 3600
+                "USD", "KRW", from, NOW.atOffset(ZoneOffset.UTC), 60
         )).thenReturn(List.of(first, second));
 
         ExchangeRateHistoryResponse response = service.getHistory("1d");
@@ -221,7 +221,7 @@ class ExchangeRateServiceTest {
         );
 
         when(exchangeRateRepository.findHistoryBuckets(
-                "USD", "KRW", OffsetDateTime.parse("2026-08-25T06:00:00Z"), NOW.atOffset(ZoneOffset.UTC), 3600
+                "USD", "KRW", OffsetDateTime.parse("2026-08-25T06:00:00Z"), NOW.atOffset(ZoneOffset.UTC), 60
         )).thenReturn(List.of(exchangeRate));
 
         ExchangeRateHistoryResponse response = service.getHistory("1d");
@@ -235,7 +235,13 @@ class ExchangeRateServiceTest {
     void t9_지원하는_period_조회(String period, OffsetDateTime expectedFrom) {
         when(exchangeRateRepository.findHistoryBuckets(
                 "USD", "KRW", expectedFrom, NOW.atOffset(ZoneOffset.UTC),
-                period.equals("1d") ? 3600 : period.equals("1y") ? 604800 : 86400
+                switch (period) {
+                    case "1d" -> 60;
+                    case "1w" -> 1800;
+                    case "1m" -> 7200;
+                    case "3m" -> 21600;
+                    default -> 86400;
+                }
         )).thenReturn(List.of());
 
         ExchangeRateHistoryResponse response = service.getHistory(period);

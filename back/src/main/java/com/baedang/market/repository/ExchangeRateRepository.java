@@ -30,14 +30,14 @@ public interface ExchangeRateRepository extends JpaRepository<ExchangeRate, Long
     List<ExchangeRate> findByBaseCurrencyAndQuoteCurrencyAndValidFromGreaterThanEqualOrderByValidFromAsc(
             String baseCurrency, String quoteCurrency, OffsetDateTime from);
 
-    /** UTC epoch 기준 버킷별 마지막 원본 행만 반환합니다. 평균/반올림 없이 표시율 정밀도를 보존합니다. */
+    /** KST 자정 기준 버킷별 마지막 원본 행만 반환합니다. 평균/반올림 없이 표시율 정밀도를 보존합니다. */
     @Query(value = """
             SELECT exchange_rate_id, base_currency, quote_currency, rate, mid_rate,
                    valid_from, valid_until, collected_at
             FROM (
                 SELECT DISTINCT ON (bucket) *
                 FROM (
-                    SELECT fx.*, floor(extract(epoch FROM valid_from) / :bucketSeconds) AS bucket
+                    SELECT fx.*, floor(extract(epoch FROM valid_from AT TIME ZONE 'Asia/Seoul') / :bucketSeconds) AS bucket
                     FROM exchange_rate fx
                     WHERE base_currency = :baseCurrency AND quote_currency = :quoteCurrency
                       AND valid_from >= :from AND valid_from <= :until

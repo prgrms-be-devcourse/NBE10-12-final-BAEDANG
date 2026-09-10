@@ -354,7 +354,7 @@ FX trend chart
   ]
 }
 ```
-The database selects the last observation per bucket: `1d` uses 1 hour, `1w`/`1m`/`3m` use 1 day, and `1y` uses 7 days. Buckets use UTC Unix epoch alignment, matching the existing chart (7-day buckets are not ISO weeks). Only the requested start through now is included; empty buckets are omitted. The response preserves the selected original `validFrom` and unrounded display rate. At most 25/8/32/93/54 points respectively; no raw minute-history transfer to the browser.
+The database selects the last observation per bucket: `1d` uses 1 minute, `1w` 30 minutes, `1m` 2 hours, `3m` 6 hours, and `1y` 1 day. Buckets align to midnight in Asia/Seoul (KST). Only the requested start through now is included; empty buckets are omitted. The response preserves the selected original `validFrom` and unrounded display rate. Longer periods do not transfer raw minute history. Time-axis and crosshair labels use KST without a timezone suffix: `1d` crosshairs show `YYYY-MM-DD HH:mm`, while other periods show only `YYYY-MM-DD`, independently of graph granularity. Stored timestamps remain UTC.
 
 ---
 

@@ -50,10 +50,11 @@ class ExchangeRateRepositoryIntegrationTest {
     private EntityManager entityManager;
 
     @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(ints = {3600, 86400, 604800})
+    @org.junit.jupiter.params.provider.ValueSource(ints = {60, 1800, 7200, 21600, 86400})
     void 버킷별_마지막원본만_반환하고_조회범위밖과_미래값을_제외한다(int seconds) {
         long epoch = COLLECTED_AT.toEpochSecond();
-        OffsetDateTime start = java.time.Instant.ofEpochSecond(Math.floorDiv(epoch, seconds) * seconds).atOffset(ZoneOffset.UTC);
+        OffsetDateTime start = java.time.Instant.ofEpochSecond(
+                Math.floorDiv(epoch + 32400, seconds) * seconds - 32400).atOffset(ZoneOffset.UTC);
         int[] offsets = {-1, 0, 10, seconds - 1, seconds, seconds + 10, seconds + 11};
         for (int offset : offsets) {
             OffsetDateTime at = start.plusSeconds(offset);

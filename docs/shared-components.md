@@ -367,7 +367,7 @@ Metrics: quote.collection.batch, quote.collection.sweep.submission (submission s
 ### Limit execution components (#122)
 
 - `exchangeRateTaskScheduler`: dedicated single-thread scheduler for minute FX collection, isolated from shared market batches; the Toss client still enforces the shared rate limit.
-- `ExchangeRateRepository.findHistoryBuckets`: selects the last source row in each UTC epoch bucket in SQL, preserving original precision/time. This is display history only; execution always uses the unaggregated latest row.
+- `ExchangeRateRepository.findHistoryBuckets`: selects the last source row in each KST midnight-aligned bucket in SQL, preserving original precision/time. This is display history only; execution always uses the unaggregated latest row.
 
 - `ExchangeRateScheduler` / `ExchangeRateLoadService` / `ExchangeRatePersistenceService`: every-minute Toss collection, validation and DB upsert. Persist `valid_from`, `valid_until`, `collected_at`, `rate` and `mid_rate`; older receipts cannot overwrite a newer observation of the same source start time.
 - `ExecutionExchangeRateProviderBridge`: reads the latest DB row, without HTTP or a memory cache. Uses `rate`, validates the source validity window and future receipt time; unavailable FX is not replaced with an expired row. Financial transactions recheck the supplied snapshot after locking. `ExchangeRateService` and account valuation share the DB but retain their `midRate`-first display policy. Latest/history APIs expose `validFrom`, and the frontend polls latest every minute.
