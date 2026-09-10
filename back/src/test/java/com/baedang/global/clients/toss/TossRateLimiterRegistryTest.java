@@ -1,5 +1,6 @@
 package com.baedang.global.clients.toss;
 
+import com.baedang.global.clients.FixedIntervalGate;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

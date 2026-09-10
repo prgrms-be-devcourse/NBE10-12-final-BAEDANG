@@ -113,4 +113,17 @@ public class SchedulingConfig {
         executor.setAwaitTerminationSeconds(30);
         return executor;
     }
+
+    /** KIS 재무 수집을 공용 스케줄러와 분리하고 중복 트리거 대기열을 제한합니다. */
+    @Bean(name = "stockFinancialTaskExecutor")
+    public ThreadPoolTaskExecutor stockFinancialTaskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(1);
+        executor.setThreadNamePrefix("stock-financial-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        return executor;
+    }
 }

@@ -47,7 +47,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
 
-### Table Map (15)
+### Table Map (18)
 
 | Group | Table | Note |
 |---|---|---|
@@ -65,6 +65,9 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `exchange_rate` | FX history · regular table · no FK relations |
 | **Synthetic Order Book** | `order_book_version` | synthetic order book set header refreshed every 3s based on current price |
 | | `order_book_level` | Up to 20 levels per version (10 ASK / 10 KR BID / 1–10 US BID) with prices and quantities |
+| **Financial · Industry (KIS)** | `stock_industry` | industry classification (standard / large / medium / small) |
+| | `stock_financial_period` | annual/quarterly statement period balance sheet, income, ratios |
+| | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
 
 ### MVP Behavior Matrix (confirmed)
 
@@ -151,6 +154,9 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `holding` | own | derived from the ledger. Only `avg_exchange_rate` originates from Toss FX. |
 | `ledger_entry` | own | Recorded by execution/ledger services using the original trade_execution FX. Append-only. |
 | `users` `account` `daily_account_snapshot` `stock_external_id` | own | unrelated to external APIs. **The bookkeeping side is entirely ours** — which is why this project is bookkeeping, not channel. |
+| `stock_industry` | KIS | from `/uapi/domestic-stock/v1/quotations/search-stock-info`. Negative cache stores null classifications. |
+| `stock_financial_period` | KIS | from KIS 4 finance APIs (balance-sheet, income-statement, financial-ratio, profit-ratio). Historical rows preserved. |
+| `stock_financial_sync` | own + KIS | sync timestamps for TTL tracking (financial 7d / 7 days, industry 30d / 30 days). |
 
 ### Batch Schedule (confirmed)
 
@@ -158,6 +164,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 |---|---|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Mon **07:00** | weekly | **① Full stock-master refresh** — `/stocks/all` × 7 markets → all symbols, `/stocks` in batches of 200 → detail. New listings/delistings reflected here. ~50 calls, 15s.                                                                   |
 | Mon **08:00** | weekly | **② KR top-100 by trading amount — 1 Toss call.** `/rankings?market=KR&duration=1w&count=100` → update `is_ranked`, `rank_no`, `trading_amount` · `prev_close`·daily backfill for newly included · **keep last week's universe if empty**. |
+| Mon **08:10** | weekly | **KR top-100 financial data update — 4 annual + 4 quarterly calls per stock.** Industry is queried only if missing or older than 30 days / 30d (max 800 / 900 calls). Sequential processing with per-stock exception isolation. 3 TPS before 2026-09-10 KST / 18 TPS from 2026-09-10 KST. |
 | Mon **21:00** | weekly | **③ US top-100 by trading amount — 1 Toss call.** Same as KR. 1.5h before the US open (22:30), so first quote collection starts on the fresh universe.                                                                                     |
 | **08:50** | daily | KR `prev_close` ← prior `daily_candle.close_price` (10 min before open). Fetch price limits too. Not in the confirmed list but required for change rate (explained below).                                                                 |
 | KR regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, up to 200 per request. |
@@ -474,6 +481,55 @@ Up to 20 rows are generated per version: 10 ASK rows and 1–10 BID rows (KR alw
 - **Closed versions cleaned up**: Closed versions older than one minute are deleted regardless of consumption or execution references.
 - **Level cascade cleanup**: Deleting a closed version removes its up to 20 levels via `ON DELETE CASCADE`.
 - **Executions preserved**: Execution price, quantity, FX, and settlement amounts remain permanent; `book_level_id` remains a non-FK trace value captured at consumption time.
+
+### Financial · Industry (KIS — Flyway V5)
+
+#### `stock_industry` — industry classification
+Stores the latest standard and market-index industry classifications for Korean stocks.
+
+| Column | Type | Description |
+|---|---|---|
+| `stock_id` | BIGINT PK | References `stock(stock_id)` (`ON DELETE CASCADE`). |
+| `standard_industry_code` | VARCHAR(10) | Standard industry classification code (nullable for negative cache). |
+| `standard_industry_name` | VARCHAR(100) | Standard industry classification name. |
+| `index_industry_large_code` | VARCHAR(10) | Index industry large category code. |
+| `index_industry_large_name` | VARCHAR(100) | Index industry large category name. |
+| `index_industry_medium_code` | VARCHAR(10) | Index industry medium category code. |
+| `index_industry_medium_name` | VARCHAR(100) | Index industry medium category name. |
+| `index_industry_small_code` | VARCHAR(10) | Index industry small category code. |
+| `index_industry_small_name` | VARCHAR(100) | Index industry small category name. |
+| `fetched_at` | TIMESTAMPTZ | Exchange timestamp when industry information was fetched. |
+| `created_at` `updated_at` | TIMESTAMPTZ | Automatic auditing timestamps (`BaseEntity`). |
+
+#### `stock_financial_period` — annual and quarterly financial statements
+Stores historical balance sheet, income statement, and financial/profitability ratios by statement period.
+
+| Column | Type | Description |
+|---|---|---|
+| `stock_id` | BIGINT | References `stock(stock_id)` (`ON DELETE CASCADE`). Part of composite PK. |
+| `period_type` | VARCHAR(10) | `ANNUAL` or `QUARTERLY`. Part of composite PK. |
+| `statement_year_month` | CHAR(6) | Statement period in `YYYYMM` format (e.g. `202512`). Part of composite PK. |
+| Balance Sheet (10) | NUMERIC(30,6) | `current_assets`, `fixed_assets`, `total_assets`, `current_liabilities`, `fixed_liabilities`, `total_liabilities`, `capital_stock`, `capital_surplus`, `retained_earnings`, `total_equity`. |
+| Income Statement (3) | NUMERIC(30,6) | `sales`, `operating_profit`, `net_income`. |
+| Financial Ratios (10) | NUMERIC(30,6) | `sales_growth_rate`, `operating_profit_growth_rate`, `net_income_growth_rate`, `roe`, `eps`, `sales_per_share`, `bps`, `reserve_ratio`, `debt_ratio`, `net_profit_margin`. |
+| `created_at` `updated_at` | TIMESTAMPTZ | Automatic auditing timestamps (`BaseEntity`). |
+
+- **Derived Metric**: Operating profit margin is computed dynamically at query time (`operatingProfit × 100 ÷ sales`, scale 6 `HALF_UP`), returning null if sales is 0 or null.
+- **Historical preservation**: New syncs update matching periods and preserve earlier unreturned statement periods without deletion.
+
+#### `stock_financial_sync` — sync metadata and negative cache tracking
+Tracks successful synchronization timestamps per group to enforce TTLs and negative caching.
+
+| Column | Type | Description |
+|---|---|---|
+| `stock_id` | BIGINT PK | References `stock(stock_id)` (`ON DELETE CASCADE`). |
+| `industry_synced_at` | TIMESTAMPTZ | Timestamp of last successful industry sync (TTL: 30 days / 30d). |
+| `annual_synced_at` | TIMESTAMPTZ | Timestamp of last successful annual financial sync (TTL: 7 days / 7d). |
+| `quarterly_synced_at` | TIMESTAMPTZ | Timestamp of last successful quarterly financial sync (TTL: 7 days / 7d). |
+| `created_at` `updated_at` | TIMESTAMPTZ | Automatic auditing timestamps (`BaseEntity`). |
+
+- **Non-Trading Boundary**: KIS financial and industry data is used exclusively for information display on stock detail pages. It is NEVER used for quotes, trading decisions, or order execution.
+- **Negative Cache**: A normal empty response from KIS updates the corresponding `*_synced_at` column, preventing redundant external requests throughout the active TTL period.
 ---
 
 ## Stock Classification Model
@@ -565,7 +621,7 @@ Rejected LIMIT requests retain input and conversion evidence but have no reserva
 
 ### LIMIT execution indexes (#122)
 
-No tables/columns are added. `V6__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
+No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
 
 V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
 

@@ -503,6 +503,86 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
 | `STOCK_NOT_FOUND` | 존재하지 않는 심볼 |
 | `INVALID_INPUT` | `marketCountry` 누락 또는 KR/US 이외의 값 |
 
+
+### `GET /stocks/{symbol}/financials?marketCountry=KR`
+국내 종목 산업분류 및 재무제표 조회 — 캐시 우선
+
+`GET /stocks/{symbol}`에는 KIS 외부 호출을 섞지 않으며(시세 지연 및 가용성 보호), 기업 재무정보는 이 전용 엔드포인트로 조회합니다.
+
+| 파라미터 | 필수 | 값 |
+|---|---|---|
+| `marketCountry` | O | 시장 식별자 — `KR`만 지원 |
+
+**응답 · 200**
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "dataStatus": "FRESH",
+  "industry": {
+    "standard": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "large": { "code": "03", "name": "제조업" },
+    "medium": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "small": { "code": "03261", "name": "반도체 제조업" }
+  },
+  "annual": [
+    {
+      "statementYearMonth": "202512",
+      "balanceSheet": {
+        "currentAssets": "...",
+        "fixedAssets": "...",
+        "totalAssets": "...",
+        "currentLiabilities": "...",
+        "fixedLiabilities": "...",
+        "totalLiabilities": "...",
+        "capitalStock": "...",
+        "capitalSurplus": "...",
+        "retainedEarnings": "...",
+        "totalEquity": "..."
+      },
+      "incomeStatement": {
+        "sales": "...",
+        "operatingProfit": "...",
+        "netIncome": "..."
+      },
+      "ratios": {
+        "salesGrowthRate": "...",
+        "operatingProfitGrowthRate": "...",
+        "netIncomeGrowthRate": "...",
+        "roe": "...",
+        "eps": "...",
+        "salesPerShare": "...",
+        "bps": "...",
+        "reserveRatio": "...",
+        "debtRatio": "...",
+        "netProfitMargin": "...",
+        "operatingProfitMargin": "..."
+      }
+    }
+  ],
+  "quarterly": [],
+  "syncedAt": {
+    "industry": "2026-09-08T00:00:00Z",
+    "annual": "2026-09-08T00:00:01Z",
+    "quarterly": "2026-09-08T00:00:02Z"
+  }
+}
+```
+
+- **데이터 형식**: 모든 금액과 비율은 정밀도 보존을 위해 불필요한 후행 0이 없는 문자열(`FinancialDecimalFormatter.plain`)로 내려줍니다. `annual`, `quarterly` 배열은 결산연월(`statementYearMonth`) 내림차순 정렬입니다. null 필드는 백엔드 전역 `non_null` 정책에 따라 JSON에서 생략됩니다.
+- **영업이익률 (`operatingProfitMargin`)**: 조회 시점에 `operatingProfit × 100 ÷ sales`로 계산하며 소수점 6자리 `HALF_UP`으로 반올림합니다. `sales`가 0 또는 null이면 null로 반환합니다.
+- **`dataStatus`**:
+  - `FRESH`: 세 그룹(산업 30일 / 30d, 재무 7일 / 7d)이 모두 TTL 안이거나 방금 갱신에 성공함. 정상 빈 응답으로 적재된 negative cache도 TTL 안이면 `FRESH`입니다.
+  - `STALE`: 갱신이 필요하여 외부 KIS 호출을 시도했으나 실패하고 기존 캐시를 폴백으로 반환함.
+
+| 에러 코드 | HTTP | 상황 |
+|---|---|---|
+| `INVALID_INPUT` | 400 | `marketCountry` 파라미터 누락 또는 형식 오류 |
+| `STOCK_NOT_FOUND` | 404 | 존재하지 않는 종목 |
+| `FINANCIALS_NOT_SUPPORTED` | 422 | 미국 주식, ETF, ETN 또는 6자리 숫자가 아닌 국내 종목코드 |
+| `KIS_RATE_LIMITED` | 429 | KIS 호출 제한 발생 및 반환할 기존 캐시 없음 |
+| `KIS_API_ERROR` | 502 | KIS 외부 통신/계약 오류 발생 및 반환할 기존 캐시 없음 |
+| `KIS_API_UNAVAILABLE` | 503 | KIS 비활성화(`kis.enabled=false`) 상태이며 필요한 그룹의 캐시 없음 |
 ### `GET /stocks/{symbol}/candles`
 일봉 · 분봉 차트
 

@@ -1,4 +1,4 @@
-package com.baedang.global.clients.toss;
+package com.baedang.global.clients;
 
 import com.baedang.global.error.BusinessException;
 import org.junit.jupiter.api.DisplayName;

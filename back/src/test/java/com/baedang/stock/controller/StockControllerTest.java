@@ -10,12 +10,14 @@ import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.dto.CandleResponse;
 import com.baedang.stock.dto.StockSearchResponse;
 import com.baedang.stock.dto.StockDetailResponse;
+import com.baedang.stock.dto.StockFinancialResponse;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.CandleQueryService;
 import com.baedang.stock.service.StockSearchService;
 import com.baedang.stock.service.StockDetailService;
+import com.baedang.stock.service.StockFinancialQueryService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +35,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(StockController.class)
@@ -54,6 +57,9 @@ public class StockControllerTest {
     @MockitoBean
     private StockDetailService stockDetailService;
 
+
+    @MockitoBean
+    private StockFinancialQueryService stockFinancialQueryService;
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
 
@@ -110,16 +116,16 @@ public class StockControllerTest {
     @Test
     @DisplayName("검색어가 잘못되면 400 응답 반환")
     void t3() throws Exception {
-        when(stockSearchService.search("삼", 10))
+        when(stockSearchService.search("%", 10))
                 .thenThrow(new BusinessException(ErrorCode.INVALID_QUERY));
 
         mockMvc.perform(
                         get("/api/stocks/search")
-                                .param("q", "삼")
+                                .param("q", "%")
                                 .param("size", "10")
                 ).andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_QUERY"))
-                .andExpect(jsonPath("$.message").value("검색어는 2자 이상 입력해주세요"));
+                .andExpect(jsonPath("$.message").value("검색어를 1자 이상 입력해주세요"));
     }
 
     @Test
@@ -252,5 +258,74 @@ public class StockControllerTest {
         mockMvc.perform(get("/api/stocks/search"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("재무정보 조회 성공 시 전체 중첩 구조와 상태 문자열을 반환한다")
+    void financials_success() throws Exception {
+        StockFinancialResponse response = new StockFinancialResponse(
+                "005930",
+                "KR",
+                "FRESH",
+                new StockFinancialResponse.Industry(
+                        new StockFinancialResponse.Classification("0326", "전자부품"),
+                        null, null, null
+                ),
+                List.of(
+                        new StockFinancialResponse.Period(
+                                "202512",
+                                 new StockFinancialResponse.BalanceSheet(
+                                        "100", "200", "300", "50", "50", "100", "10", null, null, "200"
+                                ),
+                                new StockFinancialResponse.IncomeStatement("500", "50", "40"),
+                                new StockFinancialResponse.Ratios(
+                                        "10", "12", "8", "15", "5000", "60000", "40000", "800", "50", "8", "10"
+                                )
+                        )
+                ),
+                List.of(),
+                new StockFinancialResponse.SyncedAt(
+                        OffsetDateTime.parse("2026-09-08T00:00:00Z"),
+                        OffsetDateTime.parse("2026-09-08T00:00:01Z"),
+                        OffsetDateTime.parse("2026-09-08T00:00:02Z")
+                )
+        );
+
+        when(stockFinancialQueryService.getFinancials("005930", "KR")).thenReturn(response);
+
+        mockMvc.perform(get("/api/stocks/005930/financials").param("marketCountry", "KR"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.symbol").value("005930"))
+                .andExpect(jsonPath("$.marketCountry").value("KR"))
+                .andExpect(jsonPath("$.dataStatus").value("FRESH"))
+                .andExpect(jsonPath("$.industry.standard.code").value("0326"))
+                .andExpect(jsonPath("$.annual[0].statementYearMonth").value("202512"))
+                .andExpect(jsonPath("$.annual[0].balanceSheet.currentAssets").value("100"))
+                .andExpect(jsonPath("$.annual[0].incomeStatement.sales").value("500"))
+                .andExpect(jsonPath("$.annual[0].ratios.operatingProfitMargin").value("10"))
+                .andExpect(jsonPath("$.annual[0].balanceSheet.capitalSurplus").doesNotExist())
+                .andExpect(jsonPath("$.quarterly").isEmpty())
+                .andExpect(jsonPath("$.syncedAt.industry").value("2026-09-08T00:00:00Z"));
+
+        verify(stockFinancialQueryService).getFinancials("005930", "KR");
+    }
+
+    @Test
+    @DisplayName("재무정보 조회 시 marketCountry가 누락되면 400 INVALID_INPUT을 반환한다")
+    void financials_missing_marketCountry_returns_400() throws Exception {
+        mockMvc.perform(get("/api/stocks/005930/financials"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 종목 조회 시 422 FINANCIALS_NOT_SUPPORTED를 반환한다")
+    void financials_unsupported_returns_422() throws Exception {
+        when(stockFinancialQueryService.getFinancials("AAPL", "US"))
+                .thenThrow(new BusinessException(ErrorCode.FINANCIALS_NOT_SUPPORTED));
+
+        mockMvc.perform(get("/api/stocks/AAPL/financials").param("marketCountry", "US"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("FINANCIALS_NOT_SUPPORTED"));
     }
 }

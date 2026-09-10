@@ -53,13 +53,16 @@ class AccountServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AccountService(
+        AccountValuationService valuationService = new AccountValuationService(
                 accountRepository,
                 holdingRepository,
                 quoteSnapshotRepository,
                 exchangeRateRepository,
+                new HoldingValuator()
+        );
+        service = new AccountService(
+                valuationService,
                 stockRepository,
-                new HoldingValuator(),
                 Clock.fixed(NOW, ZoneOffset.UTC)
         );
     }

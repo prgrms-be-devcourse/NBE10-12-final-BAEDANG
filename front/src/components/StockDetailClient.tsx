@@ -976,9 +976,50 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                       ? `${new Date(limitQuote.expiresAt).toLocaleString("ko-KR")}까지 미체결이면 자동 만료돼요`
                       : "수량·지정가를 입력하면 접수 가능 여부를 확인해요"}
                 </div>
-                {limitQuote?.executionPreview?.status === "UNSUPPORTED" && (
-                  <div className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
-                    호가 기반 체결 예상은 서비스 준비 중이에요. 실제 체결은 지정가 조건이 성립하는 대로 이뤄져요.
+                {limitQuote?.executionPreview && (
+                  <div className="mt-2.5 rounded-lg p-2.5 text-[12px]" style={{ background: "var(--card)", border: "1px solid var(--line2)" }}>
+                    {limitQuote.executionPreview.status === "AVAILABLE" ? (
+                      <>
+                        {Number(limitQuote.executionPreview.expectedFilledQuantity || 0) > 0 ? (
+                          <div className="space-y-1">
+                            <div className="flex justify-between font-bold" style={{ color: "var(--accent)" }}>
+                              <span>호가 기준 즉시 체결 예상</span>
+                              <span>{formatNumber(limitQuote.executionPreview.expectedFilledQuantity)}주</span>
+                            </div>
+                            <div className="flex justify-between text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                              <span>예상 평균 체결가</span>
+                              <span>
+                                {formatNumber(limitQuote.executionPreview.avgExecutionPrice)}
+                                {detail.currency === "USD" ? "$" : "원"}
+                              </span>
+                            </div>
+                            {Number(limitQuote.executionPreview.remainingQuantity || 0) > 0 && (
+                              <div className="flex justify-between text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                                <span>잔여 미체결 대기</span>
+                                <span>{formatNumber(limitQuote.executionPreview.remainingQuantity)}주</span>
+                              </div>
+                            )}
+                            {side === "매수" && Number(limitQuote.executionPreview.releasedCash || 0) > 0 && (
+                              <div className="border-t pt-1 text-[11px]" style={{ borderColor: "var(--line2)", color: "var(--up)" }}>
+                                체결 후 약 {formatNumber(limitQuote.executionPreview.releasedCash)}원의 예약금이 예수금으로 환급돼요
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                            {limitQuote.executionPreview.reason === "PRICE_LIMIT"
+                              ? "현재 호가 범위를 벗어나 있어, 조건 부합 시까지 미체결 대기해요."
+                              : "현재 체결 가능한 호가 잔량이 없어 미체결 대기로 접수돼요."}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                        {limitQuote.executionPreview.status === "UNAVAILABLE"
+                          ? "실시간 호가 확인 중이에요. 접수 후 조건 성립 시 자동 체결돼요."
+                          : "주문 조건을 확인해주세요."}
+                      </div>
+                    )}
                   </div>
                 )}
               </>

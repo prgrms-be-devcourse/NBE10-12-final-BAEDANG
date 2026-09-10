@@ -102,11 +102,11 @@ class DomainNormalizationContractTest {
         Stock stock = mock(Stock.class);
         when(stock.getName()).thenReturn("삼성전자");
         when(stock.getSymbol()).thenReturn("005930");
-        when(repository.searchByKeyword("삼성")).thenReturn(List.of(stock, stock));
+        when(repository.searchByJamo("삼성")).thenReturn(List.of(stock, stock));
         StockSearchService service = new StockSearchService(repository);
 
         assertThat(service.search(" 삼\t성 ").items()).hasSize(2);
-        verify(repository).searchByKeyword("삼성");
+        verify(repository).searchByJamo("삼성");
         assertThatThrownBy(() -> service.search(null))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUERY));

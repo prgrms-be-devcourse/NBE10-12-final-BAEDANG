@@ -145,6 +145,45 @@ export default function MyPage() {
     isLoggedIn && !!user && [...heldMarketCountries].some((market) => isMarketOpen(market as MarketCountry))
   );
 
+  // 주문 내역 탭을 보고 있고, 미체결(PENDING / PARTIALLY_FILLED) 상태의 활성 주문이
+  // 존재할 때만 5초 주기로 주문 목록을 다시 조회한다. 모든 주문이 체결·취소·만료로
+  // 종료되었거나 다른 탭을 보고 있을 때는 불필요한 폴링을 돌리지 않는다.
+  const hasActiveOrders = orders.some(
+    (o) => o.status === "PENDING" || o.status === "PARTIALLY_FILLED"
+  );
+  const ordersPollInFlightRef = useRef(false);
+  useVisiblePolling(
+    () => {
+      if (!user || ordersPollInFlightRef.current) return;
+      ordersPollInFlightRef.current = true;
+      getMyOrders()
+        .then((res) => {
+          setOrders(res.items);
+          setOrdersCursor(res.nextCursor);
+          setOrdersHasNext(res.hasNext);
+        })
+        .catch(() => {})
+        .finally(() => {
+          ordersPollInFlightRef.current = false;
+        });
+    },
+    VALUATION_POLL_INTERVAL_MS,
+    isLoggedIn && !!user && tab === "orders" && hasActiveOrders
+  );
+
+  function handleTabChange(nextTab: "holdings" | "ledger" | "orders") {
+    setTab(nextTab);
+    if (nextTab === "orders") {
+      getMyOrders()
+        .then((res) => {
+          setOrders(res.items);
+          setOrdersCursor(res.nextCursor);
+          setOrdersHasNext(res.hasNext);
+        })
+        .catch(() => {});
+    }
+  }
+
   async function handleReset() {
     if (!user || !account || resetting) return;
     setResetting(true);
@@ -319,7 +358,7 @@ export default function MyPage() {
             { value: "ledger", label: "체결 내역" },
           ]}
           value={tab}
-          onChange={(v) => setTab(v as "holdings" | "ledger" | "orders")}
+          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders")}
           trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
           trackStyle={{
             background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
@@ -431,7 +470,7 @@ export default function MyPage() {
               <span>상태</span>
               <span className="text-right">수량</span>
               <span className="text-right">가격</span>
-              <span>주문시각</span>
+              <span className="text-right">주문시각</span>
               <span />
             </div>
             {orders.map((order) => (
@@ -470,7 +509,7 @@ export default function MyPage() {
                       : `${formatNumber(order.requestedLimitPrice)}원`
                     : "-"}
                 </span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
                 <span className="text-right">
@@ -508,7 +547,7 @@ export default function MyPage() {
           <div
             className="grid px-5 py-2.5 text-[12px] font-bold"
             style={{
-              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
               columnGap: "20px",
               borderBottom: "1px solid var(--line2)",
               color: "var(--mut2)",
@@ -518,7 +557,7 @@ export default function MyPage() {
             <span>설명</span>
             <span className="text-right">증감액</span>
             <span className="text-right">잔액</span>
-            <span>발생시각</span>
+            <span className="text-right">발생시각</span>
           </div>
           {ledger.map((entry) => {
             const amount = toDecimal(entry.amount);
@@ -528,7 +567,7 @@ export default function MyPage() {
                 key={entry.entryId}
                 className="grid items-center px-5 py-3 text-[15px]"
                 style={{
-                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                  gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
                   columnGap: "20px",
                   borderBottom: "1px solid var(--line2)",
                 }}
@@ -544,7 +583,7 @@ export default function MyPage() {
                   {formatSigned(entry.amount)}
                 </span>
                 <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>

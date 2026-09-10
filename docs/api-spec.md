@@ -504,6 +504,86 @@ Quote loading is owned by the separate market-data ingestion work. When no quote
 | `STOCK_NOT_FOUND` | symbol doesn't exist |
 | `INVALID_INPUT` | missing `marketCountry` or a value other than KR/US |
 
+### `GET /stocks/{symbol}/financials?marketCountry=KR`
+Korean stock industry classification & financial statements — cache-first
+
+`GET /stocks/{symbol}` does not make external financial calls to preserve quote latency and availability. Financial information is queried separately through this dedicated endpoint.
+
+| Param | Req | Value |
+|---|---|---|
+| `marketCountry` | O | market identifier — `KR` only |
+
+**Response · 200**
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "dataStatus": "FRESH",
+  "industry": {
+    "standard": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "large": { "code": "03", "name": "제조업" },
+    "medium": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "small": { "code": "03261", "name": "반도체 제조업" }
+  },
+  "annual": [
+    {
+      "statementYearMonth": "202512",
+      "balanceSheet": {
+        "currentAssets": "...",
+        "fixedAssets": "...",
+        "totalAssets": "...",
+        "currentLiabilities": "...",
+        "fixedLiabilities": "...",
+        "totalLiabilities": "...",
+        "capitalStock": "...",
+        "capitalSurplus": "...",
+        "retainedEarnings": "...",
+        "totalEquity": "..."
+      },
+      "incomeStatement": {
+        "sales": "...",
+        "operatingProfit": "...",
+        "netIncome": "..."
+      },
+      "ratios": {
+        "salesGrowthRate": "...",
+        "operatingProfitGrowthRate": "...",
+        "netIncomeGrowthRate": "...",
+        "roe": "...",
+        "eps": "...",
+        "salesPerShare": "...",
+        "bps": "...",
+        "reserveRatio": "...",
+        "debtRatio": "...",
+        "netProfitMargin": "...",
+        "operatingProfitMargin": "..."
+      }
+    }
+  ],
+  "quarterly": [],
+  "syncedAt": {
+    "industry": "2026-09-08T00:00:00Z",
+    "annual": "2026-09-08T00:00:01Z",
+    "quarterly": "2026-09-08T00:00:02Z"
+  }
+}
+```
+
+- **Data format**: All financial amounts and ratios are serialized as plain strings without exponent notation or trailing zeros (`FinancialDecimalFormatter.plain`). `annual` and `quarterly` arrays are ordered by `statementYearMonth` descending. Null values are omitted from JSON per global `non_null` inclusion policy.
+- **Operating profit margin**: Derived at query time as `operatingProfit × 100 ÷ sales` with scale 6 `HALF_UP` rounding. If `sales` is 0 or null, `operatingProfitMargin` is returned as null.
+- **`dataStatus`**:
+  - `FRESH`: All three groups are within TTL (financials 7 days / 7d, industry 30 days / 30d) or were refreshed successfully. Normal empty KIS response is stored as a negative cache and also returns `FRESH`.
+  - `STALE`: A refresh was needed and attempted, but external KIS failed, and previously cached data was returned as fallback.
+
+| Error code | HTTP | When |
+|---|---|---|
+| `INVALID_INPUT` | 400 | missing `marketCountry` parameter or invalid format |
+| `STOCK_NOT_FOUND` | 404 | symbol does not exist |
+| `FINANCIALS_NOT_SUPPORTED` | 422 | US stocks, ETFs, ETNs, or non-6-digit Korean symbols |
+| `KIS_RATE_LIMITED` | 429 | KIS request rate limit reached and no previous cache exists |
+| `KIS_API_ERROR` | 502 | KIS external communication error and no previous cache exists |
+| `KIS_API_UNAVAILABLE` | 503 | KIS is disabled (`kis.enabled=false`) and no cached data exists for a required group |
+
 ### `GET /stocks/{symbol}/candles`
 Daily & minute chart
 
@@ -932,6 +1012,54 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 **Not a delete — a new-round account opening.** The prior ledger, fills, and holdings stay preserved; queries run against the new `account_id`, so the screen clears automatically. Extensible to "past round scores" later. **The frontend must show a confirmation modal.**
 
 Closing the old account, opening the new account, and inserting its initial-deposit ledger entry are one transaction and share one UTC `resetAt`. The account-row lock serializes reset with market orders. Future limit-order locks cause `ACCOUNT_HAS_PENDING_ORDERS` (409); a stale ID whose next round is no longer active causes `ACCOUNT_RESET_CONFLICT` (409).
+
+---
+
+## Reports
+
+### `GET /reports/me` 🔒
+Investment personality report (investment MBTI) for the current active account (round).
+
+```json
+{
+  "accountId": 10,
+  "roundNo": 1,
+  "initialCash": "50000000",
+  "cashBalance": "20000000",
+  "stockValue": "33000000",
+  "totalAsset": "53000000",
+  "totalPnl": "3000000",
+  "returnRate": "0.06",
+  "classified": true,
+  "typeCode": "CKSB",
+  "typeLabel": "집중·국내·개별주·안정형",
+  "shares": {
+    "concentration": "0.6364",
+    "domestic": "0.6364",
+    "individual": "0.6364",
+    "aggressive": "0"
+  },
+  "holdingCount": 2,
+  "holdingPeriodWeeks": 4,
+  "longHeldStocks": [
+    {
+      "symbol": "005930",
+      "name": "삼성전자",
+      "currency": "KRW",
+      "avgBuyPrice": "228000",
+      "lastPrice": "241500",
+      "returnRate": "0.0592",
+      "heldSince": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "asOf": "2026-09-09T00:00:00Z"
+}
+```
+**Return rate is total P&L over the round's starting capital** — `returnRate = (cashBalance + stockValue − initialCash) / initialCash`, so it already includes realized (in cash) and unrealized (in holdings). This differs from `/accounts/me`'s `unrealizedPnlRate` (unrealized / cost). Valuation reuses the single account-valuation pass (same quotes·FX·rounding as `/accounts/me`).
+
+**Investment MBTI — 4 binary axes → 16 types**, value-weighted by evaluation amount: concentration (집중 C / 분산 D, by top-1 weight), market (국내 K / 해외 G), instrument (개별주 S / ETF E), risk (공격 A / 안정 B). `shares` are the deciding 0~1 ratios. **With fewer than 2 holdings the portfolio is `"classified": false`** ("미분류/신규") and `typeCode`·`typeLabel` are null. Axis 4 (risk) is a Phase-1 proxy using leverage/inverse weight only; holding-volatility is deferred.
+
+**`longHeldStocks`** — stocks held at least `holdingPeriodWeeks` (default 4, `report.holding-period-weeks`). "Held since" is the current lot's first buy, reconstructed by replaying filled `trade_order`s (a full sell to zero closes the lot; a later re-buy opens a new one). `returnRate` here is the **per-holding return in the stock's own currency**, `(lastPrice − avgBuyPrice) / avgBuyPrice` (null if no quote). Sorted oldest-held first. Empty until holdings accumulate 4 weeks.
 
 ---
 

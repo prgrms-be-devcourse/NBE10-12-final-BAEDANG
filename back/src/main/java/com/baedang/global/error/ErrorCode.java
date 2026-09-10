@@ -45,7 +45,7 @@ public enum ErrorCode {
     STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 종목이에요"),
     STOCK_STATUS_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "종목 거래 상태를 확인할 수 없어요. 다시 시도해주세요"),
     STOCK_NOT_TRADABLE(HttpStatus.UNPROCESSABLE_ENTITY, "현재 거래를 지원하지 않는 종목이에요"),
-    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어는 2자 이상 입력해주세요"),
+    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어를 1자 이상 입력해주세요"),
     INVALID_INTERVAL_RANGE(HttpStatus.BAD_REQUEST, "지원하지 않는 차트 기간 조합이에요"),
     INVALID_CURSOR(HttpStatus.BAD_REQUEST, "잘못된 페이지 정보예요. 처음부터 다시 불러와주세요"),
 
@@ -90,6 +90,10 @@ public enum ErrorCode {
     ACCOUNT_HAS_PENDING_ORDERS(HttpStatus.CONFLICT, "미체결 주문이 있어 포트폴리오를 초기화할 수 없어요"),
 
     // ── 외부 API ────────────────────────────────────────────────────────────
+    FINANCIALS_NOT_SUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 재무정보를 지원하지 않아요"),
+    KIS_API_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "재무정보 서비스를 사용할 수 없어요"),
+    KIS_API_ERROR(HttpStatus.BAD_GATEWAY, "재무정보를 가져올 수 없어요"),
+    KIS_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "재무정보 요청이 너무 많아요. 잠시 후 다시 시도해주세요"),
     TOSS_API_ERROR(HttpStatus.BAD_GATEWAY, "시세 서버와 통신할 수 없어요"),
     TOSS_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많아요. 잠시 후 다시 시도해주세요");
 

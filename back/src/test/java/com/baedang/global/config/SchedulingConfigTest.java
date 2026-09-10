@@ -26,6 +26,20 @@ class SchedulingConfigTest {
     }
 
     @Test
+    void 재무정보_작업_Executor는_대기열이_제한된_단일_스레드로_구성된다() {
+        ThreadPoolTaskExecutor executor = new SchedulingConfig().stockFinancialTaskExecutor();
+        executor.initialize();
+        try {
+            assertThat(executor.getCorePoolSize()).isEqualTo(1);
+            assertThat(executor.getMaxPoolSize()).isEqualTo(1);
+            assertThat(executor.getThreadNamePrefix()).isEqualTo("stock-financial-");
+            assertThat(executor.getThreadPoolExecutor().getQueue().remainingCapacity()).isEqualTo(1);
+        } finally {
+            executor.shutdown();
+        }
+    }
+
+    @Test
     void 호가_작업이_막혀도_공용_스케줄러는_실행된다() throws Exception {
         SchedulingConfig config = new SchedulingConfig();
         ThreadPoolTaskScheduler common = config.taskScheduler();

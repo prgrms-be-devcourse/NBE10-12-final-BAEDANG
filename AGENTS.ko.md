@@ -1,44 +1,30 @@
 # 모의 주식 트레이딩 서비스
 
-주린이(투자 초보자)를 위한 토스증권 Open API 기반 모의 주식 트레이딩 서비스.
-"거래를 체결시키는 도구"가 아니라 **"거래를 이해시키는 도구"**.
+투자 초보자가 거래를 체결하는 데서 그치지 않고 이해하도록 돕는 모의투자 서비스.
+**기술:** Java 21 · Spring Boot 3.5.16 · Next.js 16.3 · PostgreSQL 18/TimescaleDB · Testcontainers
+**Java 패키지:** `com.baedang` — 변경 금지.
 
-- MVP 기간: 2026-08-20 ~ 08-25 · AGILE(주차별 스프린트) · GitFlow(Main←Develop←Feature)
-
-## Build / Test
+## 명령
 
 ```bash
-cd back && ./gradlew test      # Java 21 · Spring Boot · PostgreSQL 18
-cd front && npm run dev        # Next.js 16.3
-cd infra/local && docker compose up -d        # 로컬 PG + Redis
+cd back && bash gradlew test
+cd front && npm test
+cd front && npm run dev
+cd infra/local && docker compose up -d
 ```
 
-## 프로젝트 구조
+## 절대 규칙
 
-```text
-back/                                  # Spring Boot 백엔드
-front/                                 # Next.js 프론트엔드 (예정)
-infra/local/                           # 로컬 DB 인프라 (Docker Compose)
-infra/development/                     # 개발 서버 AWS 인프라 (Terraform)
-docs/                                  # 설계 문서
-```
+- 증권사 클라이언트는 정확한 method/path만 허용하고 호출자가 임의 path나 TR ID를 넘길 수 없게 한다. **실제 주문·정정·취소·계좌 API는 절대 호출하지 않는다.**
+- Toss는 시세·환율·장 캘린더·캔들·거래 입력을 담당한다. KIS는 OAuth와 승인된 국내 산업·재무 GET 5개로 제한하고 거래 판정·체결에 사용하지 않는다.
+- 증권사 credential/token을 소스·fixture·예외·로그에 남기지 않는다.
+- 스키마는 Flyway가 관리한다. **기준 브랜치에 이미 존재하는 migration은 수정·삭제·이름 변경·순서 변경·버전 재사용을 절대 하지 않는다.** 이전 스키마를 고칠 때는 반드시 더 높은 번호의 새 migration을 추가한다.
 
-기존 Java 패키지는 `com.baedang`을 사용한다. 명시적인 요청 없이 변경하지 않는다.
+## 구현 전 원본 문서
 
-## Rules — 위반 시 프로젝트가 망가지거나 실주문 위험
-
-- `QuoteClient`**는 호출 가능 경로를 화이트리스트로 고정.** `POST /orders` **등 주문 API는 절대 호출 금지 (실주문 위험).**
-- 금액·수량은 `NUMERIC`/`BigDecimal`, API 응답 금액은 **문자열**. 시각은 `TIMESTAMPTZ`(UTC 저장, 표시만 변환).
-- `ledger_entry`는 append-only — UPDATE/DELETE 금지, 잘못 기록 시 반대 부호 항목으로 상쇄.
-- 주문·잔고 트랜잭션은 `account` 행 `FOR UPDATE` 잠금부터 시작 (동시 주문 이중 차감 방지).
-- **주문가능금액 =** `cash_balance − locked_cash` / **매도가능수량 =** `quantity − locked_quantity`. 동결액은 `gross_amount`가 아니라 **수수료·세금 포함** `net_amount` 로 잠근다.
-- 포트폴리오 초기화는 삭제가 아님 — `CLOSED` + `round_no+1` 새 계좌 개설.
-- 미국 정규장 시각 하드코딩 금지 — `/market-calendar` 캐시로 판정 (서머타임 1시간 이동).
-- 에러는 `BusinessException` 1개 + 에러 코드 표 방식, 프론트에 코드·사용자용 메시지 함께 내려줌.
-
-## Reference — 구현 시 `docs/`를 열어 확인
-
-- 엔드포인트·응답 형식 → `docs/api-spec.md`
-- 테이블·컬럼·배치 일정 → `docs/erd.md`
-- 화면·폴링 주기 → `docs/wireframe.md`
-- 브랜치/커밋/이슈/PR 컨벤션 → `docs/conventions.md` (브랜치/커밋/이슈/PR 를 만들때 반드시 사용)
+- 사용자용 금융용어 → `tools/terms.md` (`python3 tools/wiki/generate_wiki_terms.py`로 `front/src/data/wikiTerms.ts` 재생성)
+- API·정산 계산·시장 배치 → `docs/api-spec.md`
+- 스키마·회계 불변식·잠금·계좌 생명주기 → `docs/erd.md`
+- 공용 클라이언트·에러·서비스·프론트 모듈 → `docs/shared-components.md`
+- 화면·폴링 → `docs/wireframe.md`
+- 브랜치·커밋·이슈·PR → `docs/conventions.md`
