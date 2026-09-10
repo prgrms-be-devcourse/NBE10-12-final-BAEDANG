@@ -51,8 +51,7 @@ public class StockDetailService {
         // 종목만 갱신하고, 상위 100은 스케줄러가 채운 기존 값을 그대로 사용한다.
         quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
 
-        boolean realtime = Boolean.TRUE.equals(stock.getIsRanked())
-                && quoteRealtimePolicy.isRealtime(marketCountry, quote);
+        boolean realtime = quoteRealtimePolicy.isRealtime(marketCountry, quote);
         Tradability tradability = tradability(stock, quote);
 
         return new StockDetailResponse(
@@ -75,8 +74,8 @@ public class StockDetailService {
     }
 
     private Tradability tradability(Stock stock, QuoteSnapshot quote) {
-        if (!Boolean.TRUE.equals(stock.getIsRanked()) || stock.getListingStatus() != ListingStatus.ACTIVE) {
-            return Tradability.rejected("NOT_IN_UNIVERSE");
+        if (stock.getListingStatus() != ListingStatus.ACTIVE) {
+            return Tradability.rejected("STOCK_NOT_TRADABLE");
         }
         if (Boolean.TRUE.equals(stock.getIsSuspended())) return Tradability.rejected("SUSPENDED");
         if (Boolean.TRUE.equals(stock.getIsLiquidation())) return Tradability.rejected("LIQUIDATION");

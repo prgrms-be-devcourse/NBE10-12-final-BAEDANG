@@ -80,10 +80,12 @@ export function Nav() {
             <span className="text-[13px]" style={{ color: "var(--mut)" }}>
               {user.nickname}님
             </span>
+            {/* 회원가입 버튼(비로그인 상태의 PillTabs 활성 필박스)과 같은 디자인 —
+                rounded-lg, var(--accent) 배경, 흰색 굵은 13px 글자로 맞췄다. */}
             <button
               onClick={logout}
-              className="whitespace-nowrap text-[12.5px] underline underline-offset-2"
-              style={{ color: "var(--mut2)" }}
+              className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[13px] font-bold text-white"
+              style={{ background: "var(--accent)" }}
             >
               로그아웃
             </button>

@@ -71,6 +71,18 @@ export class ApiError extends Error {
   }
 
   /**
+   * 주문 계열 API의 INVALID_INPUT은 회원가입과 계약이 다르다 — `{필드명: 메시지}` 맵이
+   * 아니라 `{"field": "limitPrice"}`처럼 잘못된 파라미터 이름 하나만 문자열로 싣는다
+   * (docs/api-spec.md의 LIMIT order lifecycle 설명 참고). 메시지 자체는 이 필드 값과
+   * 무관하게 공용 문구(`message`)를 그대로 쓴다.
+   */
+  get invalidField(): string | undefined {
+    if (this.code !== "INVALID_INPUT") return undefined;
+    const value = this.data?.field;
+    return typeof value === "string" ? value : undefined;
+  }
+
+  /**
    * 주문 실패 응답에 실리는 재시도 정책. 없으면(정책 정보 없이 실패한 경우) `undefined`.
    * `back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java`와 값이 같다.
    */
@@ -252,7 +264,7 @@ export function getAccountSummary(): Promise<AccountSummary> {
 
 // ── 주문 ──────────────────────────────────────────────────────────────────────
 
-export type PlaceOrderInput = {
+export type MarketOrderRequest = {
   accountId: number;
   clientOrderId: string;
   symbol: string;
@@ -261,7 +273,7 @@ export type PlaceOrderInput = {
   quantity: string;
 };
 
-export type OrderResponse = {
+export type MarketOrderResponse = {
   orderId: number;
   status: string;
   symbol: string;
@@ -279,9 +291,186 @@ export type OrderResponse = {
   account: { cashBalanceAfter: string };
 };
 
-/** `POST /api/orders` — 시장가 매수/매도. 로그인한 사용자만 호출 가능(accessToken 필요). */
-export function placeOrder(input: PlaceOrderInput): Promise<OrderResponse> {
-  return request<OrderResponse>("/api/orders", { method: "POST", auth: true, body: input });
+/**
+ * `POST /api/orders/market` — 시장가 매수/매도. 로그인한 사용자만 호출 가능(accessToken 필요).
+ * 지정가 주문은 `POST /api/orders/limit`(별도 엔드포인트)을 사용한다.
+ */
+export function placeMarketOrder(input: MarketOrderRequest): Promise<MarketOrderResponse> {
+  return request<MarketOrderResponse>("/api/orders/market", { method: "POST", auth: true, body: input });
+}
+
+export type OrderSide = "BUY" | "SELL";
+export type OrderStatus = "PENDING" | "PARTIALLY_FILLED" | "FILLED" | "REJECTED" | "CANCELED" | "EXPIRED";
+export type OrderType = "MARKET" | "LIMIT";
+
+/** `GET /api/orders/quote/market` — 시장가 주문 수수료·세금 미리보기. */
+export function getMarketOrderQuote(params: {
+  symbol: string;
+  marketCountry: MarketCountry;
+  side: OrderSide;
+  quantity: string;
+}): Promise<MarketOrderQuoteResponse> {
+  const query = new URLSearchParams(params);
+  return request<MarketOrderQuoteResponse>(`/api/orders/quote/market?${query.toString()}`, { method: "GET", auth: true });
+}
+
+export type MarketOrderQuoteResponse = {
+  symbol: string;
+  marketCountry: MarketCountry;
+  side: OrderSide;
+  quantity: string;
+  executedPrice: string;
+  exchangeRate: string;
+  grossAmount: string;
+  fee: string;
+  tax: string;
+  netAmount: string;
+  availableCash: string;
+  quoteAt: string;
+  executable: boolean;
+  reason: string | null;
+};
+
+export type LimitOrderRequest = {
+  accountId: number;
+  clientOrderId: string;
+  symbol: string;
+  marketCountry: MarketCountry;
+  side: OrderSide;
+  quantity: string;
+  /** KR은 KRW 정수만, US는 KRW 정수 또는 USD 센트 단위 허용(limitCurrency로 구분). */
+  limitPrice: string;
+  limitCurrency: "KRW" | "USD";
+};
+
+export type LimitOrderQuoteResponse = {
+  requestedLimitPrice: string;
+  requestedLimitCurrency: "KRW" | "USD";
+  /** 백엔드가 확정한 종목 통화 지정가(US는 KRW 입력을 접수 시점 환율로 환산한 USD 고정값). */
+  limitPrice: string;
+  acceptanceExchangeRate: string;
+  acceptable: boolean;
+  /** 접수 불가 사유 코드(ErrorCode 이름, 예: MARKET_CLOSED). 접수 가능하면 null. */
+  reason: string | null;
+  availableCash: string;
+  availableQuantity: string;
+  expiresAt: string;
+  limitEstimate: {
+    grossAmount: string;
+    fee: string;
+    tax: string;
+    netAmount: string;
+    reservedCash: string;
+  };
+  executionPreview: Record<string, string>;
+};
+
+/** `GET /api/orders/quote/limit` — 지정가 주문 접수 가능 여부·예상 예약금 미리보기. */
+export function getLimitOrderQuote(params: {
+  symbol: string;
+  marketCountry: MarketCountry;
+  side: OrderSide;
+  quantity: string;
+  limitPrice: string;
+  limitCurrency: "KRW" | "USD";
+}): Promise<LimitOrderQuoteResponse> {
+  const query = new URLSearchParams(params);
+  return request<LimitOrderQuoteResponse>(`/api/orders/quote/limit?${query.toString()}`, { method: "GET", auth: true });
+}
+
+/** `POST /api/orders/limit` — 지정가 매수/매도 접수. 성공 시 PENDING(또는 즉시 REJECTED) 주문을 돌려준다. */
+export function placeLimitOrder(input: LimitOrderRequest): Promise<OrderDetailResponse> {
+  return request<OrderDetailResponse>("/api/orders/limit", { method: "POST", auth: true, body: input });
+}
+
+/** `GET /api/orders/{orderId}` — 주문 상세. 종료된 회차의 주문도 조회 가능(본인 것만). */
+export function getOrderDetail(orderId: number): Promise<OrderDetailResponse> {
+  return request<OrderDetailResponse>(`/api/orders/${orderId}`, { method: "GET", auth: true });
+}
+
+export type OrderDetailResponse = {
+  orderId: number;
+  accountId: number;
+  stockId: number;
+  symbol: string;
+  name: string;
+  marketCountry: MarketCountry;
+  orderType: OrderType;
+  side: OrderSide;
+  status: OrderStatus;
+  quantity: string;
+  filledQuantity: string;
+  /** 미체결로 남아 취소 가능한 잔여 수량. 종료된 주문은 0. */
+  activeRemainingQuantity: string;
+  requestedLimitPrice: string;
+  requestedLimitCurrency: "KRW" | "USD";
+  limitPrice: string;
+  acceptanceExchangeRate: string;
+  reservedCash: string;
+  grossAmount: string;
+  fee: string;
+  tax: string;
+  netAmount: string;
+  rejectReason: string | null;
+  orderedAt: string;
+  expiresAt: string | null;
+  closedAt: string | null;
+};
+
+export type ExecutionResponse = {
+  executionId: number;
+  sequenceNo: number;
+  quantity: string;
+  price: string;
+  exchangeRate: string;
+  grossAmount: string;
+  fee: string;
+  tax: string;
+  netAmount: string;
+  balanceAfter: string;
+  executedAt: string;
+};
+
+export type OrderExecutionsResponse = {
+  orderId: number;
+  stock: { symbol: string; name: string; marketCountry: MarketCountry };
+  items: ExecutionResponse[];
+  nextCursor: string | null;
+  hasNext: boolean;
+};
+
+/** `GET /api/orders/{orderId}/executions` — 주문 1건의 체결(부분 체결 포함) 내역, sequenceNo 오름차순. */
+export function getOrderExecutions(orderId: number, params?: { cursor?: string; size?: number }): Promise<OrderExecutionsResponse> {
+  const query = new URLSearchParams();
+  if (params?.cursor) query.set("cursor", params.cursor);
+  if (params?.size) query.set("size", String(params.size));
+  const qs = query.toString();
+  return request<OrderExecutionsResponse>(`/api/orders/${orderId}/executions${qs ? `?${qs}` : ""}`, { method: "GET", auth: true });
+}
+
+export type OrderPageResponse = {
+  items: OrderDetailResponse[];
+  nextCursor: string | null;
+  hasNext: boolean;
+};
+
+/** `GET /api/accounts/me/orders` — 현재 활성 회차의 주문 내역(커서 페이지네이션). */
+export function getMyOrders(params?: { cursor?: string; size?: number }): Promise<OrderPageResponse> {
+  const query = new URLSearchParams();
+  if (params?.cursor) query.set("cursor", params.cursor);
+  if (params?.size) query.set("size", String(params.size));
+  const qs = query.toString();
+  return request<OrderPageResponse>(`/api/accounts/me/orders${qs ? `?${qs}` : ""}`, { method: "GET", auth: true });
+}
+
+/**
+ * `PATCH /api/orders/{orderId}` — 미체결(PENDING/PARTIALLY_FILLED) 지정가 주문 취소.
+ * 요청 바디는 반드시 `{"status":"CANCELED"}` 그대로여야 한다(다른 필드/값은 INVALID_INPUT).
+ * 이미 CANCELED인 주문에 다시 호출해도 성공(멱등)하지만, FILLED/REJECTED/EXPIRED처럼
+ * 종료된 주문에 호출하면 409 ORDER_STATE_CONFLICT다.
+ */
+export function cancelOrder(orderId: number): Promise<OrderDetailResponse> {
+  return request<OrderDetailResponse>(`/api/orders/${orderId}`, { method: "PATCH", auth: true, body: { status: "CANCELED" } });
 }
 
 // ── 종목 ──────────────────────────────────────────────────────────────────────
@@ -378,8 +567,8 @@ export function getRankings(market: MarketCountry, size = 20, cursor?: string): 
   return request<RankingPage>(`/api/stocks/rankings?${params.toString()}`, { method: "GET" });
 }
 
-export type CandleInterval = "1m" | "1d";
-export type CandleRange = "1D" | "1M" | "6M" | "1Y";
+export type CandleInterval = "1m" | "5m" | "10m" | "1d" | "1w";
+export type CandleRange = "1D" | "1W" | "1M" | "6M" | "1Y";
 
 export type Candle = {
   at: string;
@@ -400,7 +589,8 @@ export type CandleData = {
 
 /**
  * `GET /api/stocks/{symbol}/candles` — 캔들 차트. 백엔드가 유효한 조합만 허용한다
- * (1m은 반드시 range=1D, 1d는 1M/6M/1Y — `CandleQueryPolicy` 참고).
+ * (1m→1D, 5m→1D/1W, 10m→1W, 1d→1M/6M/1Y, 1w→6M/1Y — `CandleQueryPolicy` 참고).
+ * 유효한 조합 선택 자체는 `lib/candle-query.ts`의 `CANDLE_UNIT_PERIODS`/`toCandleQuery`가 담당한다.
  */
 export function getCandles(
   symbol: string,
@@ -410,6 +600,50 @@ export function getCandles(
 ): Promise<CandleData> {
   const params = new URLSearchParams({ marketCountry, interval, range });
   return request<CandleData>(`/api/stocks/${encodeURIComponent(symbol)}/candles?${params.toString()}`, {
+    method: "GET",
+  });
+}
+
+export type OrderBookLevel = {
+  level: number;
+  price: string;
+  quantity: string;
+};
+
+export type OrderBook = {
+  symbol: string;
+  marketCountry: string;
+  bookVersion: number;
+  revision: number;
+  basePrice: string;
+  currency: string;
+  quoteAt: string;
+  generatedAt: string;
+  virtual: boolean;
+  description: string;
+  /** 항상 10개(오름차순, ASK 1이 최우선 매도호가) — `docs/api-spec.md` 참고. */
+  asks: OrderBookLevel[];
+  /**
+   * 내림차순(BID 1이 최우선 매수호가). 국내는 항상 10개지만, 미국은 최소 호가
+   * 단위($0.01)에 가까운 저가 종목이면 10개 미만(1~10개)이 올 수 있다 — 마지막
+   * 행의 가격은 그 경우 항상 $0.01. 고정 인덱스 접근 대신 배열 길이 그대로 렌더링할 것.
+   */
+  bids: OrderBookLevel[];
+};
+
+/**
+ * `GET /api/stocks/{symbol}/orderbook` — 전체 사용자가 공유하는 가상 호가 스냅샷.
+ * 실제 주문 호가가 아니라 현재가 기반으로 생성된 참고용 데이터다(`virtual: true`).
+ *
+ * <p>정상적인 상황에서도 503(`ORDER_BOOK_UNAVAILABLE`)이 흔하다 — 장 마감,
+ * 거래정지/정리매매 종목, 시세 지연(15초 이상) 등. 호출부는 이 경우 화면 전체를
+ * 에러로 덮지 말고 호가 영역에만 안내를 띄운 뒤, 폴링 주기에 따라 조용히
+ * 재시도해야 한다(주문과 달리 `retryPolicy`가 없다 — 사용자가 뭘 다시 눌러야
+ * 하는 에러가 아니라는 뜻).
+ */
+export function getOrderBook(symbol: string, marketCountry: MarketCountry): Promise<OrderBook> {
+  const params = new URLSearchParams({ marketCountry });
+  return request<OrderBook>(`/api/stocks/${encodeURIComponent(symbol)}/orderbook?${params.toString()}`, {
     method: "GET",
   });
 }

@@ -85,6 +85,20 @@ import static org.mockito.Mockito.verifyNoInteractions;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class MarketOrderIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.market.port.MarketDataPort currentPricePort;
+
+    @org.junit.jupiter.api.BeforeEach
+    void prepareTradingStatusBoundary() {
+        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
 
     @Container
     @ServiceConnection
@@ -122,6 +136,26 @@ class MarketOrderIntegrationTest {
         when(marketSessionProvider.isOpen(any(), any())).thenReturn(true);
         when(exchangeRateProvider.currentUsdKrwRate()).thenReturn(new BigDecimal("1383.60"));
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenAnswer(invocation -> snapshot(new BigDecimal("1383.60")));
+    }
+
+    @Test
+    void 비랭킹_시세없는_종목은_외부조회후_체결하고_멱등재요청은_외부조회를_생략한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        jdbcTemplate.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", fixture.stockId());
+        quoteSnapshotRepository.deleteById(fixture.stockId());
+        when(currentPricePort.fetchPrices(java.util.List.of(fixture.symbol()))).thenAnswer(invocation -> {
+            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return java.util.List.of(new com.baedang.market.port.PriceQuote(
+                    fixture.symbol(), new BigDecimal("10000"),
+                    Instant.now().atOffset(ZoneOffset.UTC), "KRW"));
+        });
+        MarketOrderRequest request = request(fixture, "BUY", "1");
+        MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
+        assertThat(first.status()).isEqualTo("FILLED");
+        org.mockito.Mockito.clearInvocations(currentPricePort, tradingStatuses);
+        assertThat(marketOrderService.place(fixture.userId(), request)).isEqualTo(first);
+        org.mockito.Mockito.verifyNoInteractions(currentPricePort, tradingStatuses);
+        assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("39999");
     }
 
     @Test
@@ -523,14 +557,14 @@ class MarketOrderIntegrationTest {
     }
 
     @Test
-    void 미래_시각의_시세는_REJECTED로_기록한다() {
+    void 미래_시각의_시세는_사전거절한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
         OffsetDateTime quoteAt = OffsetDateTime.now(ZoneOffset.UTC).plusMinutes(1);
         quote.updatePrice(new BigDecimal("10000"), quote.getCurrency(), quoteAt, quoteAt);
         quoteSnapshotRepository.save(quote);
 
-        assertRejected(fixture, request(fixture, "BUY", "1"), ErrorCode.FUTURE_QUOTE);
+        assertPreparationRejected(fixture, request(fixture, "BUY", "1"), ErrorCode.FUTURE_QUOTE);
     }
 
     @Test
@@ -566,7 +600,7 @@ class MarketOrderIntegrationTest {
     }
 
     @Test
-    void 정리매매와_유니버스제외도_외부조회_전에_거절한다() {
+    void 정리매매는_거절하지만_비랭킹_시장가는_체결한다() {
         Fixture liquidation = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         Stock liquidationStock = stockRepository.findById(liquidation.stockId()).orElseThrow();
         liquidationStock.updateFlags(false, true, false);
@@ -582,25 +616,22 @@ class MarketOrderIntegrationTest {
         outsideStock.clearRanking();
         stockRepository.save(outsideStock);
         MarketOrderRequest outsideRequest = request(outsideUniverse, "BUY", "1");
-        assertThatThrownBy(() -> marketOrderService.place(outsideUniverse.userId(), outsideRequest))
-                .isInstanceOfSatisfying(BusinessException.class,
-                        exception -> assertThat(exception.getErrorCode())
-                                .isEqualTo(ErrorCode.NOT_IN_UNIVERSE));
+        assertThat(marketOrderService.place(outsideUniverse.userId(), outsideRequest).status()).isEqualTo("FILLED");
 
         assertThat(tradeOrderRepository.findByAccountIdAndClientOrderId(
                 liquidation.accountId(), UUID.fromString(liquidationRequest.clientOrderId()))).isEmpty();
         assertThat(tradeOrderRepository.findByAccountIdAndClientOrderId(
-                outsideUniverse.accountId(), UUID.fromString(outsideRequest.clientOrderId()))).isEmpty();
+                outsideUniverse.accountId(), UUID.fromString(outsideRequest.clientOrderId()))).isPresent();
     }
 
     @Test
-    void 오래된_시세와_보유수량_부족은_REJECTED로_기록한다() {
+    void 오래된_시세는_사전거절하고_보유수량_부족은_REJECTED로_기록한다() {
         Fixture stale = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         QuoteSnapshot staleQuote = quoteSnapshotRepository.findById(stale.stockId()).orElseThrow();
         OffsetDateTime quoteAt = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1);
         staleQuote.updatePrice(new BigDecimal("10000"), staleQuote.getCurrency(), quoteAt, quoteAt);
         quoteSnapshotRepository.save(staleQuote);
-        assertRejected(stale, request(stale, "BUY", "1"), ErrorCode.STALE_QUOTE);
+        assertPreparationRejected(stale, request(stale, "BUY", "1"), ErrorCode.STALE_QUOTE);
 
         Fixture insufficient = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         Account account = activeAccount(insufficient.userId());
@@ -1110,5 +1141,17 @@ class MarketOrderIntegrationTest {
             String symbol,
             MarketCountry marketCountry
     ) {
+    }
+
+
+
+    private void assertPreparationRejected(Fixture fixture, MarketOrderRequest request, ErrorCode code) {
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(code);
+                    assertThat(exception.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+        assertThat(tradeOrderRepository.findByAccountIdAndClientOrderId(
+                fixture.accountId(), UUID.fromString(request.clientOrderId()))).isEmpty();
     }
 }

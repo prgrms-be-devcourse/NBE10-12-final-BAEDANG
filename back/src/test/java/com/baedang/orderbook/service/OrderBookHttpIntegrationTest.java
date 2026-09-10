@@ -58,6 +58,20 @@ import static org.mockito.Mockito.when;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookHttpIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.market.port.MarketDataPort currentPricePort;
+
+    @org.junit.jupiter.api.BeforeEach
+    void prepareTradingStatusBoundary() {
+        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
 
     private static final Instant BASE = Instant.parse("2026-09-03T01:00:00Z");
     private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
@@ -158,4 +172,6 @@ class OrderBookHttpIntegrationTest {
         HttpRequest request = HttpRequest.newBuilder(uri).GET().build();
         return HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
     }
+
+
 }

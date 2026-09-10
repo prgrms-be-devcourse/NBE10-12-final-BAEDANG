@@ -10,11 +10,13 @@ import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
+import { OrderDetailModal, OrderSideBadge, OrderStatusBadge } from "@/components/OrderDetailModal";
 import {
   ApiError,
   getAccountSummary,
   getHoldings,
   getLedger,
+  getMyOrders,
   resetAccount,
   updateNickname,
   changeUserPassword,
@@ -23,6 +25,7 @@ import {
   type HoldingItem,
   type LedgerItem,
   type MarketCountry,
+  type OrderDetailResponse,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
@@ -41,12 +44,19 @@ export default function MyPage() {
   const { rate } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
-  const [tab, setTab] = useState<"holdings" | "ledger">("holdings");
+  const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
+
+  // ── 주문 내역(현재 활성 회차) ────────────────────────────────────────────────
+  const [orders, setOrders] = useState<OrderDetailResponse[]>([]);
+  const [ordersCursor, setOrdersCursor] = useState<string | null>(null);
+  const [ordersHasNext, setOrdersHasNext] = useState(false);
+  const [ordersLoadingMore, setOrdersLoadingMore] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<OrderDetailResponse | null>(null);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -86,12 +96,15 @@ export default function MyPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError(false);
-    Promise.all([getAccountSummary(), getHoldings(), getLedger()])
-      .then(([acc, holdingsRes, ledgerRes]) => {
+    Promise.all([getAccountSummary(), getHoldings(), getLedger(), getMyOrders()])
+      .then(([acc, holdingsRes, ledgerRes, ordersRes]) => {
         if (cancelled) return;
         setAccount(acc);
         setHoldings(holdingsRes.items);
         setLedger(ledgerRes.items);
+        setOrders(ordersRes.items);
+        setOrdersCursor(ordersRes.nextCursor);
+        setOrdersHasNext(ordersRes.hasNext);
       })
       .catch(() => {
         if (!cancelled) setLoadError(true);
@@ -152,6 +165,27 @@ export default function MyPage() {
     } finally {
       setResetting(false);
     }
+  }
+
+  function loadMoreOrders() {
+    if (ordersLoadingMore || !ordersCursor) return;
+    setOrdersLoadingMore(true);
+    getMyOrders({ cursor: ordersCursor })
+      .then((res) => {
+        setOrders((prev) => [...prev, ...res.items]);
+        setOrdersCursor(res.nextCursor);
+        setOrdersHasNext(res.hasNext);
+      })
+      .catch(() => {})
+      .finally(() => setOrdersLoadingMore(false));
+  }
+
+  // 주문 취소가 성공하면(모달 안에서) 목록의 해당 행과 모달 둘 다 최신 상태로
+  // 바꾸고, 잠겨 있던 예약금이 풀렸을 수 있으니 계좌 요약도 다시 조회한다.
+  function handleOrderUpdated(updated: OrderDetailResponse) {
+    setOrders((prev) => prev.map((o) => (o.orderId === updated.orderId ? updated : o)));
+    setSelectedOrder(updated);
+    getAccountSummary().then(setAccount).catch(() => {});
   }
 
   async function handleChangeNickname(e: React.FormEvent) {
@@ -281,11 +315,12 @@ export default function MyPage() {
         <PillTabs
           options={[
             { value: "holdings", label: "보유 종목" },
+            { value: "orders", label: "주문 내역" },
             { value: "ledger", label: "체결 내역" },
           ]}
           value={tab}
-          onChange={(v) => setTab(v as "holdings" | "ledger")}
-          trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
+          onChange={(v) => setTab(v as "holdings" | "ledger" | "orders")}
+          trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
           trackStyle={{
             background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
             border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
@@ -375,6 +410,95 @@ export default function MyPage() {
             </div>
           </>
         )
+      ) : tab === "orders" ? (
+      orders.length === 0 ? (
+        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+          주문 내역이 없어요
+        </div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            <div
+              className="grid px-5 py-2.5 text-[12px] font-bold"
+              style={{
+                gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px",
+                columnGap: "12px",
+                borderBottom: "1px solid var(--line2)",
+                color: "var(--mut2)",
+              }}
+            >
+              <span>종목</span>
+              <span>상태</span>
+              <span className="text-right">수량</span>
+              <span className="text-right">가격</span>
+              <span className="text-right">주문시각</span>
+              <span />
+            </div>
+            {orders.map((order) => (
+              <div
+                key={order.orderId}
+                className="grid items-center px-5 py-3 text-[15px]"
+                style={{ gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px", columnGap: "12px", borderBottom: "1px solid var(--line2)" }}
+              >
+                <span className="font-bold" style={{ color: "var(--ink)" }}>
+                  {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
+                  <div className="mt-1 flex gap-1">
+                    <OrderSideBadge side={order.side} />
+                    <span
+                      className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
+                      style={{ background: "var(--fill)", color: "var(--mut2)" }}
+                    >
+                      {order.orderType === "LIMIT" ? "지정가" : "시장가"}
+                    </span>
+                  </div>
+                </span>
+                <span>
+                  <OrderStatusBadge status={order.status} />
+                </span>
+                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                  {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
+                  {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
+                    <div className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}>
+                      미체결 {formatNumber(order.activeRemainingQuantity)}
+                    </div>
+                  )}
+                </span>
+                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                  {order.orderType === "LIMIT"
+                    ? order.requestedLimitCurrency === "USD"
+                      ? formatUsd(order.requestedLimitPrice)
+                      : `${formatNumber(order.requestedLimitPrice)}원`
+                    : "-"}
+                </span>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                  {new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
+                </span>
+                <span className="text-right">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedOrder(order)}
+                    className="cursor-pointer rounded-md px-3.5 py-2 text-[13px] font-semibold"
+                    style={{ background: "var(--fill)", color: "var(--ink)" }}
+                  >
+                    상세
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+          {ordersHasNext && (
+            <button
+              type="button"
+              onClick={loadMoreOrders}
+              disabled={ordersLoadingMore}
+              className="mt-2.5 w-full cursor-pointer rounded-xl py-2.5 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--card)", color: "var(--ink)" }}
+            >
+              {ordersLoadingMore ? "불러오는 중…" : "더 보기"}
+            </button>
+          )}
+        </>
+      )
       ) : ledger.length === 0 ? (
         <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
           체결 내역이 없어요
@@ -384,7 +508,7 @@ export default function MyPage() {
           <div
             className="grid px-5 py-2.5 text-[12px] font-bold"
             style={{
-              gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+              gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
               columnGap: "20px",
               borderBottom: "1px solid var(--line2)",
               color: "var(--mut2)",
@@ -394,7 +518,7 @@ export default function MyPage() {
             <span>설명</span>
             <span className="text-right">증감액</span>
             <span className="text-right">잔액</span>
-            <span>발생시각</span>
+            <span className="text-right">발생시각</span>
           </div>
           {ledger.map((entry) => {
             const amount = toDecimal(entry.amount);
@@ -404,7 +528,7 @@ export default function MyPage() {
                 key={entry.entryId}
                 className="grid items-center px-5 py-3 text-[15px]"
                 style={{
-                  gridTemplateColumns: "80px 2.4fr 1fr 1fr 1.3fr",
+                  gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
                   columnGap: "20px",
                   borderBottom: "1px solid var(--line2)",
                 }}
@@ -420,7 +544,7 @@ export default function MyPage() {
                   {formatSigned(entry.amount)}
                 </span>
                 <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
+                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
                   {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
                 </span>
               </div>
@@ -429,6 +553,14 @@ export default function MyPage() {
         </div>
       )}
       </Reveal>
+
+      {selectedOrder && (
+        <OrderDetailModal
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onUpdated={handleOrderUpdated}
+        />
+      )}
 
       <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
         <div className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }}>계정 설정</div>

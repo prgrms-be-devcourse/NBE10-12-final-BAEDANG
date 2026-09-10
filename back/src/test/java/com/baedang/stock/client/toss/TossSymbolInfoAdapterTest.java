@@ -75,6 +75,20 @@ public class TossSymbolInfoAdapterTest {
         assertThat(stockInfo.krMarketDetail()).isNull();
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void 누락된_국내_거래제약을_false로_보정하지_않는다(boolean missingSuspension) {
+        TossStockInfoResponse.TossStockInfo item = mock(TossStockInfoResponse.TossStockInfo.class);
+        when(item.sharesOutstanding()).thenReturn("1");
+        when(item.koreanMarketDetail()).thenReturn(new TossStockInfoResponse.KrMarketDetail(
+                missingSuspension ? false : null, false, missingSuspension ? null : false, null));
+        when(tossSecuritiesClient.get("/api/v1/stocks", Map.of("symbols", "005930"),
+                TossStockInfoResponse.class)).thenReturn(new TossStockInfoResponse(List.of(item)));
+        assertThatThrownBy(() -> tossSymbolInfoAdapter.fetchStocks(List.of("005930")))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.TOSS_API_ERROR));
+    }
+
     @Test
     @DisplayName("상장예정(SCHEDULED)은 제외되고 DELISTED는 유지된다")
     void filterScheduleButKeepDelisted() {

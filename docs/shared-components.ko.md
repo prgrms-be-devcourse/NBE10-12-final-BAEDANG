@@ -378,10 +378,18 @@ QuoteSnapshotLoadService는 정규장 중 ACTIVE 종목 가운데 랭킹 또는 
 
 QuoteRefreshCoordinator는 정기·온디맨드 현재가 조회의 진행 중 종목을 병합합니다. 배경 작업은 3개 스레드, 실행기 대기열 없음, 초당 8회 제출 예산을 사용하며 사용자 호출용 별도 1개 슬롯을 둡니다. 최종 MARKET_DATA 합산 15 TPS는 기존 Toss 클라이언트가 재시도·다른 호출까지 포함해 제한합니다. 진행/대기 종목 맵은 기본 1,000개로 제한하고 완료/실패 시 제거합니다. 배경 제출이 거절되면 페이지 커서를 유지합니다. 전용 스케줄러 기본 fixedDelay는 25ms이며 실제 순환 시간에는 작업·용량 대기도 포함됩니다.
 
-거래용 조회는 QuoteRefreshCoordinator를 주입하여 **트랜잭션 밖에서** requireFresh(stock, maxAge)를 호출합니다. 원본 quoteAt이 신선하면 재사용하고 아니면 갱신 후 누락/미래/오래된 시세를 거절합니다. 주문·캔들·세션·환율·거래 상태 조회는 하지 않습니다. 주문 연결과 다른 계약 검증은 #141 범위입니다. refresh(stock)는 화면용 갱신으로 실패 시 기존값 표시 여부는 호출자가 결정합니다. 일봉 백필 정책은 그대로입니다.
+거래용 조회는 QuoteRefreshCoordinator를 주입하여 **트랜잭션 밖에서** requireFresh(stock, maxAge)를 호출합니다. 원본 quoteAt이 신선하면 재사용하고 아니면 갱신 후 누락/미래/오래된 시세를 거절합니다. 주문·캔들·세션·환율·거래 상태 조회는 하지 않습니다. OrderMarketDataService가 주문에 연결하고 주문 서비스가 나머지 계약을 검증합니다. refresh(stock)는 화면용 갱신으로 실패 시 기존값 표시 여부는 호출자가 결정합니다. 일봉 백필 정책은 그대로입니다.
 
 QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미래 시각을 검증하고 원자적 JDBC UPSERT를 수행합니다. 오래된 quoteAt 및 같은 quoteAt의 오래된 수집 응답은 최신 값을 덮지 않습니다. 현재가 갱신은 prev_close와 상하한가를 보존하고 updatePrevClose는 해당 컬럼만 변경합니다. 신규 테이블/migration은 없습니다.
 
 설정: trading.quote-collection.refresh-interval=5s, dispatch-interval=25ms, background-concurrency=3, background-requests-per-second=8, max-in-flight-stocks=1000, request-timeout=20s. ExternalHttpConfig는 자동 구성 RestClient 빌더에 toss.connect-timeout=2s/read-timeout=5s를 적용해 무응답 I/O가 슬롯을 영구 점유하지 않게 합니다. coordinator 대기 timeout은 전체 큐/HTTP 작업을 합친 총 응답시간 보장이 아닙니다.
 
-지표: quote.collection.batch, quote.collection.sweep.submission(HTTP 완료가 아닌 제출 순회 시간), quote.collection.source.age(실제 응답에서 관측한 시세 나이), quote.collection.inflight, quote.collection.requested, quote.collection.updated, quote.collection.failures. 그룹 전체 사용량은 기존 toss.ratelimiter 지표를 사용합니다. 조회에 성공해도 시세의 원본 시각은 그대로입니다. /prices는 symbol/timestamp/lastPrice/currency만 제공하며 Stock의 거래정지·정리매매 플래그를 갱신하지 않습니다. 상태 정보는 별도 종목 메타데이터이며 #141에서 별도로 검증해야 합니다.
+지표: quote.collection.batch, quote.collection.sweep.submission(HTTP 완료가 아닌 제출 순회 시간), quote.collection.source.age(실제 응답에서 관측한 시세 나이), quote.collection.inflight, quote.collection.requested, quote.collection.updated, quote.collection.failures. 그룹 전체 사용량은 기존 toss.ratelimiter 지표를 사용합니다. 조회에 성공해도 시세의 원본 시각은 그대로입니다. /prices는 symbol/timestamp/lastPrice/currency만 제공하며 Stock의 거래정지·정리매매 플래그를 갱신하지 않습니다. 상태 정보는 StockTradingStatusService가 별도 종목 메타데이터 API로 확인합니다.
+
+### 주문 시장 데이터 준비와 거래 상태 캐시
+
+- `OrderMarketDataService`: 주문·견적에서 주입하여 사용합니다. `refreshStatus`는 거래 상태를 확인하고 `requireQuote`는 `QuoteRefreshCoordinator.requireFresh`를 호출합니다. `prepareEstimate`는 시세 시간 오류를 기존 실행 불가 견적 사유로 전달합니다. 차트 백필은 하지 않습니다.
+- `StockTradingStatusService`: 주문 준비와 호가 스케줄러가 공유합니다. `requireCurrent`(단건), `refreshBatch`(최대 200개)를 제공합니다. SymbolInfoPort 조회를 5분 TTL·최대 1,000종목 인메모리 캐시로 공유하며 갱신 락 대기는 최대 5초입니다. HTTP 실패는 성공으로 캐시하지 않습니다. TTL은 거래소 상태의 실시간 보장이 아닙니다. `trading.stock-status-cache-ttl`로 설정합니다.
+- `StockTradingStatusPersistenceService`: 상태 컬럼만 별도 DB 트랜잭션에서 갱신합니다. 랭킹·종목명·경고는 보존합니다. KR은 상장/거래정지/정리매매, US는 상장 상태를 갱신합니다.
+- 외부 준비 서비스는 `NEVER`이며 금융 트랜잭션 안에서 호출하지 않습니다. API 경로는 기존 Port/Adapter 및 전역 RateLimiter를 그대로 사용합니다.
+- `StockRepository.findQuoteTargets/isQuoteTarget`는 ACTIVE ∩ (랭킹 ∪ 미만료 LIMIT PENDING/PARTIALLY_FILLED, 잔여 수량 > 0)를 모든 사용자 기준으로 조회합니다. 호가 게시 직전에도 대상을 재검증합니다. 인덱스 추가는 체결 워커 작업에서 일괄 검토합니다.

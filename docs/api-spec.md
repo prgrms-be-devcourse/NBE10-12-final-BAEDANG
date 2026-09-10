@@ -426,7 +426,7 @@ Partial match on Korean name · English name · ticker
 }
 ```
 **Search scope is confirmed: all stocks (~8,500).** The entire `stock` table is in scope regardless of top-100 status, and clicking a result opens the detail page normally — the only difference is realtime vs prior close.
-**Current-price collection covers ranked stocks and stocks with active limit orders only**, with a 5-second regular-session target. Other stocks use on-demand detail refresh with a 5-second collection cache. In-flight requests are shared; source quoteAt is never replaced by fetch time. Non-ranked trading remains a separate #141 integration.
+**Current-price collection covers ranked stocks and stocks with active limit orders only**, with a 5-second regular-session target. Other stocks use on-demand detail refresh with a 5-second collection cache. In-flight requests are shared; source quoteAt is never replaced by fetch time. Non-ranked orders and estimates use the same freshness checks as ranked stocks.
 **Toss gives Korean names for US stocks, so "엔비디아" matches too.** English names are inconsistent (SamsungElec, HyundaiMtr, KIA CORP.) — strip whitespace + lowercase, then partial-match; a generated column for the search key is convenient.
 **Week-1 implementation is `LIKE '%q%'`** — at 8,500 rows a full scan is milliseconds. But leading/trailing `%` skips indexes; when data grows, switch to **`pg_trgm` + GIN index** — same query, just add the index.
 **Sort order: exact match → prefix match → partial match.** Typing "삼성" must put 삼성전자 above 미래에셋삼성...
@@ -492,7 +492,7 @@ Where the price comes from depends on **whether that stock's own market is open*
 | Code | Screen text |
 |---|---|
 | `MARKET_CLOSED` | 장 마감 · 09:00~15:30 거래 가능 |
-| `NOT_IN_UNIVERSE` | 이 종목은 아직 거래를 지원하지 않아요 |
+| `STOCK_NOT_TRADABLE` | 현재 거래를 지원하지 않는 종목이에요 |
 | `SUSPENDED` | 거래정지 종목 |
 | `LIQUIDATION` | 정리매매 종목 |
 | `QUOTE_NOT_FOUND` | no quote has been loaded yet |
@@ -847,7 +847,7 @@ Market orders never write `PENDING` and never modify `locked_cash` or `locked_qu
 
 The market-order use case is a top-level transaction boundary. It must not be invoked inside another transaction; the application entry point enforces this with `Propagation.NEVER`, while the DB mutation service starts its own `REQUIRED` transaction. This keeps a committed `REJECTED` record from being rolled back by an unrelated outer workflow.
 
-**Tradable universe** — #140 collects ranked stocks and active-limit-order stocks, with on-demand reads for others. Existing `is_ranked` trading checks and response contracts remain; #141 separately connects non-ranked market/limit/quote eligibility and tradability validation.
+**Trading eligibility** — market/limit orders and both quote APIs support non-ranked stocks. Before a new order, refresh listing status (and KR suspension/liquidation flags) through the shared status cache, and require a source quote no older than 15 seconds. Re-fetching a stale source price does not make it fresh. External preparation occurs before account locks; financial transactions revalidate database state and quote time. Idempotent completed requests return before external calls. Preparation failure stores no rejected order and permits the same clientOrderId retry; follow data.retryPolicy.
 
 One order may contain at most **1,000,000 shares**, configured by `trading.max-order-quantity`; scientific notation is not accepted.
 
@@ -856,7 +856,7 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 |---|---|---|---|
 | `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
 | `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
-| `NOT_IN_UNIVERSE` | 422 | read `data.retryPolicy` for the actual path | 이 종목은 아직 거래를 지원하지 않아요 |
+| `STOCK_NOT_TRADABLE` | 422 | read `data.retryPolicy` for the actual path | 현재 거래를 지원하지 않는 종목이에요 |
 | `STOCK_SUSPENDED` | 422 | read `data.retryPolicy` for the actual path | 거래정지 종목이에요 |
 | `STOCK_LIQUIDATION` | 422 | read `data.retryPolicy` for the actual path | 정리매매 종목이에요 |
 | `INSUFFICIENT_CASH` | 422 | `NEW_CLIENT_ORDER_ID` | 주문가능금액이 부족해요 |
@@ -1015,6 +1015,54 @@ Closing the old account, opening the new account, and inserting its initial-depo
 
 ---
 
+## Reports
+
+### `GET /reports/me` 🔒
+Investment personality report (investment MBTI) for the current active account (round).
+
+```json
+{
+  "accountId": 10,
+  "roundNo": 1,
+  "initialCash": "50000000",
+  "cashBalance": "20000000",
+  "stockValue": "33000000",
+  "totalAsset": "53000000",
+  "totalPnl": "3000000",
+  "returnRate": "0.06",
+  "classified": true,
+  "typeCode": "CKSB",
+  "typeLabel": "집중·국내·개별주·안정형",
+  "shares": {
+    "concentration": "0.6364",
+    "domestic": "0.6364",
+    "individual": "0.6364",
+    "aggressive": "0"
+  },
+  "holdingCount": 2,
+  "holdingPeriodWeeks": 4,
+  "longHeldStocks": [
+    {
+      "symbol": "005930",
+      "name": "삼성전자",
+      "currency": "KRW",
+      "avgBuyPrice": "228000",
+      "lastPrice": "241500",
+      "returnRate": "0.0592",
+      "heldSince": "2026-08-01T00:00:00Z"
+    }
+  ],
+  "asOf": "2026-09-09T00:00:00Z"
+}
+```
+**Return rate is total P&L over the round's starting capital** — `returnRate = (cashBalance + stockValue − initialCash) / initialCash`, so it already includes realized (in cash) and unrealized (in holdings). This differs from `/accounts/me`'s `unrealizedPnlRate` (unrealized / cost). Valuation reuses the single account-valuation pass (same quotes·FX·rounding as `/accounts/me`).
+
+**Investment MBTI — 4 binary axes → 16 types**, value-weighted by evaluation amount: concentration (집중 C / 분산 D, by top-1 weight), market (국내 K / 해외 G), instrument (개별주 S / ETF E), risk (공격 A / 안정 B). `shares` are the deciding 0~1 ratios. **With fewer than 2 holdings the portfolio is `"classified": false`** ("미분류/신규") and `typeCode`·`typeLabel` are null. Axis 4 (risk) is a Phase-1 proxy using leverage/inverse weight only; holding-volatility is deferred.
+
+**`longHeldStocks`** — stocks held at least `holdingPeriodWeeks` (default 4, `report.holding-period-weeks`). "Held since" is the current lot's first buy, reconstructed by replaying filled `trade_order`s (a full sell to zero closes the lot; a later re-buy opens a new one). `returnRate` here is the **per-holding return in the stock's own currency**, `(lastPrice − avgBuyPrice) / avgBuyPrice` (null if no quote). Sorted oldest-held first. Empty until holdings accumulate 4 weeks.
+
+---
+
 ## Screen ↔ API Mapping
 
 | Screen | APIs called |
@@ -1158,3 +1206,9 @@ Invalid limit-order input preserves SAME_CLIENT_ORDER_ID and includes data.field
 Shared MARKET/LIMIT input validation also identifies malformed side, marketCountry, quantity and clientOrderId via data.field. Existing error codes and retry policies are unchanged: malformed clientOrderId is NOT_RETRYABLE; invalid terms after a valid ID are SAME_CLIENT_ORDER_ID.
 
 No historical data backfill or legacy correction is provided. Schema changes require an explicitly authorized database recreation or deployment schema procedure.
+
+### Non-ranked orders and book supply
+
+A limit order may enter PENDING without an existing book. After commit, the scheduler supplies books only for ranked stocks or stocks with active limit orders. When the last active order ends, a non-ranked stock leaves collection/book supply and its active book is closed. Market executions do not consume virtual liquidity. Book-based limit execution previews remain UNSUPPORTED; the execution worker is follow-up work.
+
+`STOCK_STATUS_UNAVAILABLE` (503) covers missing/unknown status, missing KR restrictions, or status-refresh lock timeout. Unknown data is never treated as tradable. The default status cache TTL is 5 minutes. US responses lack KR-specific suspension/liquidation data, so existing flags are preserved.

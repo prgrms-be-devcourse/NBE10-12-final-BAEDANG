@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TickMarkType, type UTCTimestamp } from "lightweight-charts";
-import { formatKstTickMark, toCandlestickData, toVolumeData } from "../candle-chart-data";
+import { formatKstCrosshairLabel, formatKstTickMark, isIntradayCandles, toCandlestickData, toVolumeData } from "../candle-chart-data";
 import type { Candle } from "../api";
 
 function candle(overrides: Partial<Candle> = {}): Candle {
@@ -157,5 +157,41 @@ describe("formatKstTickMark", () => {
 
   it("Year — KST 연도를 돌려준다", () => {
     expect(formatKstTickMark(kstNextDay, TickMarkType.Year)).toBe("2026년");
+  });
+});
+
+describe("formatKstCrosshairLabel", () => {
+  // lightweight-charts가 tickMarkFormatter와 별개로 부르는 크로스헤어 전용 라벨.
+  // 이것도 로컬 타임존이 아니라 항상 KST여야 한다는 걸 같은 경계 시각으로 확인한다.
+  const kstNextDay = (Date.UTC(2026, 7, 27, 16, 0, 0) / 1000) as UTCTimestamp;
+
+  it("분봉 계열(includeTimeOfDay=true) — 월.일 시:분을 KST로 돌려준다", () => {
+    expect(formatKstCrosshairLabel(kstNextDay, true)).toBe("08. 28. 01:00");
+  });
+
+  it("일봉·1주봉 계열(includeTimeOfDay=false) — 연.월.일을 KST로 돌려준다(로컬 타임존과 무관하게 UTC로는 하루 전날)", () => {
+    expect(formatKstCrosshairLabel(kstNextDay, false)).toBe("2026. 08. 28.");
+  });
+});
+
+describe("isIntradayCandles", () => {
+  it("연속된 두 시각의 간격이 하루보다 좁으면 분봉 계열로 본다", () => {
+    const oneMinuteApart = [{ time: 0 as UTCTimestamp }, { time: 60 as UTCTimestamp }];
+    expect(isIntradayCandles(oneMinuteApart)).toBe(true);
+  });
+
+  it("간격이 정확히 하루(일봉)면 분봉 계열이 아니다", () => {
+    const oneDayApart = [{ time: 0 as UTCTimestamp }, { time: (24 * 60 * 60) as UTCTimestamp }];
+    expect(isIntradayCandles(oneDayApart)).toBe(false);
+  });
+
+  it("간격이 7일(1주봉)이면 분봉 계열이 아니다", () => {
+    const oneWeekApart = [{ time: 0 as UTCTimestamp }, { time: (7 * 24 * 60 * 60) as UTCTimestamp }];
+    expect(isIntradayCandles(oneWeekApart)).toBe(false);
+  });
+
+  it("데이터가 1개 이하면 분봉 계열이 아닌 것으로 본다(비교할 간격이 없음)", () => {
+    expect(isIntradayCandles([])).toBe(false);
+    expect(isIntradayCandles([{ time: 0 as UTCTimestamp }])).toBe(false);
   });
 });
