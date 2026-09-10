@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -45,6 +46,9 @@ class MarketEventRepositoryIntegrationTest {
     @Autowired
     private MarketEventRepository repository;
 
+    @Autowired
+    private JdbcTemplate jdbc;
+
     @Test
     void halt_until_is_exclusive() {
         MarketEvent event = repository.saveAndFlush(circuitBreaker("20260713000658", START, END));
@@ -64,6 +68,51 @@ class MarketEventRepositoryIntegrationTest {
         assertThatThrownBy(() -> repository.saveAndFlush(
                 circuitBreaker("20260713000658", START, END)))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void market_isolation_and_utc_round_trip_are_preserved() {
+        MarketEvent kosdaq = repository.saveAndFlush(
+                MarketEvent.circuitBreaker(MarketEventSource.KRX_KIND, "20260713000664", KrMarket.KOSDAQ,
+                        2, START, END, PUBLISHED_AT, RECEIVED_AT, "코스닥 CB", SOURCE_URL));
+
+        assertThat(repository.findActiveCircuitBreaker(KrMarket.KOSPI, START.plusSeconds(1))).isEmpty();
+        MarketEvent reloaded = repository.findById(kosdaq.getMarketEventId()).orElseThrow();
+        assertThat(reloaded.getTriggeredAt().toInstant()).isEqualTo(START);
+        assertThat(reloaded.getHaltUntil().toInstant()).isEqualTo(END);
+        assertThat(reloaded.getPublishedAt().toInstant()).isEqualTo(PUBLISHED_AT);
+        assertThat(reloaded.getReceivedAt().toInstant()).isEqualTo(RECEIVED_AT);
+    }
+
+    @Test
+    void history_is_newest_first_and_respects_limit() {
+        MarketEvent older = repository.saveAndFlush(circuitBreaker(
+                "20260713000665", START, END));
+        MarketEvent newer = repository.saveAndFlush(circuitBreaker(
+                "20260713000666", START.plusSeconds(60), END.plusSeconds(60)));
+
+        var history = repository.findHistory(
+                KrMarket.KOSPI,
+                START.minusSeconds(1).atOffset(java.time.ZoneOffset.UTC),
+                END.plusSeconds(61).atOffset(java.time.ZoneOffset.UTC),
+                org.springframework.data.domain.PageRequest.of(0, 1));
+
+        assertThat(history).containsExactly(newer);
+        assertThat(older.getMarketEventId()).isLessThan(newer.getMarketEventId());
+    }
+
+    @Test
+    void database_check_constraint_rejects_unknown_market() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO market_event
+                    (source, source_event_id, market, event_type, circuit_breaker_stage,
+                     triggered_at, halt_until, published_at, received_at, title, source_url)
+                VALUES ('KRX_KIND', '20260713000667', 'NYSE', 'CIRCUIT_BREAKER', 1,
+                        '2026-07-13T04:28:32Z', '2026-07-13T04:48:32Z',
+                        '2026-07-13T04:29:00Z', '2026-07-13T04:29:07Z',
+                        '잘못된 시장', 'https://kind.krx.co.kr/event')
+                """))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
     }
 
     private MarketEvent circuitBreaker(String sourceEventId, Instant triggeredAt, Instant haltUntil) {

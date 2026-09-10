@@ -22,6 +22,7 @@ public interface MarketEventRepository extends Repository<MarketEvent, Long> {
 
     MarketEvent saveAndFlush(MarketEvent event);
 
+    Optional<MarketEvent> findById(Long marketEventId);
     boolean existsBySourceAndSourceEventId(MarketEventSource source, String sourceEventId);
 
     @Query("""
