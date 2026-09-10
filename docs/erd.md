@@ -2,7 +2,7 @@
 
 > **Version**: Week-3 MVP · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 12 tables · append-only ledger · round-based reset
+> - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 21 tables · append-only ledger and market-event history · round-based reset
 
 ## Contents
 - [Overview](#overview)
@@ -47,7 +47,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
 
-### Table Map (18)
+### Table Map (21)
 
 | Group | Table | Note |
 |---|---|---|
@@ -63,11 +63,14 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `daily_candle` | daily candles · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | minute time-series · top-100 scheduler + off-universe on-demand |
 | | `exchange_rate` | FX history · regular table · no FK relations |
+| | `market_calendar` | optional persisted market-session calendar · currently read through the market-calendar port/cache |
 | **Synthetic Order Book** | `order_book_version` | synthetic order book set header refreshed every 3s based on current price |
 | | `order_book_level` | Up to 20 levels per version (10 ASK / 10 KR BID / 1–10 US BID) with prices and quantities |
 | **Financial · Industry (KIS)** | `stock_industry` | industry classification (standard / large / medium / small) |
 | | `stock_financial_period` | annual/quarterly statement period balance sheet, income, ratios |
 | | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
+| **Market Events** | `market_event` | KRX KIND circuit-breaker/sidecar history · append-only |
+| **Learning Content** | `wiki_term` | beginner-facing financial term dictionary |
 
 ### MVP Behavior Matrix (confirmed)
 
@@ -157,6 +160,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `stock_industry` | KIS | from `/uapi/domestic-stock/v1/quotations/search-stock-info`. Negative cache stores null classifications. |
 | `stock_financial_period` | KIS | from KIS 4 finance APIs (balance-sheet, income-statement, financial-ratio, profit-ratio). Historical rows preserved. |
 | `stock_financial_sync` | own + KIS | sync timestamps for TTL tracking (financial 7d / 7 days, industry 30d / 30 days). |
+| `market_event` | KRX KIND | Circuit-breaker and sidecar facts from official RSS/detail notices. Append-only; corrections are new `source_event_id` rows. |
 
 ### Batch Schedule (confirmed)
 
@@ -293,6 +297,26 @@ LIMIT cumulative settlement is unchanged. Reconstruct US raw cumulative tax as `
 Each execution consumes exactly one book level. Multiple executions may record the same `book_level_id`, so it is not unique; protect shared liquidity debits within the execution transaction. Execution `price` is the permanently retained actual fill-price snapshot. `book_level_id` is a non-FK trace value identifying the level at consumption time; after closed-version retention, the original level is no longer queryable.
 
 When creating a LIMIT fill, pass the order stock's market to `TradeExecution.limit(order, marketCountry, ...)`. KR requires FX 1, USD gross 0 and SEC fee 0; US requires a cent-representable execution price and USD gross equal to `price × quantity`. Trailing zeros are allowed; the entity does not round the price. The market is a validation input only, not another execution column.
+
+#### `market_event` — KRX market-event history
+Stores KOSPI/KOSDAQ circuit-breaker and sidecar notices received from KRX KIND. It is append-only: a correction is stored as a new notice ID; no UPDATE or DELETE is permitted. Circuit breakers gate ordinary user trading, while sidecars are retained for history and do not gate ordinary orders. `halt_until` is the authoritative automatic expiry, so RSS outages cannot extend a halt indefinitely.
+
+| Column | Type | Description |
+|---|---|---|
+| `market_event_id` | BIGINT IDENTITY PK | Internal event identifier. |
+| `source` | VARCHAR(20) | Source enum; currently `KRX_KIND`. |
+| `source_event_id` | VARCHAR(20) | Official KIND `acptNo`; unique with `source`. |
+| `market` | VARCHAR(10) | `KOSPI` or `KOSDAQ`. |
+| `event_type` | VARCHAR(30) | `CIRCUIT_BREAKER` or `SIDECAR`. |
+| `circuit_breaker_stage` | SMALLINT | CB stage 1–3; NULL for sidecars. |
+| `sidecar_direction` | VARCHAR(4) | `BUY` or `SELL` for sidecars; NULL for CBs. |
+| `triggered_at` / `halt_until` | TIMESTAMPTZ | Actual detail-notice trigger time / automatic inactive boundary. Active interval is `[triggered_at, halt_until)`. |
+| `published_at` / `received_at` | TIMESTAMPTZ | RSS publication time / first successful parse receipt time. Neither changes the trigger time. |
+| `title` | VARCHAR(300) | Original RSS title. |
+| `source_url` | VARCHAR(1000) | HTTPS KIND detail URL. |
+| `created_at` | TIMESTAMPTZ | Database creation time. No `updated_at`. |
+
+Constraints enforce valid markets/types, CB-vs-sidecar payload combinations, `triggered_at < halt_until`, and unique `(source, source_event_id)`. Indexes support active CB lookup and KST-day history retrieval. No FK is needed: this is a source-event fact table, not a stock snapshot.
 
 #### `ledger_entry` — ledger
 Two composite FKs, `(execution_id, order_id)` to the execution and `(order_id, account_id)` to the order, enforce ledger/execution/account ownership.
@@ -625,4 +649,4 @@ No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial inde
 V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
 
 ---
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, and `V3__order_book.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V8__market_event.sql`
