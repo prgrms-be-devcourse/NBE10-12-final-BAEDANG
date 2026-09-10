@@ -3,6 +3,7 @@ package com.baedang.stock.entity;
 import com.baedang.global.entity.BaseEntity;
 import com.baedang.global.normalizer.DomainNormalizer;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Generated;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -108,8 +109,17 @@ public class Stock extends BaseEntity {
      * <b>검색과 같은 초성 공간에서</b> 완전일치/접두일치를 판정하려고 읽습니다.
      * 값은 DB가 만들기 때문에 절대 쓰지(insert/update) 마세요. ({@code insertable/updatable = false}).
      */
+    @Generated(event = {org.hibernate.generator.EventType.INSERT, org.hibernate.generator.EventType.UPDATE})
     @Column(name = "name_chosung", insertable = false, updatable = false)
     private String nameChosung;
+
+    /**
+     * V5 생성 컬럼(읽기 전용). 자모 분해 검색(3칸 고정폭, 종성 없으면 {@code ^} 패딩)의 원본입니다.
+     * 값은 DB가 만들기 때문에 절대 쓰지(insert/update) 마세요. ({@code insertable/updatable = false}).
+     */
+    @Generated(event = {org.hibernate.generator.EventType.INSERT, org.hibernate.generator.EventType.UPDATE})
+    @Column(name = "name_jamo", insertable = false, updatable = false)
+    private String nameJamo;
 
     /** 최근 1주 누적 거래대금. 랭킹 정렬 기준이자 커서의 1차 키. */
     @Column(name = "trading_amount", precision = 24, scale = 0)
@@ -234,6 +244,7 @@ public class Stock extends BaseEntity {
     public MarketCountry getMarketCountry() { return marketCountry; }
     public String getMarket() { return market; }
     public String getName() { return name; }
+    public String getNameJamo() { return nameJamo; }
     public String getNameChosung() { return nameChosung; }
     public String getEnglishName() { return englishName; }
     public String getIsinCode() { return isinCode; }

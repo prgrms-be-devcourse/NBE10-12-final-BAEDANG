@@ -49,17 +49,18 @@ public class StockSearchService {
         }
 
         if (isValid(keyword)) {
+            // 자모 분해는 검색어당 한 번만. 비교자 안에서 부르면 정렬 비교마다 DB를 왕복합니다.
+            String jamoKeyword = stockRepository.hangulJamo(keyword, false);
+
             return respond(stockRepository.searchByJamo(keyword),
-                    stock -> matchRank(stock, keyword), size);
+                    stock -> jamoRank(stock, jamoKeyword), size);
         }
 
         return new StockSearchResponse(List.of());
     }
 
-    private StockSearchResponse respond(List<Stock> found, ToIntFunction<Stock> rank, int size) {
-        List<StockSearchResponse.Item> items = found.stream().sorted(searchOrder(rank)).limit(size).map(this::toItem).toList();
-
-        return new StockSearchResponse(items);
+    private boolean isChosungOnly(String keyword) {
+        return keyword.chars().allMatch(c -> JAEUM_FIRST <= c && c <= JAEUM_LAST);
     }
 
     private boolean isValid(String keyword) {
@@ -77,13 +78,20 @@ public class StockSearchService {
         return true;
     }
 
-    private boolean isChosungOnly(String keyword) {
-        return keyword.chars().allMatch(c -> JAEUM_FIRST <= c && c <= JAEUM_LAST);
+    private StockSearchResponse respond(List<Stock> found, ToIntFunction<Stock> getRank, int size) {
+        List<StockSearchResponse.Item> items = found
+                .stream()
+                .sorted(createComparator(getRank))
+                .limit(size)
+                .map(this::toItem)
+                .toList();
+
+        return new StockSearchResponse(items);
     }
 
-    private Comparator<Stock> searchOrder(ToIntFunction<Stock> rank) {
+    private Comparator<Stock> createComparator(ToIntFunction<Stock> getRank) {
         return Comparator
-                .<Stock>comparingInt(rank)
+                .comparingInt(getRank)
                 .thenComparing(
                         Stock::getName,
                         Comparator.nullsLast(String.CASE_INSENSITIVE_ORDER)
@@ -94,31 +102,7 @@ public class StockSearchService {
                 );
     }
 
-    private int matchRank(Stock stock, String keyword) {
-        List<String> values = List.of(
-                normalize(stock.getName()),
-                normalize(stock.getEnglishName()),
-                normalize(stock.getSymbol())
-        );
-
-        if (values.stream().anyMatch(value -> value.equals(keyword))) {
-            return 0;
-        }
-
-        String prefix = withoutTrailingJaeum(keyword);
-
-        if (values.stream().anyMatch(value -> value.startsWith(prefix))) {
-            return 1;
-        }
-
-        return 2;
-    }
-
-    /**
-     * 초성 검색 결과의 순위. 검색이 {@code name_chosung} 으로 걸린 것이므로
-     * 순위도 같은 초성 공간에서 매겨야 합니다 — 원문 이름과 'ㅅㅅㅈㅈ' 를 비교하면
-     * 모든 결과가 같은 순위가 되어 정렬이 이름순으로만 남습니다.
-     */
+    // 초성 검색의 검색어와 검색 결과를 비교해서 순위를 반환합니다.
     private int chosungRank(Stock stock, String keyword) {
         String chosung = stock.getNameChosung();
 
@@ -130,17 +114,32 @@ public class StockSearchService {
     }
 
     /**
-     * 미완성 입력('삼ㅅ')의 접두 판정용. 마지막 독립 자음을 떼고 완성된 부분만 봅니다
-     * (원문 이름에는 독립 자음이 없어 그대로 비교하면 접두 일치가 영영 안 잡힙니다).
+     * 자모 검색의 검색어와 검색 결과를 비교해서 순위를 반환합니다.
+     *
+     * <p>검색어는 컬럼과 같은 3칸 고정폭({@code partialTail = false})으로 분해한 것을 씁니다.
+     * 검색(LIKE)은 조합 중인 음절을 살리려고 {@code true} 로 관대하게 걸지만, 순위는 그 패딩이
+     * 있어야 글자 경계를 지킵니다 — {@code true}('서' → ㅅㅓ)로 접두를 재면 '성우하이텍'(ㅅㅓㅇ…)이
+     * '서' 의 접두로 잡혀 진짜 접두인 '서울가스' 와 동률이 됩니다.
      */
-    private String withoutTrailingJaeum(String keyword) {
-        char last = keyword.charAt(keyword.length() - 1);
+    private int jamoRank(Stock stock, String keyword) {
+        String jamo = stock.getNameJamo();
 
-        if (JAEUM_FIRST <= last && last <= JAEUM_LAST && keyword.length() > 1) {
-            return keyword.substring(0, keyword.length() - 1);
+        if (jamo == null) return 2;
+
+        List<String> values = List.of(
+                jamo,
+                normalize(stock.getEnglishName()),
+                normalize(stock.getSymbol())
+        );
+
+        if (values.stream().anyMatch(value -> value.equals(keyword))) {
+            return 0;
+        }
+        if (values.stream().anyMatch(value -> value.startsWith(keyword))) {
+            return 1;
         }
 
-        return keyword;
+        return 2;
     }
 
     private String normalizeQuery(String query) {

@@ -70,6 +70,17 @@ public interface StockRepository extends JpaRepository<Stock, Long> {
     List<Stock> searchByJamo(@Param("keyword") String keyword);
 
     /**
+     * 검색어를 자모로 분해합니다. 결과 정렬용 순위 판정이 검색과 <b>같은 자모 공간</b>에서
+     * 이뤄져야 하는데, {@code hangul_jamo} 는 SQL 에만 존재하기 때문입니다 (Java 중복 구현 금지).
+     *
+     * <p>{@code partialTail} 이 규칙을 가릅니다 — 컬럼과 같은 3칸 고정폭(종성 없으면 {@code ^}
+     * 패딩)이 필요한 완전일치 판정은 {@code false}, 미완성 입력('삼ㅅ')을 살려야 하는
+     * 접두 판정은 {@code true} 입니다.
+     */
+    @Query(value = "select hangul_jamo(:keyword, :partialTail)", nativeQuery = true)
+    String hangulJamo(@Param("keyword") String keyword, @Param("partialTail") boolean partialTail);
+
+    /**
      * 독립 초성 검색 (예: {@code ㅅㅅㅈㅈ} → 삼성전자).
      *
      * <p>순수 초성 검색어는 영문명·심볼에 걸릴 일이 없으므로 종목명 초성만 봅니다.
