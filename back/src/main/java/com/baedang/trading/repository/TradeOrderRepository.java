@@ -38,16 +38,6 @@ public interface TradeOrderRepository extends JpaRepository<TradeOrder, Long> {
 
     Optional<TradeOrder> findByAccountIdAndClientOrderId(Long accountId, UUID clientOrderId);
 
-    /**
-     * 계좌의 특정 종목들에 대해 <b>실제로 체결된</b> 주문을 시간 오름차순으로 조회합니다.
-     * 보유 lot 의 시작 시점을 재생(replay)으로 찾을 때 씁니다({@code filled_quantity > 0} 이라
-     * REJECTED·미체결은 제외). 시각 동률은 orderId 로 안정 정렬합니다.
-     */
-    @Query("select o from TradeOrder o where o.accountId = :accountId and o.stockId in :stockIds"
-            + " and o.filledQuantity > 0 order by o.orderedAt asc, o.orderId asc")
-    List<TradeOrder> findFilledByAccountAndStocks(
-            @Param("accountId") Long accountId, @Param("stockIds") Collection<Long> stockIds);
-
     long countByAccountId(Long accountId);
 
     /** 원장 항목들의 종목명 조인을 위해 orderId → stockId 를 한 번에 조회합니다. */

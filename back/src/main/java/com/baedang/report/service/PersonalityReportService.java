@@ -15,8 +15,8 @@ import com.baedang.report.support.InvestmentTypeClassifier;
 import com.baedang.report.support.InvestmentTypeClassifier.HoldingSlice;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.entity.TradeOrder;
-import com.baedang.trading.repository.TradeOrderRepository;
+import com.baedang.trading.model.HoldingReplayEvent;
+import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.user.entity.Account;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -41,8 +41,8 @@ import java.util.stream.Collectors;
  * {@code (cash + stockValue − initial_cash)/initial_cash}, 실현+미실현을 모두 포함한다.
  * (계좌 요약의 미실현/원가 손익률과는 다른 지표라 재사용하지 않는다.)
  *
- * <p>N주 이상 보유 성과 섹션은 {@code trade_order} 체결 이력을 재생해 현재 lot 의 첫 매수
- * 시각을 구하고({@link HoldingLotTracker}), 임계 기간을 넘은 종목만 담는다. 등락률은
+ * <p>N주 이상 보유 성과 섹션은 {@code trade_execution} 개별 체결을 재생해 현재 lot 의 첫
+ * 매수 시각을 구하고({@link HoldingLotTracker}), 임계 기간을 넘은 종목만 담는다. 등락률은
  * <b>내 보유 수익률</b>(현재가 대비 평단가)이다.
  */
 @Service
@@ -51,20 +51,20 @@ public class PersonalityReportService {
 
     private final AccountValuationService accountValuationService;
     private final StockRepository stockRepository;
-    private final TradeOrderRepository tradeOrderRepository;
+    private final TradeExecutionRepository tradeExecutionRepository;
     private final InvestmentTypeClassifier classifier;
     private final int holdingPeriodWeeks;
     private final Clock clock;
 
     public PersonalityReportService(AccountValuationService accountValuationService,
                                     StockRepository stockRepository,
-                                    TradeOrderRepository tradeOrderRepository,
+                                    TradeExecutionRepository tradeExecutionRepository,
                                     InvestmentTypeClassifier classifier,
                                     @Value("${report.holding-period-weeks:4}") int holdingPeriodWeeks,
                                     Clock clock) {
         this.accountValuationService = accountValuationService;
         this.stockRepository = stockRepository;
-        this.tradeOrderRepository = tradeOrderRepository;
+        this.tradeExecutionRepository = tradeExecutionRepository;
         this.classifier = classifier;
         this.holdingPeriodWeeks = holdingPeriodWeeks;
         this.clock = clock;
@@ -122,15 +122,15 @@ public class PersonalityReportService {
             return List.of();
         }
         List<Long> stockIds = valued.valuations().stream().map(HoldingValuation::stockId).toList();
-        Map<Long, List<TradeOrder>> fillsByStock =
-                tradeOrderRepository.findFilledByAccountAndStocks(accountId, stockIds).stream()
-                        .collect(Collectors.groupingBy(TradeOrder::getStockId));
+        Map<Long, List<HoldingReplayEvent>> executionsByStock =
+                tradeExecutionRepository.findHoldingReplayEvents(accountId, stockIds).stream()
+                        .collect(Collectors.groupingBy(HoldingReplayEvent::stockId));
 
         OffsetDateTime threshold = now.minusWeeks(holdingPeriodWeeks);
         List<LongHeldStock> items = new ArrayList<>();
         for (HoldingValuation v : valued.valuations()) {
             OffsetDateTime heldSince = HoldingLotTracker.currentLotStart(
-                    fillsByStock.getOrDefault(v.stockId(), List.of()));
+                    executionsByStock.getOrDefault(v.stockId(), List.of()));
             if (heldSince == null || heldSince.isAfter(threshold)) {
                 continue; // 보유 이력이 없거나 N주 미만 보유
             }

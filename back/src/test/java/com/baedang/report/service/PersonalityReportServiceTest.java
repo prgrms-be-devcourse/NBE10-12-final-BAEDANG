@@ -10,8 +10,8 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.entity.TradeOrder;
-import com.baedang.trading.repository.TradeOrderRepository;
+import com.baedang.trading.model.HoldingReplayEvent;
+import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.user.entity.Account;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,14 +37,14 @@ class PersonalityReportServiceTest {
 
     @Mock AccountValuationService accountValuationService;
     @Mock StockRepository stockRepository;
-    @Mock TradeOrderRepository tradeOrderRepository;
+    @Mock TradeExecutionRepository tradeExecutionRepository;
     @Mock Account account;
 
     private PersonalityReportService service() {
         return new PersonalityReportService(
                 accountValuationService,
                 stockRepository,
-                tradeOrderRepository,
+                tradeExecutionRepository,
                 new InvestmentTypeClassifier(),
                 4,
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -71,13 +71,9 @@ class PersonalityReportServiceTest {
         return stock;
     }
 
-    private static TradeOrder fill(long stockId, OrderSide side, long qty, String orderedAt) {
-        TradeOrder o = org.mockito.Mockito.mock(TradeOrder.class);
-        lenient().when(o.getStockId()).thenReturn(stockId);
-        lenient().when(o.getSide()).thenReturn(side);
-        lenient().when(o.getFilledQuantity()).thenReturn(BigDecimal.valueOf(qty));
-        lenient().when(o.getOrderedAt()).thenReturn(OffsetDateTime.parse(orderedAt));
-        return o;
+    private static HoldingReplayEvent exec(long stockId, OrderSide side, long qty, String executedAt) {
+        return new HoldingReplayEvent(
+                stockId, side, BigDecimal.valueOf(qty), OffsetDateTime.parse(executedAt));
     }
 
     private void givenAccount(long initialCash, long cashBalance) {
@@ -154,10 +150,10 @@ class PersonalityReportServiceTest {
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         Stock s2 = stock(2, StockCategory.ETF, MarketCountry.US, "1.0");
         when(stockRepository.findByStockIdIn(List.of(1L, 2L))).thenReturn(List.of(s1, s2));
-        TradeOrder o1 = fill(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z");
-        TradeOrder o2 = fill(2, OrderSide.BUY, 10, "2026-09-01T00:00:00Z");
-        when(tradeOrderRepository.findFilledByAccountAndStocks(10L, List.of(1L, 2L)))
-                .thenReturn(List.of(o1, o2));
+        when(tradeExecutionRepository.findHoldingReplayEvents(10L, List.of(1L, 2L)))
+                .thenReturn(List.of(
+                        exec(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z"),
+                        exec(2, OrderSide.BUY, 10, "2026-09-01T00:00:00Z")));
 
         PersonalityReportResponse r = service().getReport(1L);
 
@@ -166,5 +162,25 @@ class PersonalityReportServiceTest {
         assertThat(item.symbol()).isEqualTo("SYM1");
         assertThat(item.returnRate()).isEqualTo("0.2");
         assertThat(item.heldSince()).isEqualTo(OffsetDateTime.parse("2026-08-01T00:00:00Z"));
+    }
+
+    @Test
+    void 전량매도_뒤_재체결된_종목은_체결시각_기준이라_4주_목록에서_빠진다() {
+        givenAccount(50_000_000, 20_000_000);
+        // stock1: 8/1 매수 → 9/8 전량 매도 → 9/9 지정가 5주 체결. 현재 lot 은 9/9(임계 이후)라 제외.
+        List<HoldingValuation> valuations = List.of(valuation(1, 21_000_000, 10_000, 12_000));
+        when(accountValuationService.valuateActiveAccount(1L))
+                .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
+        Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
+        when(stockRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(s1));
+        when(tradeExecutionRepository.findHoldingReplayEvents(10L, List.of(1L)))
+                .thenReturn(List.of(
+                        exec(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z"),
+                        exec(1, OrderSide.SELL, 10, "2026-09-08T00:00:00Z"),
+                        exec(1, OrderSide.BUY, 5, "2026-09-09T00:00:00Z")));
+
+        PersonalityReportResponse r = service().getReport(1L);
+
+        assertThat(r.longHeldStocks()).isEmpty();
     }
 }
