@@ -11,8 +11,8 @@ import java.time.LocalDate;
 /**
  * 종목 마스터. 매주 월요일 07:00 배치가 전 종목(약 8,500개)을 갱신합니다.
  *
- * <p>검색은 이 테이블 전체가 대상이고, <b>거래는 {@code isRanked} 인 상위 100종목만</b>
- * 가능합니다. 나머지는 조회만 됩니다.
+ * <p>검색은 이 테이블 전체가 대상이고, <b>거래는 랭킹과 무관하게 종목 상태·장 운영·시세 신선도로 판단</b>
+ * 합니다. 랭킹은 정기 시세 수집 대상 선정에 사용합니다.
  */
 @Entity
 @Table(name = "stock")
@@ -92,7 +92,7 @@ public class Stock extends BaseEntity {
     @Column(name = "listing_status", nullable = false, length = 20)
     private ListingStatus listingStatus;
 
-    /** 거래대금 상위 100 포함 여부. <b>시세 수집·거래 가능 판정</b>에 씁니다. */
+    /** 거래대금 상위 100 포함 여부. <b>정기 시세 수집 대상 판정</b>에 씁니다. */
     @Column(name = "is_ranked", nullable = false)
     private Boolean isRanked;
 
@@ -233,8 +233,7 @@ public class Stock extends BaseEntity {
 
     /** 지금 이 종목을 거래할 수 있는 상태인가 (장 시간 판정은 별도). */
     public boolean isTradable() {
-        return Boolean.TRUE.equals(isRanked)
-                && !Boolean.TRUE.equals(isSuspended)
+        return !Boolean.TRUE.equals(isSuspended)
                 && !Boolean.TRUE.equals(isLiquidation)
                 && listingStatus == ListingStatus.ACTIVE;
     }

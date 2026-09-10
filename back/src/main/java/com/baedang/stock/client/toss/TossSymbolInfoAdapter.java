@@ -131,6 +131,9 @@ public class TossSymbolInfoAdapter implements SymbolInfoPort {
 
     private StockInfo.KrMarketDetail toKrMarketDetail(TossStockInfoResponse.KrMarketDetail detail) {
         if (detail == null) return null;
+        if (detail.liquidationTrading() == null || detail.krxTradingSuspended() == null) {
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR, "국내 종목의 필수 거래 제약 정보 누락");
+        }
 
         return new StockInfo.KrMarketDetail(
                 Boolean.TRUE.equals(detail.liquidationTrading()),

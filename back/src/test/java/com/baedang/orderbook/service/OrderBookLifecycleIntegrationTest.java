@@ -64,6 +64,20 @@ import static org.mockito.Mockito.mock;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookLifecycleIntegrationTest {
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+
+    @org.springframework.test.context.bean.override.mockito.MockitoBean
+    com.baedang.market.port.MarketDataPort currentPricePort;
+
+    @org.junit.jupiter.api.BeforeEach
+    void prepareTradingStatusBoundary() {
+        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+    }
+
 
     private static final Instant BASE = Instant.parse("2026-09-03T01:00:00Z");
 
@@ -128,6 +142,33 @@ class OrderBookLifecycleIntegrationTest {
 
     private Optional<OrderBookVersion> activeVersion() {
         return versionRepository.findByStockIdAndIsActiveTrue(krStock.getStockId());
+    }
+
+    @Autowired com.baedang.stock.service.StockTradingStatusPersistenceService statusPersistence;
+
+    @Test
+    void 상태_갱신은_랭킹을_보존하고_거래정지_확인후_호가를_닫는다() {
+        scheduler.refreshOrderBooks();
+        assertThat(activeVersion()).isPresent();
+        statusPersistence.update(krStock.getStockId(), MarketCountry.KR,
+                new com.baedang.stock.port.StockInfo(krStock.getSymbol(), "changed", null, null,
+                        "KOSPI", "STOCK", true, "ACTIVE", "KRW", null, null, null, null,
+                        new com.baedang.stock.port.StockInfo.KrMarketDetail(false, false, true, null)));
+        Stock refreshed = stockRepository.findById(krStock.getStockId()).orElseThrow();
+        assertThat(refreshed.getIsRanked()).isTrue();
+        assertThat(refreshed.getName()).isEqualTo(krStock.getName());
+        assertThat(refreshed.isTradable()).isFalse();
+        scheduler.refreshOrderBooks();
+        assertThat(activeVersion()).isEmpty();
+    }
+
+    @Test
+    void 상태_확인_실패는_이전_호가를_사용가능한_상태로_남기지_않는다() {
+        scheduler.refreshOrderBooks();
+        assertThat(activeVersion()).isPresent();
+        when(tradingStatuses.refreshBatch(any())).thenThrow(new IllegalStateException("provider unavailable"));
+        scheduler.refreshOrderBooks();
+        assertThat(activeVersion()).isEmpty();
     }
 
     @Test
@@ -378,8 +419,18 @@ class OrderBookRestartTestConfiguration {
         when(provider.currentUsdKrwRate()).thenReturn(new BigDecimal("1383.60"));
         return provider;
     }
+    @Bean
+    @Primary
+    com.baedang.stock.service.StockTradingStatusService restartTradingStatuses() {
+        com.baedang.stock.service.StockTradingStatusService service = mock(com.baedang.stock.service.StockTradingStatusService.class);
+        when(service.refreshBatch(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        return service;
+    }
+
     @Bean(name = "marketCalendarDelegate")
     MarketCalendarPort marketCalendarDelegate() {
         return mock(MarketCalendarPort.class);
     }
+
+
 }

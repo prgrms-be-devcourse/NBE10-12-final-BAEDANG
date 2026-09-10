@@ -14,6 +14,8 @@ import com.baedang.orderbook.service.OrderBookRetentionService;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.stock.service.StockTradingStatusService;
+import org.springframework.data.domain.PageRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -24,6 +26,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,6 +61,7 @@ public class OrderBookRefreshScheduler {
     private final OrderBookRetentionService retentionService;
     private final OrderBookProperties properties;
     private final Clock clock;
+    private final StockTradingStatusService statuses;
 
     public OrderBookRefreshScheduler(
             MarketSessionProvider marketSessionProvider,
@@ -67,7 +72,8 @@ public class OrderBookRefreshScheduler {
             OrderBookPublicationService publicationService,
             OrderBookRetentionService retentionService,
             OrderBookProperties properties,
-            Clock clock
+            Clock clock,
+            StockTradingStatusService statuses
     ) {
         this.marketSessionProvider = marketSessionProvider;
         this.stockRepository = stockRepository;
@@ -78,6 +84,7 @@ public class OrderBookRefreshScheduler {
         this.retentionService = retentionService;
         this.properties = properties;
         this.clock = clock;
+        this.statuses = statuses;
     }
 
     @Scheduled(
@@ -128,35 +135,51 @@ public class OrderBookRefreshScheduler {
             return;
         }
 
-        List<Stock> rankedStocks = stockRepository.findByMarketCountryAndIsRankedTrue(country);
-        Set<Long> rankedStockIds = rankedStocks.stream()
-                .map(Stock::getStockId)
-                .collect(Collectors.toSet());
-
-        // active IDs − ranked IDs에 해당하는 종목(랭킹 이탈 종목)을 별도 트랜잭션으로 종료
+        Set<Long> targetIds = new HashSet<>();
+        long after = 0L;
+        while (true) {
+            List<Stock> targets = stockRepository.findQuoteTargets(country, after,
+                    clock.instant().atOffset(ZoneOffset.UTC),
+                    PageRequest.of(0, 200));
+            targetIds.addAll(targets.stream().map(Stock::getStockId).toList());
+            if (targets.isEmpty()) break;
+            refreshPage(targets, session.validUntil());
+            after = targets.getLast().getStockId();
+            if (targets.size() < 200) break;
+        }
         for (Long activeId : activeStockIds) {
-            if (!rankedStockIds.contains(activeId)) {
-                closeStockSafely(activeId);
-            }
-        }
-
-        if (rankedStocks.isEmpty()) {
-            return;
-        }
-
-        Map<Long, QuoteSnapshot> quoteMap = quoteSnapshotRepository.findByStockIdIn(rankedStockIds)
-                .stream()
-                .collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity(), (a, b) -> a));
-
-        for (Stock stock : rankedStocks) {
-            try {
-                refreshStock(stock, quoteMap.get(stock.getStockId()), session.validUntil(), now);
-            } catch (RuntimeException exception) {
-                log.error("종목 호가 갱신 실패: {} ({})", stock.getSymbol(), stock.getStockId(), exception);
+            if (!targetIds.contains(activeId)) {
+                try {
+                    publicationService.closeIfNotTarget(activeId);
+                } catch (RuntimeException exception) {
+                    log.error("호가 대상 제외 처리 실패: stockId={}", activeId, exception);
+                }
             }
         }
     }
 
+    private void refreshPage(List<Stock> targets, Instant sessionUntil) {
+        List<Stock> verified;
+        try {
+            verified = statuses.refreshBatch(targets);
+        } catch (RuntimeException exception) {
+            log.warn("종목 상태 확인 실패로 호가를 종료합니다", exception);
+            targets.forEach(stock -> closeStockSafely(stock.getStockId()));
+            return;
+        }
+        Set<Long> verifiedIds = verified.stream().map(Stock::getStockId).collect(Collectors.toSet());
+        targets.stream().filter(stock -> !verifiedIds.contains(stock.getStockId()))
+                .forEach(stock -> closeStockSafely(stock.getStockId()));
+        Map<Long, QuoteSnapshot> quoteMap = quoteSnapshotRepository.findByStockIdIn(verifiedIds)
+                .stream().collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity()));
+        for (Stock stock : verified) {
+            try {
+                refreshStock(stock, quoteMap.get(stock.getStockId()), sessionUntil, clock.instant());
+            } catch (RuntimeException exception) {
+                log.error("종목 호가 갱신 실패: stockId={}", stock.getStockId(), exception);
+            }
+        }
+    }
     private void refreshStock(Stock stock, QuoteSnapshot quote, Instant sessionValidUntil, Instant now) {
         Long stockId = stock.getStockId();
         if (quote == null || quote.getQuoteAt() == null || quote.getLastPrice() == null) {

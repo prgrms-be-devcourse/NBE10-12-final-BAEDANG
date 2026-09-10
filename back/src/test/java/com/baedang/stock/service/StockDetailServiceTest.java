@@ -99,16 +99,15 @@ class StockDetailServiceTest {
     }
 
     @Test
-    void 상위_100_밖의_종목은_최신_시세가_있어도_실시간이_아니다() {
+    void 비랭킹_종목도_시세와_세션에_따라_실시간과_거래가능을_판정한다() {
         when(stock.getIsRanked()).thenReturn(false);
         QuoteSnapshot quote = quote("120", "100");
         when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(quote));
 
         StockDetailResponse result = service.getDetail("abc", "KR");
 
-        assertThat(result.price().realtime()).isFalse();
-        assertThat(result.tradableReason()).isEqualTo("NOT_IN_UNIVERSE");
-        verify(quoteRealtimePolicy, never()).isRealtime(any(), any());
+        verify(quoteRealtimePolicy).isRealtime(MarketCountry.KR, quote);
+        assertThat(result.tradableReason()).isEqualTo("MARKET_CLOSED");
     }
 
     @Test
