@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.global.config.JpaConfig;
 import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotBatchRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -8,10 +9,13 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.TradeOrderRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
@@ -20,17 +24,20 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.sql.init.mode=never"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({QuoteSnapshotBatchRepository.class,
-        com.baedang.global.config.JpaConfig.class})
+        JpaConfig.class})
 class QuoteCollectionIntegrationTest {
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
@@ -40,11 +47,11 @@ class QuoteCollectionIntegrationTest {
     @Autowired QuoteSnapshotBatchRepository batch;
     QuoteSnapshotPersistenceService persistence;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void configurePolicy() {
-        MarketTradingDayPolicy policy = org.mockito.Mockito.mock(MarketTradingDayPolicy.class);
-        org.mockito.Mockito.when(policy.quoteTradeDate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(java.util.Optional.of(NOW.toLocalDate()));
+        MarketTradingDayPolicy policy = Mockito.mock(MarketTradingDayPolicy.class);
+        Mockito.when(policy.quoteTradeDate(ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(Optional.of(NOW.toLocalDate()));
         persistence = new QuoteSnapshotPersistenceService(batch, policy);
     }
     @Autowired JdbcTemplate jdbc;

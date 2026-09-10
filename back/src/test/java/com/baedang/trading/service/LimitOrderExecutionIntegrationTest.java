@@ -2,33 +2,38 @@ package com.baedang.trading.service;
 
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
-import com.baedang.orderbook.support.MutableClock;
 import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import com.baedang.orderbook.service.OrderBookPublicationService;
+import com.baedang.orderbook.support.MutableClock;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.service.StockTradingStatusService;
+import com.baedang.trading.dto.LimitExecutionPreviewResponse;
 import com.baedang.trading.dto.LimitOrderRequest;
+import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
+import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.LimitExecutionAttempt;
 import com.baedang.trading.model.LimitExecutionBook;
 import com.baedang.trading.model.LimitExecutionOutcome;
 import com.baedang.trading.model.LimitExecutionPreparation;
 import com.baedang.trading.model.LimitOrderCommand;
-import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository.Group;
+import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.trading.scheduler.LimitExecutionProgress;
 import com.baedang.trading.scheduler.LimitOrderExecutionWorker;
+import com.baedang.trading.scheduler.LimitOrderExpirationScheduler;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
-import com.baedang.trading.repository.TradeOrderRepository;
-import com.baedang.stock.repository.StockRepository;
-import com.baedang.stock.entity.MarketCountry;
-import com.baedang.trading.entity.OrderSide;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,6 +49,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.test.util.AopTestUtils;
+import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -52,17 +59,17 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.List;
 import java.util.ArrayList;
-import java.util.UUID;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -87,10 +94,10 @@ class LimitOrderExecutionIntegrationTest {
     }
     @MockitoBean MarketSessionProvider sessions;
     @MockitoBean ExecutionExchangeRateProvider rates;
-    @MockitoBean com.baedang.market.port.MarketCalendarPort calendars;
-    @MockitoBean com.baedang.market.port.MarketDataPort marketData;
+    @MockitoBean MarketCalendarPort calendars;
+    @MockitoBean MarketDataPort marketData;
     @MockitoBean StockTradingStatusService statuses;
-    @MockitoBean com.baedang.trading.scheduler.LimitOrderExpirationScheduler expirationTrigger;
+    @MockitoBean LimitOrderExpirationScheduler expirationTrigger;
     @MockitoSpyBean LedgerService ledger;
     @Autowired MutableClock clock;
     @Autowired JdbcTemplate jdbc;
@@ -105,7 +112,7 @@ class LimitOrderExecutionIntegrationTest {
     @Autowired TradeOrderRepository orders;
     @Autowired StockRepository stocks;
     @Autowired PlatformTransactionManager manager;
-    @Autowired com.baedang.trading.repository.LimitExecutionCandidateRepository candidates;
+    @Autowired LimitExecutionCandidateRepository candidates;
     long user, account, stock, version;
     String symbol;
 
@@ -127,7 +134,7 @@ class LimitOrderExecutionIntegrationTest {
     @Test
     void 미리보기와_여러호가_실체결의_금액이_일치하고_원장별_잔액을_보존한다() {
         book("ASK", "99", 1, 2);
-        com.baedang.trading.dto.LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","3","100","USD").executionPreview();
+        LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","3","100","USD").executionPreview();
         assertThat(preview.expectedFilledQuantity()).isEqualTo("3");
         assertThat(preview.avgExecutionPrice()).isEqualTo("99.67");
         assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
@@ -186,7 +193,7 @@ class LimitOrderExecutionIntegrationTest {
         long order = place("BUY","3","100");
         AtomicInteger calls = new AtomicInteger();
         doAnswer(inv -> { if (calls.incrementAndGet() == 2) throw new IllegalStateException("원장 저장 실패"); return inv.callRealMethod(); })
-                .when(org.springframework.test.util.AopTestUtils.<LedgerService>getUltimateTargetObject(ledger))
+                .when(AopTestUtils.<LedgerService>getUltimateTargetObject(ledger))
                 .recordBuy(any(),any(),any(),any());
         assertThatThrownBy(() -> execute(order)).isInstanceOf(IllegalStateException.class);
         assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
@@ -216,7 +223,7 @@ class LimitOrderExecutionIntegrationTest {
         long account2 = jdbc.queryForObject("INSERT INTO account(user_id,initial_cash,cash_balance,opened_at) VALUES (?,50000000,50000000,?) RETURNING account_id",Long.class,user2,NOW.minusSeconds(1).atOffset(ZoneOffset.UTC));
         long second = admission.place(user2,new LimitOrderRequest(account2,UUID.randomUUID().toString(),symbol,"US","BUY","3","100","USD")).orderId();
         LimitExecutionAttempt a = attempt(first), b = attempt(second);
-        try (java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(2)) {
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
             CountDownLatch start = new CountDownLatch(1);
             Future<LimitExecutionOutcome> one = pool.submit(() -> { start.await(); return transactions.execute(a); });
             Future<LimitExecutionOutcome> two = pool.submit(() -> { start.await(); return transactions.execute(b); });
@@ -390,7 +397,7 @@ class LimitOrderExecutionIntegrationTest {
         long order = place("BUY","1","100");
         LimitExecutionAttempt attempt = attempt(order);
         CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
-        try (java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(2)) {
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
             Future<?> blocker = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
                 jdbc.queryForObject("SELECT account_id FROM account WHERE account_id=? FOR UPDATE",Long.class,account);
                 locked.countDown();
@@ -404,7 +411,7 @@ class LimitOrderExecutionIntegrationTest {
             while (System.nanoTime() < deadline) {
                 waiting = jdbc.queryForObject("SELECT count(*) > 0 FROM pg_stat_activity WHERE wait_event_type='Lock' AND query ILIKE '%account%'",Boolean.class);
                 if (waiting) break;
-                java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
             }
             assertThat(waiting).isTrue();
             clock.setCurrent(NOW.plusSeconds(2));
@@ -426,12 +433,12 @@ class LimitOrderExecutionIntegrationTest {
         assertThat(execute(order).executionCount()).isEqualTo(2);
         verifyNoInteractions(rates);
         assertThatThrownBy(() -> new TransactionTemplate(manager).execute(tx -> execute(order)))
-                .isInstanceOf(org.springframework.transaction.IllegalTransactionStateException.class);
+                .isInstanceOf(IllegalTransactionStateException.class);
     }
 
     private LimitExecutionOutcome execute(long orderId) {
-        com.baedang.trading.entity.TradeOrder order = orders.findById(orderId).orElseThrow();
-        com.baedang.trading.model.LimitExecutionPreparation prepared = execution.prepare(order.getStockId(), order.getSide());
+        TradeOrder order = orders.findById(orderId).orElseThrow();
+        LimitExecutionPreparation prepared = execution.prepare(order.getStockId(), order.getSide());
         return prepared.available() ? execution.execute(orderId, prepared) : LimitExecutionOutcome.deferred(prepared.reason());
     }
 
@@ -448,7 +455,7 @@ class LimitOrderExecutionIntegrationTest {
         when(rates.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
                 prepared.atOffset(ZoneOffset.UTC),prepared.atOffset(ZoneOffset.UTC),NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)));
         assertThat(execute(order).executionCount()).isEqualTo(1);
-        assertThat(jdbc.queryForObject("SELECT executed_at FROM trade_execution WHERE order_id=?",java.time.OffsetDateTime.class,order).toInstant()).isEqualTo(NOW);
+        assertThat(jdbc.queryForObject("SELECT executed_at FROM trade_execution WHERE order_id=?",OffsetDateTime.class,order).toInstant()).isEqualTo(NOW);
     }
 
     @Test
@@ -494,13 +501,13 @@ class LimitOrderExecutionIntegrationTest {
         long high = place("BUY","1","101");
         long same = place("BUY","1","101");
         long newer = place("BUY","1","102");
-        com.baedang.trading.repository.LimitExecutionCandidateRepository.Group group =
-                new com.baedang.trading.repository.LimitExecutionCandidateRepository.Group(stock,OrderSide.BUY);
-        List<com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate> page =
+        LimitExecutionCandidateRepository.Group group =
+                new LimitExecutionCandidateRepository.Group(stock,OrderSide.BUY);
+        List<LimitExecutionCandidateRepository.Candidate> page =
                 candidates.page(group,null,NOW.atOffset(ZoneOffset.UTC),1);
-        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(newer);
+        assertThat(page).extracting(LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(newer);
         page = candidates.page(group,page.getLast(),NOW.atOffset(ZoneOffset.UTC),50);
-        assertThat(page).extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(high,same,lower);
+        assertThat(page).extracting(LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(high,same,lower);
         assertThat(candidates.page(group,null,NOW.atOffset(ZoneOffset.UTC),1).getFirst().orderId()).isEqualTo(newer);
     }
 
@@ -509,10 +516,10 @@ class LimitOrderExecutionIntegrationTest {
         jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,10,0,90,1400,900,1260000,?)",account,stock,NOW.atOffset(ZoneOffset.UTC));
         long high = place("SELL","1","101");
         long low = place("SELL","1","99");
-        com.baedang.trading.repository.LimitExecutionCandidateRepository.Group group =
-                new com.baedang.trading.repository.LimitExecutionCandidateRepository.Group(stock,OrderSide.SELL);
+        LimitExecutionCandidateRepository.Group group =
+                new LimitExecutionCandidateRepository.Group(stock,OrderSide.SELL);
         assertThat(candidates.page(group,null,NOW.atOffset(ZoneOffset.UTC),50))
-                .extracting(com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(low,high);
+                .extracting(LimitExecutionCandidateRepository.Candidate::orderId).containsExactly(low,high);
         assertThat(candidates.page(group,null,NOW.plusSeconds(3600).atOffset(ZoneOffset.UTC),50)).isEmpty();
     }
     private void rate(String value) {
@@ -645,8 +652,8 @@ class LimitOrderExecutionIntegrationTest {
     @Test
     void 계산가능한_0주_미리보기는_AVAILABLE이고_DB는_변경하지않는다() {
         book("ASK","101",1,1);
-        com.baedang.trading.dto.LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","1","100","USD").executionPreview();
-        assertThat(preview.status()).isEqualTo(com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.AVAILABLE);
+        LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","1","100","USD").executionPreview();
+        assertThat(preview.status()).isEqualTo(LimitExecutionPreviewResponse.Status.AVAILABLE);
         assertThat(preview.reason()).isEqualTo("PRICE_LIMIT");
         assertThat(preview.expectedFilledQuantity()).isEqualTo("0");
         assertThat(preview.avgExecutionPrice()).isNull();
@@ -654,7 +661,7 @@ class LimitOrderExecutionIntegrationTest {
         assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
     }
     private LimitExecutionAttempt attempt(long id) {
-        com.baedang.trading.entity.TradeOrder order = orders.findById(id).orElseThrow();
+        TradeOrder order = orders.findById(id).orElseThrow();
         LimitExecutionBook book = books.read(stocks.findById(stock).orElseThrow(),order.getSide(),NOW).orElseThrow();
         return new LimitExecutionAttempt(order.getAccountId(),id,stock,order.getExecutionCount(),book.version(),book.revision(),
                 new OrderMarketContext(MarketCountry.US,true,NOW.plusSeconds(3600),ExecutionRateEvidence.from(rates.currentUsdKrwSnapshot()),NOW));
@@ -681,7 +688,7 @@ class LimitOrderExecutionIntegrationTest {
         book("ASK","100",3,1);
         long order = place("BUY","1","100");
         CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
-        try (java.util.concurrent.ExecutorService pool = Executors.newFixedThreadPool(2)) {
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
             Future<?> blocker = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
                 jdbc.queryForObject("SELECT account_id FROM account WHERE account_id=? FOR UPDATE",Long.class,account);
                 locked.countDown();

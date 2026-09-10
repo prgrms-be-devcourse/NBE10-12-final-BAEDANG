@@ -1,11 +1,11 @@
 package com.baedang.trading.repository;
 
 import com.baedang.stock.entity.MarketCountry;
+import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.TradeOrder;
-import com.baedang.trading.entity.OrderStatus;
-import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.model.CumulativeSettlementState;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.service.LimitOrderSettlementCalculator;
@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -158,7 +159,7 @@ class TradeExecutionSettlementIntegrationTest {
             entityManager.flush();
         }
         assertThatThrownBy(() -> jdbc.update("UPDATE trade_order SET reserved_cash = 0 WHERE order_id = ?", order.getOrderId()))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .isInstanceOf(DataIntegrityViolationException.class)
                 .hasMessageContaining("ck_order_limit_terms");
     }
 

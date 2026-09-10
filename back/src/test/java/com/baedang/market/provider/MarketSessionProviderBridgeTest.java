@@ -8,8 +8,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -73,7 +75,7 @@ class MarketSessionProviderBridgeTest {
                 .thenReturn(closedDay(MarketCountry.KR, null));
 
         bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION);
-        bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION.plus(java.time.Duration.ofDays(1)));
+        bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION.plus(Duration.ofDays(1)));
 
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(DATE);
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(nextDate);
@@ -92,7 +94,7 @@ class MarketSessionProviderBridgeTest {
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
 
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(DATE);
-        verify(marketCalendarPort, org.mockito.Mockito.never()).fetchUsMarketCalendar(DATE);
+        verify(marketCalendarPort, Mockito.never()).fetchUsMarketCalendar(DATE);
         // 한국 날짜와 무관하게 America/New_York 현지 날짜만 조회한다.
         verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE.minusDays(1));
     }
@@ -104,7 +106,7 @@ class MarketSessionProviderBridgeTest {
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
 
-        verify(marketCalendarPort, org.mockito.Mockito.never()).fetchUsMarketCalendar(DATE);
+        verify(marketCalendarPort, Mockito.never()).fetchUsMarketCalendar(DATE);
         verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE.minusDays(1));
     }
 

@@ -11,10 +11,13 @@ import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -46,7 +49,7 @@ class DailyCandleSeedServiceTest {
     private DailyCandleSeedService service() {
         return new DailyCandleSeedService(
                 marketDataPort, stockRepository, persistenceService,
-                dailyCandleRepository, java.time.Clock.fixed(java.time.Instant.parse("2026-09-15T22:00:00Z"), java.time.ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 100);
+                dailyCandleRepository, Clock.fixed(Instant.parse("2026-09-15T22:00:00Z"), ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 100);
     }
 
     @Test
@@ -65,7 +68,7 @@ class DailyCandleSeedServiceTest {
         SeedResult result = service().seed(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles(eq("005930"), any(), anyInt());
-        verify(persistenceService).upsert(2L, "KRW", com.baedang.stock.entity.MarketCountry.KR, candles, java.time.Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService).upsert(2L, "KRW", MarketCountry.KR, candles, Instant.parse("2026-09-15T22:00:00Z"));
         verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(1);
@@ -156,8 +159,8 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seedAll();
 
-        verify(persistenceService).upsert(1L, "KRW", com.baedang.stock.entity.MarketCountry.KR, List.of(candle("KRW")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
-        verify(persistenceService).upsert(2L, "USD", com.baedang.stock.entity.MarketCountry.US, List.of(candle("USD")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService).upsert(1L, "KRW", MarketCountry.KR, List.of(candle("KRW")), Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService).upsert(2L, "USD", MarketCountry.US, List.of(candle("USD")), Instant.parse("2026-09-15T22:00:00Z"));
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(2);
     }
@@ -168,7 +171,7 @@ class DailyCandleSeedServiceTest {
             case "getSymbol" -> symbol;
             case "getCurrency" -> currency;
             case "getMarketCountry" -> currency.equalsIgnoreCase("USD") ? MarketCountry.US : MarketCountry.KR;
-            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+            default -> Answers.RETURNS_DEFAULTS.answer(invocation);
         });
     }
 

@@ -9,6 +9,8 @@ import com.baedang.stock.port.StockInfo;
 import com.baedang.stock.port.StockWarnings;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -75,8 +77,8 @@ public class TossSymbolInfoAdapterTest {
         assertThat(stockInfo.krMarketDetail()).isNull();
     }
 
-    @org.junit.jupiter.params.ParameterizedTest
-    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
     void 누락된_국내_거래제약을_false로_보정하지_않는다(boolean missingSuspension) {
         TossStockInfoResponse.TossStockInfo item = mock(TossStockInfoResponse.TossStockInfo.class);
         when(item.sharesOutstanding()).thenReturn("1");

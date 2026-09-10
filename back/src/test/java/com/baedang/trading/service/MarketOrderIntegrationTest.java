@@ -5,20 +5,20 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.dto.MarketOrderRequest;
+import com.baedang.stock.service.StockTradingStatusService;
 import com.baedang.trading.dto.MarketOrderQuoteResponse;
+import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
-import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.OrderMarketContext;
-import com.baedang.trading.model.ExecutionRateEvidence;
-import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.entity.EntryType;
 import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.LedgerEntry;
@@ -26,6 +26,10 @@ import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.TradeExecution;
 import com.baedang.trading.entity.TradeOrder;
+import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.MarketOrderCommand;
+import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
 import com.baedang.trading.repository.TradeExecutionRepository;
@@ -40,17 +44,19 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -60,6 +66,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -72,9 +79,9 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -85,17 +92,17 @@ import static org.mockito.Mockito.verifyNoInteractions;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class MarketOrderIntegrationTest {
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+    @MockitoBean
+    StockTradingStatusService tradingStatuses;
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.market.port.MarketDataPort currentPricePort;
+    @MockitoBean
+    MarketDataPort currentPricePort;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void prepareTradingStatusBoundary() {
-        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(tradingStatuses.requireCurrent(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+        Mockito.lenient().when(tradingStatuses.refreshBatch(ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -142,26 +149,26 @@ class MarketOrderIntegrationTest {
     void 비랭킹_시세없는_종목은_외부조회후_체결하고_멱등재요청은_외부조회를_생략한다() {
         // This integration suite simulates an open session independent of wall-clock execution time.
         when(marketCalendarPort.fetchKrMarketCalendar(any())).thenAnswer(invocation -> {
-            java.time.LocalDate date = invocation.getArgument(0);
+            LocalDate date = invocation.getArgument(0);
             var start = date.atStartOfDay(MarketCountry.KR.zoneId()).toOffsetDateTime();
-            return new com.baedang.market.port.MarketCalendarDay(MarketCountry.KR, date, true,
+            return new MarketCalendarDay(MarketCountry.KR, date, true,
                     start, start.plusDays(1), null);
         });
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         jdbcTemplate.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", fixture.stockId());
         quoteSnapshotRepository.deleteById(fixture.stockId());
-        when(currentPricePort.fetchPrices(java.util.List.of(fixture.symbol()))).thenAnswer(invocation -> {
-            assertThat(org.springframework.transaction.support.TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            return java.util.List.of(new com.baedang.market.port.PriceQuote(
+        when(currentPricePort.fetchPrices(List.of(fixture.symbol()))).thenAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return List.of(new PriceQuote(
                     fixture.symbol(), new BigDecimal("10000"),
                     Instant.now().atOffset(ZoneOffset.UTC), "KRW"));
         });
         MarketOrderRequest request = request(fixture, "BUY", "1");
         MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
         assertThat(first.status()).isEqualTo("FILLED");
-        org.mockito.Mockito.clearInvocations(currentPricePort, tradingStatuses);
+        Mockito.clearInvocations(currentPricePort, tradingStatuses);
         assertThat(marketOrderService.place(fixture.userId(), request)).isEqualTo(first);
-        org.mockito.Mockito.verifyNoInteractions(currentPricePort, tradingStatuses);
+        Mockito.verifyNoInteractions(currentPricePort, tradingStatuses);
         assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("39999");
     }
 
@@ -433,7 +440,7 @@ class MarketOrderIntegrationTest {
                     usd_purchase_amount, krw_purchase_amount
                 ) VALUES (?, ?, 1, 2, 10000, 1, 0, 10000)
                 """, fixture.accountId(), fixture.stockId()))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -447,7 +454,7 @@ class MarketOrderIntegrationTest {
                     usd_purchase_amount, krw_purchase_amount
                 ) VALUES (?, ?, 0, 0, 10000, 1, 0, 10000)
                 """, fixture.accountId(), fixture.stockId()))
-                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -988,7 +995,7 @@ class MarketOrderIntegrationTest {
                 + fixture.accountId() + ")");
         try {
             assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request(fixture, "BUY", "2")))
-                    .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+                    .isInstanceOf(DataIntegrityViolationException.class);
             assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance()).isEqualByComparingTo("50000");
             assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isZero();
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_execution e JOIN trade_order o ON o.order_id = e.order_id WHERE o.account_id = ?",

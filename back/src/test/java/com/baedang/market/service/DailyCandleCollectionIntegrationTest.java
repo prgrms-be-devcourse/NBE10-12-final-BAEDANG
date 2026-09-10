@@ -9,6 +9,8 @@ import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -22,10 +24,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -62,8 +66,8 @@ class DailyCandleCollectionIntegrationTest {
 
     @BeforeEach
     void cleanUp() {
-        org.mockito.Mockito.when(resolver.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(java.util.Optional.of(LocalDate.of(2026, 9, 15)));
+        Mockito.when(resolver.resolve(ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(Optional.of(LocalDate.of(2026, 9, 15)));
         jdbcTemplate.execute("TRUNCATE TABLE daily_candle");
     }
 
@@ -74,9 +78,9 @@ class DailyCandleCollectionIntegrationTest {
         OffsetDateTime candleAt = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
 
         persistenceService.upsert(stock.getStockId(), "KRW",
-                com.baedang.stock.entity.MarketCountry.KR, List.of(candle(candleAt, "100", "KRW")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+                MarketCountry.KR, List.of(candle(candleAt, "100", "KRW")), Instant.parse("2026-09-15T22:00:00Z"));
         persistenceService.upsert(stock.getStockId(), "KRW",
-                com.baedang.stock.entity.MarketCountry.KR, List.of(candle(candleAt, "110", "KRW")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+                MarketCountry.KR, List.of(candle(candleAt, "110", "KRW")), Instant.parse("2026-09-15T22:00:00Z"));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));
@@ -89,10 +93,10 @@ class DailyCandleCollectionIntegrationTest {
     void 여러날짜_캔들_배치_저장된다() {
         Stock stock = saveStock(MarketCountry.KR, "KRW");
 
-        persistenceService.upsert(stock.getStockId(), "KRW", com.baedang.stock.entity.MarketCountry.KR, List.of(
+        persistenceService.upsert(stock.getStockId(), "KRW", MarketCountry.KR, List.of(
                 candle(OffsetDateTime.of(2026, 8, 26, 6, 0, 0, 0, ZoneOffset.UTC), "100", "KRW"),
                 candle(OffsetDateTime.of(2026, 8, 27, 6, 0, 0, 0, ZoneOffset.UTC), "110", "KRW"),
-                candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "120", "KRW")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+                candle(OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC), "120", "KRW")), Instant.parse("2026-09-15T22:00:00Z"));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));
@@ -108,7 +112,7 @@ class DailyCandleCollectionIntegrationTest {
         Stock missing = saveStock(MarketCountry.KR, "KRW");
         OffsetDateTime candleAt = OffsetDateTime.parse("2026-08-28T09:00:00+09:00");
         persistenceService.upsert(stored.getStockId(), "KRW",
-                com.baedang.stock.entity.MarketCountry.KR, List.of(candle(candleAt, "100", "KRW")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+                MarketCountry.KR, List.of(candle(candleAt, "100", "KRW")), Instant.parse("2026-09-15T22:00:00Z"));
 
         Set<Long> storedIds = dailyCandleRepository.findStoredStockIds(
                 LocalDate.of(2026, 8, 28),
@@ -125,7 +129,7 @@ class DailyCandleCollectionIntegrationTest {
         OffsetDateTime usCandleStart = OffsetDateTime.parse("2026-08-27T09:30:00-04:00");
 
         persistenceService.upsert(stock.getStockId(), "USD",
-                com.baedang.stock.entity.MarketCountry.US, List.of(candle(usCandleStart, "150", "USD")), java.time.Instant.parse("2026-09-15T22:00:00Z"));
+                MarketCountry.US, List.of(candle(usCandleStart, "150", "USD")), Instant.parse("2026-09-15T22:00:00Z"));
 
         var rows = dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
                 stock.getStockId(), PageRequest.of(0, 10));

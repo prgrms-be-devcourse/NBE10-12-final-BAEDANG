@@ -1,10 +1,5 @@
 package com.baedang.stock.entity;
 
-import java.math.BigDecimal;
-
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.type.SqlTypes;
-
 import com.baedang.global.entity.BaseEntity;
 import com.baedang.stock.port.StockFinancialInfoPort.BalanceSheet;
 import com.baedang.stock.port.StockFinancialInfoPort.IncomeStatement;
@@ -16,6 +11,11 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.IdClass;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
+
+import java.math.BigDecimal;
+import java.util.Objects;
 
 @Entity
 @Table(name = "stock_financial_period")
@@ -159,14 +159,14 @@ public class StockFinancialPeriod extends BaseEntity {
         public boolean equals(Object other) {
             if (this == other) return true;
             if (!(other instanceof Pk that)) return false;
-            return java.util.Objects.equals(stockId, that.stockId)
+            return Objects.equals(stockId, that.stockId)
                     && periodType == that.periodType
-                    && java.util.Objects.equals(statementYearMonth, that.statementYearMonth);
+                    && Objects.equals(statementYearMonth, that.statementYearMonth);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(stockId, periodType, statementYearMonth);
+            return Objects.hash(stockId, periodType, statementYearMonth);
         }
     }
 }

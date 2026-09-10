@@ -9,6 +9,7 @@ import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.service.DailyCandleFetchCoordinator;
 import com.baedang.market.service.DailyCandlePersistenceService;
 import com.baedang.market.service.LatestCompletedTradingDayResolver;
 import com.baedang.market.service.PrevCloseUpdateService;
@@ -66,7 +67,7 @@ public class StockOnDemandQuoteService {
     private final LatestCompletedTradingDayResolver latestCompletedTradingDayResolver;
     private final PrevCloseUpdateService referenceRecovery;
     private final MarketSessionProvider sessions;
-    private final com.baedang.market.service.DailyCandleFetchCoordinator dailyCoordinator;
+    private final DailyCandleFetchCoordinator dailyCoordinator;
     private final Clock clock;
     private final Duration displayCacheTtl;
     private final ReentrantLock[] refreshLocks = createRefreshLocks();
@@ -80,7 +81,7 @@ public class StockOnDemandQuoteService {
             OnDemandDailyCandleBackfillTracker onDemandDailyCandleBackfillTracker,
             LatestCompletedTradingDayResolver latestCompletedTradingDayResolver,
             Clock clock,
-            com.baedang.market.service.DailyCandleFetchCoordinator dailyCoordinator,
+            DailyCandleFetchCoordinator dailyCoordinator,
             PrevCloseUpdateService referenceRecovery,
             MarketSessionProvider sessions,
             QuoteRefreshCoordinator quoteRefreshCoordinator,

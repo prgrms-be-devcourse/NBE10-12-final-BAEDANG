@@ -15,8 +15,10 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -116,7 +118,7 @@ class ExecutionExchangeRateProviderBridgeTest {
     void 동시조회는_한번만_외부호출하고_같은_스냅샷을_공유한다() throws Exception {
         try (var pool = Executors.newFixedThreadPool(4)) {
             var start = new CountDownLatch(1);
-            var futures = new java.util.ArrayList<java.util.concurrent.Future<ExecutionExchangeRateSnapshot>>();
+            var futures = new ArrayList<Future<ExecutionExchangeRateSnapshot>>();
             for (int i = 0; i < 4; i++) futures.add(pool.submit(() -> {
                 start.await();
                 return provider.currentUsdKrwSnapshot();

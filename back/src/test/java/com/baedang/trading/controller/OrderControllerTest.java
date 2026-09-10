@@ -3,38 +3,40 @@ package com.baedang.trading.controller;
 import com.baedang.auth.security.JwtAuthenticationFilter;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
-import com.baedang.global.config.SecurityConfig;
 import com.baedang.stock.entity.MarketCountry;
+import com.baedang.trading.dto.ExecutionResponse;
+import com.baedang.trading.dto.LimitExecutionPreviewResponse;
 import com.baedang.trading.dto.LimitOrderQuoteResponse;
 import com.baedang.trading.dto.LimitOrderRequest;
+import com.baedang.trading.dto.MarketOrderQuoteResponse;
 import com.baedang.trading.dto.MarketOrderRequest;
+import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.dto.OrderDetailResponse;
 import com.baedang.trading.dto.OrderExecutionsResponse;
-import com.baedang.trading.dto.ExecutionResponse;
-import com.baedang.trading.dto.MarketOrderQuoteResponse;
-import com.baedang.trading.dto.MarketOrderResponse;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.service.LimitOrderService;
-import com.baedang.trading.service.MarketOrderService;
 import com.baedang.trading.service.MarketOrderQuoteService;
+import com.baedang.trading.service.MarketOrderService;
 import com.baedang.trading.service.OrderReadService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.springframework.http.MediaType;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
@@ -145,10 +147,10 @@ class OrderControllerTest {
                         "0",
                         OffsetDateTime.parse("2026-08-11T15:30:00+09:00"),
                         new LimitOrderQuoteResponse.Estimate("2400000", "240", "0", "2400240", "2400240"),
-                        com.baedang.trading.dto.LimitExecutionPreviewResponse.unavailable(
-                                com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.UNAVAILABLE,
+                        LimitExecutionPreviewResponse.unavailable(
+                                LimitExecutionPreviewResponse.Status.UNAVAILABLE,
                                 "NO_USABLE_BOOK",
-                                java.time.Instant.parse("2026-08-11T06:00:00Z"))
+                                Instant.parse("2026-08-11T06:00:00Z"))
                 ));
 
         mockMvc.perform(get("/api/orders/quote/limit")

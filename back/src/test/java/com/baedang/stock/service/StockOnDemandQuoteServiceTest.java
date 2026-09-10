@@ -5,11 +5,15 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.repository.CandleAggregateRepository;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.service.DailyCandleFetchCoordinator;
 import com.baedang.market.service.DailyCandlePersistenceService;
 import com.baedang.market.service.LatestCompletedTradingDayResolver;
+import com.baedang.market.service.PrevCloseUpdateService;
+import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.market.service.QuoteSnapshotPersistenceService;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -17,13 +21,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -60,10 +67,10 @@ class StockOnDemandQuoteServiceTest {
     // 2026-08-31 12:00 KST.
     private static final Instant NOW = Instant.parse("2026-08-31T03:00:00Z");
 
-    @Mock com.baedang.market.service.PrevCloseUpdateService referenceRecovery;
-    @Mock com.baedang.market.port.MarketSessionProvider sessions;
+    @Mock PrevCloseUpdateService referenceRecovery;
+    @Mock MarketSessionProvider sessions;
     @Mock MarketDataPort marketDataPort;
-    @Mock com.baedang.market.service.QuoteRefreshCoordinator coordinator;
+    @Mock QuoteRefreshCoordinator coordinator;
     @Mock QuoteSnapshotRepository quoteSnapshotRepository;
     @Mock QuoteSnapshotPersistenceService quoteSnapshotPersistenceService;
     @Mock DailyCandleRepository dailyCandleRepository;
@@ -84,7 +91,7 @@ class StockOnDemandQuoteServiceTest {
                 candleAggregateRepository,
                 new OnDemandDailyCandleBackfillTracker(),
                 latestCompletedTradingDayResolver,
-                Clock.fixed(NOW, ZoneOffset.UTC), new com.baedang.market.service.DailyCandleFetchCoordinator(), referenceRecovery, sessions, coordinator, java.time.Duration.ofSeconds(5));
+                Clock.fixed(NOW, ZoneOffset.UTC), new DailyCandleFetchCoordinator(), referenceRecovery, sessions, coordinator, Duration.ofSeconds(5));
         // 테스트마다 실제로 쓰는 stub 조합이 달라서(예: 랭킹 안 종목 조기 반환 경로는
         // symbol/currency를 아예 안 읽는다) 공용 stub은 lenient로 둔다.
         lenient().when(sessions.isOpen(any(), any())).thenReturn(true);
@@ -120,7 +127,7 @@ class StockOnDemandQuoteServiceTest {
         when(coordinator.refresh(stock)).thenReturn(refreshed);
         QuoteSnapshot result = service.ensureQuote(stock, null);
 
-        verify(dailyCandlePersistenceService).upsert(10L, "KRW", com.baedang.stock.entity.MarketCountry.KR, List.of(dailyCandle), NOW);
+        verify(dailyCandlePersistenceService).upsert(10L, "KRW", MarketCountry.KR, List.of(dailyCandle), NOW);
         verify(coordinator).refresh(stock);
         assertThat(result).isSameAs(refreshed);
         verify(referenceRecovery).recover(stock);
@@ -195,7 +202,7 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
+        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
     }
 
     @Test
@@ -215,7 +222,7 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort, times(2)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService, times(2)).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
+        verify(dailyCandlePersistenceService, times(2)).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
     }
 
     @Test
@@ -254,7 +261,7 @@ class StockOnDemandQuoteServiceTest {
         doAnswer(invocation -> {
             backfilled.set(true);
             return null;
-        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
+        }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
 
         int threadCount = 5;
         ExecutorService pool = Executors.newFixedThreadPool(threadCount);
@@ -290,7 +297,7 @@ class StockOnDemandQuoteServiceTest {
 
         assertThat(result).isSameAs(existing);
         verify(marketDataPort).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
+        verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
         verify(marketDataPort, never()).fetchPrices(any());
     }
 
@@ -304,7 +311,7 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
+        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
     }
 
     @Test
@@ -334,11 +341,11 @@ class StockOnDemandQuoteServiceTest {
     }
 
     private QuoteSnapshot quote(LocalDate collectedDateKst) {
-        return quoteCollectedAt(collectedDateKst.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime());
+        return quoteCollectedAt(collectedDateKst.atStartOfDay(ZoneId.of("Asia/Seoul")).toOffsetDateTime());
     }
 
     private QuoteSnapshot quoteCollectedAt(OffsetDateTime collectedAt) {
-        QuoteSnapshot mockQuote = org.mockito.Mockito.mock(QuoteSnapshot.class);
+        QuoteSnapshot mockQuote = Mockito.mock(QuoteSnapshot.class);
         lenient().when(mockQuote.getCollectedAt()).thenReturn(collectedAt);
         return mockQuote;
     }
@@ -391,7 +398,7 @@ class StockOnDemandQuoteServiceTest {
         service.ensureDailyCandles(stock);
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
-        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(com.baedang.stock.entity.MarketCountry.KR), any(), any());
+        verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
     }
 
     /** 일봉 200개는 있지만 최신 확정 거래일보다 오래돼서 백필이 필요한 상태. */
@@ -407,7 +414,7 @@ class StockOnDemandQuoteServiceTest {
 
     private Candle candle(LocalDate date, String close) {
         return new Candle(
-                date.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
+                date.atStartOfDay(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
                 new BigDecimal(close), new BigDecimal(close), new BigDecimal(close),
                 new BigDecimal(close), new BigDecimal("1000"), "KRW");
     }

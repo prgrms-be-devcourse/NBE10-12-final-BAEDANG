@@ -4,7 +4,9 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.model.BuyReservationResult;
 import com.baedang.trading.model.CumulativeSettlementState;
+import com.baedang.trading.model.ExecutionAmounts;
 import com.baedang.trading.model.LimitOrderSettlementResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -204,15 +206,15 @@ class LimitOrderSettlementCalculatorTest {
 
     @Test
     void 동결계산_결과_모델_불변식을_검증한다() {
-        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, null, BigDecimal.ZERO))
+        assertThatThrownBy(() -> new BuyReservationResult(true, null, BigDecimal.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, BigDecimal.ZERO, null))
+        assertThatThrownBy(() -> new BuyReservationResult(true, BigDecimal.ZERO, null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, BigDecimal.ONE.negate(), BigDecimal.ZERO))
+        assertThatThrownBy(() -> new BuyReservationResult(true, BigDecimal.ONE.negate(), BigDecimal.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(true, BigDecimal.ZERO, BigDecimal.ONE.negate()))
+        assertThatThrownBy(() -> new BuyReservationResult(true, BigDecimal.ZERO, BigDecimal.ONE.negate()))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new com.baedang.trading.model.BuyReservationResult(false, BigDecimal.TEN, BigDecimal.ONE))
+        assertThatThrownBy(() -> new BuyReservationResult(false, BigDecimal.TEN, BigDecimal.ONE))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -229,7 +231,7 @@ class LimitOrderSettlementCalculatorTest {
     @Test
     void 지정가정산결과_모델_불변식을_검증한다() {
         var empty = CumulativeSettlementState.empty();
-        var amounts = new com.baedang.trading.model.ExecutionAmounts(d("0"), d("100"), d("0"), d("100"), d("0"), d("0"), d("100"));
+        var amounts = new ExecutionAmounts(d("0"), d("100"), d("0"), d("100"), d("0"), d("0"), d("100"));
         assertThatThrownBy(() -> new LimitOrderSettlementResult(null, amounts, empty))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new LimitOrderSettlementResult(d("100"), amounts, null))

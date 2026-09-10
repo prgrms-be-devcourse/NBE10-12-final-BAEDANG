@@ -4,6 +4,7 @@ import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
+import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.CandleAggregateRepository;
@@ -14,7 +15,9 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -30,6 +33,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.util.List;
@@ -71,15 +75,15 @@ class CandleQueryIntegrationTest {
     @Autowired MinuteCandleRepository minuteCandleRepository;
     @Autowired JdbcClient jdbcClient;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void configureCalendar() {
-        when(latestCompletedTradingDayResolver.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        when(latestCompletedTradingDayResolver.resolve(ArgumentMatchers.any(), ArgumentMatchers.any()))
                 .thenReturn(Optional.of(LocalDate.of(2026, 9, 15)));
-        when(marketCalendarPort.fetchUsMarketCalendar(org.mockito.ArgumentMatchers.any()))
+        when(marketCalendarPort.fetchUsMarketCalendar(ArgumentMatchers.any()))
                 .thenAnswer(call -> {
                     LocalDate date = call.getArgument(0);
                     var open = date.atTime(9, 30).atZone(MarketCountry.US.zoneId()).toOffsetDateTime();
-                    return new com.baedang.market.port.MarketCalendarDay(MarketCountry.US, date, true, open, open.plusHours(6).plusMinutes(30), null);
+                    return new MarketCalendarDay(MarketCountry.US, date, true, open, open.plusHours(6).plusMinutes(30), null);
                 });
     }
 
@@ -293,12 +297,12 @@ class CandleQueryIntegrationTest {
     }
 
     private OffsetDateTime kst(int year, int month, int day, int hour, int minute) {
-        return java.time.LocalDateTime.of(year, month, day, hour, minute)
+        return LocalDateTime.of(year, month, day, hour, minute)
                 .atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime();
     }
 
     private OffsetDateTime et(int year, int month, int day, int hour, int minute) {
-        return java.time.LocalDateTime.of(year, month, day, hour, minute)
+        return LocalDateTime.of(year, month, day, hour, minute)
                 .atZone(ZoneId.of("America/New_York")).toOffsetDateTime();
     }
 

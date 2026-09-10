@@ -4,6 +4,7 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.trading.entity.Holding;
 import com.baedang.user.entity.Account;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -19,6 +20,6 @@ public record AccountValuation(
         List<Holding> holdings,
         Map<Long, QuoteSnapshot> quotes,
         List<HoldingValuation> valuations,
-        java.math.BigDecimal usdKrwRate
+        BigDecimal usdKrwRate
 ) {
 }

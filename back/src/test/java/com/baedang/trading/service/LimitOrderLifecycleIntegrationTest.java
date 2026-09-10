@@ -6,17 +6,25 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.stock.repository.StockRepository;
+import com.baedang.stock.service.StockTradingStatusService;
+import com.baedang.trading.dto.LimitExecutionPreviewResponse;
 import com.baedang.trading.dto.LimitOrderRequest;
+import com.baedang.trading.dto.OrderDetailResponse;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
+import com.baedang.trading.scheduler.LimitOrderExpirationScheduler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -38,14 +46,14 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.util.Base64;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
-import java.util.UUID;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -66,17 +74,17 @@ import static org.mockito.Mockito.when;
         "spring.sql.init.mode=never"
 })
 class LimitOrderLifecycleIntegrationTest {
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+    @MockitoBean
+    StockTradingStatusService tradingStatuses;
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.market.port.MarketDataPort currentPricePort;
+    @MockitoBean
+    MarketDataPort currentPricePort;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void prepareTradingStatusBoundary() {
-        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(tradingStatuses.requireCurrent(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+        Mockito.lenient().when(tradingStatuses.refreshBatch(ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -114,7 +122,7 @@ class LimitOrderLifecycleIntegrationTest {
     @MockitoBean MarketSessionProvider sessions;
     @MockitoBean ExecutionExchangeRateProvider rates;
     @MockitoBean MarketCalendarPort calendars;
-    @MockitoBean com.baedang.trading.scheduler.LimitOrderExpirationScheduler scheduledTriggers;
+    @MockitoBean LimitOrderExpirationScheduler scheduledTriggers;
 
     @Autowired LimitOrderService service;
     @Autowired OrderReadService reads;
@@ -155,14 +163,14 @@ class LimitOrderLifecycleIntegrationTest {
         return jdbc.queryForObject("SELECT locked_cash FROM account WHERE account_id=?", BigDecimal.class, account);
     }
 
-    @Autowired com.baedang.stock.repository.StockRepository stocks;
+    @Autowired StockRepository stocks;
 
     @Test
     void 비랭킹_지정가는_호가없이_접수하고_마지막_주문_종료시_수집에서_제외한다() {
         jdbc.update("UPDATE stock SET is_ranked=false WHERE stock_id=?", stock);
         assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isFalse();
-        com.baedang.trading.dto.OrderDetailResponse first = service.place(user, request("BUY", "1", "100", "USD"));
-        com.baedang.trading.dto.OrderDetailResponse second = service.place(user, request("BUY", "1", "99", "USD"));
+        OrderDetailResponse first = service.place(user, request("BUY", "1", "100", "USD"));
+        OrderDetailResponse second = service.place(user, request("BUY", "1", "99", "USD"));
         assertThat(first.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM order_book_version WHERE stock_id=?", Long.class, stock)).isZero();
         assertThat(stocks.isQuoteTarget(stock, NOW.atOffset(ZoneOffset.UTC))).isTrue();
@@ -204,7 +212,7 @@ class LimitOrderLifecycleIntegrationTest {
         assertThat(quote.limitPrice()).isEqualTo("100.00");
         assertThat(quote.limitEstimate().grossAmount()).isEqualTo("140000");
         assertThat(quote.limitEstimate().netAmount()).isEqualTo("BUY".equals(side) ? "140014" : "139972");
-        assertThat(quote.executionPreview().status()).isEqualTo(com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.NOT_APPLICABLE);
+        assertThat(quote.executionPreview().status()).isEqualTo(LimitExecutionPreviewResponse.Status.NOT_APPLICABLE);
         if (expected == ErrorCode.MARKET_CLOSED) assertThat(quote.expiresAt()).isNull();
         assertNoOrderEffects();
         assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account))
@@ -227,8 +235,8 @@ class LimitOrderLifecycleIntegrationTest {
             assertThat(e.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
         });
         assertNoOrderEffects();
-        org.mockito.Mockito.doReturn(new MarketSessionStatus(true, NOW.plusSeconds(3600))).when(sessions).currentSession(any(), any());
-        org.mockito.Mockito.doReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
+        Mockito.doReturn(new MarketSessionStatus(true, NOW.plusSeconds(3600))).when(sessions).currentSession(any(), any());
+        Mockito.doReturn(new ExecutionExchangeRateSnapshot(new BigDecimal("1400"),
                 NOW.atOffset(ZoneOffset.UTC), NOW.atOffset(ZoneOffset.UTC), NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)))
                 .when(rates).currentUsdKrwSnapshot();
         var accepted = service.place(user, request);
@@ -354,8 +362,8 @@ class LimitOrderLifecycleIntegrationTest {
 
     @Test
     void 동결해제_실패는_주문종료를_롤백하고_후속주문처리와_복구후재시도를_허용한다() {
-        com.baedang.trading.dto.OrderDetailResponse first = service.place(user, request("BUY", "2", "100", "USD"));
-        com.baedang.trading.dto.OrderDetailResponse second = service.place(user, request("BUY", "1", "100", "USD"));
+        OrderDetailResponse first = service.place(user, request("BUY", "2", "100", "USD"));
+        OrderDetailResponse second = service.place(user, request("BUY", "1", "100", "USD"));
         jdbc.update("UPDATE account SET locked_cash=140014 WHERE account_id=?", account);
         time.set(NOW.plusSeconds(3601));
 
@@ -380,14 +388,14 @@ class LimitOrderLifecycleIntegrationTest {
     @Test
     void 매도_동결해제_실패는_종료를_롤백하고_복구후_한번만_해제한다() {
         jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,avg_buy_price,avg_exchange_rate,usd_purchase_amount,krw_purchase_amount) VALUES (?,?,3,100,1400,300,420000)", account, stock);
-        com.baedang.trading.dto.OrderDetailResponse first = service.place(user, request("SELL", "2", "100", "USD"));
-        com.baedang.trading.dto.OrderDetailResponse second = service.place(user, request("SELL", "1", "100", "USD"));
+        OrderDetailResponse first = service.place(user, request("SELL", "2", "100", "USD"));
+        OrderDetailResponse second = service.place(user, request("SELL", "1", "100", "USD"));
         jdbc.update("UPDATE holding SET locked_quantity=1 WHERE account_id=? AND stock_id=?", account, stock);
         time.set(NOW.plusSeconds(3601));
 
         expiration.expireDue();
 
-        com.baedang.trading.dto.OrderDetailResponse failed = reads.detail(user, first.orderId());
+        OrderDetailResponse failed = reads.detail(user, first.orderId());
         assertThat(failed.status()).isEqualTo(OrderStatus.PENDING);
         assertThat(failed.activeRemainingQuantity()).isEqualTo("2");
         assertThat(failed.closedAt()).isNull();
@@ -677,7 +685,7 @@ class LimitOrderLifecycleIntegrationTest {
 
         var quote = service.quote(user, symbol, "KR", "BUY", "1", "1000", "KRW");
         assertThat(quote.acceptable()).isTrue();
-        assertThat(quote.executionPreview().status()).isEqualTo(com.baedang.trading.dto.LimitExecutionPreviewResponse.Status.UNAVAILABLE);
+        assertThat(quote.executionPreview().status()).isEqualTo(LimitExecutionPreviewResponse.Status.UNAVAILABLE);
         assertThat(locked()).isZero();
 
         service.place(user, new LimitOrderRequest(account, UUID.randomUUID().toString(), symbol, "KR", "BUY", "1", "1000", "KRW"));

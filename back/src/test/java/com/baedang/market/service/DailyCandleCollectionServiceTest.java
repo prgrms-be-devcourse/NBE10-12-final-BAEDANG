@@ -2,9 +2,9 @@ package com.baedang.market.service;
 
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
-import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -12,14 +12,15 @@ import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.OffsetDateTime;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
@@ -68,7 +69,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService).upsert(1L, "KRW", com.baedang.stock.entity.MarketCountry.KR, candles, NOW);
+        verify(persistenceService).upsert(1L, "KRW", MarketCountry.KR, candles, NOW);
     }
 
     @Test
@@ -190,7 +191,7 @@ class DailyCandleCollectionServiceTest {
         service().collect(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles("DONE", CandleInterval.ONE_DAY, 1);
-        verify(persistenceService).upsert(2L, "KRW", com.baedang.stock.entity.MarketCountry.KR, candles, NOW);
+        verify(persistenceService).upsert(2L, "KRW", MarketCountry.KR, candles, NOW);
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {
@@ -199,7 +200,7 @@ class DailyCandleCollectionServiceTest {
             case "getSymbol" -> symbol;
             case "getCurrency" -> currency;
             case "getMarketCountry" -> currency.equalsIgnoreCase("USD") ? MarketCountry.US : MarketCountry.KR;
-            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+            default -> Answers.RETURNS_DEFAULTS.answer(invocation);
         });
     }
 

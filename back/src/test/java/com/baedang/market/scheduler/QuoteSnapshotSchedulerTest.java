@@ -1,6 +1,7 @@
 package com.baedang.market.scheduler;
 
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.service.QuoteSnapshotLoadService;
 import com.baedang.stock.entity.MarketCountry;
 import org.junit.jupiter.api.DisplayName;
@@ -36,8 +37,8 @@ public class QuoteSnapshotSchedulerTest {
                 clock
         );
 
-        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(true, NOW.plusSeconds(60)));
-        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(false, NOW));
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new MarketSessionStatus(true, NOW.plusSeconds(60)));
+        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenReturn(new MarketSessionStatus(false, NOW));
 
         scheduler.pollQuotes();
 
@@ -54,8 +55,8 @@ public class QuoteSnapshotSchedulerTest {
                 clock
         );
 
-        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(false, NOW));
-        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenReturn(new com.baedang.market.port.MarketSessionStatus(false, NOW));
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new MarketSessionStatus(false, NOW));
+        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenReturn(new MarketSessionStatus(false, NOW));
 
         scheduler.pollQuotes();
 

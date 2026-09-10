@@ -4,6 +4,7 @@ import com.baedang.market.dto.MarketStatusResponse;
 import com.baedang.market.dto.MarketStatusResponse.Market;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.provider.CachingMarketCalendarPort;
 import com.baedang.stock.entity.MarketCountry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -160,7 +161,7 @@ class MarketStatusServiceTest {
     }
 
     private MarketStatusService service(Instant now) {
-        return new MarketStatusService(new com.baedang.market.provider.CachingMarketCalendarPort(port), Clock.fixed(now, ZoneOffset.UTC));
+        return new MarketStatusService(new CachingMarketCalendarPort(port), Clock.fixed(now, ZoneOffset.UTC));
     }
 
     private static Instant at(int y, int mo, int d, int h, int mi) {

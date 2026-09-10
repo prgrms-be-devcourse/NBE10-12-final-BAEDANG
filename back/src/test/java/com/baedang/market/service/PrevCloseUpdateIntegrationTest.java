@@ -9,18 +9,24 @@ import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.*;
 import org.testcontainers.utility.DockerImageName;
-import java.time.*;
+
 import java.math.BigDecimal;
+import java.time.*;
 import java.util.*;
-import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -216,14 +222,14 @@ class PrevCloseUpdateIntegrationTest {
     @Test void seedAndReferenceRecoverySerializeExternalFetchThroughCommittedStorage() throws Exception {
         jdbc.update("UPDATE stock SET is_ranked=false");
         var stock = stock(MarketCountry.US);
-        var firstEntered = new java.util.concurrent.CountDownLatch(1);
-        var releaseFirst = new java.util.concurrent.CountDownLatch(1);
-        var secondEntered = new java.util.concurrent.CountDownLatch(1);
-        var sequence = new java.util.concurrent.atomic.AtomicInteger();
+        var firstEntered = new CountDownLatch(1);
+        var releaseFirst = new CountDownLatch(1);
+        var secondEntered = new CountDownLatch(1);
+        var sequence = new AtomicInteger();
         when(data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200)).thenAnswer(call -> {
             if (sequence.incrementAndGet() == 1) {
                 firstEntered.countDown();
-                assertThat(releaseFirst.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(releaseFirst.await(5, TimeUnit.SECONDS)).isTrue();
                 return List.of(candle(stock,"2026-09-11","100"));
             }
             secondEntered.countDown();
@@ -231,15 +237,15 @@ class PrevCloseUpdateIntegrationTest {
                     .get().extracting(DailyCandle::getClosePrice).isEqualTo(new BigDecimal("100.0000"));
             return List.of(candle(stock,"2026-09-10","100"),candle(stock,"2026-09-11","110"));
         });
-        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+        try (var executor = Executors.newFixedThreadPool(2)) {
             var first = executor.submit(() -> seeder.seed(MarketCountry.US));
             try {
-                assertThat(firstEntered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(firstEntered.await(5, TimeUnit.SECONDS)).isTrue();
                 var second = executor.submit(() -> recovery.recover(stock));
-                assertThat(secondEntered.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)).isFalse();
+                assertThat(secondEntered.await(100, TimeUnit.MILLISECONDS)).isFalse();
                 releaseFirst.countDown();
-                assertThat(first.get(5, java.util.concurrent.TimeUnit.SECONDS).success()).isEqualTo(1);
-                assertThat(second.get(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(first.get(5, TimeUnit.SECONDS).success()).isEqualTo(1);
+                assertThat(second.get(5, TimeUnit.SECONDS)).isTrue();
             } finally {
                 releaseFirst.countDown();
             }

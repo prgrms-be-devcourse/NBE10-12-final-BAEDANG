@@ -6,12 +6,15 @@ import com.baedang.market.repository.*;
 import com.baedang.stock.entity.*;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.Test;
-import java.time.*;
+import org.springframework.test.util.ReflectionTestUtils;
+
 import java.math.BigDecimal;
+import java.time.*;
 import java.util.*;
-import static org.mockito.Mockito.*;
-import static org.mockito.ArgumentMatchers.*;
+
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
 
 class PrevCloseUpdateServiceTest {
     final StockRepository stocks = mock(StockRepository.class);
@@ -29,7 +32,7 @@ class PrevCloseUpdateServiceTest {
     final OffsetDateTime closeAt = OffsetDateTime.parse("2026-09-11T16:00:00-04:00");
 
     void setup() {
-        org.springframework.test.util.ReflectionTestUtils.setField(stock, "stockId", 1L);
+        ReflectionTestUtils.setField(stock, "stockId", 1L);
         when(completed.resolve(MarketCountry.US)).thenReturn(Optional.of(friday));
         when(policy.previousTradingDay(MarketCountry.US, friday)).thenReturn(Optional.of(friday.minusDays(1)));
         when(daily.upsert(any(), any(), any(), any(), any())).thenReturn(List.of(candle(friday, "110"), candle(friday.minusDays(1), "100")));
@@ -52,7 +55,7 @@ class PrevCloseUpdateServiceTest {
         verifyNoInteractions(data);
     }
     @Test void unavailableCalendarNeverCopiesLastPrice() {
-        org.springframework.test.util.ReflectionTestUtils.setField(stock, "stockId", 1L);
+        ReflectionTestUtils.setField(stock, "stockId", 1L);
         when(completed.resolve(MarketCountry.US)).thenReturn(Optional.empty());
         assertThat(service.recover(stock)).isFalse();
         verifyNoInteractions(prices, data, candles);

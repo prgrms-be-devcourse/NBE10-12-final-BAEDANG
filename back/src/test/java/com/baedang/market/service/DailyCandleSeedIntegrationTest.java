@@ -12,6 +12,8 @@ import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
@@ -25,10 +27,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.sql.Date;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -76,8 +80,8 @@ class DailyCandleSeedIntegrationTest {
 
     @BeforeEach
     void cleanUp() {
-        org.mockito.Mockito.when(resolver.resolve(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
-                .thenReturn(java.util.Optional.of(LocalDate.of(2026, 9, 15)));
+        Mockito.when(resolver.resolve(ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(Optional.of(LocalDate.of(2026, 9, 15)));
         jdbcTemplate.execute("TRUNCATE TABLE daily_candle");
         jdbcTemplate.execute("DELETE FROM stock");
     }
@@ -154,7 +158,7 @@ class DailyCandleSeedIntegrationTest {
                             (stock_id, trade_date, open_price, high_price, low_price, close_price, volume)
                         VALUES (?, ?, 1, 1, 1, 1, 1)
                         """,
-                stock.getStockId(), java.sql.Date.valueOf(tradeDate));
+                stock.getStockId(), Date.valueOf(tradeDate));
     }
 
     private Candle candle(String at, String close) {

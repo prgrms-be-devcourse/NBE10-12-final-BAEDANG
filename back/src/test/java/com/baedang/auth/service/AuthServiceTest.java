@@ -1,7 +1,7 @@
 package com.baedang.auth.service;
 
-import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.AccessTokenResponse;
+import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
@@ -16,17 +16,18 @@ import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
 import io.jsonwebtoken.ExpiredJwtException;
-import org.hibernate.exception.ConstraintViolationException;
 import io.jsonwebtoken.JwtException;
+import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -37,7 +38,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
-
 
 class AuthServiceTest {
     private UserRepository userRepository;
@@ -120,7 +120,7 @@ class AuthServiceTest {
         when(userRepository.existsByNickname(request.nickname())).thenReturn(false);
         when(userRepository.saveAndFlush(any(User.class))).thenThrow(
                 new DataIntegrityViolationException("nickname conflict",
-                        new ConstraintViolationException("nickname conflict", new java.sql.SQLException(),
+                        new ConstraintViolationException("nickname conflict", new SQLException(),
                                 "uq_users_nickname")));
 
         assertThatThrownBy(() -> authService.signUp(request))

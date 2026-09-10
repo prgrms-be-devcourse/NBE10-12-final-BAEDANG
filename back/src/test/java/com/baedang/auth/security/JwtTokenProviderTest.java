@@ -1,13 +1,12 @@
 package com.baedang.auth.security;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -15,8 +14,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
 
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JwtTokenProviderTest {
     private static final String TEST_SECRET = "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=";
@@ -104,7 +103,7 @@ class JwtTokenProviderTest {
     @Test
     @DisplayName("숫자가 아닌 subject를 거절한다")
     void 숫자가_아닌_subject를_거절한다() {
-        byte[] keyBytes = io.jsonwebtoken.io.Decoders.BASE64.decode(TEST_SECRET);
+        byte[] keyBytes = Decoders.BASE64.decode(TEST_SECRET);
         String invalidSubToken = Jwts.builder()
                 .issuer("baedang")
                 .subject("not-a-number")
