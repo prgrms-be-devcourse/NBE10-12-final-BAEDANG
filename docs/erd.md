@@ -2,7 +2,7 @@
 
 > **Version**: Week-3 MVP · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 21 tables · append-only ledger and market-event history · round-based reset
+> - **Badges**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 22 tables · append-only ledger and market-event history · round-based reset
 
 ## Contents
 - [Overview](#overview)
@@ -46,8 +46,10 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | stock → order_book_version | 1:N (max 1 active per stock: is_active=true) |
 | order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
+| users → stock_like | 1:N |
+| stock → stock_like | 1:N (CASCADE) |
 
-### Table Map (21)
+### Table Map (22)
 
 | Group | Table | Note |
 |---|---|---|
@@ -70,6 +72,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `stock_financial_period` | annual/quarterly statement period balance sheet, income, ratios |
 | | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
 | **Market Events** | `market_event` | KRX KIND circuit-breaker/sidecar history · append-only |
+| **Stock Likes** | `stock_like` | user stock likes (관심 종목) · unique per user×stock |
 | **Learning Content** | `wiki_term` | beginner-facing financial term dictionary |
 
 ### MVP Behavior Matrix (confirmed)
@@ -553,6 +556,22 @@ Tracks successful synchronization timestamps per group to enforce TTLs and negat
 
 - **Non-Trading Boundary**: KIS financial and industry data is used exclusively for information display on stock detail pages. It is NEVER used for quotes, trading decisions, or order execution.
 - **Negative Cache**: A normal empty response from KIS updates the corresponding `*_synced_at` column, preventing redundant external requests throughout the active TTL period.
+
+### Stock Likes (Flyway V13)
+
+#### `stock_like` — stock likes (관심 종목)
+One row per user×stock (#169). Registration uses `INSERT ... ON CONFLICT (user_id, stock_id) DO NOTHING`, then selects the row, so duplicates and concurrent requests never raise a unique-violation 500. Deletion is a physical DELETE, because this is a user preference, not accounting history.
+
+| Column | Type | Description |
+|---|---|---|
+| `stock_like_id` | BIGINT IDENTITY PK | Increases monotonically, so it doubles as the newest-first cursor key and the `DELETE /stocks/likes/{id}` target. |
+| `user_id` | BIGINT FK | References `users(user_id)`. No CASCADE: withdrawal is a status transition, and a physical user delete is blocked (same as `account.user_id`). |
+| `stock_id` | BIGINT FK | References `stock(stock_id)` (`ON DELETE CASCADE`). A stock like row is disposable if its stock master row is ever purged. |
+| `created_at` | TIMESTAMPTZ | Registration time (DB default). No `updated_at`: rows are inserted or deleted, never updated. |
+
+The unique constraint `uq_stock_like_user_stock (user_id, stock_id)` prevents duplicates. Its index also serves registration lookups, the per-page ranking stock like lookup (`user_id = ? AND stock_id IN (...)`), and the `user_id` filter of the list query. Each user has only a handful of rows, so there is no separate `(user_id, stock_like_id)` sort index. Add one if per-user row counts grow large.
+
+V9–V12 were skipped to avoid clashing with versions claimed by concurrently open PRs.
 ---
 
 ## Stock Classification Model
@@ -649,4 +668,4 @@ No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial inde
 V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
 
 ---
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V8__market_event.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V13__stock_like.sql`

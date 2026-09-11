@@ -9,6 +9,7 @@
 - [Auth & Member](#auth--member)
 - [Market](#market)
 - [Stocks](#stocks)
+- [Stock Likes](#stock-likes)
 - [Trading](#trading)
 - [Accounts](#accounts)
 - [Screen ↔ API Mapping](#screen--api-mapping)
@@ -41,7 +42,7 @@ Authorization: Bearer <accessToken>
 | Scope | Target |
 |---|---|
 | public (no login) | signup · login · refresh · rankings · search · stock detail · chart · FX · guide |
-| 🔒 login required | logout · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · orders · account · holdings · ledger · portfolio reset |
+| 🔒 login required | logout · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · orders · account · holdings · ledger · portfolio reset · `/stocks/likes` (POST/GET/DELETE) |
 ### Response Format
 
 Successful responses return the data directly; collections carry a cursor alongside.
@@ -379,6 +380,7 @@ Top 100 by trading amount · cursor pagination
   "items": [
     {
       "rank": 1,
+      "stockId": 5,
       "symbol": "005930",
       "name": "삼성전자",
       "market": "KOSPI",
@@ -392,7 +394,8 @@ Top 100 by trading amount · cursor pagination
       "changeRate": "0.0231",
       "tradingAmount": "1240000000000",
       "quoteAt": "2026-08-11T12:36:59+09:00",
-      "realtime": true
+      "realtime": true,
+      "stockLikeId": 42
     }
   ],
   "nextCursor": "eyJ0YSI6IjEyNDAwMDAwMDAwMDAiLCJpZCI6MTAyNH0",
@@ -400,6 +403,7 @@ Top 100 by trading amount · cursor pagination
 }
 ```
 - `realtime` — `quoteAt` within the current regular session → `true`. The basis for the frontend's "12:36:59 기준 · 실시간" vs "8월 11일 종가" distinction.
+- **Stock like flag (#169)** — this endpoint stays public, but if a valid `Authorization` header is sent the server fills `stockLikeId` for stocks the user has liked. One extra `(user_id, stock_id) IN (...)` lookup per page. `stockLikeId` is omitted when the user has not liked the stock or the request is anonymous, so a missing field means "not liked". Use `stockId` for `POST /stocks/likes` and `stockLikeId` for `DELETE /stocks/likes/{id}`. An expired token still returns 401 `TOKEN_EXPIRED`, as on every endpoint.
 - **Screen column mapping** — name · symbol · category · lastPrice · (changeAmount, changeRate) · tradingAmount.
 - `tradingAmount` is **trailing one week** (`duration=1w`). The selection criterion is the displayed value, so users understand "why this order" — label it "최근 1주 거래대금".
 
@@ -716,6 +720,73 @@ All users share the same synthetic order book snapshot. A single request returns
 | `ORDER_BOOK_UNAVAILABLE` | 503 | Feature disabled (`ORDERBOOK_ENABLED=false`), untradable stock (suspended, liquidation, off-universe), market closed or session expired, quote older than 15s, future quote, currency mismatch, or missing/incomplete active version |
 
 GET error responses do not include an order submission `retryPolicy`; clients re-query based on their normal polling interval.
+---
+
+## Stock Likes
+
+Stock like (관심 종목) endpoints (#169). Each user and stock pair has at most one row, enforced by the `stock_like` unique constraint `(user_id, stock_id)`. **Register and delete never error on duplicates.** Registering a stock already on the list, or deleting an id that does not exist, returns 200 without changing rows. Concurrent duplicate requests also never produce a 500.
+
+### `POST /stocks/likes` 🔒
+Like a stock
+
+**Request**
+```json
+{ "stockId": 5 }
+```
+
+**Response · 200**
+```json
+{ "stockLikeId": 42 }
+```
+The same `stockLikeId` is returned whether the row was just created or already existed. The client can therefore unlike immediately, even off-hours when ranking polling is paused. Server: `INSERT ... ON CONFLICT (user_id, stock_id) DO NOTHING`, then select the row by `(user_id, stock_id)`. Under READ COMMITTED the select sees a row committed by a concurrent request.
+
+| Error | Condition |
+|---|---|
+| 400 `INVALID_INPUT` | `stockId` is missing |
+| 404 `STOCK_NOT_FOUND` | no stock with that `stockId` |
+
+### `GET /stocks/likes` 🔒
+Stock likes, newest first, with cursor pagination
+
+| Param | Req | Description |
+|---|---|---|
+| `cursor` | — | `nextCursor` from the previous response |
+| `size` | — | default 20, max 50 |
+
+**Response**
+```json
+{
+  "items": [
+    {
+      "stockLikeId": 42,
+      "stockId": 5,
+      "symbol": "005930",
+      "name": "삼성전자",
+      "marketCountry": "KR",
+      "prevClose": "236050",
+      "lastPrice": "241500",
+      "changeRate": "0.023089"
+    }
+  ],
+  "nextCursor": "NDI",
+  "hasNext": false
+}
+```
+- **Cursor**: an opaque `stock_like_id`, following the same pattern as the ledger. The query is `WHERE user_id = ? AND stock_like_id < :cursor ORDER BY stock_like_id DESC LIMIT :size + 1`. `nextCursor` is filled even on the last page; use `hasNext` to decide whether to continue. A malformed cursor returns 400 `INVALID_CURSOR`.
+- **Prices**: prices are formatted in the stock's currency, the same way as rankings. They are read from `quote_snapshot`.
+  - A stock that has never been collected is filled on demand through the stock-detail path (`StockOnDemandQuoteService.ensureQuote`). This happens at most once per stock.
+  - If Toss fails, the three price fields are omitted and the list still returns 200.
+  - An existing but stale snapshot is not refreshed here. Off-universe stocks may therefore show a frozen price until they are collected elsewhere.
+- **Polling**: poll this one endpoint for the stock likes screen, not `GET /stocks/{symbol}` per stock. Per-stock detail polling multiplies requests and can trigger Toss on-demand calls.
+- **Transaction**: the service runs without a surrounding transaction (`propagation = NEVER`). Each repository read and the on-demand quote write use their own short transaction, so no DB connection is held during Toss calls.
+
+### `DELETE /stocks/likes/{id}` 🔒
+Unlike a stock
+
+`{id}` is the `stockLikeId` from the register response, a ranking item, or a stock likes list item. The server deletes with `WHERE user_id = :currentUser AND stock_like_id = :id`, so another user's id deletes nothing.
+
+**Response · 200**: empty body. It is also 200 when the id does not exist or belongs to another user; the response does not reveal whether someone else's row exists. A non-numeric `id` returns 400 `INVALID_INPUT`.
+
 ---
 
 ## Trading
@@ -1145,6 +1216,7 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 | `before` boundary | measure whether Toss `/candles` `before` is inclusive and whether the closing-auction (15:30) candle exists |
 | `STALE_QUOTE` threshold | whether 15s is appropriate |
 | fractional digits (week 2) | US minimum order unit (0.1? 0.001?) |
+| stock like flag on detail/search (#169) | rankings already carry `stockLikeId`. Decide whether stock detail and search responses carry it too, or the client uses a separate lookup |
 
 ---
 

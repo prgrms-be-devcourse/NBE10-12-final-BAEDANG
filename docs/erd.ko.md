@@ -2,7 +2,7 @@
 
 > **버전**: 3주차 MVP 기준 · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 21 tables · append-only 원장·시장조치 이력 · 회차 기반 초기화
+> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 22 tables · append-only 원장·시장조치 이력 · 회차 기반 초기화
 
 ## 목차
 - [전체 관계도](#전체-관계도)
@@ -46,8 +46,10 @@
 | stock → order_book_version | 1:N (is_active=true는 종목당 최대 1개) |
 | order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: ASK 10, KR BID 10, US BID 1~10, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
+| users → stock_like | 1:N |
+| stock → stock_like | 1:N (CASCADE) |
 
-### 테이블 맵 (21개)
+### 테이블 맵 (22개)
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
@@ -70,6 +72,7 @@
 | | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율 |
 | | `stock_financial_sync` | 그룹별 동기화 시각 및 TTL(negative cache 지원) |
 | **시장조치** | `market_event` | KRX KIND 서킷브레이커·사이드카 이력 · append-only |
+| **관심 종목** | `stock_like` | 회원별 관심 종목 · 회원×종목당 한 행 |
 | **학습 콘텐츠** | `wiki_term` | 초보 투자자를 위한 금융 용어 사전 |
 
 ### MVP 동작 매트릭스 (확정)
@@ -545,6 +548,26 @@ KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시�
 
 - **시세·주문 비사용 원칙**: KIS 데이터는 종목 상세의 기업 정보 표시 전용입니다. 시세 산정, 주문 가능 여부 판정, 체결 정산에는 절대 사용하지 않습니다.
 - **Negative Cache**: KIS에서 정상 빈 응답이 오면 해당 `*_synced_at`을 갱신하고 빈 상태를 유지하여, TTL 동안 불필요한 반복 외부 호출을 방지합니다.
+
+### 관심 종목 (Flyway V13)
+
+#### `stock_like` — 관심 종목
+회원×종목 한 쌍당 한 행입니다 (#169).
+- 등록은 `INSERT ... ON CONFLICT (user_id, stock_id) DO NOTHING` 후 행을 조회합니다. 그래서 중복이나 동시 요청이 와도 유니크 위반 500이 나지 않습니다.
+- 삭제는 물리 DELETE입니다. 회계 이력이 아니라 사용자 설정이기 때문입니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `stock_like_id` | BIGINT IDENTITY PK | 단조 증가라서 최신순 커서 키이자 `DELETE /stocks/likes/{id}`의 대상으로 씁니다. |
+| `user_id` | BIGINT FK | `users(user_id)` 참조. CASCADE 없음: 탈퇴는 상태 변경이고, 회원 행의 물리 삭제는 막힙니다(`account.user_id`와 같음). |
+| `stock_id` | BIGINT FK | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). 종목 마스터 행이 지워지면 관심 종목 행도 함께 지워져도 됩니다. |
+| `created_at` | TIMESTAMPTZ | 등록 시각 (DB 기본값). `updated_at` 없음: 행은 추가되거나 삭제될 뿐 수정되지 않습니다. |
+
+- 유니크 제약 `uq_stock_like_user_stock (user_id, stock_id)`가 중복을 막습니다.
+- 이 인덱스는 등록 후 조회, 랭킹 페이지의 관심 여부 조회(`user_id = ? AND stock_id IN (...)`), 목록 조회의 `user_id` 필터에도 쓰입니다.
+- 회원당 행이 많지 않아서 정렬용 `(user_id, stock_like_id)` 인덱스는 따로 두지 않았습니다. 회원당 행 수가 크게 늘면 그때 추가합니다.
+
+V9~V12는 동시에 열린 PR들이 이미 쓰고 있는 버전이라, 충돌을 피하려고 건너뛰었습니다.
 ---
 
 ## 종목 분류 모델
@@ -644,4 +667,4 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
 
 ---
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V8__market_event.sql`까지 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V13__stock_like.sql`까지 함께 보세요
