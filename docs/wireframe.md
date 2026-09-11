@@ -255,3 +255,7 @@ USD / KRW  1,398.50  ▲ 2.30 (+0.16%)  15:00 기준  [환율 추이 그래프 �
 
 ---
 > Week-1 MVP Wireframe · 26.08.20 ~ 08.25
+
+## Price-limit display policy
+
+Stock detail keeps the existing nullable `price.upperLimit` and `price.lowerLimit` fields. During a KR regular session only today's validated limits are visible; outside regular hours they must match the displayed quote's regular-session trade date. Missing/unverified/mismatched dates return null without failing the detail response. US always returns both null and displays "가격 제한 없음"; KR null displays "정보 없음". Collection failure does not change tradability, order admission or synthetic order-book behavior. New collection is regular-session only; pre-open/holiday requests can display matching stored values but cannot backfill past limits.
