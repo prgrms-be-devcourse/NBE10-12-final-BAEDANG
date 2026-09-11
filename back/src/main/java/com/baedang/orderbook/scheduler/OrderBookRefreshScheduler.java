@@ -18,7 +18,6 @@ import com.baedang.stock.service.StockTradingStatusService;
 import org.springframework.data.domain.PageRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -43,11 +42,6 @@ import java.util.stream.Collectors;
  * publication/close 트랜잭션과 retention 트랜잭션을 격리 실행한다.
  */
 @Component
-@ConditionalOnProperty(
-        prefix = "trading.orderbook",
-        name = "enabled",
-        havingValue = "true"
-)
 public class OrderBookRefreshScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(OrderBookRefreshScheduler.class);

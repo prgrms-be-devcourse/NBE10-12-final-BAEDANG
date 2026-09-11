@@ -17,6 +17,6 @@ public record ExchangeRateLatestResponse(
         String rate,
         String changeAmount,
         String changeRate,
-        OffsetDateTime rateAt
+        OffsetDateTime validFrom
 ) {
 }

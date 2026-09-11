@@ -843,9 +843,8 @@ class MarketOrderIntegrationTest {
         assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"source", "ttl"})
-    void 계좌잠금후_환율이_만료되면_아무것도_정산하지_않고_같은_ID로_재시도한다(String expiry) {
+    @Test
+    void 계좌잠금후_환율이_만료되면_아무것도_정산하지_않고_같은_ID로_재시도한다() {
         var fixture = createUsFixture(new BigDecimal("500000"), new BigDecimal("100"));
         var request = request(fixture, "BUY", "1");
         var command = new MarketOrderCommand(fixture.accountId(), UUID.fromString(request.clientOrderId()),
@@ -853,8 +852,7 @@ class MarketOrderIntegrationTest {
         var now = Clock.systemUTC().instant();
         var at = now.atOffset(ZoneOffset.UTC);
         var evidence = new ExecutionRateEvidence(new BigDecimal("1300"),
-                at.minusSeconds(expiry.equals("ttl") ? 60 : 10), at.minusMinutes(2),
-                expiry.equals("source") ? at.minusSeconds(1) : at.plusHours(1));
+                at.minusSeconds(10), at.minusMinutes(2), at.minusSeconds(1));
         var context = new OrderMarketContext(MarketCountry.US, true, Instant.MAX, evidence, now);
         clearInvocations(exchangeRateProvider, marketSessionProvider);
 
@@ -879,13 +877,46 @@ class MarketOrderIntegrationTest {
         verifyNoInteractions(exchangeRateProvider, marketSessionProvider);
     }
 
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {true, false})
+    void 만료환율_복구는_트랜잭션밖에서_한번만_수행하고_성공한_경우에만_체결한다(boolean recovered) {
+        Fixture fixture = createUsFixture(new BigDecimal("500000"), new BigDecimal("100"));
+        MarketOrderRequest request = request(fixture, "BUY", "1");
+        if (recovered) {
+            when(exchangeRateProvider.currentUsdKrwSnapshot())
+                    .thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND))
+                    .thenAnswer(invocation -> snapshot(new BigDecimal("1383.60")));
+        } else {
+            when(exchangeRateProvider.currentUsdKrwSnapshot()).thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        }
+        org.mockito.Mockito.doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            return null;
+        }).when(exchangeRateProvider).refreshUnavailableForMarketOrder();
+        if (recovered) {
+            assertThat(marketOrderService.place(fixture.userId(), request)).isNotNull();
+        } else {
+            assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                    .isInstanceOfSatisfying(BusinessException.class, error -> {
+                        assertThat(error.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+                        assertThat(error.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                    });
+        }
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(recovered ? 1 : 0);
+        org.mockito.Mockito.verify(exchangeRateProvider).refreshUnavailableForMarketOrder();
+        org.mockito.Mockito.verify(exchangeRateProvider, org.mockito.Mockito.times(2)).currentUsdKrwSnapshot();
+    }
+
     @Test
     void 미국_시장가_스냅샷은_트랜잭션밖에서_조회하고_멱등요청은_재조회하지_않는다() {
         var fixture = createUsFixture(new BigDecimal("500000"), new BigDecimal("100"));
         var request = request(fixture, "BUY", "1");
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenAnswer(invocation -> {
             assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
-            return snapshot(new BigDecimal("1383.601234"));
+            OffsetDateTime now = Clock.systemUTC().instant().atOffset(ZoneOffset.UTC);
+            // 실제 저장 시각을 보존한 DB 스냅샷도 원본 유효기간 안이면 체결할 수 있습니다.
+            return new ExecutionExchangeRateSnapshot(new BigDecimal("1383.601234"),
+                    now.minusMinutes(5), now.minusHours(1), now.plusHours(1));
         });
         var response = marketOrderService.place(fixture.userId(), request);
         clearInvocations(exchangeRateProvider, marketSessionProvider);

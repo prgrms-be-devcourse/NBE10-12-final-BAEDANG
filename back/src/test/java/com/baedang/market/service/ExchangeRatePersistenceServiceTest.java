@@ -44,19 +44,19 @@ class ExchangeRatePersistenceServiceTest {
                 RATE_AT.plusHours(1)
         );
 
-        when(exchangeRateRepository.insertIgnoreDuplicate(
-                "USD", "KRW", quote.rate(), quote.midRate(), RATE_AT, COLLECTED_AT
+        when(exchangeRateRepository.upsertLatestObservation(
+                "USD", "KRW", quote.rate(), quote.midRate(), RATE_AT,RATE_AT.plusHours(1), COLLECTED_AT
         )).thenReturn(1);
 
         boolean inserted = persistenceService.saveIfValid(quote, COLLECTED_AT);
 
         assertThat(inserted).isTrue();
-        verify(exchangeRateRepository).insertIgnoreDuplicate(
-                "USD", "KRW", quote.rate(), quote.midRate(), RATE_AT, COLLECTED_AT);
+        verify(exchangeRateRepository).upsertLatestObservation(
+                "USD", "KRW", quote.rate(), quote.midRate(), RATE_AT,RATE_AT.plusHours(1), COLLECTED_AT);
     }
 
     @Test
-    @DisplayName("이미 적재된 rateAt이면 중복 저장하지 않는다")
+    @DisplayName("기존 수신 시각보다 오래되면 저장하지 않는다")
     void t2() {
         ExchangeRateQuote quote = new ExchangeRateQuote(
                 "USD",
@@ -67,8 +67,8 @@ class ExchangeRatePersistenceServiceTest {
                 RATE_AT.plusHours(1)
         );
 
-        when(exchangeRateRepository.insertIgnoreDuplicate(
-                "USD", "KRW", quote.rate(), quote.midRate(), RATE_AT, COLLECTED_AT
+        when(exchangeRateRepository.upsertLatestObservation(
+                "USD", "KRW", quote.rate(), quote.midRate(), RATE_AT,RATE_AT.plusHours(1), COLLECTED_AT
         )).thenReturn(0);
 
         boolean inserted = persistenceService.saveIfValid(quote, COLLECTED_AT);
@@ -77,7 +77,7 @@ class ExchangeRatePersistenceServiceTest {
     }
 
     @Test
-    @DisplayName("rateAt이 없으면 저장하지 않는다")
+    @DisplayName("validFrom이 없으면 저장하지 않는다")
     void t3() {
         ExchangeRateQuote quote = new ExchangeRateQuote(
                 "USD",
@@ -94,8 +94,8 @@ class ExchangeRatePersistenceServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"0","-1"})
-    @DisplayName("midRate가 0 이하이면 저장하지 않는다")
+    @ValueSource(strings = {"0", "-1", "1300.1234567", "10000000000000"})
+    @DisplayName("midRate가 양수 또는 DB 정밀도 조건을 위반하면 저장하지 않는다")
     void t4(String invalidMidRate) {
         ExchangeRateQuote quote = new ExchangeRateQuote(
                 "USD",
@@ -124,24 +124,44 @@ class ExchangeRatePersistenceServiceTest {
                 RATE_AT.plusHours(1)
         );
 
-        when(exchangeRateRepository.insertIgnoreDuplicate(
+        when(exchangeRateRepository.upsertLatestObservation(
                 "USD",
                 "KRW",
                 quote.rate(),
                 null,
-                RATE_AT,
+                RATE_AT,RATE_AT.plusHours(1),
                 COLLECTED_AT
         )).thenReturn(1);
 
         boolean inserted = persistenceService.saveIfValid(quote, COLLECTED_AT);
         assertThat(inserted).isTrue();
-        verify(exchangeRateRepository).insertIgnoreDuplicate(
+        verify(exchangeRateRepository).upsertLatestObservation(
                 "USD",
                 "KRW",
                 quote.rate(),
                 null,
-                RATE_AT,
+                RATE_AT,RATE_AT.plusHours(1),
                 COLLECTED_AT
         );
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"null", "currency", "until", "expired", "future", "inverted", "scale", "overflow"})
+    void 잘못된_원본환율은_DB에_반영하지않는다(String kind) {
+        OffsetDateTime from = RATE_AT;
+        OffsetDateTime until = RATE_AT.plusHours(1);
+        BigDecimal rate = new BigDecimal("1400.25");
+        switch (kind) {
+            case "until" -> until = null;
+            case "expired" -> until = COLLECTED_AT;
+            case "future" -> from = COLLECTED_AT.plusSeconds(1);
+            case "inverted" -> until = RATE_AT.minusSeconds(1);
+            case "scale" -> rate = new BigDecimal("1400.1234567");
+            case "overflow" -> rate = new BigDecimal("10000000000000");
+        }
+        ExchangeRateQuote quote = kind.equals("null") ? null : new ExchangeRateQuote(
+                kind.equals("currency") ? "EUR" : "USD", "KRW", rate, null, from, until);
+        assertThat(persistenceService.saveIfValid(quote, COLLECTED_AT)).isFalse();
+        verifyNoInteractions(exchangeRateRepository);
     }
 }

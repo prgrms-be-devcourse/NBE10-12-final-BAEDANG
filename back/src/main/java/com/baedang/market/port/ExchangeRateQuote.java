@@ -12,7 +12,7 @@ import java.time.OffsetDateTime;
  *
  * @param rate     실제 매수 시 적용 환율 (환전 스프레드 포함)
  * @param midRate  은행간 매매기준율 — 화면 표시용
- * @param validFrom 이 환율이 유효해지는 시각 (Toss 응답의 validFrom, 그대로 rate_at 으로 씀)
+ * @param validFrom 이 환율이 유효해지는 시각 (Toss 응답의 validFrom, 그대로 valid_from 으로 씀)
  * @param validUntil 이 환율의 유효 종료 시각
  */
 public record ExchangeRateQuote(
