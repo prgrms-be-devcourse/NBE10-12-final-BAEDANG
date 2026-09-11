@@ -50,8 +50,9 @@ public class KindMarketEventAdapter implements MarketEventSourcePort {
     public Optional<ConfirmedMarketEvent> fetchConfirmed(MarketEventCandidate candidate) {
         Objects.requireNonNull(candidate, "candidate must not be null");
         try {
-            String viewerHtml = httpClient.getText(candidate.viewerUrl(), MAX_BYTES);
-            URI detailUri = viewerParser.externalDetailUri(candidate.viewerUrl(), viewerHtml);
+            URI viewerUri = uriPolicy.viewer(candidate.viewerUrl());
+            String viewerHtml = httpClient.getText(viewerUri, MAX_BYTES);
+            URI detailUri = viewerParser.externalDetailUri(viewerUri, viewerHtml);
             String detailHtml = httpClient.getText(detailUri, MAX_BYTES);
             ConfirmedMarketEvent event = detailParser.parse(candidate, detailUri, detailHtml, clock.instant());
             return Optional.of(event);

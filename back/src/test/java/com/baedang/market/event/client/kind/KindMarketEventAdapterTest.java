@@ -18,6 +18,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class KindMarketEventAdapterTest {
@@ -76,6 +77,7 @@ class KindMarketEventAdapterTest {
                 "CB 1단계",
                 viewerUrl
         );
+        when(uriPolicy.viewer(viewerUrl)).thenReturn(viewerUrl);
         URI detailUri = URI.create("https://kind.krx.co.kr/external/detail.htm");
         when(httpClient.getText(viewerUrl, 1048576)).thenReturn("<html>viewer</html>");
         when(viewerParser.externalDetailUri(viewerUrl, "<html>viewer</html>")).thenReturn(detailUri);
@@ -113,6 +115,7 @@ class KindMarketEventAdapterTest {
                 "CB 1단계",
                 viewerUrl
         );
+        when(uriPolicy.viewer(viewerUrl)).thenReturn(viewerUrl);
         when(httpClient.getText(viewerUrl, 1048576)).thenReturn("<html>bad viewer</html>");
         when(viewerParser.externalDetailUri(viewerUrl, "<html>bad viewer</html>"))
                 .thenThrow(new IllegalArgumentException("invalid viewer HTML"));
@@ -135,11 +138,37 @@ class KindMarketEventAdapterTest {
                 "CB 1단계",
                 viewerUrl
         );
+        when(uriPolicy.viewer(viewerUrl)).thenReturn(viewerUrl);
         when(httpClient.getText(viewerUrl, 1048576))
                 .thenThrow(new IllegalStateException("network timeout"));
 
         assertThatThrownBy(() -> adapter.fetchConfirmed(candidate))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("network timeout");
+    }
+
+    @Test
+    void rejects_untrusted_viewer_before_http_request() {
+        URI foreignViewer = URI.create(
+                "https://169.254.169.254/latest/meta-data/");
+        MarketEventCandidate candidate = new MarketEventCandidate(
+                KrMarket.KOSPI,
+                "20260713000658",
+                MarketEventType.CIRCUIT_BREAKER,
+                1,
+                null,
+                Instant.parse("2026-07-13T04:29:00Z"),
+                "CB 1단계",
+                foreignViewer
+        );
+        when(httpClient.getText(foreignViewer, 1048576))
+                .thenThrow(new AssertionError("HTTP must not be called for an untrusted viewer"));
+        when(uriPolicy.viewer(foreignViewer))
+                .thenThrow(new IllegalArgumentException("untrusted viewer"));
+
+        Optional<ConfirmedMarketEvent> confirmed = adapter.fetchConfirmed(candidate);
+
+        assertThat(confirmed).isEmpty();
+        verifyNoInteractions(httpClient);
     }
 }
