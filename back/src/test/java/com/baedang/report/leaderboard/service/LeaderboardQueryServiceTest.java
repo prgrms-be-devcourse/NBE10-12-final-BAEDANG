@@ -43,7 +43,7 @@ class LeaderboardQueryServiceTest {
 
     private static LeaderboardSnapshot snap(long accountId, long userId, int rank, String returnRate) {
         return LeaderboardSnapshot.of(AS_OF, accountId, userId, 1,
-                BigDecimal.valueOf(50_000_000), new BigDecimal(returnRate), rank, 100);
+                BigDecimal.valueOf(50_000_000), new BigDecimal(returnRate), rank, 100, null);
     }
 
     private static User user(long userId, String nickname) {

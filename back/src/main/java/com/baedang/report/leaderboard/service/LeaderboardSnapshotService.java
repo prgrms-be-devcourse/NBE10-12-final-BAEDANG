@@ -8,6 +8,8 @@ import com.baedang.report.leaderboard.entity.LeaderboardRun;
 import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
 import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
 import com.baedang.report.leaderboard.repository.LeaderboardSnapshotRepository;
+import com.baedang.report.service.InvestmentTypeService;
+import com.baedang.report.support.InvestmentProfile;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -46,6 +48,7 @@ public class LeaderboardSnapshotService {
 
     private final AccountRepository accountRepository;
     private final AccountValuationService accountValuationService;
+    private final InvestmentTypeService investmentTypeService;
     private final LeaderboardSnapshotRepository snapshotRepository;
     private final LeaderboardRunRepository runRepository;
     private final int eligibilityWeeks;
@@ -55,6 +58,7 @@ public class LeaderboardSnapshotService {
     public LeaderboardSnapshotService(
             AccountRepository accountRepository,
             AccountValuationService accountValuationService,
+            InvestmentTypeService investmentTypeService,
             LeaderboardSnapshotRepository snapshotRepository,
             LeaderboardRunRepository runRepository,
             @Value("${report.leaderboard.eligibility-weeks:4}") int eligibilityWeeks,
@@ -63,6 +67,7 @@ public class LeaderboardSnapshotService {
     ) {
         this.accountRepository = accountRepository;
         this.accountValuationService = accountValuationService;
+        this.investmentTypeService = investmentTypeService;
         this.snapshotRepository = snapshotRepository;
         this.runRepository = runRepository;
         this.eligibilityWeeks = eligibilityWeeks;
@@ -99,7 +104,11 @@ public class LeaderboardSnapshotService {
             // 초기자본은 항상 양수라 non-null. 리포트와 동일 산식·반올림(단일 지점).
             BigDecimal returnRate = ReturnRateCalculator.calculate(
                     equity.subtract(account.getInitialCash()), account.getInitialCash());
-            ranked.add(new Ranked(account, equity, returnRate));
+            // 유형도 개인 리포트와 같은 경로로 판정해 스냅샷에 싣는다(유형별 비교·순위, #153).
+            // 이미 조회한 보유를 넘겨 재조회를 피한다. 미분류(보유<2 등)는 type_code=null.
+            InvestmentProfile profile = investmentTypeService.classify(account, valued.holdings(), asOf);
+            String typeCode = profile.classified() ? profile.type().code() : null;
+            ranked.add(new Ranked(account, equity, returnRate, typeCode));
         }
 
         // 수익률 내림차순, 동률은 account_id 오름차순(결정적 타이브레이크).
@@ -113,7 +122,7 @@ public class LeaderboardSnapshotService {
             Account a = r.account();
             rows.add(LeaderboardSnapshot.of(
                     asOf, a.getAccountId(), a.getUserId(), a.getRoundNo(),
-                    r.equity(), r.returnRate(), rank++, participants));
+                    r.equity(), r.returnRate(), rank++, participants, r.typeCode()));
         }
         snapshotRepository.saveAll(rows);
         runRepository.save(LeaderboardRun.of(asOf, participants));
@@ -121,6 +130,6 @@ public class LeaderboardSnapshotService {
         return new SnapshotResult(asOf, participants);
     }
 
-    private record Ranked(Account account, BigDecimal equity, BigDecimal returnRate) {
+    private record Ranked(Account account, BigDecimal equity, BigDecimal returnRate, String typeCode) {
     }
 }

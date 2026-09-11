@@ -4,14 +4,13 @@ import com.baedang.account.service.AccountValuationService;
 import com.baedang.account.support.AccountValuation;
 import com.baedang.account.support.HoldingValuation;
 import com.baedang.report.dto.PersonalityReportResponse;
-import com.baedang.report.support.FourWeekCostProfiler;
-import com.baedang.report.support.InvestmentTypeClassifier;
+import com.baedang.report.support.InvestmentProfile;
+import com.baedang.report.support.InvestmentType;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.model.CostReplayEvent;
 import com.baedang.trading.model.HoldingReplayEvent;
 import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.user.entity.Account;
@@ -34,6 +33,11 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
+/**
+ * 리포트 <b>조립</b> 단위 테스트 — 수익률 산식, 4주 회차 게이트, 성과 섹션. 유형 판정은
+ * {@link InvestmentTypeService} 를 목으로 주입해 그 결과를 DTO 로 내리는지만 본다(판정 로직은
+ * FourWeekCostProfiler·InvestmentTypeClassifier 테스트가 담당).
+ */
 @ExtendWith(MockitoExtension.class)
 class PersonalityReportServiceTest {
 
@@ -42,26 +46,23 @@ class PersonalityReportServiceTest {
     @Mock AccountValuationService accountValuationService;
     @Mock StockRepository stockRepository;
     @Mock TradeExecutionRepository tradeExecutionRepository;
+    @Mock InvestmentTypeService investmentTypeService;
     @Mock Account account;
 
     private PersonalityReportService service() {
-        InvestmentTypeClassifier classifier = new InvestmentTypeClassifier();
         return new PersonalityReportService(
-                accountValuationService,
-                stockRepository,
-                tradeExecutionRepository,
-                classifier,
-                new FourWeekCostProfiler(classifier),
-                4,
-                4,
-                4,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                accountValuationService, stockRepository, tradeExecutionRepository,
+                investmentTypeService, 4, 4, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
-    /** 원가 재생 이벤트 한 건(매수/매도, 원화 거래대금). */
-    private static CostReplayEvent costEvent(long stockId, OrderSide side, long qty, long grossKrw, String at) {
-        return new CostReplayEvent(stockId, side, BigDecimal.valueOf(qty),
-                BigDecimal.valueOf(grossKrw), OffsetDateTime.parse(at));
+    /** 분류된 프로필(유형·비중). 리포트가 이 값을 그대로 DTO 로 내리는지 검증용. */
+    private static InvestmentProfile classifiedCKSB(int holdingCount) {
+        InvestmentType type = new InvestmentType(
+                InvestmentType.Diversification.CONCENTRATED, InvestmentType.Market.DOMESTIC,
+                InvestmentType.Instrument.INDIVIDUAL, InvestmentType.Risk.STABLE);
+        return new InvestmentProfile(true, type,
+                new BigDecimal("0.6364"), new BigDecimal("0.6364"), new BigDecimal("0.6364"),
+                BigDecimal.ZERO, holdingCount);
     }
 
     private static HoldingValuation valuation(long stockId, long evalWon) {
@@ -95,12 +96,12 @@ class PersonalityReportServiceTest {
         when(account.getRoundNo()).thenReturn(1);
         when(account.getInitialCash()).thenReturn(BigDecimal.valueOf(initialCash));
         when(account.getCashBalance()).thenReturn(BigDecimal.valueOf(cashBalance));
-        // 6주 전 개설 → MBTI 4주 창 = [NOW−4주, NOW].
+        // 6주 전 개설 → 4주 회차 게이트 통과(열린 리포트).
         when(account.getOpenedAt()).thenReturn(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC).minusWeeks(6));
     }
 
     @Test
-    void 수익률은_초기자본_대비_총손익이고_유형을_분류한다() {
+    void 수익률은_초기자본_대비_총손익이고_분류기_결과를_내린다() {
         givenAccount(50_000_000, 20_000_000);
         List<HoldingValuation> valuations = List.of(valuation(1, 21_000_000), valuation(2, 12_000_000));
         when(accountValuationService.valuateActiveAccount(1L))
@@ -108,11 +109,7 @@ class PersonalityReportServiceTest {
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         Stock s2 = stock(2, StockCategory.ETF, MarketCountry.US, "1.0");
         when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1, s2));
-        // 원가 구성: 국내 개별주 2,100만 + 미국 ETF 1,200만. 창 이전 매수라 4주 내내 구성 불변
-        // → 4주 평균 = 스냅샷. 국내·개별주·top1 = 21/33 ≈ 0.6364 → CKSB.
-        when(tradeExecutionRepository.findCostReplayEvents(10L)).thenReturn(List.of(
-                costEvent(1, OrderSide.BUY, 10, 21_000_000, "2026-08-01T00:00:00Z"),
-                costEvent(2, OrderSide.BUY, 10, 12_000_000, "2026-08-01T00:00:00Z")));
+        when(investmentTypeService.classify(any(), any(), any())).thenReturn(classifiedCKSB(2));
 
         PersonalityReportResponse r = service().getReport(1L);
 
@@ -125,7 +122,7 @@ class PersonalityReportServiceTest {
         assertThat(r.holdingCount()).isEqualTo(2);
         assertThat(r.shares().domestic()).isEqualTo("0.6364");
         assertThat(r.holdingPeriodWeeks()).isEqualTo(4);
-        assertThat(r.longHeldStocks()).isEmpty(); // 체결 재생은 원가용이고 성과 섹션은 별도(기본 빈 목록)
+        assertThat(r.longHeldStocks()).isEmpty(); // 체결 이력 미제공 → 기본 빈 목록
     }
 
     @Test
@@ -147,13 +144,15 @@ class PersonalityReportServiceTest {
     }
 
     @Test
-    void 보유가_1종목이면_미분류이고_유형코드는_없다() {
+    void 미분류면_유형코드가_없다() {
         givenAccount(50_000_000, 40_000_000);
         List<HoldingValuation> valuations = List.of(valuation(1, 11_000_000));
         when(accountValuationService.valuateActiveAccount(1L))
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1));
+        when(investmentTypeService.classify(any(), any(), any()))
+                .thenReturn(InvestmentProfile.unclassified(1));
 
         PersonalityReportResponse r = service().getReport(1L);
 
@@ -167,6 +166,8 @@ class PersonalityReportServiceTest {
         givenAccount(50_000_000, 50_000_000);
         when(accountValuationService.valuateActiveAccount(1L))
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), List.of(), null));
+        when(investmentTypeService.classify(any(), any(), any()))
+                .thenReturn(InvestmentProfile.unclassified(0));
 
         PersonalityReportResponse r = service().getReport(1L);
 
@@ -189,6 +190,7 @@ class PersonalityReportServiceTest {
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         Stock s2 = stock(2, StockCategory.ETF, MarketCountry.US, "1.0");
         when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1, s2));
+        when(investmentTypeService.classify(any(), any(), any())).thenReturn(classifiedCKSB(2));
         when(tradeExecutionRepository.findHoldingReplayEvents(10L, List.of(1L, 2L)))
                 .thenReturn(List.of(
                         exec(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z"),
@@ -212,6 +214,7 @@ class PersonalityReportServiceTest {
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1));
+        when(investmentTypeService.classify(any(), any(), any())).thenReturn(classifiedCKSB(1));
         when(tradeExecutionRepository.findHoldingReplayEvents(10L, List.of(1L)))
                 .thenReturn(List.of(
                         exec(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z"),
