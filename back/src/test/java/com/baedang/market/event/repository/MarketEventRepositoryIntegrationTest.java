@@ -184,6 +184,47 @@ class MarketEventRepositoryIntegrationTest {
         assertThat(older.getMarketEventId()).isLessThan(newer.getMarketEventId());
     }
 
+    /**
+     * 같은 발동시각을 가진 두 이벤트는 {@code marketEventId} 내림차순으로 나와야 한다.
+     *
+     * <p>주의: 이 순서를 실제로 보장하는 것은 쿼리의 {@code ORDER BY}가 아니라
+     * {@code ix_market_event_history(market, triggered_at DESC, market_event_id DESC)} 인덱스다.
+     * 쿼리에서 tie-break를 지워도 이 인덱스가 같은 순서를 주므로 이 테스트는 통과한다(확인함).
+     * 즉 이 테스트가 지키는 것은 "인덱스가 바뀌면 관측 순서가 바뀐다"는 사실이고,
+     * 인덱스 자체의 정의는 아래 {@code history_ordering_index_matches_the_query}가 고정한다.
+     */
+    @Test
+    void history_orders_equal_trigger_times_by_id_descending() {
+        MarketEvent first = repository.saveAndFlush(circuitBreaker("20260713000680", START, END));
+        MarketEvent second = repository.saveAndFlush(circuitBreaker(
+                "20260713000681", START, END.plusSeconds(60)));
+
+        var history = repository.findHistory(
+                KrMarket.KOSPI,
+                START.minusSeconds(1).atOffset(java.time.ZoneOffset.UTC),
+                END.plusSeconds(61).atOffset(java.time.ZoneOffset.UTC),
+                org.springframework.data.domain.PageRequest.of(0, 100));
+
+        assertThat(history).containsExactly(second, first);
+        assertThat(second.getMarketEventId()).isGreaterThan(first.getMarketEventId());
+        assertThat(second.getTriggeredAt()).isEqualTo(first.getTriggeredAt());
+    }
+
+    /**
+     * 이력 조회의 결정적 순서는 인덱스 정의가 제공한다. 쿼리와 인덱스가 어긋나면 정렬을 위해
+     * 추가 정렬이 필요해지거나 계획에 따라 순서가 흔들린다 — 그래서 인덱스 컬럼과 방향을 함께 고정한다.
+     */
+    @Test
+    void history_ordering_index_matches_the_query() {
+        String definition = jdbc.queryForObject("""
+                SELECT indexdef FROM pg_indexes
+                WHERE tablename = 'market_event' AND indexname = 'ix_market_event_history'
+                """, String.class);
+
+        assertThat(definition)
+                .contains("(market, triggered_at DESC, market_event_id DESC)");
+    }
+
     @Test
     void database_check_constraint_rejects_unknown_market() {
         assertThatThrownBy(() -> jdbc.update("""
