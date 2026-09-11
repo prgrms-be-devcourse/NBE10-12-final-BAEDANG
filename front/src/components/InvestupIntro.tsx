@@ -21,7 +21,6 @@ import {
   COMPARE_TITLE_WORDS,
   COMPARE_SUBTITLE_WORDS,
   CMP,
-  CMP_SKELETON_W,
   GLOBE_DOTS,
   PINS,
   DEG,
@@ -38,6 +37,16 @@ const CMP_STEP_MS = 2400 / CMP.length;
 // 비교 섹션 제목/부제 단어별 등장 효과에서, 단어마다 시작을 얼마나 늦출지(초).
 // 제목과 부제가 "동일한 애니메이션 효과"이려면 이 값도 똑같이 써야 한다.
 const WORD_STAGGER_S = 0.07;
+
+/* 비교 카드 4개 행("목적"/"실수했을 때"/"수수료·세금"/"사용법 안내")의 스크롤 접기/
+ * 펼침 리빌 — toss insurance 채용 페이지(pd-recruit.tossinsu.com) 참고 요청에 맞춰
+ * "빠르고 가볍고 자연스러운" 느낌으로 다시 만들었다. width/blur로 모양이 바뀌는
+ * 대신 opacity + translateY만 쓴다(레이아웃에 영향을 주는 속성을 피해 리플로우 없이
+ * 합성 레이어에서만 처리되므로 더 가볍다). */
+const CMP_ROW_TRANSLATE_PX = 24; // 이동 거리 20~30px 요청 — 그 중간값
+const CMP_ROW_DURATION_MS = 480; // 0.4~0.6s 요청 — 살짝 빠른 쪽
+const CMP_ROW_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'; // 초반 반응이 빠른 ease-out
+const CMP_ROW_STAGGER_MS = 40; // "아주 짧은" 시차 — 4행이 위에서부터 빠르게 순서대로
 
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
 type CmpState = { phase: 0 | 1 | 2; val: number; open: boolean };
@@ -96,6 +105,22 @@ export function InvestupIntro({
   // 패턴이다(계속 값이 바뀌는 연속 스크롤 값만 직접 DOM 쓰기로 처리한다).
   const [titleRevealed, setTitleRevealed] = useState(false);
   const [subRevealed, setSubRevealed] = useState(false);
+
+  // prefers-reduced-motion: 켜져 있으면 비교 카드 4행 리빌의 이동·시차를 없애고
+  // 거의 즉시 전환되게 한다(요청 16번). 마운트 후 실제 값으로 갱신하고, 사용자가
+  // 설정을 바꾸는 경우까지 반영하도록 change 이벤트도 구독한다.
+  const [reducedMotion, setReducedMotion] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  );
+  useEffect(() => {
+    // 초기값은 위 lazy initializer에서 이미 구했다 — 이 effect는 이후 사용자가
+    // 설정을 바꾸는 경우에만 구독한다(effect 본문에서 곧바로 setState를 호출하면
+    // react-hooks/set-state-in-effect에 걸린다).
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   // rAF 루프/이벤트 핸들러 안에서 최신 값을 읽기 위한 ref. 렌더 중 직접 대입하면
   // "Cannot access refs during render" 린트 규칙에 걸리므로, 커밋 이후(effect)에
@@ -1075,23 +1100,19 @@ export function InvestupIntro({
                 </span>
               </div>
 
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 12,
-                  marginTop: 14,
-                  overflow: 'hidden',
-                  transition: 'height .9s cubic-bezier(.2,.9,.24,1)',
-                }}
-              >
+              {/* 4행 모두 높이가 고정이라(opacity+translateY만 바뀜) 이 컨테이너
+                  자체의 높이는 바뀌지 않는다 — 그래서 이전에 있던 height 트랜지션은
+                  더 이상 필요 없다(요청 12번: 레이아웃이 움직이지 않게). */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
                 {CMP.map((r, i) => {
-                  const dim = i / (CMP.length - 1);
-                  const delay = `${(cmpOpen ? i * 0.11 : (CMP.length - 1 - i) * 0.05).toFixed(2)}s`;
+                  // 펼칠 땐 위→아래, 접을 땐 아래→위 순서로 살짝씩 시차를 준다
+                  // (요청 11번: 아주 짧은 stagger로 순서대로).
+                  const delayMs = reducedMotion
+                    ? 0
+                    : (cmpOpen ? i : CMP.length - 1 - i) * CMP_ROW_STAGGER_MS;
+                  const durationMs = reducedMotion ? 1 : CMP_ROW_DURATION_MS;
+                  const transition = `opacity ${durationMs}ms ${CMP_ROW_EASE} ${delayMs}ms, transform ${durationMs}ms ${CMP_ROW_EASE} ${delayMs}ms`;
                   const cellStyle: React.CSSProperties = {
-                    opacity: cmpOpen ? 1 : 0,
-                    transition: `opacity .5s ease ${delay}`,
-                    whiteSpace: cmpOpen ? 'normal' : 'nowrap',
                     wordBreak: 'keep-all',
                   };
                   return (
@@ -1102,17 +1123,17 @@ export function InvestupIntro({
                         gridTemplateColumns: 'minmax(96px, 132px) 1fr 1fr',
                         alignItems: 'center',
                         gap: 14,
-                        height: cmpOpen ? 'auto' : 62,
                         minHeight: 62,
-                        overflow: cmpOpen ? 'visible' : 'hidden',
-                        padding: cmpOpen ? '12px 20px' : '0 20px',
+                        padding: '12px 20px',
                         borderRadius: 18,
                         background: '#ffffff',
-                        width: cmpOpen ? '100%' : CMP_SKELETON_W[i],
-                        opacity: cmpOpen ? 1 : Number((0.95 - dim * 0.5).toFixed(2)),
-                        filter: `blur(${cmpOpen ? 0 : (dim * 2.2).toFixed(1)}px)`,
-                        transformOrigin: '0% 50%',
-                        transition: `width .8s cubic-bezier(.2,.9,.24,1) ${delay}, opacity .55s ease ${delay}, filter .55s ease ${delay}`,
+                        // width/blur로 모양을 바꾸던 이전 방식(리플로우 발생) 대신
+                        // opacity + translateY만 사용 — 합성 레이어에서만 처리돼
+                        // 가볍고, 레이아웃도 흔들리지 않는다(요청 3, 4, 12번).
+                        opacity: cmpOpen ? 1 : 0,
+                        transform: cmpOpen ? 'translateY(0px)' : `translateY(${CMP_ROW_TRANSLATE_PX}px)`,
+                        willChange: 'transform, opacity',
+                        transition,
                       }}
                     >
                       <span style={{ ...cellStyle, fontSize: 15, fontWeight: 500, letterSpacing: '-.01em', color: '#23456f' }}>
