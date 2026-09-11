@@ -30,10 +30,6 @@ import { Reveal } from './Reveal';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
 
-// 분석 중 문구("N가지 확인 중…")가 1→2→...→CMP.length로 한 단계씩 오르는 간격.
-// 정확히 CMP.length 걸음으로 나눠 분석 소요 시간(2400ms)에 딱 맞춘다.
-const CMP_STEP_MS = 2400 / CMP.length;
-
 // 비교 섹션 제목/부제 단어별 등장 효과에서, 단어마다 시작을 얼마나 늦출지(초).
 // 제목과 부제가 "동일한 애니메이션 효과"이려면 이 값도 똑같이 써야 한다.
 const WORD_STAGGER_S = 0.07;
@@ -49,7 +45,7 @@ const CMP_ROW_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'; // 초반 반응이 빠�
 const CMP_ROW_STAGGER_MS = 55; // 4행이 위(펼칠 때)/아래(접을 때)부터 순서대로
 
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
-type CmpState = { phase: 0 | 1 | 2; val: number; open: boolean };
+type CmpState = { phase: 0 | 1 | 2; open: boolean };
 
 export function InvestupIntro({
   logoSrc = '/investup-wordmark-light.png',
@@ -61,7 +57,7 @@ export function InvestupIntro({
   const [heroIn, setHeroIn] = useState(false);
   const [step, setStep] = useState(3);
   const [pin, setPin] = useState<PinState>({ on: false, i: 0, x: 0, y: 0, boxW: 0, boxH: 0 });
-  const [cmp, setCmp] = useState<CmpState>({ phase: 0, val: 0.31, open: true });
+  const [cmp, setCmp] = useState<CmpState>({ phase: 0, open: true });
 
   const lifted = step >= 4;
   const charted = step >= 5;
@@ -147,24 +143,19 @@ export function InvestupIntro({
   }, []);
 
   /* ── 비교 카드: 분석 시작 / 접기 ───────────── */
-  const cmpTimers = useRef<{ tick?: number; idle?: number; done?: number }>({});
+  const cmpTimers = useRef<{ done?: number }>({});
 
   useEffect(() => {
     const timers = cmpTimers.current;
     return () => {
-      window.clearInterval(timers.tick);
-      window.clearInterval(timers.idle);
       window.clearTimeout(timers.done);
     };
   }, []);
 
-  // 분석 중 문구("N가지 확인 중…")의 N — 0.12~0.46 사이를 130ms마다 무작위로
-  // 오가던 예전 방식은 숫자가 계속 들쭉날쭉 튀어서 산만했다. 대신 실제 비교
-  // 항목 수(CMP.length)만큼 1→2→3→4로 차분하게 한 단계씩만 올라가게 했다 —
-  // 정확히 CMP.length 걸음으로 나눠 딱 완료 시점(2400ms)에 맞춰 끝난다.
   // useCallback으로 감싸 참조가 안정적으로 유지되게 했다 — 프레임 루프
   // effect(아래, deps: [])가 이 함수들을 호출하므로 exhaustive-deps 규칙을
   // 만족시키려면 안정적인 참조가 필요하다.
+  //
   // tick() 안의 스크롤 방향 판정은 cmpRef.current.open/.phase를 읽는데, 이 ref는
   // 원래 `useEffect(() => { cmpRef.current = cmp }, [cmp])`로만 동기화됐다 —
   // 즉 setCmp를 부른 뒤 "렌더 → 커밋 → effect 실행"이 끝나야 ref가 갱신된다.
@@ -178,38 +169,19 @@ export function InvestupIntro({
   // tick()이 항상 최신 값을 본다(effect의 동기화는 안전망으로 남겨둔다).
   const startCmp = useCallback(() => {
     const timers = cmpTimers.current;
-    window.clearInterval(timers.tick);
     window.clearTimeout(timers.done);
-    let step = 1;
-    const initial: CmpState = { phase: 1, val: step / CMP.length, open: true };
+    const initial: CmpState = { phase: 1, open: true };
     cmpRef.current = initial;
     setCmp(initial);
-    timers.tick = window.setInterval(() => {
-      step = Math.min(CMP.length, step + 1);
-      cmpRef.current = { ...cmpRef.current, val: step / CMP.length };
-      setCmp((s) => ({ ...s, val: step / CMP.length }));
-      if (step >= CMP.length) window.clearInterval(timers.tick);
-    }, CMP_STEP_MS);
     timers.done = window.setTimeout(() => {
-      window.clearInterval(timers.tick);
       cmpRef.current = { ...cmpRef.current, phase: 2 };
       setCmp((s) => ({ ...s, phase: 2 }));
     }, 2400);
   }, []);
 
   const collapseCmp = useCallback((collapse: boolean) => {
-    const timers = cmpTimers.current;
-    window.clearInterval(timers.idle);
     cmpRef.current = { ...cmpRef.current, open: !collapse };
     setCmp((s) => ({ ...s, open: !collapse }));
-    if (collapse) {
-      let step = 0;
-      timers.idle = window.setInterval(() => {
-        step = (step % CMP.length) + 1;
-        cmpRef.current = { ...cmpRef.current, val: step / CMP.length };
-        setCmp((s) => ({ ...s, val: step / CMP.length }));
-      }, CMP_STEP_MS);
-    }
   }, []);
 
   /* ── 프레임 루프: 지구본 페인트 + 스크롤 구동 ── */
@@ -1080,14 +1052,12 @@ export function InvestupIntro({
                     textWrap: 'pretty' as never,
                   }}
                 >
-                  {/* 분석 중엔 실제 비교 항목 수(CMP.length)만큼 1→2→3→4로 차분히
-                      오르는 숫자(위 startCmp 참고). 완료 문구는 아래 4개 행이 말하는
-                      내용을 한 문장으로 풀어 설명한다. */}
+                  {/* 완료 문구는 아래 4개 행이 말하는 내용을 한 문장으로 풀어 설명한다. */}
                   {cmpOpen ? (
                     '거래를 연습하고, 금융 지식과 자신의 투자 성향까지 이해할 수 있도록 돕습니다.'
                   ) : (
                     <Fragment>
-                      {`${Math.max(1, Math.round(cmp.val * CMP.length))}가지 확인 중`}
+                      비교 분석 중
                       {/* "…" 한 글자 대신 점 3개를 각각 다른 span으로 나눠서
                           animation-delay를 다르게 줬다 — 순서대로 살짝 떠올랐다
                           가라앉는 "넘실거리는" 움직임(iv-dot-wave, css 참고). */}
