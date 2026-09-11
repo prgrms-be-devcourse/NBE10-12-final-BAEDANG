@@ -1017,7 +1017,8 @@ export function InvestupIntro({
                 >
                   {w}
                 </span>
-                {i < COMPARE_SUBTITLE_WORDS.length - 1 && ' '}
+                {/* "도구고," 다음에서 줄바꿈 — 나머지 단어 사이는 그대로 띄어쓰기. */}
+                {i < COMPARE_SUBTITLE_WORDS.length - 1 && (w === '도구고,' ? <br /> : ' ')}
               </Fragment>
             ))}
           </span>
