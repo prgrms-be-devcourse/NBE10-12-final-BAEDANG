@@ -91,21 +91,6 @@
   }
 }
 
-/* 비교 카드 "차이점 분석 중…" 숫자 롤링 — toss.im/#assets "금리 분석 중..." 카드에서
-   숫자가 바뀔 때 새 값이 우상단에서 미끄러져 들어오며 나타나는 효과와 같다(해당 값을
-   그대로 옮겼다: translate(40px,-20px) → translate(0,0), opacity 0 → 1). 숫자가 바뀔
-   때마다 새 span을 key로 다시 마운트해서 이 애니메이션이 매번 재생되게 한다. */
-@keyframes iv-num-roll {
-  from {
-    opacity: 0;
-    transform: translate(40px, -20px);
-  }
-  to {
-    opacity: 1;
-    transform: translate(0, 0);
-  }
-}
-
 /* 시작하기 버튼 호버 */
 .iv-cta-btn {
   transition: background-color 0.28s ease;

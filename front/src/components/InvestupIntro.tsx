@@ -918,8 +918,6 @@ export function InvestupIntro({
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
                 <span
                   style={{
-                    position: 'relative',
-                    display: 'inline-block',
                     fontSize: 'clamp(28px, 3.2vw, 38px)',
                     fontWeight: 700,
                     letterSpacing: '-.03em',
@@ -928,16 +926,7 @@ export function InvestupIntro({
                     textWrap: 'pretty' as never,
                   }}
                 >
-                  {/* 값이 바뀔 때마다 key가 바뀌면서 새 span이 다시 마운트되고,
-                      그때마다 iv-num-roll(오른쪽 위에서 미끄러져 들어오며 나타남)
-                      애니메이션이 재생된다 — toss.im "금리 분석 중..." 카드의
-                      숫자 롤링 효과와 같은 방식(값마다 새로 나타남)이다. */}
-                  <span
-                    key={cmpOpen ? 'done' : Math.round(cmp.val * 12)}
-                    style={{ display: 'inline-block', animation: 'iv-num-roll .32s cubic-bezier(.2,.9,.24,1)' }}
-                  >
-                    {cmpOpen ? '4가지가 다릅니다' : `${Math.max(1, Math.round(cmp.val * 12))}개 항목 비교`}
-                  </span>
+                  {cmpOpen ? '4가지가 다릅니다' : `${Math.max(1, Math.round(cmp.val * 12))}개 항목 비교`}
                 </span>
                 <span
                   style={{
@@ -990,19 +979,12 @@ export function InvestupIntro({
                   transition: 'height .9s cubic-bezier(.2,.9,.24,1)',
                 }}
               >
-                {/* 각 행 = toss.im "금리 분석 중..." 카드의 은행 목록 행과 같은 방식.
-                    분석 중일 땐 행 안에 가는 스캔 바(너비는 CMP_SKELETON_W, 은행마다
-                    다르게 스캔되는 것처럼 행마다 다르다)만 보이고 실제 내용은 숨겨져
-                    있다가(opacity:0, translateX(24px) — toss의 .jvhjhm7과 동일한 값),
-                    분석이 끝나면 내용이 오른쪽에서 왼쪽으로 미끄러져 들어오며(→0)
-                    페이드인된다. 행마다 시작 시점을 살짝씩 늦춰(delay) 위에서부터
-                    순서대로 나타나게 한다 — toss도 은행이 위에서부터 순서대로 드러난다. */}
                 {CMP.map((r, i) => {
-                  const delay = `${(cmpOpen ? i * 0.11 : 0).toFixed(2)}s`;
-                  const contentStyle: React.CSSProperties = {
+                  const dim = i / (CMP.length - 1);
+                  const delay = `${(cmpOpen ? i * 0.11 : (CMP.length - 1 - i) * 0.05).toFixed(2)}s`;
+                  const cellStyle: React.CSSProperties = {
                     opacity: cmpOpen ? 1 : 0,
-                    transform: cmpOpen ? 'translateX(0)' : 'translateX(24px)',
-                    transition: `opacity .5s ease ${delay}, transform .6s cubic-bezier(.2,.9,.24,1) ${delay}`,
+                    transition: `opacity .5s ease ${delay}`,
                     whiteSpace: cmpOpen ? 'normal' : 'nowrap',
                     wordBreak: 'keep-all',
                   };
@@ -1010,40 +992,30 @@ export function InvestupIntro({
                     <div
                       key={r.label}
                       style={{
-                        position: 'relative',
                         display: 'grid',
                         gridTemplateColumns: 'minmax(96px, 132px) 1fr 1fr',
                         alignItems: 'center',
                         gap: 14,
+                        height: cmpOpen ? 'auto' : 62,
                         minHeight: 62,
-                        padding: '12px 20px',
+                        overflow: cmpOpen ? 'visible' : 'hidden',
+                        padding: cmpOpen ? '12px 20px' : '0 20px',
                         borderRadius: 18,
                         background: '#ffffff',
-                        overflow: 'hidden',
+                        width: cmpOpen ? '100%' : CMP_SKELETON_W[i],
+                        opacity: cmpOpen ? 1 : Number((0.95 - dim * 0.5).toFixed(2)),
+                        filter: `blur(${cmpOpen ? 0 : (dim * 2.2).toFixed(1)}px)`,
+                        transformOrigin: '0% 50%',
+                        transition: `width .8s cubic-bezier(.2,.9,.24,1) ${delay}, opacity .55s ease ${delay}, filter .55s ease ${delay}`,
                       }}
                     >
-                      <span
-                        aria-hidden
-                        style={{
-                          position: 'absolute',
-                          left: 20,
-                          top: '50%',
-                          height: 3,
-                          borderRadius: 2,
-                          width: CMP_SKELETON_W[i],
-                          background: 'linear-gradient(90deg, rgba(61,123,250,.16), rgba(61,123,250,.42))',
-                          transform: 'translateY(-50%)',
-                          opacity: cmpOpen ? 0 : 1,
-                          transition: 'opacity .35s ease',
-                        }}
-                      />
-                      <span style={{ ...contentStyle, fontSize: 15, fontWeight: 500, letterSpacing: '-.01em', color: '#23456f' }}>
+                      <span style={{ ...cellStyle, fontSize: 15, fontWeight: 500, letterSpacing: '-.01em', color: '#23456f' }}>
                         {r.label}
                       </span>
-                      <span style={{ ...contentStyle, fontSize: 16, letterSpacing: '-.01em', color: '#6b7787' }}>
+                      <span style={{ ...cellStyle, fontSize: 16, letterSpacing: '-.01em', color: '#6b7787' }}>
                         {r.legacy}
                       </span>
-                      <span style={{ ...contentStyle, fontSize: 16, fontWeight: 700, letterSpacing: '-.01em', color: '#1f3a68' }}>
+                      <span style={{ ...cellStyle, fontSize: 16, fontWeight: 700, letterSpacing: '-.01em', color: '#1f3a68' }}>
                         {r.ours}
                       </span>
                     </div>
