@@ -2,7 +2,7 @@
 
 > **버전**: 3주차 MVP 기준 · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 12 tables · append-only ledger · 회차 기반 초기화
+> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 21 tables · append-only 원장·시장조치 이력 · 회차 기반 초기화
 
 ## 목차
 - [전체 관계도](#전체-관계도)
@@ -47,7 +47,7 @@
 | order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: ASK 10, KR BID 10, US BID 1~10, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
 
-### 테이블 맵 (18개)
+### 테이블 맵 (21개)
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
@@ -63,11 +63,14 @@
 | | `daily_candle` | 일봉 · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드 |
 | | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
+| | `market_calendar` | 선택적 장 운영일 저장 테이블 · 현재는 시장 캘린더 포트/캐시로 조회 |
 | **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
 | | `order_book_level` | 버전당 최대 20개 레벨(ASK 10 / KR BID 10 / US BID 1~10) 가격·수량 |
 | **산업 · 재무 (KIS)** | `stock_industry` | 표준산업분류 및 지수업종(대·중·소) 분류 |
 | | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율 |
 | | `stock_financial_sync` | 그룹별 동기화 시각 및 TTL(negative cache 지원) |
+| **시장조치** | `market_event` | KRX KIND 서킷브레이커·사이드카 이력 · append-only |
+| **학습 콘텐츠** | `wiki_term` | 초보 투자자를 위한 금융 용어 사전 |
 
 ### MVP 동작 매트릭스 (확정)
 
@@ -157,6 +160,7 @@ quote_snapshot.prev_close
 | `stock_industry` | KIS | `/uapi/domestic-stock/v1/quotations/search-stock-info` 원천. 정상 빈 응답은 null 분류로 negative cache 저장. |
 | `stock_financial_period` | KIS | KIS 4대 재무 API(대차대조표, 손익계산서, 재무비율, 수익성비율) 원천. 과거 행 보존. |
 | `stock_financial_sync` | 자체 + KIS | 그룹별 동기화 시각(재무 7일 / 7d, 산업 30일 / 30d TTL 판정 및 캐시 여부). |
+| `market_event` | KRX KIND | 공식 RSS/상세 공시에서 확인한 서킷브레이커·사이드카 사실. append-only이며 정정은 새 `source_event_id` 행으로 저장합니다. |
 
 ### 배치 일정 (확정)
 
@@ -285,6 +289,26 @@ LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세
 한 체결은 한 호가 레벨만 소비합니다. 같은 `book_level_id`를 여러 체결이 소비할 수 있으므로 UNIQUE가 아니며, 공유 잔량 차감은 체결과 같은 트랜잭션에서 보호합니다. 체결의 `price`는 영구 보존하는 실제 체결 단가 스냅샷입니다. `book_level_id`는 소비 당시 레벨의 고유 ID를 기록하는 FK 없는 추적 값이며, 종료 버전 retention 이후에는 원본 레벨을 조회할 수 없습니다.
 
 지정가 체결 생성 시 `TradeExecution.limit(order, marketCountry, ...)`에 주문 종목의 시장을 전달합니다. KR은 환율 1·USD 거래대금 0·SEC 비용 0, US는 체결단가가 센트 단위로 표현 가능하고 USD 거래대금이 `price × quantity`인지 검증합니다. 후행 0은 허용하며 엔티티에서 단가를 반올림하지 않습니다. 시장은 검증 입력으로만 사용하며 체결 테이블에 중복 저장하지 않습니다.
+
+#### `market_event` — KRX 시장조치 이력
+KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시를 저장합니다. append-only 테이블이므로 정정 공시는 새 공시 ID로 저장하고 UPDATE/DELETE하지 않습니다. 서킷브레이커는 일반 사용자 거래를 차단하는 근거이고, 사이드카는 이력·조회만 제공하며 일반 주문을 차단하지 않습니다. `halt_until`이 자동 만료의 기준이므로 RSS 장애가 중단을 무기한 연장하지 않습니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `market_event_id` | BIGINT IDENTITY PK | 내부 시장조치 식별자. |
+| `source` | VARCHAR(20) | 원천 enum. 현재 `KRX_KIND`. |
+| `source_event_id` | VARCHAR(20) | KIND 공식 `acptNo`; `source`와 함께 유일합니다. |
+| `market` | VARCHAR(10) | `KOSPI` 또는 `KOSDAQ`. |
+| `event_type` | VARCHAR(30) | `CIRCUIT_BREAKER` 또는 `SIDECAR`. |
+| `circuit_breaker_stage` | SMALLINT | CB 단계 1~3; 사이드카는 NULL. |
+| `sidecar_direction` | VARCHAR(4) | 사이드카 방향 `BUY`/`SELL`; CB는 NULL. |
+| `triggered_at` / `halt_until` | TIMESTAMPTZ | 상세 공시의 실제 발동 시각 / 자동 비활성화 경계. 활성 구간은 `[triggered_at, halt_until)`입니다. |
+| `published_at` / `received_at` | TIMESTAMPTZ | RSS 게시 시각 / 최초 정상 파싱 수신 시각. 발동 시각을 대체하지 않습니다. |
+| `title` | VARCHAR(300) | RSS 원문 제목. |
+| `source_url` | VARCHAR(1000) | HTTPS KIND 상세 공시 URL. |
+| `created_at` | TIMESTAMPTZ | DB 생성 시각. `updated_at`은 없습니다. |
+
+시장·종류·CB/사이드카 payload 조합·시간 순서를 CHECK로 강제하고 `(source, source_event_id)`를 UNIQUE로 지정합니다. 활성 CB 조회와 KST 날짜별 이력을 위한 인덱스를 둡니다. 종목 스냅샷이 아닌 원천 공시 사실 이력이므로 FK는 두지 않습니다.
 
 #### `ledger_entry` — 거래 원장
 `(execution_id, order_id)` → 체결, `(order_id, account_id)` → 주문의 두 복합 FK로 원장·체결·계좌 연결을 보장합니다.
@@ -620,7 +644,7 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
 
 ---
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`, `V2__limit_order_lifecycle.sql`, `V3__order_book.sql`과 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V8__market_event.sql`까지 함께 보세요
 
 ## 정규장 거래일과 기준가 (#173)
 
