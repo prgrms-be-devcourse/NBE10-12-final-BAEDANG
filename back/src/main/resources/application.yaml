@@ -194,6 +194,18 @@ report:
     account-count: ${REPORT_SEED_ACCOUNT_COUNT:50}
     max-holdings: ${REPORT_SEED_MAX_HOLDINGS:8}
 
+  # 리더보드 배치 스냅샷(설계문서 §6.4).
+  leaderboard:
+    # 자격 = opened_at + N주를 채운 ACTIVE 계좌. 리포트 4주 게이트와 같은 창.
+    eligibility-weeks: ${REPORT_LEADERBOARD_ELIGIBILITY_WEEKS:4}
+    # 시드 포함 여부는 코호트(배치) 시점에 정한다. 기본 false = 프로덕션 안전(실유저만 랭킹).
+    #   dev/데모에서만 true 로 켜 시드 모집단을 리더보드에 노출한다.
+    include-seed: ${REPORT_LEADERBOARD_INCLUDE_SEED:false}
+    top-size: ${REPORT_LEADERBOARD_TOP_SIZE:10}
+    neighbor-radius: ${REPORT_LEADERBOARD_NEIGHBOR_RADIUS:2}
+    # 개발용 수동 배치 트리거. true 일 때만 POST /internal/admin/leaderboard/refresh 가 등록된다.
+    admin-trigger-enabled: ${REPORT_LEADERBOARD_ADMIN_TRIGGER_ENABLED:false}
+
 auth:
   jwt:
     issuer: baedang

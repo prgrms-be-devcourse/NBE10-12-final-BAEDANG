@@ -58,15 +58,27 @@ public class AccountValuationService {
     public AccountValuation valuateActiveAccount(Long userId) {
         Account account = accountRepository.findByUserIdAndStatus(userId, AccountStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
+        return valuate(account, latestUsdKrwRate());
+    }
 
+    /**
+     * 주어진 계좌를 원화로 평가한다. 리더보드 배치처럼 여러 계좌를 순회할 때, 실행 내 상수인
+     * USD/KRW 환율을 {@link #currentUsdKrwRate()}로 한 번만 구해 넘긴다(계좌마다 환율 재조회 방지).
+     * 평가는 이 하나의 경로만 거쳐야 리포트·리더보드 값이 어긋나지 않는다(AGENTS.md 공용 규칙).
+     */
+    public AccountValuation valuate(Account account, BigDecimal usdKrwRate) {
         List<Holding> holdings =
                 holdingRepository.findByAccountIdAndQuantityGreaterThan(account.getAccountId(), BigDecimal.ZERO);
 
         Map<Long, QuoteSnapshot> quotes = quotesByStockId(holdings);
-        BigDecimal usdKrwRate = latestUsdKrwRate();
         List<HoldingValuation> valuations = holdingValuator.valuate(holdings, quotes, usdKrwRate);
 
         return new AccountValuation(account, holdings, quotes, valuations, usdKrwRate);
+    }
+
+    /** 배치가 실행당 한 번 구해 계좌 순회 전체에 쓰는 최신 USD/KRW 환율. */
+    public BigDecimal currentUsdKrwRate() {
+        return latestUsdKrwRate();
     }
 
     private Map<Long, QuoteSnapshot> quotesByStockId(List<Holding> holdings) {

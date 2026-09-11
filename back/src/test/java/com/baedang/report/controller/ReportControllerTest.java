@@ -7,6 +7,8 @@ import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.report.dto.PersonalityReportResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.service.LeaderboardQueryService;
 import com.baedang.report.service.PersonalityReportService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,6 +34,7 @@ class ReportControllerTest {
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PersonalityReportService personalityReportService;
+    @MockitoBean LeaderboardQueryService leaderboardQueryService;
     @MockitoBean JwtTokenProvider jwtTokenProvider;
 
     @Test
@@ -67,6 +70,27 @@ class ReportControllerTest {
         mockMvc.perform(get("/api/reports/me").with(authenticatedUser(1L)))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_FOUND"));
+    }
+
+    @Test
+    void 리더보드를_조회하면_asOf와_상위목록을_응답한다() throws Exception {
+        when(leaderboardQueryService.getLeaderboard(7L)).thenReturn(new LeaderboardResponse(
+                OffsetDateTime.parse("2026-09-11T07:30:00Z"), 100,
+                List.of(new LeaderboardResponse.Entry(1, "홍*동", "0.3")),
+                new LeaderboardResponse.MeSection(2, "0.2", 5,
+                        List.of(new LeaderboardResponse.Entry(2, "김*수", "0.2")))));
+
+        mockMvc.perform(get("/api/reports/leaderboard").with(authenticatedUser(7L)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.participants").value(100))
+                .andExpect(jsonPath("$.top[0].nickname").value("홍*동"))
+                .andExpect(jsonPath("$.me.topPercent").value(5));
+    }
+
+    @Test
+    void 리더보드도_인증_없이_조회하면_401을_응답한다() throws Exception {
+        mockMvc.perform(get("/api/reports/leaderboard"))
+                .andExpect(status().isUnauthorized());
     }
 
     private static RequestPostProcessor authenticatedUser(long userId) {
