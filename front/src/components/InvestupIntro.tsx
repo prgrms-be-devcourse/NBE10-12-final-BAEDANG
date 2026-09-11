@@ -26,7 +26,6 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
-import { Reveal } from './Reveal';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
 
@@ -64,6 +63,7 @@ export function InvestupIntro({
 
   const globeRef = useRef<HTMLCanvasElement | null>(null);
   const stepsTitleRef = useRef<HTMLSpanElement | null>(null);
+  const stepsCardsRef = useRef<HTMLDivElement | null>(null);
   const titleRef = useRef<HTMLSpanElement | null>(null);
   const subtitleRef = useRef<HTMLSpanElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
@@ -89,6 +89,7 @@ export function InvestupIntro({
     cw: null as number | null,
     ch: null as number | null,
     cardOn: false,
+    stepsCardsOn: false,
     titleShown: false,
     subShown: false,
     lastY: null as number | null,
@@ -422,7 +423,18 @@ export function InvestupIntro({
     const tick = () => {
       const a = A.current;
 
-      updateWordsReveal(stepsTitleRef.current);
+      // 반환값(0~1)은 "이 제목이 얼마나 나타났는지"라, STEP 1~3 카드를 제목이
+      // 완전히 다 나타난 뒤에만 등장시키는 데 재사용한다(요청: 문구가 모두
+      // 등장한 다음에 카드가 등장하게). 단어 스태거·이징 계산상 마지막 단어는
+      // p가 대략 0.95 이상일 때 완전히 선명해지므로(WORD_STAGGER 관련 공식
+      // 참고) 그보다 넉넉한 0.97을 문턱값으로 썼다.
+      const stepsTitleP = updateWordsReveal(stepsTitleRef.current);
+      const stepsCardsEl = stepsCardsRef.current;
+      if (stepsCardsEl && !a.stepsCardsOn && stepsTitleP > 0.97) {
+        a.stepsCardsOn = true;
+        stepsCardsEl.style.opacity = '1';
+        stepsCardsEl.style.transform = 'translateY(0px)';
+      }
 
       // 비교 제목/부제: 연속 스크럽이 아니라 화면에 들어오면(rect.top이 임계값
       // 아래로 내려오면) 한 번만 트리거되는 전체 등장 — 짧은 스크롤 한 번으로도
@@ -859,16 +871,26 @@ export function InvestupIntro({
             ))}
           </span>
         </h2>
-        <Reveal delay={0} duration={1}>
-          {/* 제목과의 간격을 많이 띄워달라는 요청 — 처음엔 비교 섹션 카드와 같은
-              값(clamp(64px, 11vh, 140px))을 썼는데, 조금 더 띄워달라는 후속
-              요청으로 다시 키웠다. */}
+        {/* 제목과의 간격을 많이 띄워달라는 요청 — 처음엔 비교 섹션 카드와 같은
+            값(clamp(64px, 11vh, 140px))을 썼는데, 조금 더 띄워달라는 후속
+            요청으로 다시 키웠다.
+            예전엔 <Reveal>(자체 IntersectionObserver로 뷰포트 진입 시 독립적으로
+            등장)로 감쌌는데, "제목이 다 나타난 다음에 카드가 등장"하도록
+            바뀌면서 제목의 스크럽 진행률(stepsTitleP, tick() 참고)에 종속시켜야
+            해서 Reveal 대신 직접 ref에 스타일을 써서 게이팅한다. 초기 포즈·
+            keyframe 값(opacity 0→1, translateY(18px)→0)은 Reveal이 쓰던
+            riseIn과 동일하게 맞췄고, "조금 더 늦춰달라"는 요청으로 지속시간만
+            1s → 1.3s로 늘렸다. */}
           <div
+            ref={stepsCardsRef}
             style={{
               display: 'flex',
               flexWrap: 'wrap',
               gap: 'clamp(16px, 2vw, 28px)',
               marginTop: 'clamp(90px, 14vh, 170px)',
+              opacity: 0,
+              transform: 'translateY(18px)',
+              transition: 'opacity 1.3s cubic-bezier(.22,1,.36,1), transform 1.3s cubic-bezier(.22,1,.36,1)',
             }}
           >
             {STEPS.map((s) => (
@@ -900,7 +922,6 @@ export function InvestupIntro({
               </TiltCard>
             ))}
           </div>
-        </Reveal>
       </section>
 
       {/* ══ 03 Compare ═══════════════════════════ */}
