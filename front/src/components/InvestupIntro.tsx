@@ -900,7 +900,7 @@ export function InvestupIntro({
 
         {/* 제목과의 간격을 더 띄우고(marginTop), 카드를 가운데로 정렬했다
             (기존엔 justifyContent: 'flex-start'라 왼쪽에 붙어 있었다). */}
-        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'clamp(24px, 4.5vh, 56px)' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'clamp(64px, 11vh, 140px)' }}>
           <div
             ref={cardRef}
             style={{
