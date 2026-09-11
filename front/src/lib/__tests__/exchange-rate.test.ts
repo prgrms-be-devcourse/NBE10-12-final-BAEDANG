@@ -1,97 +1,66 @@
-/**
- * fetchExchangeRate의 성공/실패(기본값 대체) 분기 테스트.
- * getExchangeRateLatest가 내부적으로 쓰는 global.fetch를 모킹한다 (api.test.ts와 동일 패턴).
- */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchExchangeRate, DEFAULT_USD_KRW_RATE } from '../exchange-rate';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { fetchExchangeRate, exchangeRateStateAfterRefresh, INITIAL_EXCHANGE_RATE_STATE } from "../exchange-rate";
+import { getExchangeRateHistory } from "../api";
 
+const response = {
+  baseCurrency: "USD", quoteCurrency: "KRW", rate: "1400.000000",
+  changeAmount: "2.000000", changeRate: "0.001431", validFrom: "2026-08-26T15:00:00+09:00",
+};
 function mockFetch(status: number, body: unknown) {
-  return vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(body),
+  vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+    ok: status >= 200 && status < 300, status, json: () => Promise.resolve(body),
   } as Response);
 }
+beforeEach(() => vi.restoreAllMocks());
 
-beforeEach(() => {
-  vi.restoreAllMocks();
+describe("환율 조회", () => {
+  it.each(["latest", "history"])("%s HTTP 요청까지 취소 신호를 전달한다", async (kind) => {
+    const controller = new AbortController();
+    mockFetch(200, kind === "latest" ? response : { items: [] });
+    if (kind === "latest") await fetchExchangeRate(controller.signal);
+    else await getExchangeRateHistory("1d", controller.signal);
+    expect(globalThis.fetch).toHaveBeenCalledWith(expect.any(String),
+      expect.objectContaining({ signal: controller.signal }));
+  });
+  it("정상 환율과 원본 시각을 반환한다", async () => {
+    mockFetch(200, response);
+    expect(await fetchExchangeRate()).toEqual({
+      rate: 1400, changeAmount: 2, changeRate: 0.001431, updatedAt: new Date(response.validFrom),
+    });
+  });
+  it("환율 미적재 오류를 임의 값으로 대체하지 않는다", async () => {
+    mockFetch(404, { code: "EXCHANGE_RATE_NOT_FOUND", message: "환율 정보 없음" });
+    await expect(fetchExchangeRate()).rejects.toThrow();
+  });
+  it("네트워크 실패를 호출부에 전달한다", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("network down"));
+    await expect(fetchExchangeRate()).rejects.toThrow();
+  });
+  it.each([
+    { rate: "" }, { rate: "not-a-number" }, { rate: "Infinity" },
+    { rate: "0" }, { rate: "-1" }, { changeAmount: "" },
+    { changeRate: "Infinity" }, { validFrom: "invalid" }, { validFrom: null },
+  ])("비정상 응답 %j를 거절한다", async (invalid) => {
+    mockFetch(200, { ...response, ...invalid });
+    await expect(fetchExchangeRate()).rejects.toThrow("환율 응답 형식");
+  });
 });
 
-describe('fetchExchangeRate — 성공', () => {
-  it('백엔드 응답을 숫자로 변환해 반환한다', async () => {
-    mockFetch(200, {
-      baseCurrency: 'USD',
-      quoteCurrency: 'KRW',
-      rate: '1400.000000',
-      changeAmount: '2.000000',
-      changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
+describe("화면 환율 상태", () => {
+  it("최초 실패는 값 없음으로 남기고 재조회 성공 시 회복한다", () => {
+    const failed = exchangeRateStateAfterRefresh(INITIAL_EXCHANGE_RATE_STATE, null);
+    expect(failed).toEqual({
+      rate: null, changeAmount: null, changeRate: null, updatedAt: null, isLoading: false, hasError: true,
     });
-
-    const info = await fetchExchangeRate();
-
-    expect(info.rate).toBe(1400);
-    expect(info.changeAmount).toBe(2);
-    expect(info.changeRate).toBeCloseTo(0.001431);
-    expect(info.updatedAt).toEqual(new Date('2026-08-26T15:00:00+09:00'));
+    const info = { rate: 1400, changeAmount: 2, changeRate: 0.001431, updatedAt: new Date(response.validFrom) };
+    expect(exchangeRateStateAfterRefresh(failed, info)).toEqual({ ...info, isLoading: false, hasError: false });
   });
-});
-
-describe('fetchExchangeRate — 예상 가능한 실패(EXCHANGE_RATE_NOT_FOUND)', () => {
-  it('조용히 기본값으로 대체하고 콘솔에 경고를 남기지 않는다', async () => {
-    mockFetch(404, { code: 'EXCHANGE_RATE_NOT_FOUND', message: '환율 정보를 가져올 수 없어요' });
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const info = await fetchExchangeRate();
-
-    expect(info.rate).toBe(DEFAULT_USD_KRW_RATE);
-    expect(warnSpy).not.toHaveBeenCalled();
-  });
-});
-
-describe('fetchExchangeRate — 예상 못한 실패', () => {
-  it('네트워크 에러 시 기본값으로 대체하고 콘솔에 경고를 남긴다', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('network down'));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const info = await fetchExchangeRate();
-
-    expect(info.rate).toBe(DEFAULT_USD_KRW_RATE);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('응답 필드가 숫자로 파싱되지 않으면 기본값으로 대체하고 콘솔에 경고를 남긴다', async () => {
-    mockFetch(200, {
-      baseCurrency: 'USD',
-      quoteCurrency: 'KRW',
-      rate: 'not-a-number',
-      changeAmount: '2.000000',
-      changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
-    });
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const info = await fetchExchangeRate();
-
-    expect(info.rate).toBe(DEFAULT_USD_KRW_RATE);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('빈 문자열은 Number("")가 0을 반환해도 유효한 값으로 취급하지 않는다', async () => {
-    // Number("")는 0이라 Number.isNaN만으로는 못 걸러낸다 — 이 케이스를 잡는 게 이 테스트의 목적이다.
-    mockFetch(200, {
-      baseCurrency: 'USD',
-      quoteCurrency: 'KRW',
-      rate: '',
-      changeAmount: '2.000000',
-      changeRate: '0.001431',
-      rateAt: '2026-08-26T15:00:00+09:00',
-    });
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    const info = await fetchExchangeRate();
-
-    expect(info.rate).toBe(DEFAULT_USD_KRW_RATE);
-    expect(warnSpy).toHaveBeenCalledTimes(1);
+  it("후속 실패는 마지막 정상값과 원본 시각을 보존하고 복구 시 오류를 해제한다", () => {
+    const info = { rate: 1400, changeAmount: 2, changeRate: 0.001431, updatedAt: new Date(response.validFrom) };
+    const loaded = exchangeRateStateAfterRefresh(INITIAL_EXCHANGE_RATE_STATE, info);
+    const failed = exchangeRateStateAfterRefresh(loaded, null);
+    expect(failed).toEqual({ ...info, isLoading: false, hasError: true });
+    const next = { ...info, rate: 1401, updatedAt: new Date("2026-08-26T06:01:00Z") };
+    expect(exchangeRateStateAfterRefresh(failed, next)).toEqual({ ...next, isLoading: false, hasError: false });
   });
 });

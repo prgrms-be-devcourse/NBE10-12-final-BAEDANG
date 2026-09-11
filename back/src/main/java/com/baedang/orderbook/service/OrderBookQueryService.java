@@ -52,7 +52,7 @@ public class OrderBookQueryService {
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(symbol, marketCountry)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
 
-        if (!properties.enabled() || !stock.isTradable()) {
+        if (!stock.isTradable()) {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
         }
 

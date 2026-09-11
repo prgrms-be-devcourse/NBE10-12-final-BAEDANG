@@ -215,7 +215,7 @@ const prompt = [
 
 const requestData = JSON.stringify({
   contents: [{ parts: [{ text: prompt }] }],
-  generationConfig: { temperature: 0.2, maxOutputTokens: 4096 },
+  generationConfig: { temperature: 0.2, maxOutputTokens: 8192 },
 });
 
 const MODELS = ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash'];
@@ -292,13 +292,21 @@ async function run() {
 
     if (statusCode >= 200 && statusCode < 300) {
       let reviewText;
+      let finishReason;
       try {
-        reviewText = JSON.parse(body).candidates?.[0]?.content?.parts?.[0]?.text;
+        const candidate = JSON.parse(body).candidates?.[0];
+        reviewText = candidate?.content?.parts?.[0]?.text;
+        finishReason = candidate?.finishReason;
       } catch {
         console.warn('[WARN] Invalid upstream JSON; trying next model.');
         continue;
       }
       if (typeof reviewText !== 'string' || !reviewText.trim()) continue;
+      if (finishReason === 'MAX_TOKENS') {
+        const openCodeBlocks = (reviewText.match(/```/g) || []).length % 2 !== 0;
+        if (openCodeBlocks) reviewText += '\n```';
+        reviewText += '\n\n> ※ 안내: 변경사항이 방대하여 답변 길이 한도(Max Output Tokens)에 도달해 일부 내용이 생략되었습니다.';
+      }
       const commentBody = `${TAG}\n### [Gemini AI 코드 리뷰 - PR #${prNumber}]\n\n${reviewText}\n\n---\n`
         + `*이 리뷰는 GitHub Actions와 ${getModelDisplayName(model)}에 의해 자동으로 생성·갱신되었습니다.*`;
       // 댓글 게시 실패를 Gemini 호출 실패로 취급하여 다시 생성하지 않습니다.

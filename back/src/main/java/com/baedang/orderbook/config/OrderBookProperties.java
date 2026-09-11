@@ -9,7 +9,6 @@ import java.time.Duration;
 
 @ConfigurationProperties(prefix = "trading.orderbook")
 public record OrderBookProperties(
-        boolean enabled,
         String policyVersion,
         Duration refreshInterval,
         Duration maxQuoteAge,
@@ -24,7 +23,6 @@ public record OrderBookProperties(
         Duration retentionInitialDelay
 ) {
     public OrderBookProperties(
-            boolean enabled,
             String policyVersion,
             Duration refreshInterval,
             Duration maxQuoteAge,
@@ -36,7 +34,7 @@ public record OrderBookProperties(
             int noiseMaxBps,
             Duration closedVersionRetention
     ) {
-        this(enabled, policyVersion, refreshInterval, maxQuoteAge, krBaseNotional, usBaseNotional,
+        this(policyVersion, refreshInterval, maxQuoteAge, krBaseNotional, usBaseNotional,
                 minQuantity, maxQuantity, noiseMinBps, noiseMaxBps, closedVersionRetention,
                 Duration.ZERO, Duration.ZERO);
     }

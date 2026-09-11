@@ -55,8 +55,9 @@ class MarketOrderServiceTest {
     @Mock MarketSessionProvider marketSessionProvider;
     @Mock ExecutionExchangeRateProvider exchangeRateProvider;
 
-    @Test
-    void 미국_시장가는_캐시_원본_수신시각과_유효기간을_트랜잭션에_전달한다() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void 미국_시장가는_유효한_DB환율을_사용하고_만료시에만_한번_복구한다(boolean expired) {
         Instant now = Instant.parse("2026-09-04T01:00:00Z");
         var at = now.atOffset(ZoneOffset.UTC);
         var snapshot = new ExecutionExchangeRateSnapshot(new BigDecimal("1383.601234"),
@@ -69,7 +70,12 @@ class MarketOrderServiceTest {
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US))
                 .thenReturn(Optional.of(Stock.create("AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true)));
         when(marketSessionProvider.currentSession(MarketCountry.US, now)).thenReturn(new MarketSessionStatus(true, Instant.MAX));
-        when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
+        if (expired) {
+            when(exchangeRateProvider.currentUsdKrwSnapshot())
+                    .thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND)).thenReturn(snapshot);
+        } else {
+            when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
+        }
         when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
         var service = new MarketOrderService(orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
@@ -81,6 +87,7 @@ class MarketOrderServiceTest {
         assertThat(captor.getValue().checkedAt()).isEqualTo(now);
         assertThat(captor.getValue().executionRate()).isEqualTo(snapshot.rate());
         verify(exchangeRateProvider, never()).currentUsdKrwRate();
+        verify(exchangeRateProvider, org.mockito.Mockito.times(expired ? 1 : 0)).refreshUnavailableForMarketOrder();
     }
 
     @Test

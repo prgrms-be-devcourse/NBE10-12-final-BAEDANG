@@ -46,8 +46,8 @@ class OrderPolicyTest {
 
     @ParameterizedTest
     @CsvSource({"0,-1,2,1,true", "0,-1,2,2,false", "-59,-100,3600,0,true",
-            "-59,-100,3600,1,false", "1,-100,3600,0,false", "0,1,3600,0,false"})
-    void 컨텍스트가_신선해도_환율의_유효구간과_TTL은_따로_검증한다(
+            "-59,-100,3600,1,true", "1,-100,3600,0,false", "0,1,3600,0,false"})
+    void 컨텍스트가_신선해도_원본환율의_유효구간과_미래수신을_검증한다(
             long fetchedOffset, long fromOffset, long untilOffset, long nowOffset, boolean valid) {
         var evidence = new ExecutionRateEvidence(new BigDecimal("1383.601234"),
                 QUOTE_AT.plusSeconds(fetchedOffset), QUOTE_AT.plusSeconds(fromOffset), QUOTE_AT.plusSeconds(untilOffset));
