@@ -1136,7 +1136,9 @@ export function InvestupIntro({
                         minHeight: 62,
                         padding: '12px 20px',
                         borderRadius: 18,
-                        background: '#ffffff',
+                        // 완전 불투명한 흰색 대신 살짝 반투명하게 — 뒤 카드의
+                        // 그라데이션이 은은하게 비쳐 보인다.
+                        background: 'rgba(255, 255, 255, 0.72)',
                         // 왼쪽 끝을 축으로 오른쪽으로 펼쳐졌다가(scaleX 0→1) 다시
                         // 왼쪽으로 접혀 들어간다(scaleX 1→0) — width처럼 레이아웃에
                         // 영향을 주지 않고 transform(합성 레이어)만으로 처리돼 여전히
