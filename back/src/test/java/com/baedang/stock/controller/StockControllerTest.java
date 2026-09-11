@@ -15,6 +15,7 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.CandleQueryService;
+import com.baedang.stock.service.StockLikeService;
 import com.baedang.stock.service.StockSearchService;
 import com.baedang.stock.service.StockDetailService;
 import com.baedang.stock.service.StockFinancialQueryService;
@@ -33,7 +34,9 @@ import java.time.LocalDate;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -61,7 +64,23 @@ public class StockControllerTest {
     @MockitoBean
     private StockFinancialQueryService stockFinancialQueryService;
     @MockitoBean
+    private StockLikeService stockLikeService;
+    @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    @DisplayName("관심 종목 API는 인증 없이 호출하면 401을 반환한다")
+    void likesRequireAuthentication() throws Exception {
+        mockMvc.perform(get("/api/stocks/likes"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        mockMvc.perform(post("/api/stocks/likes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"stockId\":5}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/stocks/likes/5"))
+                .andExpect(status().isUnauthorized());
+    }
 
     @Test
     @DisplayName("종목 검색 API가 검색 결과 반환")
