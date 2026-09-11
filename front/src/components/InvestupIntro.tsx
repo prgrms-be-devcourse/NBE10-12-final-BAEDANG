@@ -1023,6 +1023,17 @@ export function InvestupIntro({
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'clamp(64px, 11vh, 140px)' }}>
           <div
             ref={cardRef}
+            // 분석이 끝난 뒤엔(phase 2) 마우스를 올리면 4행이 오른쪽으로 펼쳐지고,
+            // 커서를 떼면(mouseleave) 다시 왼쪽으로 접힌다 — 스크롤 방향으로 여닫는
+            // 것과 똑같은 collapseCmp를 그대로 재사용해서 애니메이션(속도·이징·
+            // scaleX 방향)이 완전히 동일하다. 분석 중(phase 0/1)엔 아직 펼칠 4행이
+            // 없으니 무시한다.
+            onMouseEnter={() => {
+              if (cmpRef.current.phase === 2) collapseCmp(false);
+            }}
+            onMouseLeave={() => {
+              if (cmpRef.current.phase === 2) collapseCmp(true);
+            }}
             style={{
               position: 'relative',
               opacity: 0,
@@ -1072,9 +1083,21 @@ export function InvestupIntro({
                   {/* 분석 중엔 실제 비교 항목 수(CMP.length)만큼 1→2→3→4로 차분히
                       오르는 숫자(위 startCmp 참고). 완료 문구는 아래 4개 행이 말하는
                       내용을 한 문장으로 풀어 설명한다. */}
-                  {cmpOpen
-                    ? '거래를 연습하고, 금융 지식과 자신의 투자 성향까지 이해할 수 있도록 돕습니다.'
-                    : `${Math.max(1, Math.round(cmp.val * CMP.length))}가지 확인 중…`}
+                  {cmpOpen ? (
+                    '거래를 연습하고, 금융 지식과 자신의 투자 성향까지 이해할 수 있도록 돕습니다.'
+                  ) : (
+                    <Fragment>
+                      {`${Math.max(1, Math.round(cmp.val * CMP.length))}가지 확인 중`}
+                      {/* "…" 한 글자 대신 점 3개를 각각 다른 span으로 나눠서
+                          animation-delay를 다르게 줬다 — 순서대로 살짝 떠올랐다
+                          가라앉는 "넘실거리는" 움직임(iv-dot-wave, css 참고). */}
+                      <span aria-hidden style={{ display: 'inline-flex' }}>
+                        <span className="iv-dot" style={{ animationDelay: '0s' }}>.</span>
+                        <span className="iv-dot" style={{ animationDelay: '.15s' }}>.</span>
+                        <span className="iv-dot" style={{ animationDelay: '.3s' }}>.</span>
+                      </span>
+                    </Fragment>
+                  )}
                 </span>
                 <span
                   style={{
