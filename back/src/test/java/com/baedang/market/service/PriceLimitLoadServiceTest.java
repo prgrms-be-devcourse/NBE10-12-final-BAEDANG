@@ -1,6 +1,8 @@
 package com.baedang.market.service;
 
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.global.clients.FixedIntervalGate;
+import java.util.concurrent.atomic.AtomicLong;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceLimits;
@@ -189,5 +191,52 @@ class PriceLimitLoadServiceTest {
         assertThat(service.canDisplay(stock, quote)).isFalse();
         when(quote.getPriceLimitDate()).thenReturn(DATE);
         assertThat(service.canDisplay(stock, quote)).isTrue();
+    }
+
+    @Test
+    void 상세는_게이트에서_기다리지_않고_거절후에도_실패대기를_남기지_않는다() {
+        AtomicLong nanos = new AtomicLong();
+        FixedIntervalGate gate = new FixedIntervalGate(2, nanos::get,
+                ignored -> { throw new AssertionError("상세 조회가 게이트에서 대기하면 안 됩니다"); });
+        PriceLimitLoadService displayService = new PriceLimitLoadService(data, days, quotes, persistence, clock, true, gate);
+        assertThat(gate.tryAcquire()).isTrue();
+        displayService.ensureForDisplay(stock);
+        verifyNoInteractions(data, persistence);
+        nanos.set(TimeUnit.MILLISECONDS.toNanos(500));
+        displayService.ensureForDisplay(stock);
+        verify(data).fetchPriceLimits("005930");
+        verify(persistence).save(eq(1L), eq(DATE), any());
+    }
+
+    @Test
+    void 상세의_실제_API실패는_1분대기를_유지한다() {
+        AtomicLong nanos = new AtomicLong();
+        FixedIntervalGate gate = new FixedIntervalGate(2, nanos::get,
+                ignored -> { throw new AssertionError("상세 조회 대기 금지"); });
+        PriceLimitLoadService displayService = new PriceLimitLoadService(data, days, quotes, persistence, clock, true, gate);
+        when(data.fetchPriceLimits(any())).thenThrow(new IllegalStateException());
+        displayService.ensureForDisplay(stock);
+        nanos.set(TimeUnit.SECONDS.toNanos(2));
+        clock.advance(Duration.ofSeconds(59));
+        displayService.ensureForDisplay(stock);
+        verify(data, times(1)).fetchPriceLimits(any());
+        clock.advance(Duration.ofSeconds(1));
+        displayService.ensureForDisplay(stock);
+        verify(data, times(2)).fetchPriceLimits(any());
+    }
+
+    @Test
+    void 배경수집은_게이트를_기다린_뒤_요청한다() {
+        AtomicLong nanos = new AtomicLong();
+        AtomicLong slept = new AtomicLong();
+        FixedIntervalGate gate = new FixedIntervalGate(2, nanos::get, delay -> {
+            slept.addAndGet(delay);
+            nanos.addAndGet(delay);
+        });
+        PriceLimitLoadService background = new PriceLimitLoadService(data, days, quotes, persistence, clock, true, gate);
+        assertThat(gate.tryAcquire()).isTrue();
+        background.ensure(stock);
+        assertThat(slept.get()).isEqualTo(TimeUnit.MILLISECONDS.toNanos(500));
+        verify(data).fetchPriceLimits("005930");
     }
 }

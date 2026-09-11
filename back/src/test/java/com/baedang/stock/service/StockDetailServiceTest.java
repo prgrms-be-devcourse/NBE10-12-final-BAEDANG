@@ -71,7 +71,7 @@ class StockDetailServiceTest {
         StockDetailResponse response = service.getDetail("abc", "KR");
         assertThat(response.price().upperLimit()).isEqualTo("130");
         assertThat(response.price().lowerLimit()).isEqualTo("70");
-        verify(priceLimits).ensure(stock);
+        verify(priceLimits).ensureForDisplay(stock);
     }
 
     @Test

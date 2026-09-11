@@ -12,6 +12,7 @@ import com.baedang.stock.entity.Stock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,7 +33,7 @@ public class PriceLimitLoadService {
     private static final Duration RETRY_DELAY = Duration.ofMinutes(1);
     private static final int MAX_PENDING = 1000;
     private final Map<Long, Attempt> attempts = new HashMap<>();
-    private final FixedIntervalGate requests = new FixedIntervalGate(2);
+    private final FixedIntervalGate requests;
     private final MarketDataPort data;
     private final MarketTradingDayPolicy tradingDays;
     private final QuoteSnapshotRepository quotes;
@@ -40,9 +41,17 @@ public class PriceLimitLoadService {
     private final Clock clock;
     private final boolean enabled;
 
+    @Autowired
     public PriceLimitLoadService(MarketDataPort data, MarketTradingDayPolicy tradingDays,
             QuoteSnapshotRepository quotes, PriceLimitRepository persistence, Clock clock,
             @Value("${toss.enabled:false}") boolean enabled) {
+        this(data, tradingDays, quotes, persistence, clock, enabled, new FixedIntervalGate(2));
+    }
+
+    PriceLimitLoadService(MarketDataPort data, MarketTradingDayPolicy tradingDays,
+            QuoteSnapshotRepository quotes, PriceLimitRepository persistence, Clock clock,
+            boolean enabled, FixedIntervalGate requests) {
+        this.requests = requests;
         this.data = data;
         this.tradingDays = tradingDays;
         this.quotes = quotes;
@@ -51,7 +60,17 @@ public class PriceLimitLoadService {
         this.enabled = enabled;
     }
 
+    /** 배경 수집은 속도 제한 순서를 기다려 누락 대상 전체를 처리합니다. */
     public void ensure(Stock stock) {
+        ensure(stock, true);
+    }
+
+    /** 상세 조회는 상하한가 전용 게이트에서 대기하지 않습니다. */
+    public void ensureForDisplay(Stock stock) {
+        ensure(stock, false);
+    }
+
+    private void ensure(Stock stock, boolean waitForPermit) {
         if (!enabled || stock.getMarketCountry() != MarketCountry.KR) return;
         Instant started = clock.instant();
         LocalDate date = started.atZone(MarketCountry.KR.zoneId()).toLocalDate();
@@ -65,7 +84,12 @@ public class PriceLimitLoadService {
             QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElse(null);
             if (quote == null) return;
             if (date.equals(quote.getPriceLimitDate())) { success = true; return; }
-            requests.acquire();
+            if (waitForPermit) requests.acquire();
+            else if (!requests.tryAcquire()) {
+                // 호출을 시도하지 않은 경우 실패 대기를 남기지 않아 다음 조회에서 다시 확인합니다.
+                success = true;
+                return;
+            }
             if (!day.isRegularSessionAt(clock.instant())) return;
             PriceLimits limits = data.fetchPriceLimits(stock.getSymbol());
             Instant received = clock.instant();

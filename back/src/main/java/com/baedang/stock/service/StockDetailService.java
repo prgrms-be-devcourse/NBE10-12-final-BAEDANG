@@ -55,7 +55,7 @@ public class StockDetailService {
         // 종목만 갱신하고, 상위 100은 스케줄러가 채운 기존 값을 그대로 사용한다.
         quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
 
-        priceLimits.ensure(stock);
+        priceLimits.ensureForDisplay(stock);
         quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(quote);
         boolean showLimits = priceLimits.canDisplay(stock, quote);
         boolean realtime = quoteRealtimePolicy.isRealtime(marketCountry, quote);
