@@ -89,7 +89,7 @@ export function InvestupIntro({
     cw: null as number | null,
     ch: null as number | null,
     cardOn: false,
-    stepsCardsOn: false,
+    stepsShown: false,
     titleShown: false,
     subShown: false,
     lastY: null as number | null,
@@ -102,6 +102,9 @@ export function InvestupIntro({
   // 패턴이다(계속 값이 바뀌는 연속 스크롤 값만 직접 DOM 쓰기로 처리한다).
   const [titleRevealed, setTitleRevealed] = useState(false);
   const [subRevealed, setSubRevealed] = useState(false);
+  // "GET STARTED"/"투자의 첫걸음, 이렇게 시작해요"에도 같은 방식을 적용해달라는
+  // 요청 — titleRevealed와 완전히 같은 패턴이다.
+  const [stepsRevealed, setStepsRevealed] = useState(false);
 
   // prefers-reduced-motion: 켜져 있으면 비교 카드 4행 리빌의 이동·시차를 없애고
   // 거의 즉시 전환되게 한다(요청 16번). 마운트 후 실제 값으로 갱신하고, 사용자가
@@ -189,6 +192,7 @@ export function InvestupIntro({
   useEffect(() => {
     let raf = 0;
     let mounted = true;
+    let stepsCardsTimer = 0;
 
     const fit = (cv: HTMLCanvasElement | null) => {
       if (!cv || !cv.clientWidth || !cv.clientHeight) return null;
@@ -389,51 +393,26 @@ export function InvestupIntro({
       }
     };
 
-    /**
-     * 02 "이렇게 사용해요" 제목: 단어별 스크롤 연동 등장(블러+상승) — toss.im/#assets의
-     * "공부할 필요 없이 누구나 금융 전문가로" 문구와 같은 방식. 한 번 트리거되고
-     * 끝나는 CSS 트랜지션이 아니라, 스크롤 위치의 연속 함수로 매 프레임 직접 써서
-     * 스크롤을 올리면 다시 흐려지며 가라앉는다(실제로 확인한 toss.im의 동작과 동일).
-     * 단어마다 시작 시점을 살짝씩 늦춰서 왼쪽부터 순서대로 나타나게 한다.
-     *
-     * 03 "증권사 앱과 무엇이 다른가요?" 제목/부제는 더 이상 이 함수를 쓰지 않는다 —
-     * "스크롤을 한 번만 내려도 다 등장"하도록 tick() 안에서 화면 진입 여부만
-     * 한 번 검사해 titleRevealed/subRevealed React 상태를 한 번 켜고, 단어별
-     * 등장은 CSS transition-delay로 재생한다(아래 JSX 참고).
-     */
-    const updateWordsReveal = (container: HTMLElement | null): number => {
-      if (!container) return 0;
-      const rect = container.getBoundingClientRect();
-      const start = window.innerHeight * 0.92;
-      const end = window.innerHeight * 0.52;
-      const p = clamp01((start - rect.top) / (start - end));
-      const words = container.querySelectorAll<HTMLElement>(':scope > .iv-word');
-      const n = words.length;
-      words.forEach((w, i) => {
-        const localStart = n > 1 ? (i / n) * 0.6 : 0;
-        const localP = clamp01((p - localStart) / 0.5);
-        const eased = 1 - Math.pow(1 - localP, 3);
-        w.style.opacity = eased.toFixed(3);
-        w.style.filter = `blur(${(16 * (1 - eased)).toFixed(1)}px)`;
-        w.style.transform = `translateY(${(24 * (1 - eased)).toFixed(1)}px)`;
-      });
-      return p;
-    };
-
     const tick = () => {
       const a = A.current;
 
-      // 반환값(0~1)은 "이 제목이 얼마나 나타났는지"라, STEP 1~3 카드를 제목이
-      // 완전히 다 나타난 뒤에만 등장시키는 데 재사용한다(요청: 문구가 모두
-      // 등장한 다음에 카드가 등장하게). 단어 스태거·이징 계산상 마지막 단어는
-      // p가 대략 0.95 이상일 때 완전히 선명해지므로(WORD_STAGGER 관련 공식
-      // 참고) 그보다 넉넉한 0.97을 문턱값으로 썼다.
-      const stepsTitleP = updateWordsReveal(stepsTitleRef.current);
-      const stepsCardsEl = stepsCardsRef.current;
-      if (stepsCardsEl && !a.stepsCardsOn && stepsTitleP > 0.97) {
-        a.stepsCardsOn = true;
-        stepsCardsEl.style.opacity = '1';
-        stepsCardsEl.style.transform = 'translateY(0px)';
+      // "GET STARTED"/"투자의 첫걸음, 이렇게 시작해요"도 03 Compare 제목/부제와
+      // 완전히 같은 방식(화면에 들어오면 한 번만 트리거되는 전체 등장)으로
+      // 바꿨다 — 예전엔 연속 스크럽(updateWordsReveal)을 썼는데, 이제 STEPS쪽도
+      // 쓰지 않으므로 그 함수 자체를 지웠다.
+      const stepsTitleEl = stepsTitleRef.current;
+      if (stepsTitleEl && !a.stepsShown && stepsTitleEl.getBoundingClientRect().top < window.innerHeight * 0.92) {
+        a.stepsShown = true;
+        setStepsRevealed(true);
+        // STEP 1~3 카드는 제목이 다 나타난 다음에 등장해야 한다(요청) — 제목
+        // 단어 트랜지션(.6s) + 최대 시차(3 × WORD_STAGGER_S ≈ .21s)보다 넉넉하게
+        // 900ms 뒤에 카드를 연다.
+        stepsCardsTimer = window.setTimeout(() => {
+          const stepsCardsEl = stepsCardsRef.current;
+          if (!stepsCardsEl) return;
+          stepsCardsEl.style.opacity = '1';
+          stepsCardsEl.style.transform = 'translateY(0px)';
+        }, 900);
       }
 
       // 비교 제목/부제: 연속 스크럽이 아니라 화면에 들어오면(rect.top이 임계값
@@ -497,6 +476,7 @@ export function InvestupIntro({
     return () => {
       mounted = false;
       cancelAnimationFrame(raf);
+      window.clearTimeout(stepsCardsTimer);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
       document.removeEventListener('visibilitychange', onScroll);
@@ -828,8 +808,8 @@ export function InvestupIntro({
           background: T.practicesBg,
         }}
       >
-        {/* 아래 03 Compare의 eyebrow + 마스크 슬라이드업 제목과 완전히 같은 스타일·효과 —
-            글자만 다르다. */}
+        {/* 03 Compare의 eyebrow + 제목과 완전히 같은 스타일·효과(stepsRevealed가
+            titleRevealed와 같은 역할) — 화면에 들어오면 한 번에 전체가 나타난다. */}
         <p
           style={{
             margin: '0 0 18px',
@@ -839,6 +819,10 @@ export function InvestupIntro({
             letterSpacing: '.22em',
             textTransform: 'uppercase',
             color: T.eyebrowInk,
+            opacity: stepsRevealed ? 1 : 0,
+            filter: stepsRevealed ? 'blur(0px)' : 'blur(8px)',
+            transform: stepsRevealed ? 'translateY(0px)' : 'translateY(12px)',
+            transition: 'opacity .6s cubic-bezier(.2,.9,.24,1), filter .6s cubic-bezier(.2,.9,.24,1), transform .6s cubic-bezier(.2,.9,.24,1)',
           }}
         >
           get started
@@ -857,14 +841,21 @@ export function InvestupIntro({
             textWrap: 'pretty' as never,
           }}
         >
-          {/* 초기 포즈는 인라인, 이후 스크롤 위치에 따라 매 프레임 직접 DOM 쓰기
-              (updateWordsReveal) — 단어마다 순서대로 블러+상승에서 선명하게 나타난다. */}
+          {/* 화면에 들어오면(stepsRevealed) 전체 단어가 한 번에 나타난다 — 단어마다
+              WORD_STAGGER_S만큼 시작을 늦춰 왼쪽부터 순서대로 나타나 보이지만,
+              스크롤을 더 내릴 필요 없이 짧은 스크롤 한 번으로 전체가 재생된다. */}
           <span ref={stepsTitleRef}>
             {STEPS_TITLE_WORDS.map((w, i) => (
               <Fragment key={w}>
                 <span
                   className="iv-word"
-                  style={{ display: 'inline-block', opacity: 0, filter: 'blur(16px)', transform: 'translateY(24px)' }}
+                  style={{
+                    display: 'inline-block',
+                    opacity: stepsRevealed ? 1 : 0,
+                    filter: stepsRevealed ? 'blur(0px)' : 'blur(16px)',
+                    transform: stepsRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                    transition: `opacity .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, filter .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, transform .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s`,
+                  }}
                 >
                   {w}
                 </span>
@@ -877,12 +868,12 @@ export function InvestupIntro({
             값(clamp(64px, 11vh, 140px))을 썼는데, 조금 더 띄워달라는 후속
             요청으로 다시 키웠다.
             예전엔 <Reveal>(자체 IntersectionObserver로 뷰포트 진입 시 독립적으로
-            등장)로 감쌌는데, "제목이 다 나타난 다음에 카드가 등장"하도록
-            바뀌면서 제목의 스크럽 진행률(stepsTitleP, tick() 참고)에 종속시켜야
-            해서 Reveal 대신 직접 ref에 스타일을 써서 게이팅한다. 초기 포즈·
-            keyframe 값(opacity 0→1, translateY(18px)→0)은 Reveal이 쓰던
-            riseIn과 동일하게 맞췄고, "조금 더 늦춰달라"는 요청으로 지속시간만
-            1s → 1.3s로 늘렸다. */}
+            등장)로 감쌌는데, "제목이 다 나타난 다음에 카드가 등장"해야 해서
+            Reveal 대신 직접 ref에 스타일을 쓴다 — 제목이 트리거되는 순간(tick()의
+            stepsShown 분기) 900ms 뒤로 예약된 타이머가 이 스타일을 바꾼다.
+            초기 포즈·keyframe 값(opacity 0→1, translateY(18px)→0)은 Reveal이
+            쓰던 riseIn과 동일하게 맞췄고, "조금 더 늦춰달라"는 요청으로
+            지속시간만 1s → 1.3s로 늘렸다. */}
           <div
             ref={stepsCardsRef}
             style={{
