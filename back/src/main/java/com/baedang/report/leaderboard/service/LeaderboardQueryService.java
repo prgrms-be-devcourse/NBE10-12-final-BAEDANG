@@ -3,7 +3,9 @@ package com.baedang.report.leaderboard.service;
 import com.baedang.report.leaderboard.dto.LeaderboardResponse;
 import com.baedang.report.leaderboard.dto.LeaderboardResponse.Entry;
 import com.baedang.report.leaderboard.dto.LeaderboardResponse.MeSection;
+import com.baedang.report.leaderboard.entity.LeaderboardRun;
 import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
+import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
 import com.baedang.report.leaderboard.repository.LeaderboardSnapshotRepository;
 import com.baedang.report.leaderboard.support.NicknameMasker;
 import com.baedang.report.leaderboard.support.PercentileBracket;
@@ -36,6 +38,7 @@ import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 public class LeaderboardQueryService {
 
     private final LeaderboardSnapshotRepository snapshotRepository;
+    private final LeaderboardRunRepository runRepository;
     private final AccountRepository accountRepository;
     private final UserRepository userRepository;
     private final int topSize;
@@ -43,12 +46,14 @@ public class LeaderboardQueryService {
 
     public LeaderboardQueryService(
             LeaderboardSnapshotRepository snapshotRepository,
+            LeaderboardRunRepository runRepository,
             AccountRepository accountRepository,
             UserRepository userRepository,
             @Value("${report.leaderboard.top-size:10}") int topSize,
             @Value("${report.leaderboard.neighbor-radius:2}") int neighborRadius
     ) {
         this.snapshotRepository = snapshotRepository;
+        this.runRepository = runRepository;
         this.accountRepository = accountRepository;
         this.userRepository = userRepository;
         this.topSize = topSize;
@@ -56,14 +61,20 @@ public class LeaderboardQueryService {
     }
 
     public LeaderboardResponse getLeaderboard(Long userId) {
-        OffsetDateTime asOf = snapshotRepository.findLatestAsOf().orElse(null);
-        if (asOf == null) {
-            return LeaderboardResponse.empty(); // 아직 스냅샷 없음/빈 보드
+        // 스냅샷 행의 max(as_of) 가 아니라 최신 배치 실행을 기준으로 한다 — 최신 실행이 0명이면
+        // 과거 순위를 노출하지 않고 빈 보드를 보인다(전원 리셋·시드 제외 전환 대응).
+        LeaderboardRun run = runRepository.findTopByOrderByAsOfDesc().orElse(null);
+        if (run == null) {
+            return LeaderboardResponse.empty(); // 아직 배치 실행 없음
+        }
+        OffsetDateTime asOf = run.getAsOf();
+        if (run.getParticipants() == 0) {
+            return new LeaderboardResponse(asOf, 0, List.of(), null); // 최신 실행이 빈 보드(as-of 유지)
         }
 
         List<LeaderboardSnapshot> top =
                 snapshotRepository.findByAsOfAndRankLessThanEqualOrderByRankAsc(asOf, topSize);
-        int participants = top.isEmpty() ? 0 : top.get(0).getParticipants();
+        int participants = run.getParticipants();
 
         List<LeaderboardSnapshot> neighbors = List.of();
         Optional<LeaderboardSnapshot> mine = myRow(userId, asOf);

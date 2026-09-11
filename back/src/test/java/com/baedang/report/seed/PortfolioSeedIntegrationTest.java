@@ -1,8 +1,11 @@
 package com.baedang.report.seed;
 
 import com.baedang.global.config.JpaConfig;
+import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.report.seed.PortfolioSeedService.SeedResult;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.Holding;
 import com.baedang.trading.repository.HoldingRepository;
@@ -67,6 +70,16 @@ class PortfolioSeedIntegrationTest {
         insertRanked("NVDA", "US", "NASDAQ", "엔비디아", "USD", "STOCK", "INDIVIDUAL", null, "8000000000000");
         insertRanked("SPY", "US", "NYSE", "SPDR S&P500", "USD", "ETF", "ETF", "1.0", "5000000000000");
         insertRanked("TSLA", "US", "NASDAQ", "테슬라", "USD", "STOCK", "INDIVIDUAL", null, "4000000000000");
+        // 시드는 시세를 쓰지 않고 읽는다 → 기존 quote_snapshot 을 미리 넣어 둔다(prevClose 포함).
+        for (Stock s : stocks.findAll()) {
+            boolean us = s.getMarketCountry() == MarketCountry.US;
+            OffsetDateTime ts = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC);
+            QuoteSnapshot q = new QuoteSnapshot(
+                    s.getStockId(), new BigDecimal(us ? "150.0000" : "70000.0000"),
+                    us ? "USD" : "KRW", ts, ts);
+            q.updatePrevClose(new BigDecimal(us ? "148.0000" : "69000.0000"));
+            quotes.save(q);
+        }
     }
 
     private void insertRanked(String symbol, String country, String market, String name, String currency,
@@ -111,11 +124,11 @@ class PortfolioSeedIntegrationTest {
             assertThat(account.getCashBalance()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
         }
 
-        // 보유한 종목엔 return% 계산용 시세가 있어야 한다.
-        List<Holding> allHoldings = holdings.findAll();
-        assertThat(allHoldings).isNotEmpty();
-        for (Holding holding : allHoldings) {
-            assertThat(quotes.findById(holding.getStockId())).isPresent();
+        // 시드는 공용 quote_snapshot 을 쓰지/덮지 않는다(읽기만) — 개수 불변·prevClose 보존.
+        assertThat(holdings.findAll()).isNotEmpty();
+        assertThat(quotes.findAll()).hasSize((int) stocks.count()); // seedUniverse 가 넣은 수 그대로
+        for (QuoteSnapshot q : quotes.findAll()) {
+            assertThat(q.getPrevClose()).isNotNull(); // 덮어쓰기로 null 이 되지 않음
         }
     }
 

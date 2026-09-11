@@ -3,7 +3,9 @@ package com.baedang.report.leaderboard.service;
 import com.baedang.account.service.AccountValuationService;
 import com.baedang.account.support.AccountValuation;
 import com.baedang.account.support.HoldingValuation;
+import com.baedang.report.leaderboard.entity.LeaderboardRun;
 import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
+import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
 import com.baedang.report.leaderboard.repository.LeaderboardSnapshotRepository;
 import com.baedang.report.leaderboard.service.LeaderboardSnapshotService.SnapshotResult;
 import com.baedang.user.entity.Account;
@@ -39,10 +41,11 @@ class LeaderboardSnapshotServiceTest {
     @Mock AccountRepository accountRepository;
     @Mock AccountValuationService accountValuationService;
     @Mock LeaderboardSnapshotRepository snapshotRepository;
+    @Mock LeaderboardRunRepository runRepository;
 
     private LeaderboardSnapshotService service(boolean includeSeed) {
         return new LeaderboardSnapshotService(
-                accountRepository, accountValuationService, snapshotRepository,
+                accountRepository, accountValuationService, snapshotRepository, runRepository,
                 4, includeSeed, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -91,6 +94,8 @@ class LeaderboardSnapshotServiceTest {
         // 수익률 값 확인: 20% / 10% / 10%
         assertThat(saved.get(0).getReturnRate()).isEqualByComparingTo("0.2");
         assertThat(saved.get(1).getReturnRate()).isEqualByComparingTo("0.1");
+        // 실행 기록도 남긴다(조회가 최신 실행을 기준으로 하게).
+        verify(runRepository).save(org.mockito.ArgumentMatchers.argThat(r -> r.getParticipants() == 3));
     }
 
     @Test
@@ -102,6 +107,8 @@ class LeaderboardSnapshotServiceTest {
 
         assertThat(result.participants()).isZero();
         verify(snapshotRepository, never()).saveAll(any());
+        // 참가자 0 이어도 실행 기록은 남긴다(조회가 빈 보드를 판별하도록).
+        verify(runRepository).save(org.mockito.ArgumentMatchers.argThat(r -> r.getParticipants() == 0));
     }
 
     @Test

@@ -1,7 +1,9 @@
 package com.baedang.report.leaderboard.service;
 
 import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.entity.LeaderboardRun;
 import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
+import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
 import com.baedang.report.leaderboard.repository.LeaderboardSnapshotRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
@@ -31,11 +33,12 @@ class LeaderboardQueryServiceTest {
     private static final OffsetDateTime AS_OF = OffsetDateTime.parse("2026-09-11T07:30:00Z");
 
     @Mock LeaderboardSnapshotRepository snapshotRepository;
+    @Mock LeaderboardRunRepository runRepository;
     @Mock AccountRepository accountRepository;
     @Mock UserRepository userRepository;
 
     private LeaderboardQueryService service() {
-        return new LeaderboardQueryService(snapshotRepository, accountRepository, userRepository, 10, 2);
+        return new LeaderboardQueryService(snapshotRepository, runRepository, accountRepository, userRepository, 10, 2);
     }
 
     private static LeaderboardSnapshot snap(long accountId, long userId, int rank, String returnRate) {
@@ -53,7 +56,7 @@ class LeaderboardQueryServiceTest {
     private void givenTop() {
         // 목 유저를 먼저 만든 뒤 스터빙한다(when 안에서 when 호출 = 중첩 스터빙 금지).
         List<User> maskingUsers = List.of(user(501, "홍길동"), user(502, "김철수"), user(503, "이영희"));
-        when(snapshotRepository.findLatestAsOf()).thenReturn(Optional.of(AS_OF));
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 100)));
         when(snapshotRepository.findByAsOfAndRankLessThanEqualOrderByRankAsc(AS_OF, 10))
                 .thenReturn(List.of(snap(101, 501, 1, "0.3"), snap(102, 502, 2, "0.2"), snap(103, 503, 3, "0.1")));
         when(userRepository.findAllById(any())).thenReturn(maskingUsers);
@@ -99,12 +102,25 @@ class LeaderboardQueryServiceTest {
     }
 
     @Test
-    void 스냅샷이_없으면_빈_보드를_내려준다() {
-        when(snapshotRepository.findLatestAsOf()).thenReturn(Optional.empty());
+    void 배치_실행이_없으면_빈_보드를_내려준다() {
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.empty());
 
         LeaderboardResponse res = service().getLeaderboard(1L);
 
         assertThat(res.asOf()).isNull();
+        assertThat(res.participants()).isZero();
+        assertThat(res.top()).isEmpty();
+        assertThat(res.me()).isNull();
+    }
+
+    @Test
+    void 최신_실행이_참가자_0이면_과거_순위_대신_빈_보드를_as_of와_함께_내린다() {
+        // 전원 리셋·시드 제외 전환으로 최신 실행이 0명 → 스냅샷 행의 max(as_of) 가 아니라 최신 실행 기준.
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 0)));
+
+        LeaderboardResponse res = service().getLeaderboard(1L);
+
+        assertThat(res.asOf()).isEqualTo(AS_OF); // as-of 는 유지("X시점 기준 참가자 없음")
         assertThat(res.participants()).isZero();
         assertThat(res.top()).isEmpty();
         assertThat(res.me()).isNull();

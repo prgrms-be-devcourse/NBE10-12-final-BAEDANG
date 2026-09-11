@@ -25,8 +25,10 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
@@ -41,6 +43,12 @@ import java.util.UUID;
  * 로 만들어 원가·평단가 불변식을 코드가 강제하고, 예수금은 {@link Account#debitMarketBuy}
  * 로 차감해 {@code cash_balance = initial_cash − Σ원가} 를 유지한다. 원장은 생략한다
  * (수수료·세금 무시 — 마커로 분리된 시드라 허용).
+ *
+ * <p><b>시세는 읽기만 한다(공용 상태 불변):</b> {@code quote_snapshot} 은 전 유저 공용이라 시드가
+ * 쓰면 실계좌 평가·거래 입력까지 오염된다(+ prevClose·상/하한가도 지워진다). 그래서 합성 시세를
+ * 쓰지 않고, 종목의 <b>기존 현재가</b>를 읽어 평단가를 {@code lastPrice ÷ drift(±30%)} 로 잡는다.
+ * 손대지 않은 실 시세로 평가하면 {@code return% ≈ drift−1} 이라 수익률 스프레드가 생긴다. 기존
+ * 시세가 없는 종목은 제외한다(랭킹 시세 수집이 끝난 환경에서 실행).
  *
  * <p><b>백데이트 체결:</b> 종목마다 매수 {@code trade_order}(FILLED·MARKET) + {@code trade_execution}
  * 한 건을 <b>계좌 개설~현재 사이로 분산된 시각</b>에 적재한다. 종목이 서로 다른 시점에 편입되므로
@@ -127,9 +135,17 @@ public class PortfolioSeedService {
             return new SeedResult(0, 0, 0, 0);
         }
 
+        // 종목별 "현재 시세"는 기존 quote_snapshot 을 읽어 쓴다. 합성 시세를 새로 쓰지 않는다 —
+        // quote_snapshot 은 전 유저 공용이라, 시드가 덮어쓰면 실계좌 평가·거래 입력까지 오염된다.
+        Map<Long, BigDecimal> priceByStock = existingPrices(krUniverse, usUniverse);
+        if (priceByStock.isEmpty()) {
+            log.warn("랭킹 종목의 시세가 없음 — 시세 수집(Toss) 후 다시 호출하세요");
+            return new SeedResult(0, 0, 0, 0);
+        }
+
         Random random = new Random(RANDOM_SEED);
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-        Set<Long> quotedStocks = new HashSet<>();
+        Set<Long> pricedStocks = new HashSet<>();
         int accounts = 0;
         int holdings = 0;
 
@@ -141,17 +157,32 @@ public class PortfolioSeedService {
             Account account = accountRepository.save(
                     Account.open(user.getUserId(), 1, initialCash, openedAt));
 
-            holdings += buildPortfolio(account, krUniverse, usUniverse, random, openedAt, now, quotedStocks);
+            holdings += buildPortfolio(account, krUniverse, usUniverse, priceByStock, random, openedAt, now, pricedStocks);
             accounts++;
         }
 
-        log.info("시드 적재 완료 — 계좌 {}, 보유 {}, 시세 {}", accounts, holdings, quotedStocks.size());
-        return new SeedResult(accounts, holdings, quotedStocks.size(), 0);
+        log.info("시드 적재 완료 — 계좌 {}, 보유 {}, 평가 기준 시세 {}종목", accounts, holdings, pricedStocks.size());
+        return new SeedResult(accounts, holdings, pricedStocks.size(), 0);
+    }
+
+    /** 랭킹 유니버스 종목의 기존 시세(현재가)를 stockId→lastPrice 로 모은다. 없으면 제외. */
+    private Map<Long, BigDecimal> existingPrices(List<Stock> krUniverse, List<Stock> usUniverse) {
+        List<Long> ids = new ArrayList<>();
+        krUniverse.forEach(s -> ids.add(s.getStockId()));
+        usUniverse.forEach(s -> ids.add(s.getStockId()));
+        Map<Long, BigDecimal> prices = new HashMap<>();
+        for (QuoteSnapshot q : quoteSnapshotRepository.findByStockIdIn(ids)) {
+            if (q.getLastPrice() != null && q.getLastPrice().signum() > 0) {
+                prices.put(q.getStockId(), q.getLastPrice());
+            }
+        }
+        return prices;
     }
 
     /** 한 계좌의 보유를 현실 샘플러로 구성하고, 총원가만큼 예수금을 차감한다. 생성한 보유 수 반환. */
-    private int buildPortfolio(Account account, List<Stock> krUniverse, List<Stock> usUniverse, Random random,
-                               OffsetDateTime at, OffsetDateTime now, Set<Long> quotedStocks) {
+    private int buildPortfolio(Account account, List<Stock> krUniverse, List<Stock> usUniverse,
+                               Map<Long, BigDecimal> priceByStock, Random random,
+                               OffsetDateTime at, OffsetDateTime now, Set<Long> pricedStocks) {
         int k = 1 + random.nextInt(maxHoldings);
         List<Stock> picked = marketAwareSample(krUniverse, usUniverse, k, random);
         double[] weights = randomWeights(picked.size(), random);
@@ -164,9 +195,19 @@ public class PortfolioSeedService {
         int created = 0;
         for (int j = 0; j < picked.size(); j++) {
             Stock stock = picked.get(j);
+            BigDecimal marketPrice = priceByStock.get(stock.getStockId());
+            if (marketPrice == null || marketPrice.signum() <= 0) {
+                continue; // 기존 시세가 없으면 평가할 수 없어 건너뛴다(시세를 새로 쓰지 않는다).
+            }
             boolean us = stock.getMarketCountry() == MarketCountry.US;
-            BigDecimal nativePrice = syntheticPrice(stock, us);
-            BigDecimal priceKrw = us ? nativePrice.multiply(SEED_USD_KRW) : nativePrice;
+            // 합성 원가: 현재 시세 대비 드리프트(±30%)로 평단가를 잡아, 손대지 않은 실 시세로 평가하면
+            // return% ≈ 드리프트−1 이 된다(공용 시세 오염 없이 수익률 스프레드 확보).
+            double drift = 0.70 + random.nextDouble() * 0.60;
+            BigDecimal avgBuyPrice = marketPrice.divide(BigDecimal.valueOf(drift), 4, RoundingMode.HALF_UP);
+            if (avgBuyPrice.signum() <= 0) {
+                continue;
+            }
+            BigDecimal priceKrw = us ? avgBuyPrice.multiply(SEED_USD_KRW) : avgBuyPrice;
 
             BigDecimal targetCost = totalInvest.multiply(BigDecimal.valueOf(weights[j]));
             long qty = targetCost.divide(priceKrw, 0, RoundingMode.DOWN).longValueExact();
@@ -175,25 +216,17 @@ public class PortfolioSeedService {
             }
             BigDecimal quantity = BigDecimal.valueOf(qty);
             BigDecimal krwCost = priceKrw.multiply(quantity);
-            BigDecimal usdCost = us ? nativePrice.multiply(quantity) : BigDecimal.ZERO;
+            BigDecimal usdCost = us ? avgBuyPrice.multiply(quantity) : BigDecimal.ZERO;
 
             // 종목마다 매수 시각을 개설~현재 사이로 분산 → 4주 창 안에서 구성이 변한다.
             OffsetDateTime buyAt = staggeredBuyTime(at, now, random);
             holdingRepository.save(Holding.firstBuy(
                     account.getAccountId(), stock.getStockId(), quantity, usdCost, krwCost, buyAt));
             insertBuyExecution(account.getAccountId(), stock.getStockId(), quantity,
-                    nativePrice, us ? SEED_USD_KRW : BigDecimal.ONE, krwCost, buyAt);
+                    avgBuyPrice, us ? SEED_USD_KRW : BigDecimal.ONE, krwCost, buyAt);
             spent = spent.add(krwCost);
+            pricedStocks.add(stock.getStockId());
             created++;
-
-            // return% 배관용 현재가(원가 × 드리프트 ±30%). 종목당 한 번만.
-            if (quotedStocks.add(stock.getStockId())) {
-                BigDecimal lastPrice = nativePrice
-                        .multiply(BigDecimal.valueOf(0.70 + random.nextDouble() * 0.60))
-                        .setScale(4, RoundingMode.HALF_UP);
-                quoteSnapshotRepository.save(new QuoteSnapshot(
-                        stock.getStockId(), lastPrice, us ? "USD" : "KRW", now, now));
-            }
         }
 
         if (spent.signum() > 0) {
@@ -298,14 +331,5 @@ public class PortfolioSeedService {
             w[i] /= sum;
         }
         return w;
-    }
-
-    /** 종목별 결정적 합성 단가(종목 통화 기준). 분포 검증엔 상대 크기만 의미 있다. */
-    private static BigDecimal syntheticPrice(Stock stock, boolean us) {
-        long h = Math.abs(stock.getStockId() * 2654435761L);
-        if (us) {
-            return BigDecimal.valueOf(10 + (h % 890)).setScale(4, RoundingMode.HALF_UP); // $10~$900
-        }
-        return BigDecimal.valueOf(1000 + (h % 299000)).setScale(4, RoundingMode.HALF_UP); // 1,000~300,000원
     }
 }

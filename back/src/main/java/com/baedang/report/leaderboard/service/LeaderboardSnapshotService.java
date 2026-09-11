@@ -4,7 +4,9 @@ import com.baedang.account.service.AccountValuationService;
 import com.baedang.account.support.AccountValuation;
 import com.baedang.account.support.HoldingValuation;
 import com.baedang.account.support.ReturnRateCalculator;
+import com.baedang.report.leaderboard.entity.LeaderboardRun;
 import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
+import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
 import com.baedang.report.leaderboard.repository.LeaderboardSnapshotRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
@@ -45,6 +47,7 @@ public class LeaderboardSnapshotService {
     private final AccountRepository accountRepository;
     private final AccountValuationService accountValuationService;
     private final LeaderboardSnapshotRepository snapshotRepository;
+    private final LeaderboardRunRepository runRepository;
     private final int eligibilityWeeks;
     private final boolean includeSeed;
     private final Clock clock;
@@ -53,6 +56,7 @@ public class LeaderboardSnapshotService {
             AccountRepository accountRepository,
             AccountValuationService accountValuationService,
             LeaderboardSnapshotRepository snapshotRepository,
+            LeaderboardRunRepository runRepository,
             @Value("${report.leaderboard.eligibility-weeks:4}") int eligibilityWeeks,
             @Value("${report.leaderboard.include-seed:false}") boolean includeSeed,
             Clock clock
@@ -60,6 +64,7 @@ public class LeaderboardSnapshotService {
         this.accountRepository = accountRepository;
         this.accountValuationService = accountValuationService;
         this.snapshotRepository = snapshotRepository;
+        this.runRepository = runRepository;
         this.eligibilityWeeks = eligibilityWeeks;
         this.includeSeed = includeSeed;
         this.clock = clock;
@@ -77,6 +82,8 @@ public class LeaderboardSnapshotService {
         List<Account> eligible = accountRepository.findLeaderboardEligible(
                 AccountStatus.ACTIVE, openedAtOrBefore, includeSeed);
         if (eligible.isEmpty()) {
+            // 참가자 0 이어도 실행을 기록해, 조회가 최신 실행 기준으로 빈 보드를 보이게 한다.
+            runRepository.save(LeaderboardRun.of(asOf, 0));
             log.info("리더보드 자격 계좌 없음(자격=개설 {}주 경과) — 빈 보드", eligibilityWeeks);
             return new SnapshotResult(asOf, 0);
         }
@@ -109,6 +116,7 @@ public class LeaderboardSnapshotService {
                     r.equity(), r.returnRate(), rank++, participants));
         }
         snapshotRepository.saveAll(rows);
+        runRepository.save(LeaderboardRun.of(asOf, participants));
         log.info("리더보드 스냅샷 적재 — as_of={}, 참가자={}", asOf, participants);
         return new SnapshotResult(asOf, participants);
     }
