@@ -68,7 +68,7 @@ export const CMP = [
   { label: '목적', legacy: '거래 체결', ours: '학습과 훈련' },
   { label: '실수했을 때', legacy: '실제 손실, 되돌릴 수 없음', ours: '손실 없음, 초기화하고 다시' },
   { label: '수수료·세금', legacy: '거래 후 결과에만 반영', ours: '주문 전 미리 보여줌' },
-  { label: '사용법 안내', legacy: '없음', ours: '이용가이드 · 용어 위키 제공' },
+  { label: '사용법 안내', legacy: '없음', ours: '금융 용어 위키 · 사용자 투자 성향 리포트 제공' },
 ] as const;
 
 /** 접힌(스켈레톤) 상태의 행 너비 */
