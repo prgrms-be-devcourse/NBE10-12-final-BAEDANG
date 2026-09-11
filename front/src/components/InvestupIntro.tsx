@@ -898,6 +898,22 @@ export function InvestupIntro({
           </span>
         </h2>
 
+        {/* 제목을 보충하는 한 줄 설명 — 제목과는 marginTop으로 크게 띄웠다. */}
+        <p
+          style={{
+            margin: 'clamp(40px, 7vh, 80px) auto 0',
+            textAlign: 'center',
+            fontSize: 'clamp(15px, 1.6vw, 18px)',
+            lineHeight: 1.6,
+            color: T.cardBodyInk,
+            maxWidth: '32em',
+            wordBreak: 'keep-all',
+            textWrap: 'pretty' as never,
+          }}
+        >
+          증권사 앱은 거래를 체결시키는 도구고, 저희는 거래를 이해시키는 도구예요.
+        </p>
+
         {/* 제목과의 간격을 더 띄우고(marginTop), 카드를 가운데로 정렬했다
             (기존엔 justifyContent: 'flex-start'라 왼쪽에 붙어 있었다). */}
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'clamp(64px, 11vh, 140px)' }}>
