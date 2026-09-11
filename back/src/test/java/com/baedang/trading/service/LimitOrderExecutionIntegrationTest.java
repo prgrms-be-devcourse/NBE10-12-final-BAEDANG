@@ -6,6 +6,7 @@ import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.orderbook.entity.OrderBookSide;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import com.baedang.orderbook.service.OrderBookPublicationService;
@@ -85,6 +86,8 @@ class LimitOrderExecutionIntegrationTest {
     static class Time {
         @Bean @Primary MutableClock executionTestClock() { return new MutableClock(NOW); }
     }
+    // 체결 테스트가 준비한 호가를 주기 갱신이 덮어쓰지 않도록 격리한다.
+    @MockitoBean OrderBookRefreshScheduler orderBookRefreshScheduler;
     @MockitoBean MarketSessionProvider sessions;
     @MockitoBean ExecutionExchangeRateProvider rates;
     @MockitoBean com.baedang.market.port.MarketCalendarPort calendars;

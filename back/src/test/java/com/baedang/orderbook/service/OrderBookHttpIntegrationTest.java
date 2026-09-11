@@ -51,7 +51,6 @@ import static org.mockito.Mockito.when;
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
         "toss.enabled=false",
-        "trading.orderbook.enabled=true",
         "trading.orderbook.refresh-initial-delay=1h",
         "trading.orderbook.retention-initial-delay=1h",
         "JWT_SECRET=ZGV2LXNlY3JldC1rZXktZm9yLXRlc3Rpbmctb25seQ==",

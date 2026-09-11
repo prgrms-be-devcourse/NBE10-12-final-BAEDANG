@@ -715,7 +715,7 @@ All users share the same synthetic order book snapshot. A single request returns
 |---|---|---|
 | `INVALID_INPUT` | 400 | `marketCountry` parameter missing or unsupported (anything other than `KR`, `US`) |
 | `STOCK_NOT_FOUND` | 404 | Symbol does not exist |
-| `ORDER_BOOK_UNAVAILABLE` | 503 | Feature disabled (`ORDERBOOK_ENABLED=false`), untradable stock (suspended, liquidation, off-universe), market closed or session expired, quote older than 15s, future quote, currency mismatch, or missing/incomplete active version |
+| `ORDER_BOOK_UNAVAILABLE` | 503 | Untradable stock (suspended, liquidation, off-universe), market closed or session expired, quote older than 15s, future quote, currency mismatch, or missing/incomplete active version |
 
 GET error responses do not include an order submission `retryPolicy`; clients re-query based on their normal polling interval.
 ---
