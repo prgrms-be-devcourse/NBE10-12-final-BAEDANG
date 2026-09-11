@@ -1,0 +1,101 @@
+/* Investup 인트로 — 전역 스타일 / 키프레임.
+   Pretendard는 이 프로젝트의 루트 레이아웃(app/layout.tsx)이 이미 전역으로 로드하므로
+   여기서 다시 @import하지 않는다(원본 디자인 패키지의 styles/investup-intro.css에는
+   있었지만, 중복 로드를 피하려고 이 한 줄만 뺐다 — 나머지는 그대로다). */
+
+:root {
+  --iv-bg: #eff6fc;
+  --iv-ink: #071829;
+  --iv-deep: #0f3868;
+  --iv-accent: #1b6da3;
+  --iv-dot: #7fb6e3;
+  --iv-cta-hover: #90c3ec;
+}
+
+.iv-root a {
+  color: var(--iv-deep);
+  text-decoration: none;
+}
+
+.iv-root a:hover {
+  color: var(--iv-accent);
+}
+
+/* 히어로 배경 메시가 천천히 흐르는 움직임 */
+@keyframes iv-drift {
+  0% {
+    transform: translate3d(-2%, -1%, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(3%, 2%, 0) rotate(6deg);
+  }
+  100% {
+    transform: translate3d(-2%, -1%, 0) rotate(0deg);
+  }
+}
+
+/* 하단 스크롤 화살표 */
+@keyframes iv-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(9px);
+  }
+}
+
+/* 좌·우 상단 도트 패턴: 전체 밝기 호흡 */
+@keyframes iv-dot-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 좌·우 상단 도트 패턴: 발광 하이라이트가 대각선으로 훑고 지나감 */
+@keyframes iv-dot-shimmer-l {
+  0% {
+    background-position: -20% -20%;
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.55;
+  }
+  100% {
+    background-position: 150% 150%;
+    opacity: 0;
+  }
+}
+
+@keyframes iv-dot-shimmer-r {
+  0% {
+    background-position: 120% -20%;
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.55;
+  }
+  100% {
+    background-position: -50% 150%;
+    opacity: 0;
+  }
+}
+
+/* 시작하기 버튼 호버 */
+.iv-cta-btn {
+  transition: background-color 0.28s ease;
+}
+
+.iv-cta-btn:hover {
+  background: var(--iv-cta-hover);
+}
