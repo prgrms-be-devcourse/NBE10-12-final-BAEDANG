@@ -6,6 +6,6 @@ import java.util.List;
 public record ExchangeRateHistoryResponse(
         List<Item> items
 ) {
-    public record Item(OffsetDateTime rateAt, String rate) {
+    public record Item(OffsetDateTime validFrom, String rate) {
     }
 }

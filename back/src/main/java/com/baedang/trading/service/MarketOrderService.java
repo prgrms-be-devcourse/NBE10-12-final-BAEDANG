@@ -122,7 +122,7 @@ public class MarketOrderService {
         try {
             session = marketSessionProvider.currentSession(stock.getMarketCountry(), sessionLookupAt);
             if (stock.getMarketCountry() == MarketCountry.US) {
-                ExecutionExchangeRateSnapshot snapshot = exchangeRateProvider.currentUsdKrwSnapshot();
+                ExecutionExchangeRateSnapshot snapshot = marketOrderExchangeRate();
                 if (snapshot == null) {
                     throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
                 }
@@ -137,6 +137,17 @@ public class MarketOrderService {
         }
         return new OrderMarketContext(
                 stock.getMarketCountry(), session.open(), session.validUntil(), rateEvidence, checkedAt);
+    }
+
+    private ExecutionExchangeRateSnapshot marketOrderExchangeRate() {
+        try {
+            return exchangeRateProvider.currentUsdKrwSnapshot();
+        } catch (BusinessException exception) {
+            if (exception.getErrorCode() != ErrorCode.EXCHANGE_RATE_NOT_FOUND) throw exception;
+            exchangeRateProvider.refreshUnavailableForMarketOrder();
+            // 성공 응답 자체를 신뢰하지 않고 DB에 저장된 원본 유효기간을 다시 검증합니다.
+            return exchangeRateProvider.currentUsdKrwSnapshot();
+        }
     }
 
     private BusinessException withRetryPolicy(

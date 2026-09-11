@@ -115,13 +115,13 @@ class DomainNormalizationContractTest {
     @Test
     void 환율은_정규화된_통화로_조회하되_미지원_통화의_기존_오류를_유지한다() {
         ExchangeRateRepository repository = mock(ExchangeRateRepository.class);
-        when(repository.findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("XXX", "KRW"))
+        when(repository.findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("XXX", "KRW"))
                 .thenReturn(Optional.empty());
         ExchangeRateService service = new ExchangeRateService(repository, Clock.systemUTC());
 
         assertThatThrownBy(() -> service.getLatest(" xxx ", " krw "))
                 .isInstanceOfSatisfying(BusinessException.class,
                         e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
-        verify(repository).findTopByBaseCurrencyAndQuoteCurrencyOrderByRateAtDesc("XXX", "KRW");
+        verify(repository).findTopByBaseCurrencyAndQuoteCurrencyOrderByValidFromDesc("XXX", "KRW");
     }
 }

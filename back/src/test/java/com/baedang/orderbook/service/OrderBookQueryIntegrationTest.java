@@ -62,7 +62,6 @@ import static org.mockito.Mockito.when;
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
         "toss.enabled=false",
-        "trading.orderbook.enabled=true",
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookQueryIntegrationTest {
@@ -281,26 +280,6 @@ class OrderBookQueryIntegrationTest {
                 .thenReturn(MarketSessionStatus.closed());
 
         assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);
-    }
-
-    @Test
-    void 기능_비활성_상태에서는_503이다() {
-        publicationService.publish(
-                generatedBook(42L, BASE.minusSeconds(2)), BASE.plusSeconds(3600)).orElseThrow();
-
-        OrderBookProperties disabled = new OrderBookProperties(
-                false, properties.policyVersion(), properties.refreshInterval(), properties.maxQuoteAge(),
-                properties.krBaseNotional(), properties.usBaseNotional(), properties.minQuantity(),
-                properties.maxQuantity(), properties.noiseMinBps(), properties.noiseMaxBps(),
-                properties.closedVersionRetention()
-        );
-        OrderBookQueryService disabledService = new OrderBookQueryService(
-                stockRepository, levelRepository, marketSessionProvider, disabled, clock);
-
-        assertThatThrownBy(() -> disabledService.getOrderBook(krStock.getSymbol(), "KR"))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE);

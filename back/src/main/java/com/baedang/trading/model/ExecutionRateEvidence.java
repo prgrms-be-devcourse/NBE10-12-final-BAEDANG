@@ -25,12 +25,11 @@ public record ExecutionRateEvidence(BigDecimal rate, OffsetDateTime fetchedAt,
     public static ExecutionRateEvidence krw(OffsetDateTime preparedAt) {
         if (preparedAt == null) throw new IllegalArgumentException("준비 시각이 필요합니다");
         return new ExecutionRateEvidence(BigDecimal.ONE, preparedAt, preparedAt,
-                preparedAt.plus(ExecutionExchangeRateSnapshot.MAX_AGE));
+                preparedAt.plusSeconds(60));
     }
 
     public boolean isValidAt(OffsetDateTime at) {
         return at != null && !at.isBefore(fetchedAt)
-                && !at.isBefore(validFrom) && at.isBefore(validUntil)
-                && at.isBefore(fetchedAt.plus(ExecutionExchangeRateSnapshot.MAX_AGE));
+                && !at.isBefore(validFrom) && at.isBefore(validUntil);
     }
 }
