@@ -43,6 +43,12 @@ const CMP_ROW_DURATION_MS = 640;
 const CMP_ROW_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'; // 초반 반응이 빠른 ease-out
 const CMP_ROW_STAGGER_MS = 55; // 4행이 위(펼칠 때)/아래(접을 때)부터 순서대로
 
+// 04 Zoom의 남색 패널 — 스크롤 위치를 그대로 쓰지 않고 이 비율만큼씩만 목표
+// 크기를 따라가며 입력을 다듬는다(0~1, 1이면 스무딩 없이 스크롤과 완전히
+// 1:1). 값을 올리면 스크롤에 더 빠르게/딱딱하게 반응하고, 낮추면 더 부드럽고
+// 느긋하게 따라온다 — 속도감을 조절하고 싶으면 이 값 하나만 바꾸면 된다.
+const ZOOM_SCROLL_SMOOTHING = 0.35;
+
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
 type CmpState = { phase: 0 | 1 | 2; open: boolean };
 
@@ -133,6 +139,13 @@ export function InvestupIntro({
   useEffect(() => {
     cmpRef.current = cmp;
   }, [cmp]);
+  // paintZoom()도 rAF 루프 안에서 매 프레임 도는 클로저라 같은 이유로 ref가
+  // 필요하다 — reducedMotion이면 04 Zoom의 스크롤 입력 스무딩(lerp)을 꺼서
+  // 지연 없이 스크롤 위치를 그대로 따라가게 한다.
+  const reducedMotionRef = useRef(reducedMotion);
+  useEffect(() => {
+    reducedMotionRef.current = reducedMotion;
+  }, [reducedMotion]);
 
   /* ── 인트로 타임라인 ───────────────────────── */
   useEffect(() => {
@@ -358,15 +371,23 @@ export function InvestupIntro({
         a.cw = tw;
         a.ch = th;
       }
-      a.cw += (tw - a.cw) * 0.24; // 스크롤 입력 스무딩
-      a.ch += (th - a.ch) * 0.24;
+      // prefers-reduced-motion이면 스무딩 없이 스크롤 위치를 그대로 1:1로
+      // 따라간다(추가로 "코스팅"되는 움직임을 없앤다). 그 외엔
+      // ZOOM_SCROLL_SMOOTHING만큼씩 목표값을 따라가며 입력을 부드럽게 다듬는다
+      // — 값이 클수록(1에 가까울수록) 스크롤에 더 빠르게 반응한다. 나중에 속도감을
+      // 조절하려면 이 상수 하나만 바꾸면 된다.
+      const lerp = reducedMotionRef.current ? 1 : ZOOM_SCROLL_SMOOTHING;
+      a.cw += (tw - a.cw) * lerp;
+      a.ch += (th - a.ch) * lerp;
       const w = Math.abs(tw - a.cw) < 0.4 ? tw : a.cw;
       const h = Math.abs(th - a.ch) < 0.4 ? th : a.ch;
 
       card.style.opacity = bar > 0 ? '1' : '0';
-      card.style.width = `${w.toFixed(1)}px`;
-      card.style.height = `${h.toFixed(1)}px`;
-      card.style.borderRadius = `${Math.min(Math.min(w, h) * 0.2, 8 + eg * 56).toFixed(1)}px`;
+      // width/height를 매 프레임 바꾸면 리플로우가 생긴다 — 대신 기준 크기를
+      // JSX에서 100vw×100vh로 고정해두고(CSS 뷰포트 단위라 리사이즈에도 JS
+      // 없이 저절로 맞춰진다), transform: scale()만 매 프레임 써서 확대·축소를
+      // 표현한다. scale은 합성 레이어에서만 처리돼 리플로우가 없다.
+      card.style.transform = `translate(-50%, -50%) scale(${(w / vw).toFixed(4)}, ${(h / vh).toFixed(4)})`;
 
       if (gapRef.current) {
         gapRef.current.style.width = `${(w + Math.min(vw * 0.09, 110) * (1 - eg)).toFixed(1)}px`;
@@ -1250,19 +1271,25 @@ export function InvestupIntro({
             </span>
           </div>
 
-          {/* 세로 직선 → 정사각형으로 확대되며 화면을 채움 */}
+          {/* 세로 얇은 막대 → 화면을 채우는 사각형으로 확대. 기준 크기를
+              100vw×100vh로 고정해두고(리사이즈에도 CSS 뷰포트 단위가 알아서
+              맞춘다), paintZoom()이 매 프레임 transform: scale()만 써서
+              키운다 — width/height를 매 프레임 바꾸면 생기는 리플로우 없이
+              합성 레이어에서만 처리된다. border-radius도 고정값(스케일이
+              커지는 마지막 구간 기준으로 자연스러운 굵기)이라 별도 계산이
+              필요 없다. */}
           <div
             ref={zoomCardRef}
             style={{
               position: 'absolute',
               left: '50%',
               top: '50%',
-              width: 0,
-              height: 0,
-              transform: 'translate(-50%, -50%)',
+              width: '100vw',
+              height: '100vh',
+              transform: 'translate(-50%, -50%) scale(0, 0)',
               zIndex: 3,
               background: T.deepInk,
-              borderRadius: 999,
+              borderRadius: 16,
               overflow: 'hidden',
               opacity: 0,
             }}
