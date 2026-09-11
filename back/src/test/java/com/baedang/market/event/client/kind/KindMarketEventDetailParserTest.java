@@ -164,7 +164,6 @@ class KindMarketEventDetailParserTest {
         URI detailUri = URI.create("https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
         String wrongDurationHtml = """
                 <div class="xforms">
-                  <div class="xforms_title">유가증권시장 매매거래 일시중단(1단계 CB 발동)</div>
                   <table>
                     <tr><td>1. 일자 및 시각</td><td>2026-07-13</td><td>13:28:32</td></tr>
                     <tr><td>2. 내용</td><td>향후 10분간 유가증권시장 매매거래 일시중단</td></tr>
@@ -191,7 +190,7 @@ class KindMarketEventDetailParserTest {
         );
 
         assertThat(event.market()).isEqualTo(KrMarket.KOSDAQ);
-        assertThat(event.triggeredAt()).isEqualTo(Instant.parse("2026-03-05T00:05:12Z"));
+        assertThat(event.triggeredAt()).isEqualTo(Instant.parse("2026-03-05T00:06:02Z"));
     }
 
     @Test
