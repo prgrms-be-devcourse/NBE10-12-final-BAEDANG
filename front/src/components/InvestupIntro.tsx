@@ -43,7 +43,6 @@ const WORD_STAGGER_S = 0.07;
  * "빠르고 가볍고 자연스러운" 느낌으로 다시 만들었다. width/blur로 모양이 바뀌는
  * 대신 opacity + translateY만 쓴다(레이아웃에 영향을 주는 속성을 피해 리플로우 없이
  * 합성 레이어에서만 처리되므로 더 가볍다). */
-const CMP_ROW_TRANSLATE_PX = 24; // 이동 거리 20~30px 요청 — 그 중간값
 const CMP_ROW_DURATION_MS = 480; // 0.4~0.6s 요청 — 살짝 빠른 쪽
 const CMP_ROW_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'; // 초반 반응이 빠른 ease-out
 const CMP_ROW_STAGGER_MS = 40; // "아주 짧은" 시차 — 4행이 위에서부터 빠르게 순서대로
@@ -1100,9 +1099,9 @@ export function InvestupIntro({
                 </span>
               </div>
 
-              {/* 4행 모두 높이가 고정이라(opacity+translateY만 바뀜) 이 컨테이너
-                  자체의 높이는 바뀌지 않는다 — 그래서 이전에 있던 height 트랜지션은
-                  더 이상 필요 없다(요청 12번: 레이아웃이 움직이지 않게). */}
+              {/* 4행 모두 높이가 고정이라(opacity+scaleX만 바뀜, width는 그대로) 이
+                  컨테이너 자체의 높이는 바뀌지 않는다 — 그래서 height 트랜지션은
+                  필요 없다(레이아웃이 움직이지 않게). */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 14 }}>
                 {CMP.map((r, i) => {
                   // 펼칠 땐 위→아래, 접을 땐 아래→위 순서로 살짝씩 시차를 준다
@@ -1127,11 +1126,14 @@ export function InvestupIntro({
                         padding: '12px 20px',
                         borderRadius: 18,
                         background: '#ffffff',
-                        // width/blur로 모양을 바꾸던 이전 방식(리플로우 발생) 대신
-                        // opacity + translateY만 사용 — 합성 레이어에서만 처리돼
-                        // 가볍고, 레이아웃도 흔들리지 않는다(요청 3, 4, 12번).
+                        // 왼쪽 끝을 축으로 오른쪽으로 펼쳐졌다가(scaleX 0→1) 다시
+                        // 왼쪽으로 접혀 들어간다(scaleX 1→0) — width처럼 레이아웃에
+                        // 영향을 주지 않고 transform(합성 레이어)만으로 처리돼 여전히
+                        // 가볍다. opacity를 같은 곡선으로 같이 줘서 폭이 아주 좁을 때
+                        // 텍스트가 눌려 보이는 구간을 자연스럽게 가려준다.
+                        transformOrigin: '0% 50%',
                         opacity: cmpOpen ? 1 : 0,
-                        transform: cmpOpen ? 'translateY(0px)' : `translateY(${CMP_ROW_TRANSLATE_PX}px)`,
+                        transform: cmpOpen ? 'scaleX(1)' : 'scaleX(0)',
                         willChange: 'transform, opacity',
                         transition,
                       }}
