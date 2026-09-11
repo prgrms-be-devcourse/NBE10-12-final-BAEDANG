@@ -75,13 +75,14 @@ export const CMP = [
  * 누구나 금융 전문가로" 문구와 같은 효과. 단어 배열로 나눠 각자 스크롤 진행률에
  * 따라 독립적으로 나타나게 한다(순서대로 시작 시점을 살짝씩 늦춘다). ───────── */
 export const STEPS_TITLE_WORDS = ['투자의', '첫걸음,', '이렇게', '시작해요'] as const;
-export const COMPARE_TITLE_WORDS = ['증권사', '앱과', '무엇이', '다른가요?'] as const;
+export const COMPARE_TITLE_WORDS = ['기존', '증권사', '서비스와', '무엇이', '다른가요?'] as const;
 
 /** 비교 섹션 제목 아래 한 줄 설명 — 제목과 같은 단어별 등장 효과를 쓰기 위해
  * 똑같이 단어 배열로 나눴다. */
 export const COMPARE_SUBTITLE_WORDS = [
+  '기존',
   '증권사',
-  '앱은',
+  '서비스는',
   '거래를',
   '체결시키는',
   '도구고,',

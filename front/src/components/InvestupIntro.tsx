@@ -1136,10 +1136,10 @@ export function InvestupIntro({
               >
                 <span />
                 <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.01em', color: '#1b6da3' }}>
-                  일반 증권사 앱
+                  기존 증권사 서비스
                 </span>
                 <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: '-.01em', color: '#1f3a68' }}>
-                  모의주식 트레이딩
+                  Investup
                 </span>
               </div>
 
