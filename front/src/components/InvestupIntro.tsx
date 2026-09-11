@@ -689,7 +689,7 @@ export function InvestupIntro({
               wordBreak: 'keep-all',
             }}
           >
-            위험 없이 시작하는 진짜 투자 감각
+            실수는 가볍게, 투자 감각은 제대로
           </p>
         </div>
 

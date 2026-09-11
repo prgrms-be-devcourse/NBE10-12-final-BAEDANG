@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import { IntroScreen } from "@/components/IntroScreen";
 
 export const metadata: Metadata = {
-  title: "InvestUP — 위험 없이 시작하는 진짜 투자 감각",
-  description: "모의 투자금 5,000만원으로 지금 시작해보세요.",
+  title: "InvestUP — 실수는 가볍게, 투자 감각은 제대로",
+  description: "모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요.",
 };
 
 /**
