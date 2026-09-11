@@ -8,6 +8,8 @@ import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.StockCategory;
+import com.baedang.stock.entity.StockLike;
+import com.baedang.stock.repository.StockLikeRepository;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -46,6 +48,9 @@ public class RankingServiceTest {
 
     @Mock
     private QuoteRealtimePolicy quoteRealtimePolicy;
+
+    @Mock
+    private StockLikeRepository stockLikeRepository;
 
     @InjectMocks
     private RankingService rankingService;
@@ -301,5 +306,24 @@ public class RankingServiceTest {
         when(stock.getTradingAmount()).thenReturn(tradingAmount);
 
         return stock;
+    }
+
+    @Test
+    @DisplayName("로그인 사용자면 관심 종목에 stockLikeId를 담는다")
+    void likedStocksCarryStockLikeId() {
+        Stock stock = mock(Stock.class);
+        StockLike like = mock(StockLike.class);
+        when(stockRepository.findRankedByMarketCountry(MarketCountry.KR, PageRequest.of(0, 21)))
+                .thenReturn(List.of(stock));
+        when(stock.getStockId()).thenReturn(1L);
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of());
+        when(stockLikeRepository.findByUserIdAndStockIdIn(7L, List.of(1L))).thenReturn(List.of(like));
+        when(like.getStockId()).thenReturn(1L);
+        when(like.getStockLikeId()).thenReturn(42L);
+
+        RankingResponse response = rankingService.getRankings("KR", 20, null, 7L);
+
+        assertThat(response.items().get(0).stockId()).isEqualTo(1L);
+        assertThat(response.items().get(0).stockLikeId()).isEqualTo(42L);
     }
 }

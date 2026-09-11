@@ -25,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -34,6 +35,7 @@ import java.time.LocalDate;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -348,5 +350,22 @@ public class StockControllerTest {
         mockMvc.perform(get("/api/stocks/AAPL/financials").param("marketCountry", "US"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("FINANCIALS_NOT_SUPPORTED"));
+    }
+
+    @Test
+    @DisplayName("랭킹은 비로그인도 조회할 수 있고, 로그인하면 userId를 서비스에 전달한다")
+    void rankingsArePublicAndPassUserId() throws Exception {
+        RankingResponse empty = new RankingResponse(List.of(), null, false);
+        when(rankingService.getRankings("KR", 20, null, null)).thenReturn(empty);
+        when(rankingService.getRankings("KR", 20, null, 7L)).thenReturn(empty);
+
+        mockMvc.perform(get("/api/stocks/rankings").param("market", "KR"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/stocks/rankings").param("market", "KR")
+                        .with(authentication(new UsernamePasswordAuthenticationToken(7L, null, List.of()))))
+                .andExpect(status().isOk());
+
+        verify(rankingService).getRankings("KR", 20, null, null);
+        verify(rankingService).getRankings("KR", 20, null, 7L);
     }
 }
