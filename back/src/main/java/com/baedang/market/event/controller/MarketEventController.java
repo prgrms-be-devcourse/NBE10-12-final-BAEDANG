@@ -40,18 +40,23 @@ public class MarketEventController {
 
     private static KrMarket parseMarket(String raw) {
         return KrMarket.fromStockMarket(raw)
-                .orElseThrow(() -> invalid("market", "지원하지 않는 시장입니다: " + raw));
+                .orElseThrow(() -> invalid("market"));
     }
 
     private static LocalDate parseDate(String raw) {
         try {
             return LocalDate.parse(raw);
         } catch (DateTimeParseException e) {
-            throw invalid("date", "날짜 형식이 올바르지 않습니다: " + raw);
+            throw invalid("date");
         }
     }
 
-    private static BusinessException invalid(String field, String detail) {
-        return new BusinessException(ErrorCode.INVALID_INPUT, detail, Map.of("field", field));
+    /**
+     * {@code detail}는 {@code GlobalExceptionHandler}가 WARN으로 기록한다. 원본 입력을 넣으면
+     * 개행·제어문자·임의 길이 문자열이 그대로 로그에 들어가므로 필드명만 남긴다.
+     * 클라이언트가 분기할 값은 이미 {@code data.field}에 있다.
+     */
+    private static BusinessException invalid(String field) {
+        return new BusinessException(ErrorCode.INVALID_INPUT, "field=" + field, Map.of("field", field));
     }
 }

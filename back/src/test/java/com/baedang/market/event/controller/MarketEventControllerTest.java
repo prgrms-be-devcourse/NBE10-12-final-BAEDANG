@@ -9,7 +9,11 @@ import com.baedang.market.event.entity.KrMarket;
 import com.baedang.market.event.entity.MarketEventType;
 import com.baedang.market.event.entity.SidecarDirection;
 import com.baedang.market.event.service.MarketEventQueryService;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -179,6 +183,34 @@ class MarketEventControllerTest {
                         .param("date", "2026-07-13"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.market").value("KOSPI"));
+    }
+
+    /**
+     * {@code BusinessException.detail}은 응답에 나가지 않지만 GlobalExceptionHandler가 WARN으로 기록한다.
+     * 원본 입력을 detail에 넣으면 임의 길이·제어문자가 그대로 로그에 들어간다 — 설계가 금지한 지점이다.
+     */
+    @Test
+    void invalid_input_is_not_echoed_into_logs() throws Exception {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        Logger handlerLogger =
+                (Logger) LoggerFactory.getLogger("com.baedang.global.error.GlobalExceptionHandler");
+        handlerLogger.addAppender(appender);
+
+        try {
+            mvc.perform(get("/api/market/events")
+                            .param("market", "KOSPI")
+                            .param("date", "2026-07-13-injected-token"))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.data.field").value("date"));
+
+            assertThat(appender.list)
+                    .isNotEmpty()
+                    .allSatisfy(event -> assertThat(event.getFormattedMessage())
+                            .doesNotContain("injected-token"));
+        } finally {
+            handlerLogger.detachAppender(appender);
+        }
     }
 
     private static MarketEventListResponse sample(KrMarket market) {

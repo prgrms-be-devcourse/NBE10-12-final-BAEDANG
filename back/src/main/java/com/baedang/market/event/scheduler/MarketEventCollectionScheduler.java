@@ -52,9 +52,16 @@ public class MarketEventCollectionScheduler {
         this.scheduler = Objects.requireNonNull(scheduler, "scheduler must not be null");
     }
 
-    /** fixedDelay라 이전 실행이 끝난 뒤 다음 주기를 센다. KIND가 느려도 수집이 겹치지 않는다. */
+    /**
+     * fixedDelay라 이전 실행이 끝난 뒤 다음 주기를 센다. KIND가 느려도 수집이 겹치지 않는다.
+     *
+     * <p>{@code initialDelayString}은 주기와 같은 값을 쓴다. 없으면 첫 정기 실행이 즉시 발생해
+     * {@link #recoverOnStartup()}과 연속 두 번 수집한다 — UNIQUE가 행 중복은 막아도 RSS·상세
+     * 재호출과 지표 중복은 남는다.
+     */
     @Scheduled(
             fixedDelayString = "${krx.market-events.poll-interval:15s}",
+            initialDelayString = "${krx.market-events.poll-interval:15s}",
             scheduler = "marketEventTaskScheduler")
     public void poll() {
         collectIfOpen();
@@ -74,14 +81,15 @@ public class MarketEventCollectionScheduler {
             }
         } catch (RuntimeException e) {
             // 세션을 모르면 수집하지 않는다. 추측해서 호출하면 장외 호출이 된다.
-            log.warn("시장 세션 조회 실패로 수집을 건너뜁니다: cause={}", e.toString());
+            // 예외 메시지에는 요청 URI(acptNo 포함)가 섞일 수 있으므로 클래스명만 남긴다.
+            log.warn("시장 세션 조회 실패로 수집을 건너뜁니다: type={}", e.getClass().getSimpleName());
             return;
         }
 
         try {
             collection.collect();
         } catch (RuntimeException e) {
-            log.warn("시장조치 수집 실패: cause={}", e.toString());
+            log.warn("시장조치 수집 실패: type={}", e.getClass().getSimpleName());
         }
     }
 }

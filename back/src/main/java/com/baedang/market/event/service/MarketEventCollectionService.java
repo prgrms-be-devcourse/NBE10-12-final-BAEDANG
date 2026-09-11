@@ -11,6 +11,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -75,7 +76,7 @@ public class MarketEventCollectionService {
             batch = source.fetchCandidates(market);
         } catch (RuntimeException e) {
             count("krx.market_event.poll", market.name(), "result", "failure");
-            log.warn("KIND RSS 조회 실패: market={}, cause={}", market, e.toString());
+            log.warn("KIND RSS 조회 실패: market={}, type={}", market, e.getClass().getSimpleName());
             return;
         }
         count("krx.market_event.poll", market.name(), "result", "success");
@@ -115,8 +116,8 @@ public class MarketEventCollectionService {
                 // 시장 캘린더를 신뢰할 수 없으면 이 후보를 저장하지 않는다. 종료시각을 추정해 넣으면
                 // append-only 행이 영구히 틀린 값을 갖고, 다음 폴링은 기존 acptNo를 건너뛰어 고칠 기회가 없다.
                 count("krx.market_event.parse_error", market.name(), "stage", "calendar");
-                log.warn("시장조치 종료시각 계산 실패: market={}, acptNo={}, type={}, cause={}",
-                        market, sourceEventId, event.eventType(), e.toString());
+                log.warn("시장조치 종료시각 계산 실패: market={}, acptNo={}, type={}",
+                        market, sourceEventId, event.eventType());
                 return;
             }
 
@@ -135,11 +136,17 @@ public class MarketEventCollectionService {
             // 같은 키가 없는데 제약을 위반했다면 우리 데이터가 스키마와 어긋난 것이다. 중복으로 숨기지 않는다.
             log.error("시장조치 저장 제약 위반: market={}, acptNo={}", market, sourceEventId, e);
             throw e;
+        } catch (DataAccessException e) {
+            // DB 장애는 이 후보만의 문제가 아니라 이번 수집 주기 전체의 문제다. parse_error로 계측하면
+            // 운영 대시보드에서 "KIND 파싱 실패"로 보여 원인을 오분류한다. 스케줄러가 주기 실패로 처리한다.
+            log.error("시장조치 저장 중 DB 오류: market={}, acptNo={}", market, sourceEventId, e);
+            throw e;
         } catch (RuntimeException e) {
             // 전송·파싱 실패는 그 후보만 버린다. 기존 이벤트의 halt_until은 건드리지 않는다.
+            // 예외 메시지에는 요청 URI와 원문 일부가 섞일 수 있으므로 닫힌 태그만 남긴다.
             count("krx.market_event.parse_error", market.name(), "stage", "fetch");
-            log.warn("시장조치 후보 처리 실패: market={}, acptNo={}, cause={}",
-                    market, sourceEventId, e.toString());
+            log.warn("시장조치 후보 처리 실패: market={}, acptNo={}, type={}",
+                    market, sourceEventId, candidate.eventType());
         }
     }
 

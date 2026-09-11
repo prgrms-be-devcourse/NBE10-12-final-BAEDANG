@@ -407,7 +407,7 @@ Sidecar items carry `direction` (`BUY` · `SELL`) instead of `stage`; circuit br
 }
 ```
 
-**CB blocks new orders; sidecar does not.** A sidecar suspends program trading quotes only, so ordinary orders remain allowed. That enforcement lives in the order path, not here — this endpoint only reports what happened.
+**Planned enforcement:** blocking new orders during a circuit breaker belongs to the order path and ships in a later change (Part 4/#166). Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — it does not gate anything.
 
 ---
 

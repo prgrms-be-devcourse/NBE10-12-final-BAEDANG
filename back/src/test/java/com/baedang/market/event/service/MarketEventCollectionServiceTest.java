@@ -11,6 +11,8 @@ import com.baedang.market.event.repository.MarketEventRepository;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.net.URI;
@@ -20,6 +22,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -162,6 +165,24 @@ class MarketEventCollectionServiceTest {
         verify(persistence).insert(confirmedSecond, NOW.plusSeconds(300));
         assertThat(counterCount("krx.market_event.parse_error", "stage", "calendar")).isEqualTo(1.0);
         assertThat(counterCount("krx.market_event.parse_error", "stage", "fetch")).isZero();
+    }
+
+    /**
+     * DB 장애는 후보 파싱 실패가 아니다. 함께 묶으면 운영에서 "KIND가 죽었나"와 "DB가 죽었나"를
+     * 구별할 수 없고, 후보 단위로 격리해 계속 시도하는 것도 의미가 없다 — 다음 후보도 실패한다.
+     */
+    @Test
+    void database_failure_propagates_and_is_not_tagged_as_parse_error() {
+        MarketEventCandidate candidate = candidate(KrMarket.KOSPI, "20260713000690");
+        when(source.fetchCandidates(KrMarket.KOSPI)).thenReturn(batch(candidate));
+        when(repository.existsBySourceAndSourceEventId(MarketEventSource.KRX_KIND, "20260713000690"))
+                .thenThrow(new DataAccessResourceFailureException("db down"));
+
+        assertThatThrownBy(() -> service.collect())
+                .isInstanceOf(DataAccessException.class);
+
+        assertThat(counterCount("krx.market_event.parse_error", "stage", "fetch")).isZero();
+        verifyNoInteractions(persistence);
     }
 
     @Test

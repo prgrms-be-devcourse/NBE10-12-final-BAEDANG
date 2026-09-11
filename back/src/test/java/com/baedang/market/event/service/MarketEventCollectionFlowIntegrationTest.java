@@ -35,8 +35,10 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
 /**
@@ -85,6 +87,8 @@ class MarketEventCollectionFlowIntegrationTest {
     @MockitoBean MarketSessionProvider marketSessionProvider;
 
     @Autowired MarketEventCollectionService collectionService;
+    @Autowired MarketEventPersistenceService persistenceService;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean MarketEventRepository repositorySpy;
     @Autowired MarketEventRepository repository;
     @Autowired JdbcTemplate jdbc;
     @Autowired PlatformTransactionManager transactionManager;
@@ -128,6 +132,34 @@ class MarketEventCollectionFlowIntegrationTest {
         assertThat(instantOf("received_at")).isEqualTo(RECEIVED_AT);
     }
 
+    /**
+     * 두 인스턴스가 동시에 사전 확인을 통과하는 경합을 재현한다. 사전 확인 두 번을 빗나가게 하고
+     * 실제 INSERT는 그대로 두어, DB 제약 위반이 서비스 경계를 넘어 정상 중복으로 흡수되는지 본다.
+     *
+     * <p>제약 위반 뒤의 재확인만 스텁한다(Spring Data 리포지토리는 인터페이스 프록시라
+     * {@code callRealMethod()}를 쓸 수 없다). 그 행이 실제로 존재하는지는 JDBC로 따로 확인한다.
+     * 이 테스트가 없으면 "중복 분기가 운영에서 실제로 동작하는가"를 아무도 검증하지 않는다.
+     */
+    @Test
+    void duplicate_race_is_absorbed_as_benign_duplicate() {
+        MarketEventCandidate candidate = candidate();
+        ConfirmedMarketEvent confirmed = confirmed();
+        repository.saveAndFlush(entity(candidate, confirmed));
+
+        doReturn(false, false, true)
+                .when(repositorySpy)
+                .existsBySourceAndSourceEventId(any(), any());
+
+        when(source.fetchCandidates(KrMarket.KOSPI)).thenReturn(new KindRssBatch(List.of(candidate), 0));
+        when(source.fetchCandidates(KrMarket.KOSDAQ)).thenReturn(new KindRssBatch(List.of(), 0));
+        when(source.fetchConfirmed(candidate)).thenReturn(Optional.of(confirmed));
+        when(timing.haltUntil(confirmed)).thenReturn(HALT_UNTIL);
+
+        assertThatCode(() -> collectionService.collect()).doesNotThrowAnyException();
+
+        assertThat(storedRowCount()).isEqualTo(1);
+    }
+
     @Test
     void collect_refuses_to_run_inside_an_existing_transaction() {
         TransactionTemplate outer = new TransactionTemplate(transactionManager);
@@ -149,6 +181,21 @@ class MarketEventCollectionFlowIntegrationTest {
         return jdbc.queryForObject(
                 "SELECT " + column + " FROM market_event WHERE source_event_id = ?",
                 java.sql.Timestamp.class, ACPT_NO).toInstant();
+    }
+
+    private com.baedang.market.event.entity.MarketEvent entity(
+            MarketEventCandidate candidate, ConfirmedMarketEvent confirmed) {
+        return com.baedang.market.event.entity.MarketEvent.circuitBreaker(
+                com.baedang.market.event.entity.MarketEventSource.KRX_KIND,
+                candidate.sourceEventId(),
+                candidate.market(),
+                candidate.circuitBreakerStage(),
+                confirmed.triggeredAt(),
+                HALT_UNTIL,
+                confirmed.publishedAt(),
+                confirmed.receivedAt(),
+                candidate.title(),
+                SOURCE_URL);
     }
 
     private MarketEventCandidate candidate() {

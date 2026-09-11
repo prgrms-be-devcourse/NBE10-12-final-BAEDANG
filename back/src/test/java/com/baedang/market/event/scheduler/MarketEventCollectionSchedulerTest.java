@@ -5,6 +5,7 @@ import com.baedang.global.config.TimeConfig;
 import com.baedang.market.event.service.MarketEventCollectionService;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.stock.entity.MarketCountry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -16,6 +17,7 @@ import java.time.ZoneOffset;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -49,6 +51,13 @@ class MarketEventCollectionSchedulerTest {
         taskScheduler.initialize();
         scheduler = new MarketEventCollectionScheduler(
                 collection, sessions, Clock.fixed(NOW, ZoneOffset.UTC), taskScheduler);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (taskScheduler != null) {
+            taskScheduler.shutdown();
+        }
     }
 
     @Test
@@ -124,6 +133,30 @@ class MarketEventCollectionSchedulerTest {
         assertThatCode(() -> scheduler.poll()).doesNotThrowAnyException();
 
         verify(collection, times(2)).collect();
+    }
+
+    /**
+     * 기동 직후 정기 실행이 즉시 겹치면 안 된다. 시작 복구만 즉시 한 번 돌고, 정기 실행은
+     * {@code initialDelay} 이후에 시작해야 한다. 회귀하면 이 창 안에 collect가 이미 호출된다.
+     */
+    @Test
+    void scheduled_polling_does_not_start_immediately() {
+        when(sessions.isOpen(any(), any())).thenReturn(true);
+
+        new ApplicationContextRunner()
+                .withUserConfiguration(TimeConfig.class, SchedulingConfig.class,
+                        MarketEventCollectionScheduler.class)
+                .withBean(MarketEventCollectionService.class, () -> collection)
+                .withBean(MarketSessionProvider.class, () -> sessions)
+                .withPropertyValues(
+                        "krx.market-events.enabled=true",
+                        "krx.market-events.poll-interval=60s")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    // ContextConsumer는 checked 예외를 던질 수 없으므로 parkNanos를 쓴다.
+                    LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(1200));
+                    verifyNoInteractions(collection);
+                });
     }
 
     /** 기본 머지 상태에서는 스케줄러 빈 자체가 없어 호출도 스케줄 등록도 일어나지 않는다. */
