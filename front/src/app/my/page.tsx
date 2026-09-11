@@ -41,7 +41,7 @@ const VALUATION_POLL_INTERVAL_MS = 5000;
 export default function MyPage() {
   const router = useRouter();
   const { isLoggedIn, user, setUser, logout } = useAuth();
-  const { rate } = useExchangeRate();
+  const { rate, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
   const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
@@ -567,7 +567,8 @@ export default function MyPage() {
               })}
             </div>
             <div className="mt-2.5 text-[13px]" style={{ color: "var(--mut2)" }}>
-              해외 종목 평가금액은 적용 환율({formatNumber(rate)} KRW/USD)로 환산돼요
+              {rate === null ? "환율 정보가 없어 해외 종목 현재가를 원화로 환산할 수 없어요" : `해외 종목 현재가는 적용 환율(${formatNumber(rate)} KRW/USD)로 환산돼요`}
+              {rateError && " · 환율 갱신 실패 (정상 수신값이 있으면 유지)"}
             </div>
           </>
         )

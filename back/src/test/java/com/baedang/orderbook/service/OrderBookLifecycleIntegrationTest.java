@@ -65,7 +65,6 @@ import static org.mockito.Mockito.when;
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
         "toss.enabled=false",
-        "trading.orderbook.enabled=true",
         "trading.orderbook.refresh-initial-delay=1h",
         "trading.orderbook.retention-initial-delay=1h",
         "logging.level.org.hibernate.SQL=OFF"
@@ -373,7 +372,6 @@ class OrderBookLifecycleIntegrationTest {
                         "spring.jpa.hibernate.ddl-auto=validate",
                         "spring.sql.init.mode=never",
                         "toss.enabled=false",
-                        "trading.orderbook.enabled=true",
                         "trading.orderbook.refresh-initial-delay=1h",
                         "trading.orderbook.retention-initial-delay=1h",
                         "server.port=0",
@@ -384,18 +382,14 @@ class OrderBookLifecycleIntegrationTest {
                         "--spring.datasource.username=" + postgres.getUsername(),
                         "--spring.datasource.password=" + postgres.getPassword(),
                         "--toss.enabled=false",
-                        "--trading.orderbook.enabled=true",
                         "--trading.orderbook.refresh-initial-delay=1h",
                         "--trading.orderbook.retention-initial-delay=1h"
                 );
     }
 
     @Test
-    void trading_orderbook_enabled_플래그가_false이면_스케줄러_빈이_등록되지_않는다() {
-        new ApplicationContextRunner()
-                .withUserConfiguration(OrderBookRefreshScheduler.class)
-                .withPropertyValues("trading.orderbook.enabled=false")
-                .run(context -> assertThat(context).doesNotHaveBean(OrderBookRefreshScheduler.class));
+    void 활성화_설정_없이_스케줄러가_등록된다() {
+        assertThat(scheduler).isNotNull();
     }
 }
 

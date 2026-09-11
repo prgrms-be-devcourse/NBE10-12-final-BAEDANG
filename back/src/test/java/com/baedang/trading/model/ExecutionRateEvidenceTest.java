@@ -15,12 +15,13 @@ class ExecutionRateEvidenceTest {
     private static final OffsetDateTime AT = OffsetDateTime.parse("2026-09-04T01:00:00Z");
 
     @Test
-    void 환율근거는_미래수신시각과_원본기한_TTL을_검증한다() {
+    void 환율근거는_60초가_지나도_원본유효기간_안이면_사용하고_미래수신은_거절한다() {
         var evidence = ExecutionRateEvidence.from(new ExecutionExchangeRateSnapshot(
                 new BigDecimal("1383.601234"), AT, AT, AT.plusHours(1)));
         assertThat(evidence.isValidAt(AT.minusSeconds(1))).isFalse();
         assertThat(evidence.isValidAt(AT.plusSeconds(59))).isTrue();
-        assertThat(evidence.isValidAt(AT.plusSeconds(60))).isFalse();
+        assertThat(evidence.isValidAt(AT.plusSeconds(60))).isTrue();
+        assertThat(evidence.isValidAt(AT.plusHours(1))).isFalse();
         var shortEvidence = ExecutionRateEvidence.from(new ExecutionExchangeRateSnapshot(
                 new BigDecimal("1383.601234"), AT, AT, AT.plusSeconds(1)));
         assertThat(shortEvidence.isValidAt(AT.plusSeconds(1))).isFalse();

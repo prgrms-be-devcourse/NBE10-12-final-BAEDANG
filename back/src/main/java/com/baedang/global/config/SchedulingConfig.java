@@ -28,7 +28,29 @@ public class SchedulingConfig {
         return scheduler;
     }
 
+    /** 시장가 대기 스레드와 분리된 단일 환율 수집 작업. 호출자 실행으로 우회하지 않습니다. */
+    @Bean(name = "exchangeRateRefreshExecutor")
+    public ThreadPoolTaskExecutor exchangeRateRefreshExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(1);
+        executor.setMaxPoolSize(1);
+        executor.setQueueCapacity(1);
+        executor.setThreadNamePrefix("exchange-rate-refresh-");
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        return executor;
+    }
 
+    /** 체결 환율 갱신이 분봉·랭킹 등 공용 배치의 지연에 영향받지 않도록 분리합니다. */
+    @Bean(name = "exchangeRateTaskScheduler")
+    public ThreadPoolTaskScheduler exchangeRateTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("exchange-rate-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
     /** 체결의 외부 준비/락 대기가 호가 공급이나 만료 처리를 막지 않도록 분리합니다. 항상 실행합니다. */
     @Bean(name = "limitExecutionTaskScheduler")
     public ThreadPoolTaskScheduler limitExecutionTaskScheduler() {

@@ -53,7 +53,8 @@ class ExchangeRateControllerTest {
                 .andExpect(jsonPath("$.quoteCurrency").value("KRW"))
                 .andExpect(jsonPath("$.rate").value("1400"))
                 .andExpect(jsonPath("$.changeAmount").value("2"))
-                .andExpect(jsonPath("$.changeRate").value("0.001431"));
+                .andExpect(jsonPath("$.changeRate").value("0.001431"))
+                .andExpect(jsonPath("$.validFrom").value("2026-08-26T15:00:00+09:00"));
     }
 
     @Test
@@ -96,7 +97,8 @@ class ExchangeRateControllerTest {
                         .param("period", "1d"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items").isArray())
-                .andExpect(jsonPath("$.items[0].rate").value("1398.5"));
+                .andExpect(jsonPath("$.items[0].rate").value("1398.5"))
+                .andExpect(jsonPath("$.items[0].validFrom").value("2026-08-26T06:00:00Z"));
     }
 
     @Test

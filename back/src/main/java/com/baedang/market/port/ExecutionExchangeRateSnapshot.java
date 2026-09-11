@@ -5,15 +5,13 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.global.normalizer.DomainNormalizer;
 
 import java.math.BigDecimal;
-import java.time.Duration;
 import java.time.OffsetDateTime;
 
 import static com.baedang.trading.support.NumericBounds.RATE_LIMIT;
 
-/** 체결용 USD/KRW 환율. 원본 유효기간과 수신 완료 후 TTL을 모두 만족해야 합니다. */
+/** 체결용 USD/KRW 환율. 원본 유효기간과 미래 수신 시각을 검증하며 별도의 캐시 TTL은 없습니다. */
 public record ExecutionExchangeRateSnapshot(BigDecimal rate, OffsetDateTime fetchedAt,
                                             OffsetDateTime validFrom, OffsetDateTime validUntil) {
-    public static final Duration MAX_AGE = Duration.ofSeconds(60);
 
     public ExecutionExchangeRateSnapshot {
         if (rate == null || rate.signum() <= 0 || rate.stripTrailingZeros().scale() > 6
@@ -35,6 +33,6 @@ public record ExecutionExchangeRateSnapshot(BigDecimal rate, OffsetDateTime fetc
 
     public boolean isValidAt(OffsetDateTime at) {
         return at != null && !at.isBefore(fetchedAt) && !at.isBefore(validFrom)
-                && at.isBefore(validUntil) && at.isBefore(fetchedAt.plus(MAX_AGE));
+                && at.isBefore(validUntil);
     }
 }
