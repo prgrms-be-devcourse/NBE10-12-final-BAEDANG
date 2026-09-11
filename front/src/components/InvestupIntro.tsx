@@ -9,7 +9,7 @@
  * 01 Hero      로고 + 태그라인 페이드인 → 위로 이동 → 도트 지구본 등장 (핀 호버 팝업)
  * 02 Steps     3단계 사용법 — 메인 화면("이렇게 사용해요") 섹션과 같은 문구·디자인·효과
  * 03 Compare   제목 슬라이드업 → 분석 카드 등장 → 4행 순차 펼침 / 스크롤 방향에 따라 접힘
- * 04 Zoom      "첫 거래는 오늘, 첫 손실은 0원" → 세로 직선 → 정사각형 확대 → CTA
+ * 04 Zoom      "첫 투자는 오늘, 첫 실수는 0원" → 세로 직선 → 정사각형 확대 → CTA
  */
 
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
@@ -1263,11 +1263,11 @@ export function InvestupIntro({
             }}
           >
             <span ref={wordARef} style={{ display: 'block', flex: '1 1 0', minWidth: 0, textAlign: 'right', opacity: 0 }}>
-              첫 거래는 오늘,
+              첫 투자는 오늘,
             </span>
             <span ref={gapRef} style={{ display: 'block', width: 26, flex: '0 0 auto' }} />
             <span ref={wordBRef} style={{ display: 'block', flex: '1 1 0', minWidth: 0, textAlign: 'left', opacity: 0 }}>
-              첫 손실은 0원
+              첫 실수는 0원
             </span>
           </div>
 
@@ -1324,7 +1324,7 @@ export function InvestupIntro({
                 wordBreak: 'keep-all',
               }}
             >
-              모의 투자금 5,000만원으로 지금 시작해보세요
+              모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요.
             </p>
             <a
               ref={ctaBtnRef}
