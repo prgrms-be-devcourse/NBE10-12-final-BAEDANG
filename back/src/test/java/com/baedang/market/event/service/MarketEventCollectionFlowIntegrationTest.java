@@ -119,6 +119,13 @@ class MarketEventCollectionFlowIntegrationTest {
         assertThat(storedRowCount()).isEqualTo(1);
         assertThat(repository.existsBySourceAndSourceEventId(MarketEventSource.KRX_KIND, ACPT_NO))
                 .isTrue();
+
+        // 저장된 행이 어느 시각을 어느 컬럼에 담았는지 — 발동시각은 상세 공시 값이어야 하고,
+        // 게시시각(pubDate)으로 대체되면 활성 구간 [triggeredAt, haltUntil)이 그대로 틀어진다.
+        assertThat(instantOf("triggered_at")).isEqualTo(TRIGGERED_AT);
+        assertThat(instantOf("halt_until")).isEqualTo(HALT_UNTIL);
+        assertThat(instantOf("published_at")).isEqualTo(PUBLISHED_AT);
+        assertThat(instantOf("received_at")).isEqualTo(RECEIVED_AT);
     }
 
     @Test
@@ -136,6 +143,12 @@ class MarketEventCollectionFlowIntegrationTest {
     private int storedRowCount() {
         return jdbc.queryForObject(
                 "SELECT count(*) FROM market_event WHERE source_event_id = ?", Integer.class, ACPT_NO);
+    }
+
+    private Instant instantOf(String column) {
+        return jdbc.queryForObject(
+                "SELECT " + column + " FROM market_event WHERE source_event_id = ?",
+                java.sql.Timestamp.class, ACPT_NO).toInstant();
     }
 
     private MarketEventCandidate candidate() {

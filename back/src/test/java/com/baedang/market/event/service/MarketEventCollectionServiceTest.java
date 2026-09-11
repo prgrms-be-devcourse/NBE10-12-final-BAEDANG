@@ -134,6 +134,7 @@ class MarketEventCollectionServiceTest {
 
         verifyNoInteractions(persistence);
         verify(timing, never()).haltUntil(any());
+        assertThat(counterCount("krx.market_event.parse_error", "stage", "detail")).isEqualTo(1.0);
     }
 
     /**
