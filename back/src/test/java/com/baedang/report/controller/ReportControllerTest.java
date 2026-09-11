@@ -99,7 +99,8 @@ class ReportControllerTest {
 
     private PersonalityReportResponse sampleReport() {
         return new PersonalityReportResponse(
-                10L, 1, "50000000", "20000000", "33000000", "53000000", "3000000", "0.06",
+                10L, 1, false, OffsetDateTime.parse("2026-08-12T00:00:00Z"),
+                "50000000", "20000000", "33000000", "53000000", "3000000", "0.06",
                 true, "CKSB", "집중·국내·개별주·안정형",
                 new PersonalityReportResponse.Shares("0.6364", "0.6364", "0.6364", "0"),
                 2, 4,

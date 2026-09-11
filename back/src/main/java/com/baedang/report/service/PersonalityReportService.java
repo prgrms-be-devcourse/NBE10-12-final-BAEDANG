@@ -60,6 +60,7 @@ public class PersonalityReportService {
     private final FourWeekCostProfiler costProfiler;
     private final int holdingPeriodWeeks;
     private final int mbtiWindowWeeks;
+    private final int unlockWeeks;
     private final Clock clock;
 
     public PersonalityReportService(AccountValuationService accountValuationService,
@@ -69,6 +70,7 @@ public class PersonalityReportService {
                                     FourWeekCostProfiler costProfiler,
                                     @Value("${report.holding-period-weeks:4}") int holdingPeriodWeeks,
                                     @Value("${report.mbti-window-weeks:4}") int mbtiWindowWeeks,
+                                    @Value("${report.unlock-weeks:4}") int unlockWeeks,
                                     Clock clock) {
         this.accountValuationService = accountValuationService;
         this.stockRepository = stockRepository;
@@ -77,6 +79,7 @@ public class PersonalityReportService {
         this.costProfiler = costProfiler;
         this.holdingPeriodWeeks = holdingPeriodWeeks;
         this.mbtiWindowWeeks = mbtiWindowWeeks;
+        this.unlockWeeks = unlockWeeks;
         this.clock = clock;
     }
 
@@ -84,6 +87,13 @@ public class PersonalityReportService {
         AccountValuation valued = accountValuationService.valuateActiveAccount(userId);
         Account account = valued.account();
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+
+        // 4주 회차 게이트(§6.1): 개설 후 N주를 채워야 리포트가 열린다. 앵커=현재 ACTIVE 계좌
+        // opened_at 이라 리셋(새 계좌) 시 자동 재시작한다. 발급 후에는 열 때마다 재계산한다(freeze 아님).
+        OffsetDateTime unlockAt = account.getOpenedAt().plusWeeks(unlockWeeks);
+        if (now.isBefore(unlockAt)) {
+            return PersonalityReportResponse.locked(account, unlockAt, holdingPeriodWeeks, now);
+        }
 
         BigDecimal stockValue = valued.valuations().stream()
                 .map(HoldingValuation::evalWon)
@@ -104,7 +114,7 @@ public class PersonalityReportService {
         List<LongHeldStock> longHeld = longHeldStocks(account.getAccountId(), valued, stocks, now);
 
         return PersonalityReportResponse.of(
-                account, stockValue, totalAsset, totalPnl, returnRate,
+                account, unlockAt, stockValue, totalAsset, totalPnl, returnRate,
                 profile, holdingPeriodWeeks, longHeld, now);
     }
 

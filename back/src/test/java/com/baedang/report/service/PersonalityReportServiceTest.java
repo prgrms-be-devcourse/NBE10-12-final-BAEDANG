@@ -53,6 +53,7 @@ class PersonalityReportServiceTest {
                 new FourWeekCostProfiler(classifier),
                 4,
                 4,
+                4,
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -124,6 +125,24 @@ class PersonalityReportServiceTest {
         assertThat(r.shares().domestic()).isEqualTo("0.6364");
         assertThat(r.holdingPeriodWeeks()).isEqualTo(4);
         assertThat(r.longHeldStocks()).isEmpty(); // 체결 재생은 원가용이고 성과 섹션은 별도(기본 빈 목록)
+    }
+
+    @Test
+    void 개설_4주_미만이면_리포트가_잠긴다() {
+        when(account.getAccountId()).thenReturn(10L);
+        when(account.getRoundNo()).thenReturn(2);
+        OffsetDateTime openedAt = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC).minusWeeks(1);
+        when(account.getOpenedAt()).thenReturn(openedAt);
+        when(accountValuationService.valuateActiveAccount(1L))
+                .thenReturn(new AccountValuation(account, List.of(), Map.of(), List.of(), null));
+
+        PersonalityReportResponse r = service().getReport(1L);
+
+        assertThat(r.locked()).isTrue();
+        assertThat(r.unlockAt()).isEqualTo(openedAt.plusWeeks(4));
+        assertThat(r.classified()).isFalse();
+        assertThat(r.typeCode()).isNull();
+        assertThat(r.roundNo()).isEqualTo(2);
     }
 
     @Test
