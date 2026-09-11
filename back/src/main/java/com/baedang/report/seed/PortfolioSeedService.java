@@ -222,15 +222,17 @@ public class PortfolioSeedService {
             OffsetDateTime buyAt = staggeredBuyTime(at, now, random);
             holdingRepository.save(Holding.firstBuy(
                     account.getAccountId(), stock.getStockId(), quantity, usdCost, krwCost, buyAt));
-            insertBuyExecution(account.getAccountId(), stock.getStockId(), quantity,
+            // 보유 원가는 정밀(krwCost), 현금 차감은 체결에 저장한 정산액(정수 원 net)으로 — 둘을
+            // 섞으면 cash ≠ initial − Σ체결net 이 된다(소수 원 누적 오차). 체결 net 을 합산해 차감한다.
+            BigDecimal netKrw = insertBuyExecution(account.getAccountId(), stock.getStockId(), quantity,
                     avgBuyPrice, us ? SEED_USD_KRW : BigDecimal.ONE, krwCost, buyAt);
-            spent = spent.add(krwCost);
+            spent = spent.add(netKrw);
             pricedStocks.add(stock.getStockId());
             created++;
         }
 
         if (spent.signum() > 0) {
-            account.debitMarketBuy(spent); // cash_balance = initial − Σ원가 (managed 엔티티, 트랜잭션 커밋 시 flush)
+            account.debitMarketBuy(spent); // cash_balance = initial − Σ체결 net (managed 엔티티, 커밋 시 flush)
         }
         return created;
     }
@@ -242,13 +244,14 @@ public class PortfolioSeedService {
     }
 
     /**
-     * 매수 체결 한 건을 {@code trade_order}(FILLED·MARKET) + {@code trade_execution} 로 직접 적재한다.
-     * 수수료·세금 0이라 {@code net = gross} 라 BUY 정산 규칙({@code net = gross + fee})을 만족한다.
-     * 보유와 어긋나지 않게 같은 단가·수량·환율을 쓰고, 원화 거래대금은 정수 원으로 반올림한다.
+     * 매수 체결 한 건을 {@code trade_order}(FILLED·MARKET) + {@code trade_execution} 로 직접 적재하고
+     * <b>정산액(정수 원 net)</b>을 돌려준다(현금 차감에 합산). 수수료·세금 0이라 {@code net = gross}
+     * 라 BUY 정산 규칙({@code net = gross + fee})을 만족한다. 보유와 어긋나지 않게 같은 단가·수량·
+     * 환율을 쓰고, 원화 거래대금은 정수 원으로 반올림한다.
      */
-    private void insertBuyExecution(long accountId, long stockId, BigDecimal quantity,
-                                    BigDecimal nativePrice, BigDecimal exchangeRate, BigDecimal krwCost,
-                                    OffsetDateTime at) {
+    private BigDecimal insertBuyExecution(long accountId, long stockId, BigDecimal quantity,
+                                          BigDecimal nativePrice, BigDecimal exchangeRate, BigDecimal krwCost,
+                                          OffsetDateTime at) {
         BigDecimal grossKrw = krwCost.setScale(0, RoundingMode.HALF_UP);
         OffsetDateTime ts = at;
         Long orderId = jdbcTemplate.queryForObject("""
@@ -269,6 +272,7 @@ public class PortfolioSeedService {
                 VALUES (?, ?, 1, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?, NULL)
                 """,
                 orderId, UUID.randomUUID(), quantity, nativePrice, exchangeRate, grossKrw, grossKrw, ts, ts);
+        return grossKrw;
     }
 
     /**

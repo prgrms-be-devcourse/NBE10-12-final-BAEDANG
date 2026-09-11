@@ -117,10 +117,14 @@ class PortfolioSeedIntegrationTest {
             // 개설 4주 이전(리포트/리더보드 게이트 통과).
             assertThat(account.getOpenedAt()).isBefore(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC).minusWeeks(4));
 
-            // cash_balance = initial_cash − Σ(보유 원가). 도메인 팩토리가 강제한 불변식.
-            BigDecimal cost = holdings.findByAccountIdAndQuantityGreaterThan(account.getAccountId(), BigDecimal.ZERO)
-                    .stream().map(Holding::getKrwPurchaseAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-            assertThat(account.getCashBalance()).isEqualByComparingTo(INITIAL_CASH.subtract(cost));
+            // cash_balance = initial_cash − Σ(체결 정산액 net). 현금은 체결에 저장한 정수 원 net 을
+            // 합산해 차감한다(보유 원가는 정밀 유지 → 소수 원 누적 오차로 현금과 어긋나지 않게).
+            BigDecimal net = jdbc.queryForObject("""
+                    SELECT COALESCE(sum(e.net_amount_krw), 0) FROM trade_execution e
+                    JOIN trade_order o ON o.order_id = e.order_id
+                    WHERE o.account_id = ?
+                    """, BigDecimal.class, account.getAccountId());
+            assertThat(account.getCashBalance()).isEqualByComparingTo(INITIAL_CASH.subtract(net));
             assertThat(account.getCashBalance()).isGreaterThanOrEqualTo(BigDecimal.ZERO);
         }
 
