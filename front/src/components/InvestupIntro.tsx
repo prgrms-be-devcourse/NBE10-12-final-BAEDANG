@@ -12,7 +12,7 @@
  * 04 Zoom      "첫 거래는 오늘, 첫 손실은 0원" → 세로 직선 → 정사각형 확대 → CTA
  */
 
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import {
   T,
   TIMING,
@@ -29,6 +29,10 @@ import {
 import { Reveal } from './Reveal';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
+
+// 분석 중 문구("N가지 확인 중…")가 1→2→...→CMP.length로 한 단계씩 오르는 간격.
+// 정확히 CMP.length 걸음으로 나눠 분석 소요 시간(2400ms)에 딱 맞춘다.
+const CMP_STEP_MS = 2400 / CMP.length;
 
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
 type CmpState = { phase: 0 | 1 | 2; val: number; open: boolean };
@@ -113,32 +117,42 @@ export function InvestupIntro({
     };
   }, []);
 
-  const startCmp = () => {
+  // 분석 중 문구("N가지 확인 중…")의 N — 0.12~0.46 사이를 130ms마다 무작위로
+  // 오가던 예전 방식은 숫자가 계속 들쭉날쭉 튀어서 산만했다. 대신 실제 비교
+  // 항목 수(CMP.length)만큼 1→2→3→4로 차분하게 한 단계씩만 올라가게 했다 —
+  // 정확히 CMP.length 걸음으로 나눠 딱 완료 시점(2400ms)에 맞춰 끝난다.
+  // useCallback으로 감싸 참조가 안정적으로 유지되게 했다 — 프레임 루프
+  // effect(아래, deps: [])가 이 함수들을 호출하므로 exhaustive-deps 규칙을
+  // 만족시키려면 안정적인 참조가 필요하다.
+  const startCmp = useCallback(() => {
     const timers = cmpTimers.current;
     window.clearInterval(timers.tick);
     window.clearTimeout(timers.done);
-    setCmp({ phase: 1, val: 0.41, open: true });
-    timers.tick = window.setInterval(
-      () => setCmp((s) => ({ ...s, val: 0.12 + Math.random() * 0.34 })),
-      130,
-    );
+    let step = 1;
+    setCmp({ phase: 1, val: step / CMP.length, open: true });
+    timers.tick = window.setInterval(() => {
+      step = Math.min(CMP.length, step + 1);
+      setCmp((s) => ({ ...s, val: step / CMP.length }));
+      if (step >= CMP.length) window.clearInterval(timers.tick);
+    }, CMP_STEP_MS);
     timers.done = window.setTimeout(() => {
       window.clearInterval(timers.tick);
       setCmp((s) => ({ ...s, phase: 2 }));
     }, 2400);
-  };
+  }, []);
 
-  const collapseCmp = (collapse: boolean) => {
+  const collapseCmp = useCallback((collapse: boolean) => {
     const timers = cmpTimers.current;
     window.clearInterval(timers.idle);
     setCmp((s) => ({ ...s, open: !collapse }));
     if (collapse) {
-      timers.idle = window.setInterval(
-        () => setCmp((s) => ({ ...s, val: 0.12 + Math.random() * 0.34 })),
-        150,
-      );
+      let step = 0;
+      timers.idle = window.setInterval(() => {
+        step = (step % CMP.length) + 1;
+        setCmp((s) => ({ ...s, val: step / CMP.length }));
+      }, CMP_STEP_MS);
     }
-  };
+  }, []);
 
   /* ── 프레임 루프: 지구본 페인트 + 스크롤 구동 ── */
   useEffect(() => {
@@ -427,7 +441,9 @@ export function InvestupIntro({
       window.removeEventListener('resize', onScroll);
       document.removeEventListener('visibilitychange', onScroll);
     };
-  }, []);
+    // startCmp/collapseCmp는 useCallback(..., [])로 참조가 고정돼 있어
+    // 여기 추가해도 이 effect는 여전히 마운트 시 한 번만 실행된다.
+  }, [startCmp, collapseCmp]);
 
   /* ── 지구본 마우스 인터랙션 ────────────────── */
   const onGlobeMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -926,7 +942,11 @@ export function InvestupIntro({
                     textWrap: 'pretty' as never,
                   }}
                 >
-                  {cmpOpen ? '4가지가 다릅니다' : `${Math.max(1, Math.round(cmp.val * 12))}개 항목 비교`}
+                  {/* "N개 항목 비교"는 표현이 밋밋하고 숫자도 들쭉날쭉 튀어 산만했다.
+                      완료 문구("4가지가 다릅니다")와 같은 "가지" 단위로 맞추고,
+                      숫자도 위 startCmp에서 1→2→3→4로 차분히 오르게 바꿨다. 바로 위
+                      eyebrow가 이미 "차이점 분석 중…"이라 "차이점"을 또 넣지 않았다. */}
+                  {cmpOpen ? '4가지가 다릅니다' : `${Math.max(1, Math.round(cmp.val * CMP.length))}가지 확인 중…`}
                 </span>
                 <span
                   style={{
