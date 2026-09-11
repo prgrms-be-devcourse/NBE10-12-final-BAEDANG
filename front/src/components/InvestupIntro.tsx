@@ -7,16 +7,16 @@
  * 그대로다 — 로직·수치·마크업을 임의로 바꾸지 않았다.
  *
  * 01 Hero      로고 + 태그라인 페이드인 → 위로 이동 → 도트 지구본 등장 (핀 호버 팝업)
- * 02 Practices 3가지 실천 카드
+ * 02 Steps     3단계 사용법 — 메인 화면("이렇게 사용해요") 섹션과 같은 문구·디자인·효과
  * 03 Compare   제목 슬라이드업 → 분석 카드 등장 → 4행 순차 펼침 / 스크롤 방향에 따라 접힘
  * 04 Zoom      "첫 거래는 오늘, 첫 손실은 0원" → 세로 직선 → 정사각형 확대 → CTA
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   T,
   TIMING,
-  PRACTICES,
+  STEPS,
   CMP,
   CMP_SKELETON_W,
   GLOBE_DOTS,
@@ -24,6 +24,8 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
+import { Reveal } from './Reveal';
+import { TiltCard } from './TiltCard';
 import './investup-intro.css';
 
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
@@ -714,7 +716,7 @@ export function InvestupIntro({
         </a>
       </section>
 
-      {/* ══ 02 Practices ═════════════════════════ */}
+      {/* ══ 02 Steps (메인 화면 "이렇게 사용해요" 섹션과 동일한 문구·디자인·효과) ══ */}
       <section
         id="practices"
         style={{
@@ -723,72 +725,59 @@ export function InvestupIntro({
           background: T.practicesBg,
         }}
       >
-        <p
-          style={{
-            margin: '0 0 18px',
-            fontSize: 13,
-            fontWeight: 500,
-            letterSpacing: '.22em',
-            textTransform: 'uppercase',
-            color: T.eyebrowInk,
-          }}
-        >
-          three practices
-        </p>
-        <h2
-          style={{
-            margin: '0 0 clamp(40px, 6vh, 72px)',
-            fontSize: 'clamp(30px, 4.4vw, 58px)',
-            fontWeight: 700,
-            letterSpacing: '-.035em',
-            lineHeight: 1.25,
-            color: T.sectionHeadInk,
-            maxWidth: '16em',
-            wordBreak: 'keep-all',
-            textWrap: 'pretty' as never,
-          }}
-        >
-          투자를 배우는 가장 안전한 방법, 세 가지 실천
-        </h2>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))',
-            gap: 'clamp(16px, 2vw, 28px)',
-          }}
-        >
-          {PRACTICES.map((c) => (
-            <article
-              key={c.n}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 14,
-                padding: 'clamp(24px, 2.6vw, 40px)',
-                borderRadius: 26,
-                background: T.cardBg,
-                border: `1px solid ${T.cardLine}`,
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 500, color: T.cardNumInk }}>{c.n}</span>
-              <h3
+        <Reveal delay={0} duration={1}>
+          <h2
+            style={{
+              margin: '0 0 8px',
+              textAlign: 'center',
+              fontSize: 28,
+              fontWeight: 800,
+              color: T.sectionHeadInk,
+            }}
+          >
+            이렇게 사용해요
+          </h2>
+          <p
+            style={{
+              margin: '0 0 clamp(40px, 6vh, 56px)',
+              textAlign: 'center',
+              fontSize: 15,
+              color: T.eyebrowInk,
+            }}
+          >
+            가입부터 첫 거래까지 3단계
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(16px, 2vw, 28px)' }}>
+            {STEPS.map((s) => (
+              <TiltCard
+                key={s.step}
                 style={{
-                  margin: 0,
-                  fontSize: 'clamp(21px, 1.9vw, 27px)',
-                  fontWeight: 700,
-                  letterSpacing: '-.03em',
-                  color: T.cardTitleInk,
-                  wordBreak: 'keep-all',
+                  flex: '1 1 260px',
+                  borderRadius: 20,
+                  padding: 'clamp(24px, 2.6vw, 40px)',
+                  textAlign: 'center',
+                  // 라이트 모드 전용 화면이라 메인 화면 STEP 카드의 라이트 모드 배경값을
+                  // 그대로 쓴다(page.tsx의 theme === "light" 분기와 동일).
+                  background:
+                    'radial-gradient(120% 120% at 50% 50%, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, #ffffff 100%)',
                 }}
               >
-                {c.title}
-              </h3>
-              <p style={{ margin: 0, fontSize: 16, lineHeight: 1.65, color: T.cardBodyInk, wordBreak: 'keep-all' }}>
-                {c.body}
-              </p>
-            </article>
-          ))}
-        </div>
+                <span style={{ display: 'inline-block', fontSize: 12, fontWeight: 800, color: T.cardNumInk }}>
+                  {s.step}
+                </span>
+                <h4 style={{ margin: '8px 0', fontSize: 16, fontWeight: 700, color: T.sectionHeadInk }}>{s.title}</h4>
+                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: T.eyebrowInk }}>
+                  {s.desc.map((line, i) => (
+                    <Fragment key={line}>
+                      {i > 0 && <br />}
+                      {line}
+                    </Fragment>
+                  ))}
+                </p>
+              </TiltCard>
+            ))}
+          </div>
+        </Reveal>
       </section>
 
       {/* ══ 03 Compare ═══════════════════════════ */}
