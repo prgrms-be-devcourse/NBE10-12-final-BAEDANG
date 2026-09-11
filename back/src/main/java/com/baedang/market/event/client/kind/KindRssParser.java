@@ -149,7 +149,7 @@ public class KindRssParser {
         }
     }
 
-    private Classification classifyTitle(String rawTitle, KrMarket feedMarket) {
+    static Classification classifyTitle(String rawTitle, KrMarket feedMarket) {
         if (rawTitle == null || rawTitle.isBlank()) {
             return null;
         }
@@ -201,7 +201,7 @@ public class KindRssParser {
         return nodes.item(0).getTextContent();
     }
 
-    private record Classification(
+    record Classification(
             MarketEventType eventType,
             Integer stage,
             SidecarDirection direction,

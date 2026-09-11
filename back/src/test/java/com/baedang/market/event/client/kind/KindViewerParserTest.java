@@ -30,6 +30,15 @@ class KindViewerParserTest {
     }
 
     @Test
+    void rejects_external_document_from_untrusted_viewer_uri() {
+        URI viewerUri = URI.create(
+                "https://evil.example/common/disclsviewer.do?method=search&acptNo=20260713000658");
+
+        assertThatThrownBy(() -> parser.externalDetailUri(viewerUri, fixture("viewer-cb.html")))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
     void rejects_two_external_links() {
         String html = """
                 <html><body>

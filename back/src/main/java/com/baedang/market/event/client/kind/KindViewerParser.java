@@ -5,9 +5,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -30,9 +28,10 @@ public class KindViewerParser {
             throw new IllegalArgumentException("html must not be blank");
         }
 
-        String expectedAcptNo = extractViewerAcptNo(viewerUri);
+        URI validatedViewerUri = uriPolicy.viewer(viewerUri);
+        String expectedAcptNo = extractViewerAcptNo(validatedViewerUri);
 
-        Document document = Jsoup.parse(html, viewerUri.toString());
+        Document document = Jsoup.parse(html, validatedViewerUri.toString());
         Set<String> externalLinks = new LinkedHashSet<>();
 
         for (Element element : document.select("iframe[src], frame[src], a[href]")) {

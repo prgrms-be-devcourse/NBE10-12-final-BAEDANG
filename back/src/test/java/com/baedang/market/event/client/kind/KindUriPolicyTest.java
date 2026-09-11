@@ -36,14 +36,17 @@ class KindUriPolicyTest {
     }
 
     @Test
-    void viewer_uri_accepts_valid_14_digit_acpt_no() {
+    void viewer_uri_accepts_only_approved_query_shapes() {
         URI uri = policy.viewer("20260713000658");
         assertThat(uri.toString()).isEqualTo(
                 "https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptNo=20260713000658");
+        assertThat(policy.viewer(URI.create(
+                "/common/disclsviewer.do?method=search&acptNo=20260713000658")))
+                .isEqualTo(uri);
 
-        URI parsed = policy.viewer(URI.create(
-                "https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptNo=20260713000658"));
-        assertThat(parsed).isEqualTo(uri);
+        URI searchInitInfo = URI.create("https://kind.krx.co.kr/common/disclsviewer.do"
+                + "?method=searchInitInfo&acptNo=20260713000658&docno=1");
+        assertThat(policy.viewer(searchInitInfo)).isEqualTo(searchInitInfo);
     }
 
     @ParameterizedTest
@@ -74,6 +77,14 @@ class KindUriPolicyTest {
 
         assertThatThrownBy(() -> policy.viewer(URI.create(
                 "http://kind.krx.co.kr/common/disclsviewer.do?method=search&acptNo=20260713000658")))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> policy.viewer(URI.create(
+                "https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptNo=20260713000658&extra=1")))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        assertThatThrownBy(() -> policy.viewer(URI.create(
+                "https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptNo=20260713000658#fragment")))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

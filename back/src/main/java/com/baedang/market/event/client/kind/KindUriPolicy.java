@@ -11,8 +11,8 @@ import java.util.regex.Pattern;
 public class KindUriPolicy {
 
     private static final Pattern ACPT_NO_PATTERN = Pattern.compile("^\\d{14}$");
-    private static final Pattern VIEWER_QUERY_PATTERN = Pattern.compile("(?:^|&)method=search(?:&|$)");
-    private static final Pattern VIEWER_ACPT_PATTERN = Pattern.compile("(?:^|&)acptNo=(\\d{14})(?:&|$)");
+    private static final Pattern VIEWER_QUERY_PATTERN = Pattern.compile(
+            "^(?:method=search&acptNo=\\d{14}|method=searchInitInfo&acptNo=\\d{14}&docno=1)$");
     private static final Pattern EXTERNAL_PATH_PATTERN =
             Pattern.compile("^/external/\\d{4}/\\d{2}/\\d{2}/\\d{6}/\\d{14}/\\d{5}\\.htm$");
 
@@ -52,7 +52,7 @@ public class KindUriPolicy {
             throw new IllegalArgumentException("viewer path가 올바르지 않습니다: " + resolved.getPath());
         }
         String query = resolved.getRawQuery();
-        if (query == null || !VIEWER_QUERY_PATTERN.matcher(query).find() || !VIEWER_ACPT_PATTERN.matcher(query).find()) {
+        if (query == null || !VIEWER_QUERY_PATTERN.matcher(query).matches()) {
             throw new IllegalArgumentException("viewer query 파라미터가 올바르지 않습니다: " + query);
         }
         if (resolved.getFragment() != null) {

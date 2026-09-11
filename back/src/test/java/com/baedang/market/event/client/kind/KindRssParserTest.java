@@ -123,6 +123,28 @@ class KindRssParserTest {
     }
 
     @Test
+    void invalid_pub_date_is_isolated_as_an_item_error() {
+        KindRssBatch result = parser.parse(
+                KrMarket.KOSPI,
+                createXml(
+                        "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
+                        "not-an-rfc-1123-date"));
+
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.parseErrorCount()).isEqualTo(1);
+    }
+
+    @Test
+    void title_over_300_characters_is_isolated_as_an_item_error() {
+        String title = "유가증권시장 매매거래 일시중단(1단계 CB 발동)" + "\u00a0".repeat(301);
+
+        KindRssBatch result = parser.parse(KrMarket.KOSPI, createXmlWithTitle(title));
+
+        assertThat(result.candidates()).isEmpty();
+        assertThat(result.parseErrorCount()).isEqualTo(1);
+    }
+
+    @Test
     void more_than_100_items_is_rejected() {
         StringBuilder items = new StringBuilder();
         for (int i = 0; i < 101; i++) {
@@ -150,6 +172,10 @@ class KindRssParserTest {
     }
 
     private String createXmlWithTitle(String title) {
+        return createXml(title, "Mon, 13 Jul 2026 13:29:00 +0900");
+    }
+
+    private String createXml(String title, String pubDate) {
         return """
                 <?xml version="1.0" encoding="UTF-8"?>
                 <rss version="2.0">
@@ -159,11 +185,11 @@ class KindRssParserTest {
                     <item>
                       <title>%s</title>
                       <link>https://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptNo=20260713000658</link>
-                      <pubDate>Mon, 13 Jul 2026 13:29:00 +0900</pubDate>
+                      <pubDate>%s</pubDate>
                     </item>
                   </channel>
                 </rss>
-                """.formatted(title);
+                """.formatted(title, pubDate);
     }
 
     private String fixture(String name) {

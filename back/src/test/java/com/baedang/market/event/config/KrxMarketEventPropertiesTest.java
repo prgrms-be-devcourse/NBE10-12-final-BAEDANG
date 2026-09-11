@@ -1,8 +1,11 @@
 package com.baedang.market.event.config;
 
+import com.baedang.market.event.client.kind.KindHttpClient;
+import com.baedang.market.event.port.MarketEventSourcePort;
 import com.baedang.global.config.TimeConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.web.client.RestClient;
 import java.net.URI;
 import java.time.Duration;
 
@@ -23,6 +26,23 @@ class KrxMarketEventPropertiesTest {
             assertThat(p.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
             assertThat(p.readTimeout()).isEqualTo(Duration.ofSeconds(5));
         });
+    }
+
+    @Test
+    void external_call_beans_follow_the_enabled_flag() {
+        contextRunner.run(context -> {
+            assertThat(context).doesNotHaveBean(RestClient.class);
+            assertThat(context).doesNotHaveBean(KindHttpClient.class);
+            assertThat(context).doesNotHaveBean(MarketEventSourcePort.class);
+        });
+
+        contextRunner
+                .withPropertyValues("krx.market-events.enabled=true")
+                .run(context -> {
+                    assertThat(context).hasBean("kindRestClient");
+                    assertThat(context).hasSingleBean(KindHttpClient.class);
+                    assertThat(context).hasSingleBean(MarketEventSourcePort.class);
+                });
     }
 
     @Test

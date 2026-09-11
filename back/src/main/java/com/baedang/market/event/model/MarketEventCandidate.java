@@ -21,6 +21,7 @@ public record MarketEventCandidate(
     public MarketEventCandidate {
         Objects.requireNonNull(market, "market must not be null");
         Objects.requireNonNull(sourceEventId, "sourceEventId must not be null");
+        Objects.requireNonNull(eventType, "eventType must not be null");
         Objects.requireNonNull(title, "title must not be null");
         if (title.isBlank() || title.length() > 300) {
             throw new IllegalArgumentException("title must be nonblank and at most 300 characters");

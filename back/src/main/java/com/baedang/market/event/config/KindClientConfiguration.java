@@ -7,6 +7,7 @@ import com.baedang.market.event.client.kind.KindRssParser;
 import com.baedang.market.event.client.kind.KindUriPolicy;
 import com.baedang.market.event.client.kind.KindViewerParser;
 import com.baedang.market.event.port.MarketEventSourcePort;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -14,8 +15,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
-import java.time.Clock;
 import java.net.http.HttpClient;
+import java.time.Clock;
 
 @Configuration(proxyBeanMethods = false)
 @EnableConfigurationProperties(KrxMarketEventProperties.class)
@@ -28,17 +29,22 @@ public class KindClientConfiguration {
 
     @Bean
     @ConditionalOnProperty(prefix = "krx.market-events", name = "enabled", havingValue = "true")
-    public KindHttpClient kindHttpClient(KrxMarketEventProperties properties) {
+    public RestClient kindRestClient(KrxMarketEventProperties properties) {
         HttpClient httpClient = HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .build();
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
         factory.setReadTimeout(properties.readTimeout());
-        RestClient restClient = RestClient.builder()
+        return RestClient.builder()
                 .baseUrl(properties.baseUrl().toString())
                 .requestFactory(factory)
                 .build();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "krx.market-events", name = "enabled", havingValue = "true")
+    public KindHttpClient kindHttpClient(@Qualifier("kindRestClient") RestClient restClient) {
         return new KindHttpClient(restClient);
     }
 
