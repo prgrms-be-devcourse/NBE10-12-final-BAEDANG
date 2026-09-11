@@ -909,11 +909,11 @@ export function InvestupIntro({
                     'radial-gradient(120% 120% at 50% 50%, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, #ffffff 100%)',
                 }}
               >
-                <span style={{ display: 'inline-block', fontSize: 12, fontWeight: 800, color: T.cardNumInk }}>
+                <span style={{ display: 'inline-block', fontSize: 13, fontWeight: 800, color: T.cardNumInk }}>
                   {s.step}
                 </span>
-                <h4 style={{ margin: '8px 0', fontSize: 16, fontWeight: 700, color: T.sectionHeadInk }}>{s.title}</h4>
-                <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: T.eyebrowInk }}>
+                <h4 style={{ margin: '8px 0', fontSize: 18, fontWeight: 700, color: T.sectionHeadInk }}>{s.title}</h4>
+                <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: T.eyebrowInk }}>
                   {s.desc.map((line, i) => (
                     <Fragment key={line}>
                       {i > 0 && <br />}
