@@ -827,7 +827,7 @@ export function InvestupIntro({
             color: T.eyebrowInk,
           }}
         >
-          three steps
+          get started
         </p>
         <h2
           style={{
