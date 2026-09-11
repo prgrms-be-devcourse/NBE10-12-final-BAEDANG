@@ -35,8 +35,11 @@ export function Nav() {
       className="relative z-[2] mb-6 flex w-full items-center gap-1.5 px-8 py-3"
       style={{ background: transparentHeader ? "transparent" : "var(--headerBg)" }}
     >
+      {/* 서비스 소개 화면("/intro")으로 보낸다 — 홈("/")은 첫 방문자만 자동으로
+          그리로 리다이렉트되므로(proxy.ts), 로고 클릭은 그 화면을 다시 보고 싶을 때
+          누구나 언제든 갈 수 있는 통로다. */}
       <Link
-        href="/"
+        href="/intro"
         className="mr-1.5 whitespace-nowrap text-[16px] font-extrabold"
         style={{ color: "var(--headerLogo)" }}
       >
