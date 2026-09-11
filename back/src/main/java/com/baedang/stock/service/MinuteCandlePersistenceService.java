@@ -35,10 +35,8 @@ public class MinuteCandlePersistenceService {
                     Instant at = candle.candleAt().toInstant();
                     LocalDate date = at.atZone(country.zoneId()).toLocalDate();
                     MarketCalendarDay day = calendars.computeIfAbsent(date, value -> tradingDays.calendar(country, value));
-                    // Bar timestamps are opening instants: a bar at close belongs to extended hours.
-                    return day.isOpen() && day.regularOpenAt() != null && day.regularCloseAt() != null
-                            && !at.isBefore(day.regularOpenAt().toInstant())
-                            && at.isBefore(day.regularCloseAt().toInstant());
+                    // 봉 시각은 시작 시각이므로 마감 시각에 시작하는 봉은 장외에 속한다.
+                    return day.isRegularSessionAt(at);
                 })
                 .map(candle -> new MinuteCandle(
                         stockId,

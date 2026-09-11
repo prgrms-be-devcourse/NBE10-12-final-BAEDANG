@@ -9,7 +9,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
 
-/** Exchange-local dates; session boundaries always come from the shared calendar port. */
+/** 거래소 현지 거래일을 사용하며 정규장 경계는 공통 캘린더 포트로 확인한다. */
 @Component
 public class MarketTradingDayPolicy {
     private final MarketCalendarPort calendars;
@@ -21,19 +21,14 @@ public class MarketTradingDayPolicy {
     public MarketCalendarDay calendar(MarketCountry country, LocalDate date) {
         MarketCalendarDay day = country == MarketCountry.KR
                 ? calendars.fetchKrMarketCalendar(date) : calendars.fetchUsMarketCalendar(date);
-        if (day == null || day.marketCountry() != country || !date.equals(day.tradeDate())) {
-            throw new IllegalStateException("Market calendar date mismatch");
-        }
-        return day;
+        return MarketCalendarDay.requireMatching(day, country, date);
     }
 
-    /** Closing prints at exactly regularCloseAt are valid observations, but not an open session. */
+    /** 정확히 regularCloseAt에 관측된 시세는 허용하지만 해당 시각에 시장이 열려 있다는 뜻은 아니다. */
     public Optional<LocalDate> quoteTradeDate(MarketCountry country, Instant at) {
         LocalDate date = at.atZone(country.zoneId()).toLocalDate();
         MarketCalendarDay day = calendar(country, date);
-        return day.isOpen() && day.regularOpenAt() != null && day.regularCloseAt() != null
-                && !at.isBefore(day.regularOpenAt().toInstant())
-                && !at.isAfter(day.regularCloseAt().toInstant())
+        return day.acceptsRegularQuoteAt(at)
                 ? Optional.of(date) : Optional.empty();
     }
 

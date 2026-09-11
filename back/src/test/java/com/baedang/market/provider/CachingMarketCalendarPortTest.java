@@ -134,6 +134,19 @@ class CachingMarketCalendarPortTest {
         assertThat(cache.entryCount()).isZero();
     }
 
+    @Test
+    void mismatchedCountryAndDateAreNotCached() {
+        when(delegate.fetchKrMarketCalendar(DATE))
+                .thenReturn(openDay(MarketCountry.US, DATE))
+                .thenReturn(openDay(MarketCountry.KR, DATE.plusDays(1)))
+                .thenReturn(openDay(MarketCountry.KR, DATE));
+        assertThatThrownBy(() -> cache.fetchKrMarketCalendar(DATE)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> cache.fetchKrMarketCalendar(DATE)).isInstanceOf(IllegalStateException.class);
+        assertThat(cache.entryCount()).isZero();
+        assertThat(cache.fetchKrMarketCalendar(DATE).tradeDate()).isEqualTo(DATE);
+        verify(delegate, times(3)).fetchKrMarketCalendar(DATE);
+    }
+
     private MarketCalendarDay openDay(MarketCountry marketCountry, LocalDate tradeDate) {
         OffsetDateTime openAt = tradeDate.atStartOfDay().atOffset(ZoneOffset.UTC);
         return new MarketCalendarDay(

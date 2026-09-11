@@ -1,9 +1,9 @@
 package com.baedang.market.provider;
 
 import com.baedang.market.port.MarketCalendarDay;
-import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.market.service.MarketTradingDayPolicy;
 import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Component;
 
@@ -28,34 +28,18 @@ import java.time.LocalDate;
 @Component
 public class MarketSessionProviderBridge implements MarketSessionProvider {
 
-    private final MarketCalendarPort marketCalendarPort;
+    private final MarketTradingDayPolicy tradingDays;
 
-    public MarketSessionProviderBridge(MarketCalendarPort marketCalendarPort) {
-        this.marketCalendarPort = marketCalendarPort;
+    public MarketSessionProviderBridge(MarketTradingDayPolicy tradingDays) {
+        this.tradingDays = tradingDays;
     }
 
     @Override
     public MarketSessionStatus currentSession(MarketCountry marketCountry, Instant now) {
         LocalDate today = now.atZone(marketCountry.zoneId()).toLocalDate();
-        return statusOf(marketCountry == MarketCountry.KR ? krCalendar(today) : usCalendar(today), now);
-    }
-
-    private MarketCalendarDay krCalendar(LocalDate date) {
-        return marketCalendarPort.fetchKrMarketCalendar(date);
-    }
-
-    private MarketCalendarDay usCalendar(LocalDate date) {
-        return marketCalendarPort.fetchUsMarketCalendar(date);
-    }
-
-    private MarketSessionStatus statusOf(MarketCalendarDay day, Instant now) {
-        if (!day.isOpen() || day.regularOpenAt() == null || day.regularCloseAt() == null) {
-            return MarketSessionStatus.closed();
-        }
-        Instant openAt = day.regularOpenAt().toInstant();
-        Instant closeAt = day.regularCloseAt().toInstant();
-        return !now.isBefore(openAt) && now.isBefore(closeAt)
-                ? new MarketSessionStatus(true, closeAt)
+        MarketCalendarDay day = tradingDays.calendar(marketCountry, today);
+        return day.isRegularSessionAt(now)
+                ? new MarketSessionStatus(true, day.regularCloseAt().toInstant())
                 : MarketSessionStatus.closed();
     }
 }

@@ -161,7 +161,7 @@ class MarketStatusServiceTest {
     }
 
     private MarketStatusService service(Instant now) {
-        return new MarketStatusService(new CachingMarketCalendarPort(port), Clock.fixed(now, ZoneOffset.UTC));
+        return new MarketStatusService(new MarketTradingDayPolicy(new CachingMarketCalendarPort(port)), Clock.fixed(now, ZoneOffset.UTC));
     }
 
     private static Instant at(int y, int mo, int d, int h, int mi) {

@@ -1,7 +1,6 @@
 package com.baedang.market.service;
 
 import com.baedang.market.port.MarketCalendarDay;
-import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.stock.entity.MarketCountry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +8,6 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.DayOfWeek;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Optional;
@@ -20,13 +18,12 @@ public class LatestCompletedTradingDayResolver {
 
     private static final Logger log = LoggerFactory.getLogger(LatestCompletedTradingDayResolver.class);
     private static final int MAX_LOOKBACK_DAYS = 14;
-    private static final Duration FINALIZATION_DELAY = Duration.ofMinutes(10);
 
-    private final MarketCalendarPort marketCalendarPort;
+    private final MarketTradingDayPolicy tradingDays;
     private final Clock clock;
 
-    public LatestCompletedTradingDayResolver(MarketCalendarPort marketCalendarPort, Clock clock) {
-        this.marketCalendarPort = marketCalendarPort;
+    public LatestCompletedTradingDayResolver(MarketTradingDayPolicy tradingDays, Clock clock) {
+        this.tradingDays = tradingDays;
         this.clock = clock;
     }
 
@@ -40,7 +37,7 @@ public class LatestCompletedTradingDayResolver {
         if (!isWeekend(today)) {
             Optional<MarketCalendarDay> todayCalendar = fetchValidated(marketCountry, today);
             if (todayCalendar.isEmpty()) return Optional.empty();
-            if (isFinalized(todayCalendar.get(), now)) return Optional.of(today);
+            if (todayCalendar.get().isFinalizedAt(now)) return Optional.of(today);
         }
 
         for (int daysAgo = 1; daysAgo <= MAX_LOOKBACK_DAYS; daysAgo++) {
@@ -66,7 +63,7 @@ public class LatestCompletedTradingDayResolver {
     ) {
         MarketCalendarDay calendarDay;
         try {
-            calendarDay = fetch(marketCountry, date);
+            calendarDay = tradingDays.calendar(marketCountry, date);
         } catch (Exception exception) {
             log.warn(
                     "[trading-day] 시장 캘린더 조회 실패: market={} candidate={} reason={}",
@@ -77,38 +74,7 @@ public class LatestCompletedTradingDayResolver {
             return Optional.empty();
         }
 
-        if (!isMatchingResponse(marketCountry, date, calendarDay)) {
-            log.warn(
-                    "[trading-day] 시장 캘린더 응답 불일치: market={} candidate={}",
-                    marketCountry,
-                    date
-            );
-            return Optional.empty();
-        }
         return Optional.of(calendarDay);
-    }
-
-    private boolean isFinalized(MarketCalendarDay calendarDay, Instant now) {
-        return calendarDay.isOpen()
-                && calendarDay.regularCloseAt() != null
-                && !now.isBefore(calendarDay.regularCloseAt().toInstant().plus(FINALIZATION_DELAY));
-    }
-
-    private MarketCalendarDay fetch(MarketCountry marketCountry, LocalDate date) {
-        return switch (marketCountry) {
-            case KR -> marketCalendarPort.fetchKrMarketCalendar(date);
-            case US -> marketCalendarPort.fetchUsMarketCalendar(date);
-        };
-    }
-
-    private boolean isMatchingResponse(
-            MarketCountry marketCountry,
-            LocalDate candidate,
-            MarketCalendarDay calendarDay
-    ) {
-        return calendarDay != null
-                && calendarDay.marketCountry() == marketCountry
-                && candidate.equals(calendarDay.tradeDate());
     }
 
     private boolean isWeekend(LocalDate date) {

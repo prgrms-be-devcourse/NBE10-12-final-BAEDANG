@@ -1,9 +1,8 @@
 package com.baedang.market.service;
 
-import com.baedang.market.dto.MarketStatusResponse.Market;
 import com.baedang.market.dto.MarketStatusResponse;
+import com.baedang.market.dto.MarketStatusResponse.Market;
 import com.baedang.market.port.MarketCalendarDay;
-import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Service;
 
@@ -26,11 +25,11 @@ public class MarketStatusService {
     /** 연휴가 아무리 길어도 이 안에 다음 거래일이 있다. 무한 루프·Port 폭주 안전장치. */
     private static final int MAX_SCAN_DAYS = 14;
 
-    private final MarketCalendarPort marketCalendarPort;
+    private final MarketTradingDayPolicy tradingDays;
     private final Clock clock;
 
-    public MarketStatusService(MarketCalendarPort marketCalendarPort, Clock clock) {
-        this.marketCalendarPort = marketCalendarPort;
+    public MarketStatusService(MarketTradingDayPolicy tradingDays, Clock clock) {
+        this.tradingDays = tradingDays;
         this.clock = clock;
     }
 
@@ -56,7 +55,7 @@ public class MarketStatusService {
 
     private MarketCalendarDay activeOpenDay(MarketCountry country, LocalDate today, Instant now) {
         MarketCalendarDay day = dayFor(country, today);
-        return isNowWithin(day, now) ? day : null;
+        return day.isRegularSessionAt(now) ? day : null;
     }
 
     /**
@@ -75,21 +74,7 @@ public class MarketStatusService {
         return null;
     }
 
-    private boolean isNowWithin(MarketCalendarDay day, Instant now) {
-        if (!day.isOpen() || day.regularOpenAt() == null || day.regularCloseAt() == null) {
-            return false;
-        }
-        Instant openAt = day.regularOpenAt().toInstant();
-        Instant closeAt = day.regularCloseAt().toInstant();
-        return !now.isBefore(openAt) && now.isBefore(closeAt);
-    }
-
     private MarketCalendarDay dayFor(MarketCountry country, LocalDate date) {
-        MarketCalendarDay day = country == MarketCountry.KR
-                ? marketCalendarPort.fetchKrMarketCalendar(date) : marketCalendarPort.fetchUsMarketCalendar(date);
-        if (day == null || day.marketCountry() != country || !date.equals(day.tradeDate())) {
-            throw new IllegalStateException("Market calendar date mismatch");
-        }
-        return day;
+        return tradingDays.calendar(country, date);
     }
 }
