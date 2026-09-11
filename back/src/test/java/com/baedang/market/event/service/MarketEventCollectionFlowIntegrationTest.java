@@ -9,6 +9,7 @@ import com.baedang.market.event.model.MarketEventCandidate;
 import com.baedang.market.event.port.MarketEventSourcePort;
 import com.baedang.market.event.repository.MarketEventRepository;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketSessionProvider;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -74,6 +75,14 @@ class MarketEventCollectionFlowIntegrationTest {
     @MockitoBean MarketCalendarPort marketCalendarPort;
     @MockitoBean MarketEventSourcePort source;
     @MockitoBean MarketEventTimingPolicy timing;
+
+    /**
+     * 이 컨텍스트는 {@code krx.market-events.enabled=true}라 스케줄러 빈이 함께 등록된다.
+     * 장이 닫힌 것으로 고정해 스케줄러가 이 테스트의 명시적 {@code collect()}와 경합하지 않게 한다.
+     * (스텁하지 않은 mock의 {@code isOpen}은 false를 돌려준다 — 캘린더가 null이라 NPE로 우연히
+     * 건너뛰는 것에 기대지 않는다.)
+     */
+    @MockitoBean MarketSessionProvider marketSessionProvider;
 
     @Autowired MarketEventCollectionService collectionService;
     @Autowired MarketEventRepository repository;
