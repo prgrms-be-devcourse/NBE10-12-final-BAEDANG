@@ -4,6 +4,7 @@ import com.baedang.market.dto.MarketStatusResponse;
 import com.baedang.market.dto.MarketStatusResponse.Market;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.provider.CachingMarketCalendarPort;
 import com.baedang.stock.entity.MarketCountry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -88,7 +89,7 @@ class MarketStatusServiceTest {
     }
 
     @Test
-    @DisplayName("US 자정 교차 — 자정 이후에도 전날 세션이 열려 있으면 open=true (전날 lookback)")
+    @DisplayName("US 자정 교차 — 자정 이후에도 전날 세션이 열려 있으면 open=true (거래소 현지 날짜)")
     void usOpenAfterMidnight() {
         Market us = us(at(2026, 8, 12, 2, 0)); // 수 02:00 KST — 전날(화) 22:30~오늘 05:00 세션 중
 
@@ -160,7 +161,7 @@ class MarketStatusServiceTest {
     }
 
     private MarketStatusService service(Instant now) {
-        return new MarketStatusService(port, Clock.fixed(now, ZoneOffset.UTC));
+        return new MarketStatusService(new MarketTradingDayPolicy(new CachingMarketCalendarPort(port)), Clock.fixed(now, ZoneOffset.UTC));
     }
 
     private static Instant at(int y, int mo, int d, int h, int mi) {

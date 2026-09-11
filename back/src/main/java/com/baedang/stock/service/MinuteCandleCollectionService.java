@@ -111,6 +111,6 @@ public class MinuteCandleCollectionService {
     private void collectOne(Stock stock) {
         List<Candle> candles = marketDataPort.fetchCandles(stock.getSymbol(), CandleInterval.ONE_MINUTE, FETCH_COUNT);
         CandleCurrencyValidator.validate(stock, candles);
-        persistenceService.upsert(stock.getStockId(), candles);
+        persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), candles);
     }
 }

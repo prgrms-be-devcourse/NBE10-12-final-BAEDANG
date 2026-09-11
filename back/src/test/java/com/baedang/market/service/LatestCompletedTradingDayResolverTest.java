@@ -101,7 +101,7 @@ class LatestCompletedTradingDayResolverTest {
 
     private LatestCompletedTradingDayResolver resolverAt(String instant) {
         Clock clock = Clock.fixed(Instant.parse(instant), ZoneOffset.UTC);
-        return new LatestCompletedTradingDayResolver(marketCalendarPort, clock);
+        return new LatestCompletedTradingDayResolver(new MarketTradingDayPolicy(marketCalendarPort), clock);
     }
 
     private MarketCalendarDay openCalendar(

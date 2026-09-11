@@ -103,7 +103,7 @@ GET /api/v1/candles?symbol=005930&interval=1d&count=200
      └ KR 15:40 / US 05:10 · 100 calls per market · ~20s
         ↓ store closePrice
 daily_candle.close_price          today's close finalized
-        ↓ copy right before the next session opens (KR 08:50 KST / US 09:00 ET)
+        ↓ match the exact previous trading day of the displayed quote
 quote_snapshot.prev_close
         ↓ together with last_price refreshed every 5s
 change rate = (last_price − prev_close) / prev_close
@@ -112,10 +112,10 @@ shown on rankings · detail · my page
 ```
 
 > **The Toss current-price response has no change rate.** It only has `symbol · timestamp · lastPrice · currency`, so the prior close must be sourced separately and computed directly. The source of that prior close is `daily_candle`, copied into `quote_snapshot` to avoid joins.
-> **Note the copy time is "right before the next session opens", not "right after close".** Copying right after close would make `prev_close = last_price`, showing 0% change throughout the off-hours.
+> The reference belongs to the displayed quote trade date. After Friday close, retain Friday close versus Thursday close; switch the reference to Friday only when a Monday quote arrives.
 
 > 📌 **Collection scope** — top **KR 100 + US 100 = 200 stocks**. The rankings API `count` max is 100, so **1 call per market completes the universe**. Selection: `duration=1w`, refreshed **every Monday KR 08:00 · US 21:00** (right before each market's open).
-> **Handled only in memory cache** — `market_calendar` (session hours), current FX (1-min TTL). No reason to accumulate history.
+> **Handled only in memory cache** — `market_calendar` (session hours). FX is shared through the database, not a memory cache.
 > **When adding features later** — `wiki_term` (finance term wiki), `index_candle` (index daily candles — for benchmark return comparison).
 
 ---
@@ -133,13 +133,13 @@ Which endpoint fills which column, and how often — **this table is the collect
 | `POST /oauth2/token` | AUTH · 5 TPS                   | once just before expiry | No DB storage. **Token must be memory-cached** — issuing on every request gets you rate-limited. |
 | `GET /api/v1/stocks/all` | STOCK_ALL · **1 TPS**          | **every Monday 07:00** | **Full stock list per market.** Returns in one shot without pagination (NASDAQ ~2,800 rows, 30KB gzipped). Calling each of the 7 `market`s (KOSPI·KOSDAQ·NYSE·NASDAQ·AMEX·KR_ETC·US_ETC) gives **all symbols in 7 calls**. Filters fit our design: `commonShare=true` (excl. preferred), `status=ACTIVE` (excl. delisted), `securityType` (STOCK·ETF·ETN·REIT…). |
 | `GET /api/v1/stocks` | STOCK · 5 TPS                  | every Monday 07:00 | `stock` detail — name·currency·ISIN·`security_type`·`is_common_share`·`leverage_factor`·shares outstanding·list date, plus suspension/liquidation flags from `koreanMarketDetail`. Send the `/stocks/all` symbols **in batches of 200** — 8,500 stocks ≈ 43 calls, ~9s. |
-| `GET /api/v1/rankings` | RANKING · 5 TPS                | universe: Mon KR 08:00 · US 21:00 / screen rankings: 30s TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, `prev_close` for newly included (`price.basePrice`). **100 per market, so 1 call each for KR·US completes it.** `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. On weekends there may be no aggregation — **keep last week's universe if empty**. |
+| `GET /api/v1/rankings` | RANKING · 5 TPS                | universe: Mon KR 08:00 · US 21:00 / screen rankings: 30s TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, membership only; ranking prices do not initialize quotes. **100 per market, so 1 call each for KR·US completes it.** `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. On weekends there may be no aggregation — **keep last week's universe if empty**. |
 | `GET /api/v1/prices` | MARKET_DATA · **15 TPS shared** | **5s target** during regular sessions | Ranked + active-limit-order stocks only, up to 200 per call. Others on demand. Background 8 TPS; final shared limiter retained. Preserve prior close and price limits. |
 | `GET /api/v1/price-limits` | MARKET_DATA · 15 TPS           | once before session opens | `quote_snapshot.upper_limit`, `lower_limit`. **Set from prior close and fixed all day**, so no realtime polling needed. Single-item call: 100 KR stocks = 100 calls, ~7s. **US stocks have no price limits → NULL.** |
-| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | KR 15:40~17:10 / US-local 16:10~17:10, retry every 30m | `daily_candle`. Each retry skips stocks already stored for the expected date and fetches only missing rows. A response counts as success only when its candle date matches the calendar date. The finalized `close_price` is copied to `quote_snapshot.prev_close` before the next session. Convert `timestamp` to a KST date. |
+| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | KR 15:40~17:10 / America/New_York 16:10~17:10; 30m retries + startup recovery | Store exchange-local dates. New writes accept only candles finalized by regular close + 10m at request start; legacy chart history remains visible and requires refetching before reference use. |
 | `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **20 TPS** | **top 100: every minute, sequential 20-stock groups** / other stocks: detail-page on-demand | `minute_candle`. Top-100 calls are scheduled during each regular session. Off-hours or foreign-market stocks call on demand and reuse the last 60 seconds of cached rows. 5m/10m candles are served from continuous aggregates derived from this table (`candle_5m`, `candle_10m`). Week 2 adds limit-order fill determination. |
 | `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS                  | **not used in week 1** · 08:00 batch if needed | `stock.is_warned`. Reports liquidation·short-term overheating·investment warning/risk·VI. **Single-item call** — 100 stocks = 100 calls, ~20s. **Not in the confirmed schedule** — the rankings API's `excludeInvestmentCaution=true` already filters most of it. |
-| `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS            | history: **every hour on the hour** / current: 1-min TTL cache | **Two separate paths.** Chart history is stored to `exchange_rate` hourly (24 calls/day); the current rate used for execution comes from a **1-min TTL memory cache**. Store the response `validFrom` as `rate_at` with `ON CONFLICT DO NOTHING` — **weekend duplicates filtered automatically**. |
+| `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS | every minute | Store original `validFrom`/`validUntil` and receipt time in DB for display and execution. Upsert the same pair/start time only with a newer observation. Market-order preparation may refresh missing/expired FX once; no FX memory cache. |
 | `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS            | app startup + once daily | **Memory cache is enough** (`V1__init.sql` lists `market_calendar` as optional if history is wanted). Used in three places — **① order-time validation**, **② quote scheduler on/off**, **③ screen "realtime/close" label**. **Never hardcode** because of DST·exam days·ad-hoc holidays. |
 | `wss://openapi-ws/ws/v1` | 100 subs / 2 connections       | **week-2 improvement** | **Realtime fill & order-book WebSocket.** 100 subs per connection, 2 connections per account → **KR 100 + US 100 = exactly 200 stocks**. Adopting it removes polling for true realtime. Requires reconnect/resubscribe, 60s PING, full-replace subscription management, and frames are **LOSSY** so loss must be tolerated. **Week 1 uses polling.** |
 | `POST /api/v1/orders` etc. | —                              | not used | **Never call order APIs** — they'd place real orders on a real account. Pin the external market-data client's callable paths to a whitelist (currently `TossSecuritiesClient`). |
@@ -167,18 +167,17 @@ Which endpoint fills which column, and how often — **this table is the collect
 | Time (KST) | Cadence | Task                                                                                                                                                                                                                                       |
 |---|---|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Mon **07:00** | weekly | **① Full stock-master refresh** — `/stocks/all` × 7 markets → all symbols, `/stocks` in batches of 200 → detail. New listings/delistings reflected here. ~50 calls, 15s.                                                                   |
-| Mon **08:00** | weekly | **② KR top-100 by trading amount — 1 Toss call.** `/rankings?market=KR&duration=1w&count=100` → update `is_ranked`, `rank_no`, `trading_amount` · `prev_close`·daily backfill for newly included · **keep last week's universe if empty**. |
+| Mon **08:00** | weekly | **② KR top-100 by trading amount — 1 Toss call.** `/rankings?market=KR&duration=1w&count=100` → update `is_ranked`, `rank_no`, `trading_amount` · **keep last week's universe if empty**. |
 | Mon **08:10** | weekly | **KR top-100 financial data update — 4 annual + 4 quarterly calls per stock.** Industry is queried only if missing or older than 30 days / 30d (max 800 / 900 calls). Sequential processing with per-stock exception isolation. 3 TPS before 2026-09-10 KST / 18 TPS from 2026-09-10 KST. |
 | Mon **21:00** | weekly | **③ US top-100 by trading amount — 1 Toss call.** Same as KR. 1.5h before the US open (22:30), so first quote collection starts on the fresh universe.                                                                                     |
-| **08:50** | daily | KR `prev_close` ← prior `daily_candle.close_price` (10 min before open). Fetch price limits too. Not in the confirmed list but required for change rate (explained below).                                                                 |
+| 5s after startup; then 1m | fixed delay | Recover missing KR/US closes and references on a dedicated scheduler; retry failures. |
 | KR regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, up to 200 per request. |
 | 09:00 ~ 15:30 | 1m | KR top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group.                                                                                                                         |
 | **15:40 ~ 17:10** | 30m | KR daily-candle retries — starts 10 min after calendar close, including delayed-close days; skips stocks already stored for the date.                                                                                                      |
-| **09:00 ET** * | daily | US `prev_close` refresh — 30 min before regular open. 22:00 KST during DST, 23:00 KST during standard time.                                                                                                                                |
 | US regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, calendar-based session times. |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute-candle collection — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group.                                                                                                                         |
-| **US-local 16:10 ~ 17:10** * | 30m | US daily-candle retries — 05:10~06:10 KST in DST, 06:10~07:10 in standard time; skips stocks already stored for the date.                                                                                                                  |
-| every hour on the hour | hourly | **FX storage** — 24 calls/day. Runs on weekends/holidays too (dupes blocked by UNIQUE).                                                                                                                                                    |
+| **America/New_York 16:10 ~ 17:10** * | 30m | US daily-candle retries — 05:10~06:10 KST in DST, 06:10~07:10 in standard time; skips stocks already stored for the date.                                                                                                                  |
+| every minute | 1 minute | FX storage — 1,440 scheduled calls/day, shared MARKET_INFO limit, including closed days. |
 | other times | — | **Quote collection stopped.** Reads still work but show prior close; orders rejected.                                                                                                                                                      |
 
 > ⚠️ Current-price background submissions default to 8 TPS; the Toss client enforces the shared MARKET_DATA 15 TPS ceiling including other callers. Sweep intervals are targets, not freshness guarantees. Trading still checks source `quote_at`.
@@ -186,7 +185,7 @@ Which endpoint fills which column, and how often — **this table is the collect
 
 > 📌 **Why `prev_close` refresh is in the list**
 > The Toss current-price response has no change rate (only `symbol·timestamp·lastPrice·currency`). The prior close must be sourced and computed: `(last_price − prev_close) / prev_close`.
-> The copy time must be **"right before the next session opens", not "right after close"** — copying right after close makes `prev_close = last_price`, showing 0% change all off-hours. **Keep daily-candle storage (15:40) and the prev_close copy (next day 08:50) separate.**
+> The reference belongs to the displayed quote trade date. After Friday close, retain Friday close versus Thursday close; switch the reference to Friday only when a Monday quote arrives.
 
 > **Not in the scheduler — handled on-demand**
 > · Off-hours minute candles — `/candles?interval=1m` on detail-page entry + 60s cache. Top-100 minute collection is already in the MVP scheduler; week 2 adds limit-order fill determination.
@@ -408,24 +407,25 @@ Internal `stock_id` is the canonical identifier; external symbols are separated 
 |---|---|---|
 | `stock_id` | BIGINT PK/FK | one row per stock, so PK is also FK (1:1). |
 | `last_price` | NUMERIC(19,4) | current price (stock currency). Toss sends **strings — always parse to BigDecimal**. double would drift the balance. |
-| `prev_close` | NUMERIC(19,4) | **prior close.** Toss current-price has no change rate, so compute `(last_price − prev_close)/prev_close`. **Copied from the prior `daily_candle.close_price`** (KR 08:50 / US 22:00, right before next open). Fallback: copy `last_price` if daily collection failed (the closing value is the close); newly included stocks initialize from the rankings `price.basePrice`. **Why "right before next open", not "right after close"** — refreshing right after close makes `prev_close = last_price`, showing 0% change all off-hours. |
+| `prev_close` | NUMERIC(19,4) | Verified daily close for the exact trading day immediately before the quote's exchange-local date derived from `quote_at`; recorded in `prev_close_date`. Missing verification returns null change, never a last-price or undated ranking fallback. |
+| `prev_close_date` | DATE | Reference trading day. Derive the quote trading day from quote_at and MarketCountry.zoneId(). Legacy rows retain a null date until refetched. |
 | `upper_limit` `lower_limit` | NUMERIC(19,4) | price limits. **Set from prior close and fixed all day — fetch once before open.** Used in order-price validation. |
 | `currency` | VARCHAR(3) | price currency. Duplicated from `stock` for join-free quote reads. |
-| `quote_at` | TIMESTAMPTZ | **the quote timestamp Toss reports.** Two uses — the "12:36:59" label, and **order freshness validation** (reject as `STALE_QUOTE` if >15s old). |
+| `quote_at` | TIMESTAMPTZ | **the Toss quote timestamp, or calendar regular close for a recovered finalized daily close.** Two uses — the "12:36:59" label, and **order freshness validation** (reject as `STALE_QUOTE` if >15s old). |
 | `collected_at` | TIMESTAMPTZ | when we collected it. Gap from `quote_at` monitors collection-latency. |
 
 #### `daily_candle` — daily candles
-Two purposes — **the daily chart** and **the `prev_close` source**. Collected right after close to finalize the day's candle; that `close_price` is copied to `quote_snapshot.prev_close` before the next session, becoming the change-rate baseline. Daily and minute candles are stored in **TimescaleDB** so both chart time series use the same retention and time-based query model. 200 stocks × 250 trading days = **50k rows/year, ~3MB**, so the daily hypertable remains small even while the minute hypertable grows.
+Preserve existing daily history in charts and weekly aggregates. New ingestion filters unfinished rows. Reference recovery must refetch Toss candles; an existing DB row is not evidence of reference verification.
 
 | Column | Type | Description |
 |---|---|---|
-| `stock_id` + `trade_date` | composite PK | one row per stock×trading day. The response `timestamp` is a time — **convert to a KST date**. Slicing in UTC shifts US stocks by a day. |
+| `stock_id` + `trade_date` | composite PK | Stock × exchange-local trading day. Convert the bar-opening timestamp using `MarketCountry.zoneId()`. |
 | `open_price` | NUMERIC(19,4) | open. |
 | `high_price` `low_price` | NUMERIC(19,4) | high/low. Draw the candle wicks. |
 | `close_price` | NUMERIC(19,4) | close. Copied to the next trading day's `prev_close` — the change-rate denominator. |
 | `volume` | NUMERIC(20,0) | volume. Bars at the chart bottom. |
 
-> ⚠️ **Decide the adjusted-price setting now.** Splits/bonus issues retro-adjust past prices. Agree on Toss's `adjusted` param and **pin it**. The current on-demand backfill makes one external call for the latest 200 candles when detail or any daily-chart range is first opened; later range switches reuse the database. On later requests, it refreshes 200 rows only when the stored latest candle predates the latest finalized trading day (regular close plus 10 minutes), and does not repeat a successful request for the same finalized day during the same process. A stock with no stored history returns at most 200 candles for 1Y, while scheduled or other stored history can raise the response to 250. **Weekly/monthly candles aren't provided by the API** — only `1m`·`1d`; aggregate them from this table.
+> ⚠️ **Adjusted candles are pinned to `adjusted=true` in the Toss adapter.** Splits and corporate actions can revise historical prices; references use these adjusted daily closes. The current on-demand backfill makes one external call for the latest 200 candles when detail or any daily-chart range is first opened; later range switches reuse the database. On later requests, it refreshes 200 rows only when the stored latest candle predates the latest finalized trading day (regular close plus 10 minutes), and does not repeat a successful request for the same finalized day during the same process. A stock with no stored history returns at most 200 candles for 1Y, while scheduled or other stored history can raise the response to 250. **Weekly/monthly candles aren't provided by the API** — only `1m`·`1d`; aggregate them from this table.
 
 #### `minute_candle` — minute time-series
 **Top-100 stocks are collected once per minute.** The collector uses the separate `MARKET_DATA_CHART` 20 TPS group and sequential 20-stock groups, then stores the received candles in this table. Off-universe and off-hours detail pages call `/candles?interval=1m` on demand and serve from the DB for the next 60s — **the table doubles as storage and cache**.
@@ -446,18 +446,19 @@ Two purposes — **the daily chart** and **the `prev_close` source**. Collected 
 > ⚠️ **Use TimescaleDB for both daily and minute candles.** Its `continuous aggregate` can derive 5m/15m candles from 1m as views without adding tables. Keep daily candles sourced from the API with `adjusted=true`; do not derive adjusted daily history from minute data. Also: **hyper-tables can't be referenced by FKs from other tables**, compression/continuous aggregates are **TSL-licensed**, and managed DBs (AWS RDS) mostly don't support them — affects deployment.
 
 #### `exchange_rate` — FX history (regular table)
-**A regular append-only table, not a TimescaleDB hypertable.** Quotes are UPDATEd in `quote_snapshot` (no history), but FX must be plotted, so it is stored per point. No FK links to other tables — **the FX the ledger needs is "that moment's value", not a reference**. Correcting FX later must never shake past fills.
+**A regular observation-history table, not a TimescaleDB hypertable.** Quotes are UPDATEd in `quote_snapshot` (no history), but FX must be plotted, so it is stored per source start time; a newer receipt may update the same point. No FK links to other tables — **the FX the ledger needs is "that moment's value", not a reference**. Correcting FX later must never shake past fills.
 
 | Column | Type | Description |
 |---|---|---|
-| `exchange_rate_id` | BIGINT PK | surrogate key. Actual identity is the `(base_currency, quote_currency, rate_at)` unique. |
+| `exchange_rate_id` | BIGINT PK | surrogate key. Actual identity is the `(base_currency, quote_currency, valid_from)` unique. |
 | `base_currency` `quote_currency` | VARCHAR(3) | the pair. MVP has only USD → KRW, but keeping columns means no schema change if more currencies arrive. |
 | `rate` | NUMERIC(19,6) | **buy rate** — what you actually pay when buying dollars. The gap from `mid_rate` is the conversion spread, itself a cost of trading — educational material in the same vein as fee/tax. |
 | `mid_rate` | NUMERIC(19,6) | **interbank mid rate** — what people usually mean by "the exchange rate". Used for chart display and valuation conversion. |
-| `rate_at` | TIMESTAMPTZ | the rate's point in time — **the response `validFrom` verbatim**. Toss refreshes per minute and gives a `validFrom~validUntil` window. Queried at 10:03:27, the rate's moment is 10:03:00 — the chart's X-axis must use this. |
-| `collected_at` | TIMESTAMPTZ | when we received it. Gap from `rate_at` shows collection latency. |
+| `valid_from` | TIMESTAMPTZ | the rate's point in time — **the response `validFrom` verbatim**. Toss refreshes per minute and gives a `validFrom~validUntil` window. Queried at 10:03:27, the rate's moment is 10:03:00 — the chart's X-axis must use this. |
+| `collected_at` | TIMESTAMPTZ | when we received it. Gap from `valid_from` shows collection latency. |
+| `valid_until` | TIMESTAMPTZ | NOT NULL, exclusive validity end. New collection uses the source value; pre-V9 development history uses a valid_from + 1 second correction. |
 
-> **Collection: every hour on the hour (confirmed).** FX moves only 0.3–0.5%/day, so per-minute is noise. Hourly storage lets you aggregate daily/weekly/monthly charts all from here. Conversely, storing only daily would leave no data when "hourly view" is asked later. **Run on weekends/holidays too** — Toss keeps returning the same `validFrom`, blocked by the `UNIQUE (base_currency, quote_currency, rate_at)`. With `ON CONFLICT DO NOTHING` the scheduler needs no weekend logic. Real volume is ~**6,000 rows/year**, weekdays mostly. **Skipping an hour is fine** — one missing point on the chart; don't retry, wait for the next hour. Alert only on consecutive failures.
+> **Collection: every minute.** Display and execution share DB observations. `valid_from` maps to API `validFrom` and the chart X-axis; execution validates `[valid_from, valid_until)` and rejects future receipt timestamps. No separate 60-second TTL. Only market-order preparation may refresh missing/expired DB FX once before financial locking; quotes and limit workers remain DB-only. Collection retries on the next scheduled run; missing/expired FX rejects or defers US orders/fills. V9 preserves development history using valid_from + 1 second, explicitly not the original source validity. Recent corrected rows may remain usable until that one-second window ends; migration does not wait for expiry. All rows then require NOT NULL. Newer receipts update the same source start time, without changing previous executions or ledgers.
 
 #### `stock_external_id` — per-source symbol mapping
 Toss calls 삼성전자 `005930`; future sources may use another identifier such as DART's `00126380`. **Creating it now means adding/swapping sources never touches domain code.** Nearly free now; retrofitting means touching everything later.
@@ -650,3 +651,11 @@ V4 is already reserved by develop and V5 by the financial-information PR. Coordi
 
 ---
 > Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V8__market_event.sql`
+
+## Regular-session trading dates and references (#173)
+
+Use `America/New_York` for US market dates and `Asia/Seoul` for KR. Trade dates are exchange-local date labels; actual order/ledger instants remain UTC in storage and may display in KST. Daily/weekly API KST-midnight values encode date labels.
+
+Change ratios compare the displayed quote's trade date with the exact preceding trading day's finalized close. Missing verification yields null reference/change. Rankings cannot initialize quotes using aggregation timestamps, and the last sampled price is never a closing-price fallback. Holidays and midnight do not advance a quote's reference.
+
+Recovery runs 5s after startup and every 1m fixed delay thereafter. Today's daily candle is excluded if the request began before regular close + 10m. Empty responses or missing expected dates are not cached as completed refreshes. V10 adds only `quote_snapshot.prev_close_date`. Existing daily history remains visible in charts and weekly aggregates, without claiming retrospective verification. Missing or mismatched references are fetched again even when daily rows exist. Minute bars are also filtered by regular-session opening timestamps.

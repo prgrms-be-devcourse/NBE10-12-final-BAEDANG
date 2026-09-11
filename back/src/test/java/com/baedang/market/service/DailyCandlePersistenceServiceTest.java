@@ -5,19 +5,25 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.repository.DailyCandleBatchRepository;
+import com.baedang.stock.entity.MarketCountry;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,6 +37,14 @@ class DailyCandlePersistenceServiceTest {
     @Mock
     DailyCandleBatchRepository repository;
 
+    @Mock LatestCompletedTradingDayResolver resolver;
+    @Mock Clock clock;
+    @BeforeEach
+    void setUp() {
+        Mockito.lenient().when(resolver.resolve(any(), any())).thenReturn(Optional.of(LocalDate.of(2026, 9, 15)));
+        Mockito.lenient().when(clock.instant()).thenReturn(Instant.parse("2026-09-15T22:00:00Z"));
+    }
+
     @InjectMocks
     DailyCandlePersistenceService service;
 
@@ -40,7 +54,7 @@ class DailyCandlePersistenceServiceTest {
         // UTC 2026-08-28 06:00:00 = KST 2026-08-28 15:00:00
         OffsetDateTime utcTime = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
 
-        service.upsert(1L, "KRW", List.of(candle(utcTime, "KRW")));
+        service.upsert(1L, "KRW", MarketCountry.KR, List.of(candle(utcTime, "KRW")), Instant.parse("2026-09-15T22:00:00Z"));
 
         ArgumentCaptor<List<DailyCandle>> captor = ArgumentCaptor.captor();
         verify(repository).upsertAll(captor.capture());
@@ -49,12 +63,12 @@ class DailyCandlePersistenceServiceTest {
     }
 
     @Test
-    @DisplayName("미국 종목도 KST 기준 날짜로 변환한다")
-    void 미국종목_KST_기준_일자_변환() {
+    @DisplayName("미국 종목은 America/New_York 거래일로 변환한다")
+    void 미국종목_거래소현지_기준_일자_변환() {
         // 미국 일봉 timestamp 계약은 봉 시작 시각이다. 09:30 ET는 같은 날 22:30 KST다.
         OffsetDateTime usCandleStart = OffsetDateTime.parse("2026-08-27T09:30:00-04:00");
 
-        service.upsert(1L, "USD", List.of(candle(usCandleStart, "USD")));
+        service.upsert(1L, "USD", MarketCountry.US, List.of(candle(usCandleStart, "USD")), Instant.parse("2026-09-15T22:00:00Z"));
 
         ArgumentCaptor<List<DailyCandle>> captor = ArgumentCaptor.captor();
         verify(repository).upsertAll(captor.capture());
@@ -67,7 +81,7 @@ class DailyCandlePersistenceServiceTest {
     void 통화_불일치_캔들은_예외를_던진다() {
         Candle usdCandle = candle(OffsetDateTime.now(), "USD");
 
-        assertThatThrownBy(() -> service.upsert(1L, "KRW", List.of(usdCandle)))
+        assertThatThrownBy(() -> service.upsert(1L, "KRW", MarketCountry.KR, List.of(usdCandle), Instant.parse("2026-09-15T22:00:00Z")))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
@@ -78,7 +92,7 @@ class DailyCandlePersistenceServiceTest {
     @Test
     @DisplayName("빈 캔들 목록은 저장을 호출하지 않는다")
     void 빈_캔들_목록은_저장을_스킵한다() {
-        service.upsert(1L, "KRW", List.of());
+        service.upsert(1L, "KRW", MarketCountry.KR, List.of(), Instant.parse("2026-09-15T22:00:00Z"));
 
         verify(repository, never()).upsertAll(any());
     }
@@ -90,7 +104,7 @@ class DailyCandlePersistenceServiceTest {
                 OffsetDateTime.now(), BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, null);
 
-        assertThatThrownBy(() -> service.upsert(1L, "KRW", List.of(nullCurrency)))
+        assertThatThrownBy(() -> service.upsert(1L, "KRW", MarketCountry.KR, List.of(nullCurrency), Instant.parse("2026-09-15T22:00:00Z")))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
@@ -103,7 +117,7 @@ class DailyCandlePersistenceServiceTest {
                 OffsetDateTime.now(), new BigDecimal("100"), new BigDecimal("90"),
                 new BigDecimal("80"), new BigDecimal("95"), BigDecimal.ONE, "KRW");
 
-        assertThatThrownBy(() -> service.upsert(1L, "KRW", List.of(invalid)))
+        assertThatThrownBy(() -> service.upsert(1L, "KRW", MarketCountry.KR, List.of(invalid), Instant.parse("2026-09-15T22:00:00Z")))
                 .isInstanceOf(BusinessException.class)
                 .extracting(error -> ((BusinessException) error).getErrorCode())
                 .isEqualTo(ErrorCode.TOSS_API_ERROR);
@@ -117,7 +131,7 @@ class DailyCandlePersistenceServiceTest {
                 OffsetDateTime.now(), BigDecimal.ONE, BigDecimal.ONE,
                 BigDecimal.ONE, BigDecimal.ONE, new BigDecimal("-1"), "KRW");
 
-        assertThatThrownBy(() -> service.upsert(1L, "KRW", List.of(invalid)))
+        assertThatThrownBy(() -> service.upsert(1L, "KRW", MarketCountry.KR, List.of(invalid), Instant.parse("2026-09-15T22:00:00Z")))
                 .isInstanceOf(BusinessException.class)
                 .extracting(error -> ((BusinessException) error).getErrorCode())
                 .isEqualTo(ErrorCode.TOSS_API_ERROR);
@@ -130,7 +144,7 @@ class DailyCandlePersistenceServiceTest {
         OffsetDateTime at = OffsetDateTime.of(2026, 8, 28, 6, 0, 0, 0, ZoneOffset.UTC);
 
         assertThatThrownBy(() -> service.upsert(
-                1L, "KRW", List.of(candle(at, "KRW"), candle(at.plusHours(1), "KRW"))))
+                1L, "KRW", MarketCountry.KR, List.of(candle(at, "KRW"), candle(at.plusHours(1), "KRW")), Instant.parse("2026-09-15T22:00:00Z")))
                 .isInstanceOf(BusinessException.class)
                 .extracting(error -> ((BusinessException) error).getErrorCode())
                 .isEqualTo(ErrorCode.TOSS_API_ERROR);

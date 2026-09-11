@@ -36,6 +36,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -311,7 +312,7 @@ class AuthLifecycleIntegrationTest {
         assertThat(new BigDecimal(ledgerRow.get("amount").toString()))
                 .isEqualByComparingTo(new BigDecimal("50000000"));
         assertThat(ledgerRow.get("order_id")).isNull();
-        OffsetDateTime occurredAt = ((java.sql.Timestamp) ledgerRow.get("occurred_at"))
+        OffsetDateTime occurredAt = ((Timestamp) ledgerRow.get("occurred_at"))
                 .toInstant().atOffset(ZoneOffset.UTC);
         assertThat(occurredAt).isEqualTo(NOW.atOffset(ZoneOffset.UTC));
     }

@@ -23,7 +23,7 @@ public class QuoteRealtimePolicy {
     public boolean isRealtime(MarketCountry marketCountry, QuoteSnapshot quote) {
         if (quote == null || quote.getQuoteAt() == null) return false;
 
-        Instant now = Instant.now(clock);
+        Instant now = clock.instant();
         Instant quoteAt = quote.getQuoteAt().toInstant();
         if (quoteAt.isAfter(now)) return false;
 
@@ -35,6 +35,6 @@ public class QuoteRealtimePolicy {
     }
 
     public boolean isMarketOpen(MarketCountry marketCountry) {
-        return marketSessionProvider.currentSession(marketCountry, Instant.now(clock)).open();
+        return marketSessionProvider.currentSession(marketCountry, clock.instant()).open();
     }
 }

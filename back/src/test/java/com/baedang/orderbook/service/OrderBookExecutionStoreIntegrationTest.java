@@ -64,7 +64,6 @@ import static org.mockito.Mockito.when;
         "spring.jpa.hibernate.ddl-auto=validate",
         "spring.sql.init.mode=never",
         "toss.enabled=false",
-        "trading.orderbook.enabled=true",
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookExecutionStoreIntegrationTest {

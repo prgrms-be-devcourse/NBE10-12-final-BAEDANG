@@ -13,7 +13,7 @@ import { useTheme } from "@/components/ThemeProvider";
 import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { pickDefaultMarket } from "@/lib/default-market";
-import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
+import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toKrw } from "@/lib/format";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const PAGE_SIZE = 20;
@@ -55,7 +55,7 @@ const POPULAR_STOCKS: { symbol: string; name: string; marketCountry: MarketCount
 const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우주항공", "로봇"];
 
 export default function RankingsPage() {
-  const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading } = useExchangeRate();
+  const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen, isLoading: marketStatusLoading } = useMarketStatus();
   const { theme } = useTheme();
   const [market, setMarket] = useState<MarketCountry>("KR");
@@ -298,13 +298,14 @@ export default function RankingsPage() {
         <span className="text-[16px] font-bold tabular-nums" style={{ color: "var(--ink)" }}>
           {rateLoading ? "불러오는 중…" : formatNumber(rate)}
         </span>
-        {!rateLoading && (
+        {!rateLoading && changeAmount !== null && (
           <span className="font-semibold tabular-nums" style={{ color: "var(--up)" }}>
             {changeAmount >= 0 ? "▲" : "▼"} {formatAbsolute(changeAmount)} ({formatPercent(changeRate)})
           </span>
         )}
         <span style={{ color: "var(--mut2)" }}>
-          {updatedAt.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })} 기준 · 1시간마다 갱신
+          {updatedAt ? `${updatedAt.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit" })} 기준 · 1분마다 갱신` : "환율 정보 없음"}
+          {rateError && (rate === null ? " · 조회 실패" : " · 갱신 실패, 마지막 정상값 표시")}
         </span>
         <button
           type="button"
@@ -529,7 +530,7 @@ export default function RankingsPage() {
           // 응답에서 통째로 빠질 수 있다 — toKrw/toDecimal이 null을 돌려주면 그대로
           // "표시할 값 없음"으로 다룬다(마이페이지 보유 종목과 같은 패턴).
           const krwPriceDecimal = toKrw(item.lastPrice, item.currency, rate);
-          const krwChangeDecimal = isUsd ? toDecimal(item.changeAmount)?.times(rate) ?? null : toDecimal(item.changeAmount);
+          const krwChangeDecimal = toKrw(item.changeAmount, item.currency, rate);
           const krwPrice = krwPriceDecimal ? krwPriceDecimal.round().toNumber() : null;
           const krwChange = krwChangeDecimal ? krwChangeDecimal.round().toNumber() : null;
           const isUp = krwChange === null || krwChange >= 0;

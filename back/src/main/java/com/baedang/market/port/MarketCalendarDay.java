@@ -2,6 +2,8 @@ package com.baedang.market.port;
 
 import com.baedang.stock.entity.MarketCountry;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
@@ -36,4 +38,33 @@ public record MarketCalendarDay(
         OffsetDateTime regularCloseAt,
         OffsetDateTime nextOpensAt
 ) {
+    private static final Duration FINALIZATION_DELAY = Duration.ofMinutes(10);
+
+    public static MarketCalendarDay requireMatching(MarketCalendarDay day, MarketCountry country, LocalDate date) {
+        if (day == null || day.marketCountry() != country || !date.equals(day.tradeDate())) {
+            throw new IllegalStateException("Market calendar date mismatch");
+        }
+        return day;
+    }
+
+    /** 시장 개장 여부와 분봉 시작 시각 판정에서는 마감 시각을 제외한다. */
+    public boolean isRegularSessionAt(Instant at) {
+        return hasRegularSession() && !at.isBefore(regularOpenAt.toInstant())
+                && at.isBefore(regularCloseAt.toInstant());
+    }
+
+    /** 정확히 마감 시각에 관측된 시세도 정규장 시세로 허용한다. */
+    public boolean acceptsRegularQuoteAt(Instant at) {
+        return hasRegularSession() && !at.isBefore(regularOpenAt.toInstant())
+                && !at.isAfter(regularCloseAt.toInstant());
+    }
+
+    public boolean isFinalizedAt(Instant requestedAt) {
+        return isOpen && regularCloseAt != null
+                && !requestedAt.isBefore(regularCloseAt.toInstant().plus(FINALIZATION_DELAY));
+    }
+
+    private boolean hasRegularSession() {
+        return isOpen && regularOpenAt != null && regularCloseAt != null;
+    }
 }

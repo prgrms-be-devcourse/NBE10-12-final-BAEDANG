@@ -4,17 +4,13 @@ import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 /**
- * 현재가 스냅샷. <b>종목당 1행이고 UPDATE 합니다</b> — 이력을 쌓지 않습니다.
- *
- * <p>화면이 조회하는 유일한 시세 테이블입니다. 전 종목이 들어 있어서
- * 프론트는 "이 종목이 상위 100인가"를 몰라도 됩니다 —
- * {@code quoteAt} 이 정규장 시간 안이면 실시간, 아니면 전일 종가입니다.
- *
- * <p>장이 닫히면 수집기가 멈추고 {@code lastPrice} 에 종가가 그대로 남습니다.
- * <b>"장외에는 전일 종가를 보여준다" 가 별도 로직 없이 자동으로 됩니다.</b>
+ * 종목당 최신 정규장 시세. 직전 거래일의 확정 종가와 그 날짜를 저장한다. 시세 거래일은 quoteAt에서 계산한다.
+ * 마감 후 복구한 일봉 종가는 캘린더의 정규장 종료 시각을 quoteAt으로 사용한다.
+ * 기준가 검증에 실패하면 가격은 제공하되 등락률은 null이다.
  */
 @Entity
 @Table(name = "quote_snapshot")
@@ -28,15 +24,19 @@ public class QuoteSnapshot {
     @Column(name = "last_price", nullable = false, precision = 19, scale = 4)
     private BigDecimal lastPrice;
 
-    /**
-     * 전일 종가. 등락률의 분모입니다.
-     *
-     * <p>토스 현재가 응답에는 등락률이 없어서 직접 계산해야 합니다.
-     * 전일 {@code daily_candle.close_price} 를 <b>다음 장 시작 직전</b>에 복사합니다 —
-     * 마감 직후에 복사하면 장외 내내 등락률이 0% 로 표시됩니다.
-     */
+    /** 시세 거래일의 직전 거래일에 확정된 일봉 종가. */
     @Column(name = "prev_close", precision = 19, scale = 4)
     private BigDecimal prevClose;
+
+    @Column(name = "prev_close_date")
+    private LocalDate prevCloseDate;
+
+    public void applyReference(LocalDate prevCloseDate, BigDecimal prevClose) {
+        this.prevCloseDate = prevCloseDate;
+        this.prevClose = prevClose;
+    }
+
+    public LocalDate getPrevCloseDate() { return prevCloseDate; }
 
     @Column(name = "upper_limit", precision = 19, scale = 4)
     private BigDecimal upperLimit;
@@ -88,26 +88,26 @@ public class QuoteSnapshot {
         this.collectedAt = collectedAt;
     }
 
-    /** 장 시작 직전 배치가 호출합니다. */
-    public void updatePrevClose(BigDecimal prevClose) {
-        this.prevClose = prevClose;
-    }
-
     /** 상하한가. 국내만 있습니다. */
     public void updateLimits(BigDecimal upperLimit, BigDecimal lowerLimit) {
         this.upperLimit = upperLimit;
         this.lowerLimit = lowerLimit;
     }
 
-    /** 등락률. prevClose 가 없거나 0 이면 null 을 돌려줍니다 (0% 로 속이지 않습니다). */
+    /** 검증된 기준가가 없거나 양수가 아니면 등락률은 null을 반환한다. */
     public BigDecimal changeRate() {
-        if (prevClose == null || prevClose.signum() == 0) return null;
-        return lastPrice.subtract(prevClose).divide(prevClose, 6, RoundingMode.HALF_UP);
+        BigDecimal referenceClose = getPrevClose();
+        if (referenceClose == null || referenceClose.signum() <= 0) {
+            return null;
+        }
+        return lastPrice.subtract(referenceClose).divide(referenceClose, 6, RoundingMode.HALF_UP);
     }
 
     public Long getStockId() { return stockId; }
     public BigDecimal getLastPrice() { return lastPrice; }
-    public BigDecimal getPrevClose() { return prevClose; }
+    public BigDecimal getPrevClose() {
+        return prevCloseDate != null ? prevClose : null;
+    }
     public BigDecimal getUpperLimit() { return upperLimit; }
     public BigDecimal getLowerLimit() { return lowerLimit; }
     public String getCurrency() { return currency; }

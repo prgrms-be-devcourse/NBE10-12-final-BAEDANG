@@ -1,26 +1,28 @@
 package com.baedang.market.service;
 
+import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
-import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.PageRequest;
 
 import java.math.BigDecimal;
-import java.time.OffsetDateTime;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
@@ -29,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -46,12 +49,24 @@ class DailyCandleCollectionServiceTest {
     @Mock DailyCandleRepository dailyCandleRepository;
     @Mock MarketCalendarPort marketCalendarPort;
 
+    @BeforeEach
+    void setUp() {
+        lenient().when(persistenceService.upsert(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            Long stockId = call.getArgument(0);
+            MarketCountry country = call.getArgument(2);
+            List<Candle> input = call.getArgument(3);
+            return input.stream().map(candle -> new DailyCandle(stockId,
+                    candle.candleAt().atZoneSameInstant(country.zoneId()).toLocalDate(),
+                    candle.openPrice(), candle.highPrice(), candle.lowPrice(), candle.closePrice(), candle.volume())).toList();
+        });
+    }
+
     /** universeSize=2 로 고정하여 테스트 속도를 높입니다. */
     private DailyCandleCollectionService service() {
         return new DailyCandleCollectionService(
                 marketDataPort, stockRepository, persistenceService,
-                dailyCandleRepository, marketCalendarPort,
-                Clock.fixed(NOW, ZoneOffset.UTC), 2);
+                dailyCandleRepository, new MarketTradingDayPolicy(marketCalendarPort),
+                Clock.fixed(NOW, ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 2);
     }
 
     // ── collect ──────────────────────────────────────────────────────────────
@@ -69,7 +84,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService).upsert(1L, "KRW", candles);
+        verify(persistenceService).upsert(1L, "KRW", MarketCountry.KR, candles, NOW);
     }
 
     @Test
@@ -87,8 +102,8 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any(), any(), any());
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
     }
 
     @Test
@@ -130,7 +145,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -170,7 +185,7 @@ class DailyCandleCollectionServiceTest {
 
         service().collect(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
     }
 
     @Test
@@ -191,7 +206,7 @@ class DailyCandleCollectionServiceTest {
         service().collect(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles("DONE", CandleInterval.ONE_DAY, 1);
-        verify(persistenceService).upsert(2L, "KRW", candles);
+        verify(persistenceService).upsert(2L, "KRW", MarketCountry.KR, candles, NOW);
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {
@@ -200,7 +215,7 @@ class DailyCandleCollectionServiceTest {
             case "getSymbol" -> symbol;
             case "getCurrency" -> currency;
             case "getMarketCountry" -> currency.equalsIgnoreCase("USD") ? MarketCountry.US : MarketCountry.KR;
-            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+            default -> Answers.RETURNS_DEFAULTS.answer(invocation);
         });
     }
 

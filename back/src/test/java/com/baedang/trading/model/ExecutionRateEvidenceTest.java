@@ -1,6 +1,7 @@
 package com.baedang.trading.model;
 
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -14,12 +15,13 @@ class ExecutionRateEvidenceTest {
     private static final OffsetDateTime AT = OffsetDateTime.parse("2026-09-04T01:00:00Z");
 
     @Test
-    void 환율근거는_미래수신시각과_원본기한_TTL을_검증한다() {
+    void 환율근거는_60초가_지나도_원본유효기간_안이면_사용하고_미래수신은_거절한다() {
         var evidence = ExecutionRateEvidence.from(new ExecutionExchangeRateSnapshot(
                 new BigDecimal("1383.601234"), AT, AT, AT.plusHours(1)));
         assertThat(evidence.isValidAt(AT.minusSeconds(1))).isFalse();
         assertThat(evidence.isValidAt(AT.plusSeconds(59))).isTrue();
-        assertThat(evidence.isValidAt(AT.plusSeconds(60))).isFalse();
+        assertThat(evidence.isValidAt(AT.plusSeconds(60))).isTrue();
+        assertThat(evidence.isValidAt(AT.plusHours(1))).isFalse();
         var shortEvidence = ExecutionRateEvidence.from(new ExecutionExchangeRateSnapshot(
                 new BigDecimal("1383.601234"), AT, AT, AT.plusSeconds(1)));
         assertThat(shortEvidence.isValidAt(AT.plusSeconds(1))).isFalse();
@@ -36,25 +38,25 @@ class ExecutionRateEvidenceTest {
 
     @Test
     void 환율_양수_불변식과_팩토리_입력을_검증한다() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(null, null, null, null))
+        Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(null, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ZERO, null, null, null))
+        Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ZERO, null, null, null))
                 .isInstanceOf(IllegalArgumentException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE.negate(), null, null, null))
+        Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE.negate(), null, null, null))
                 .isInstanceOf(IllegalArgumentException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ExecutionRateEvidence.from(null))
+        Assertions.assertThatThrownBy(() -> ExecutionRateEvidence.from(null))
                 .isInstanceOf(IllegalArgumentException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ExecutionRateEvidence.krw(null))
+        Assertions.assertThatThrownBy(() -> ExecutionRateEvidence.krw(null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void 불완전하거나_역전된_유효기간은_거절한다() {
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, null, AT.plusHours(1)))
+        Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, null, AT.plusHours(1)))
                 .isInstanceOf(IllegalArgumentException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT.plusHours(1), AT))
+        Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT.plusHours(1), AT))
                 .isInstanceOf(IllegalArgumentException.class);
-        org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT, AT))
+        Assertions.assertThatThrownBy(() -> new ExecutionRateEvidence(BigDecimal.ONE, AT, AT, AT))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -64,7 +66,7 @@ class ExecutionRateEvidenceTest {
         OffsetDateTime fetchedAt = (present & 1) != 0 ? AT : null;
         OffsetDateTime validFrom = (present & 2) != 0 ? AT : null;
         OffsetDateTime validUntil = (present & 4) != 0 ? AT.plusSeconds(60) : null;
-        org.assertj.core.api.Assertions.assertThatThrownBy(
+        Assertions.assertThatThrownBy(
                 () -> new ExecutionRateEvidence(BigDecimal.ONE, fetchedAt, validFrom, validUntil))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("환율 유효 근거는 모두 제공해야 합니다");

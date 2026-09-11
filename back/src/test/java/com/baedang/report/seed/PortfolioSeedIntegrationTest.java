@@ -77,7 +77,7 @@ class PortfolioSeedIntegrationTest {
             QuoteSnapshot q = new QuoteSnapshot(
                     s.getStockId(), new BigDecimal(us ? "150.0000" : "70000.0000"),
                     us ? "USD" : "KRW", ts, ts);
-            q.updatePrevClose(new BigDecimal(us ? "148.0000" : "69000.0000"));
+            q.applyReference(ts.toLocalDate().minusDays(1), new BigDecimal(us ? "148.0000" : "69000.0000"));
             quotes.save(q);
         }
     }

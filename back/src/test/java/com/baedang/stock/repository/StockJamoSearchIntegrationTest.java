@@ -1,5 +1,6 @@
 package com.baedang.stock.repository;
 
+import com.baedang.global.config.JpaConfig;
 import com.baedang.stock.dto.StockSearchResponse;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -31,7 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Testcontainers
 @DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.sql.init.mode=never"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({StockSearchService.class, com.baedang.global.config.JpaConfig.class})
+@Import({StockSearchService.class, JpaConfig.class})
 class StockJamoSearchIntegrationTest {
 
     @Container

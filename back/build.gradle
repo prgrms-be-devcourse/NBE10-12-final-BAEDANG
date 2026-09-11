@@ -25,7 +25,7 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
     implementation 'org.springframework.boot:spring-boot-starter-security'
-
+    implementation 'org.jsoup:jsoup:1.18.3'
     // Swagger / OpenAPI 문서 (springdoc). Swagger UI + /v3/api-docs 자동 생성.
     //   Spring Boot 3.5 은 springdoc 2.8.x 계열과 호환된다.
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.9'

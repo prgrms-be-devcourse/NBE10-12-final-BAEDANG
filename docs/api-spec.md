@@ -333,11 +333,11 @@ FX banner on the rankings page
   "quoteCurrency": "KRW",
   "rate": "1398.5",
   "changeRate": "0.0016",
-  "rateAt": "2026-08-11T15:00:00+09:00"
+  "validFrom": "2026-08-11T15:00:00+09:00"
 }
 ```
-Served from the latest `exchange_rate` row. **Stored hourly, so hourly frontend polling is enough** — more frequent calls return the same value. FX moves only 0.3–0.5%/day.
-**The execution rate is a different path.** Orders use a separate **1-min TTL memory cache** — never fill against a rate up to an hour old.
+Served from the latest `exchange_rate` row, collected every minute; the frontend also polls every minute. `validFrom` is the source validity start, not our receipt time.
+**Execution shares this DB source**, but uses `rate` instead of display `midRate`. It validates source validity and future receipt time before use and under financial locks, with no memory TTL or request-path external fallback.
 
 ### `GET /exchange-rates/history`
 FX trend chart
@@ -349,12 +349,14 @@ FX trend chart
 ```json
 {
   "items": [
-    { "rateAt": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
-    { "rateAt": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
+    { "validFrom": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
+    { "validFrom": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
   ]
 }
 ```
-Aggregated from the `exchange_rate` table (stored every hour on the hour).
+The database selects the last observation per bucket: `1d` uses 1 minute, `1w` 30 minutes, `1m` 2 hours, `3m` 6 hours, and `1y` 1 day. Buckets align to midnight in Asia/Seoul (KST). Only the requested start through now is included; empty buckets are omitted. The response preserves the selected original `validFrom` and unrounded display rate. Longer periods do not transfer raw minute history. Time-axis and crosshair labels use KST without a timezone suffix: `1d` crosshairs show `YYYY-MM-DD HH:mm`, while other periods show only `YYYY-MM-DD`, independently of graph granularity. Stored timestamps remain UTC.
+
+The history modal refreshes every minute while open and visible. Latest/history requests time out and abort after 10 seconds; disposal also aborts them. Requests do not overlap; late responses are ignored. Refresh follows new points only when the latest point was visible, preserving the zoom width; historical browsing retains its time range. Failure retains the last chart with a warning and retries next cycle. Initial load and period changes fit the chart to the data.
 
 ---
 
@@ -625,7 +627,7 @@ Daily & minute chart
 }
 ```
 
-For financial-data integrity, the MVP daily chart returns only finalized rows stored in `daily_candle`. A current price alone cannot supply today's open, high, and low, so the API does not fabricate today's OHLC. Display the current price separately from `GET /stocks/{symbol}`.
+The MVP daily chart returns stored `daily_candle` rows. New writes accept only finalized candles; existing development history remains visible without retroactive verification. A current price alone cannot supply today's open, high, and low, so the API does not fabricate today's OHLC. Display the current price separately from `GET /stocks/{symbol}`.
 **Our API keeps a 250-candle response ceiling for 1Y, while the initial on-demand backfill makes one external call for the latest 200 candles.** Entering through either detail or any daily-chart range stores the same 200 rows, and later 1M·6M·1Y switches reuse the database. After backfill, the latest stored candle is compared with the latest finalized trading day derived from the market calendar (regular close plus 10 minutes); stale off-universe stocks refresh the latest 200 rows only when needed. A successful refresh for the same finalized trading day is not repeated during the same process. A stock with no stored history therefore returns at most 200 candles for 1Y; if scheduled or other stored history exists, the response can contain up to 250.
 
 | Error code | When |
@@ -713,7 +715,7 @@ All users share the same synthetic order book snapshot. A single request returns
 |---|---|---|
 | `INVALID_INPUT` | 400 | `marketCountry` parameter missing or unsupported (anything other than `KR`, `US`) |
 | `STOCK_NOT_FOUND` | 404 | Symbol does not exist |
-| `ORDER_BOOK_UNAVAILABLE` | 503 | Feature disabled (`ORDERBOOK_ENABLED=false`), untradable stock (suspended, liquidation, off-universe), market closed or session expired, quote older than 15s, future quote, currency mismatch, or missing/incomplete active version |
+| `ORDER_BOOK_UNAVAILABLE` | 503 | Untradable stock (suspended, liquidation, off-universe), market closed or session expired, quote older than 15s, future quote, currency mismatch, or missing/incomplete active version |
 
 GET error responses do not include an order submission `retryPolicy`; clients re-query based on their normal polling interval.
 ---
@@ -871,7 +873,9 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 
 `STALE_QUOTE` uses `trading.quote-max-staleness-seconds`; `FUTURE_QUOTE` rejects any quote timestamp later than the server's validation time. The separate `trading.execution-context-max-age-seconds` setting limits account-lock wait time after external market data preparation finishes.
 
-US market orders also carry FX receipt time, `validFrom` and `validUntil` into the transaction and execution factory. After acquiring the account lock, new orders revalidate source validity and the 60-second receipt TTL independently of context freshness; execution creation also checks the same validation time and agreement with the settlement rate. Missing, expired or future FX evidence results in EXCHANGE_RATE_NOT_FOUND (404, SAME_CLIENT_ORDER_ID), without saving an order/execution/ledger or making an external call inside the transaction. KR uses 1 without an FX lookup. Existing-order idempotent responses return stored results before this check; only the applied rate is persisted.
+US market orders also carry FX receipt time, `validFrom` and `validUntil` into the transaction and execution factory. After acquiring the account lock, new orders revalidate source validity and future receipt timestamps (without a separate receipt TTL) independently of context freshness; execution creation also checks the same validation time and agreement with the settlement rate. Missing, expired or future FX evidence results in EXCHANGE_RATE_NOT_FOUND (404, SAME_CLIENT_ORDER_ID), without saving an order/execution/ledger or making an external call inside the transaction. KR uses 1 without an FX lookup. Existing-order idempotent responses return stored results before this check; only the applied rate is persisted.
+
+Market-order preparation reads DB FX first. On missing/expired FX it may request one shared refresh outside the financial transaction and then reread DB validity; quotes and limit workers do not trigger this recovery. A still-unusable snapshot fails with EXCHANGE_RATE_NOT_FOUND / SAME_CLIENT_ORDER_ID. Lock-time expiry still fails without an HTTP call or automatic transaction replay.
 
 Market settlement rounds US unit prices to cents using HALF_UP before checking storage bounds. Prices and settlement amounts must fit NUMERIC(19,4), and quantities/FX rates must fit NUMERIC(19,6); FX rates are not rounded. Storage overflow returns INVALID_SETTLEMENT_AMOUNT with SAME_CLIENT_ORDER_ID without saving an order/execution/ledger. A representable calculation whose net settlement is non-positive still saves a REJECTED order and returns NEW_CLIENT_ORDER_ID.
 
@@ -1087,15 +1091,14 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 | Mon 07:00 | weekly | full stock-master refresh — `/stocks/all` + `/stocks` batches                                               |
 | Mon 08:00 | weekly | KR top-100 by trading amount — `/rankings?market=KR&duration=1w` · 1 call                                   |
 | Mon 21:00 | weekly | US top-100 by trading amount — 1 call. 1.5h before US open                                                  |
-| 08:50 | daily | KR `prev_close` ← prior close. Price limits fetched together                                                |
+| 5s after startup; then 1m | fixed delay | Recover missing KR/US closes and references on a dedicated scheduler; retry failures. |
 | KR regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, up to 200 per request. |
 | 09:00 ~ 15:30 | 1m | KR top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group     |
 | 15:40 ~ 17:10 | 30m | KR daily-candle retries — after calendar close + 10m, excluding stocks already stored for the date          |
-| 09:00 ET * | daily | US `prev_close` refresh — 30 min before regular open (22:00 KST during DST, 23:00 KST during standard time) |
 | US regular session (calendar) | 5s target | Ranked + active-limit-order stocks only, calendar-based session times. |
 | 22:30 ~ 05:00 * | 1m | US top-100 minute candles — sequential 20-stock groups in the separate `MARKET_DATA_CHART` 20 TPS group      |
-| US-local 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks       |
-| every hour on the hour | hourly | FX storage — 24 calls/day                                                                                   |
+| America/New_York 16:10 ~ 17:10 * | 30m | US daily-candle retries — from 05:10 KST in DST or 06:10 in standard time, excluding completed stocks       |
+| every minute | 1 minute | FX storage — 1,440 scheduled calls/day, shared MARKET_INFO limit, including closed days. |
 
 **KR and US sessions never overlap** — 09:00~15:30 and 22:30~05:00, so exactly one collector runs at any moment. No combined-load worry.
 \* **US times shift 1 hour with DST** — don't hardcode; use `/market-calendar/US` session times.
@@ -1109,11 +1112,11 @@ The frontend polls **our** API; our server calls Toss on the cadence below. **Th
 | stock detail | 5s | `/stocks/{symbol}` |
 | my page | 10s | `/accounts/me` + `/holdings` |
 | chart | 60s | `/stocks/{symbol}/candles` |
-| FX banner | 1h | `/exchange-rates/latest` |
+| FX banner | 1m | `/exchange-rates/latest` |
 
 **Three must-haves.**
 ① **Pause polling in background tabs** — checking `document.visibilityState` alone cuts real traffic nearly in half.
-② **Stop polling at market close** — if `/market/status` `open` is `false`, there's nothing to refresh. The collector stops too, so `quote_snapshot.last_price` keeps the close and serves as the prior close automatically. The chart just shows the last session's candles stored in `minute_candle`.
+② **Stop polling at market close** — if `/market/status` `open` is `false`, there's nothing to refresh. The last intraday sample is retained until recovery confirms the daily closing candle; it must not be assumed to be the official close. The chart just shows the last session's candles stored in `minute_candle`.
 ③ **Return a next-update hint** — when the server's collection cadence (5s) and the client's polling cadence misalign, latency accumulates. Include `nextUpdateAt` and re-request right after it to pin the latency.
 ```json
 { "asOf": "...", "nextUpdateAt": "2026-08-11T12:37:04+09:00", "items": [...] }
@@ -1159,7 +1162,7 @@ The calculators, acceptance APIs (#120), shared book (#121), and engine/worker/p
 - Full fill releases all unused reserve after settlement; cancellation/expiration releases the remainder without reverting previous fills. Release reduces locked cash, not increases cash balance.
 - Require `netAmountKrw > 0` per book-level execution. Defer a zero/negative candidate without recording a fill/ledger or consuming liquidity. Do not combine the next level or skip levels to bypass this rule.
 - Multiple valid levels use sequential order-cumulative gross/fee/tax deltas and one FX snapshot per transaction. The SEC minimum is not charged again for each level or transaction. Earlier fills retain their own FX.
-- `LimitOrderSettlementCalculator` calculates supplied candidates; #122 selects levels/quantities and writes financial/liquidity state atomically. Snapshot TTL is 60 seconds intersected with source validity and must be rechecked after locking.
+- `LimitOrderSettlementCalculator` calculates supplied candidates; #122 selects levels/quantities and writes financial/liquidity state atomically. FX uses the latest DB observation and validates source validity and future receipt timestamps without a separate TTL; it must be rechecked after locking.
 
 LIMIT uses option B (buy at asks <= limit, sell at bids >= limit) and expires at the accepted regular-session close. All users consume liquidity from the same synthetic market, but user orders are never directly matched against each other. Liquidity consumed by one user reduces the shared remainder available to others.
 
@@ -1227,3 +1230,11 @@ A limit order may enter PENDING without an existing book. After commit, the sche
 - Cancellation and the existing 30s expiration scan share the account-first boundary; previously settled fills remain historical records. The worker does not mark expired orders itself.
 
 `STOCK_STATUS_UNAVAILABLE` (503) covers missing/unknown status, missing KR restrictions, or status-refresh lock timeout. Unknown data is never treated as tradable. The default status cache TTL is 5 minutes. US responses lack KR-specific suspension/liquidation data, so existing flags are preserved.
+
+## Regular-session trading dates and references (#173)
+
+Use `America/New_York` for US market dates and `Asia/Seoul` for KR. Trade dates are exchange-local date labels; actual order/ledger instants remain UTC in storage and may display in KST. Daily/weekly API KST-midnight values encode date labels.
+
+Change ratios compare the displayed quote's trade date with the exact preceding trading day's finalized close. Missing verification yields null reference/change. Rankings cannot initialize quotes using aggregation timestamps, and the last sampled price is never a closing-price fallback. Holidays and midnight do not advance a quote's reference.
+
+Recovery runs 5s after startup and every 1m fixed delay thereafter. Today's daily candle is excluded if the request began before regular close + 10m. Empty responses or missing expected dates are not cached as completed refreshes. V10 adds only `quote_snapshot.prev_close_date`. Existing daily history remains visible in charts and weekly aggregates, without claiming retrospective verification. Missing or mismatched references are fetched again even when daily rows exist. Minute bars are also filtered by regular-session opening timestamps.

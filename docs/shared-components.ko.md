@@ -146,7 +146,7 @@ LocalDate marketDate = now.atZone(country.zoneId()).toLocalDate();
 ```
 
 - 새 시간 의존 로직은 `clock.instant()`에서 시작합니다. 테스트는 `Clock.fixed(...)`를 주입합니다.
-- `zoneId()`를 일봉 KST 저장·차트 KST 표현·환율 KST 기준일·KST 기반 캐시 날짜에 무조건 적용하지 않습니다. 현지 날짜와 고정 KST 날짜는 서로 다른 정책입니다.
+- 일봉 및 시세 거래일은 거래소 현지 날짜다. 실제 원장 시각은 UTC로 저장하고 KST로 표시한다. 일봉·주봉 응답의 KST 자정은 날짜 라벨이며 봉 시작 시각이 아니다. 환율 기준일은 기존 KST 정책을 유지한다.
 - 시간대만으로 개장·폐장·휴장 여부를 추정하지 않습니다. 장 운영 정보는 기존 캘린더 / 세션 Port를 사용합니다.
 
 ## 6. 수익률과 주문 금액 계산
@@ -244,19 +244,19 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [OrderMarketContext](../back/src/main/java/com/baedang/trading/model/OrderMarketContext.java) | `executionRate()`, `isMarketOpenAt(now)` | 시장가 체결·지정가 접수의 공통 외부 시장 스냅샷. 트랜잭션 전에 준비하고 계좌 잠금 후 유효성을 재검증 |
 | [ClientOrderRetryPolicy](../back/src/main/java/com/baedang/trading/model/ClientOrderRetryPolicy.java) | `asData()` | `retryPolicy` 키를 담은 Map. SAME_CLIENT_ORDER_ID / NEW_CLIENT_ORDER_ID / NOT_RETRYABLE 계약 |
 | [QuoteRealtimePolicy](../back/src/main/java/com/baedang/stock/service/QuoteRealtimePolicy.java) | `isRealtime(country, quote)`, `isMarketOpen(country)` | 현재·시세 시점 세션을 이용한 판정. 캘린더 조회가 발생할 수 있어 순수 계산 함수가 아님 |
-| [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
+| [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` / `resolve(country, requestedAt)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
 
 | [TickSizePolicy](../back/src/main/java/com/baedang/orderbook/service/TickSizePolicy.java) | `nextValidPriceAbove`, `previousValidPriceBelow`, `isValidPrice`, `tickSizeAt` | 시장·종목 유형별 호가 단위 및 경계를 넘는 유효 가격 계산. NUMERIC(19,4) 최대 범위(999999999999999.9999) 내에서 계산 |
 | [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed)` | 고정 seed와 설정 기반 순수 가상 호가 생성기. V1 깊이 배수·정수 노이즈·tick 상대 라운드 넘버 부스트 적용. ASK 10개와 시장별 BID 깊이(국내 10개, 미국 1~10개)를 생성 |
 | [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 지정가 부분 체결 엔진(#122)이 동일 트랜잭션에서 활성 버전과 방향별 실제 레벨을 비관적 락으로 잠금. ASK는 10개, KRW BID는 10개, USD BID는 1~10개이며 10개 미만이면 마지막 가격은 `$0.01`. BUY→ASK, SELL→BID |
-| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `enabled()`, `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V1 기본값: enabled=false, 3s 주기, 15s maxQuoteAge, 1m retention |
+| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V1 기본값: 3s 주기, 15s maxQuoteAge, 1m retention |
 
 | [StockFinancialInfoPort](../back/src/main/java/com/baedang/stock/port/StockFinancialInfoPort.java), [KisStockFinancialInfoAdapter](../back/src/main/java/com/baedang/stock/client/kis/KisStockFinancialInfoAdapter.java) | 산업분류 및 결산연월별 재무제표용 도메인 포트 및 KIS 어댑터 | 포트는 순수 도메인 레코드(`IndustryData`, `PeriodData`) 반환. 어댑터 빈은 `kis.enabled=true` 조건부 등록 |
 | [StockFinancialSyncService](../back/src/main/java/com/baedang/stock/service/StockFinancialSyncService.java) | `ensureFresh(stock, trigger)`, `refresh(stock, trigger)`, `refreshRankedTargets(trigger)` | TTL 판정(재무 7일 / 7d, 산업 30일 / 30d), 종목별 `CompletableFuture` single-flight, 주간 배치 실행. `Optional<StockFinancialInfoPort>` 주입으로 KIS 비활성 시에도 정상 부팅 유지 |
 | [StockFinancialQueryService](../back/src/main/java/com/baedang/stock/service/StockFinancialQueryService.java) | `getFinancials(symbol, marketCountry)` | 캐시 우선 재무 조회 서비스. 국내 비ETF/ETN 종목 검증, 조회 시점 영업이익률 계산, FRESH/STALE 판정 및 폴백 처리 |
-현재 구현의 설정 가능한 가상 호가 V1 기본값은 다음과 같습니다: `enabled=false`, `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V1 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 10레벨이고 인접 레벨은 유효 호가 1틱 간격이며, 미국 BID는 `$0.01`에서 조기 종료할 수 있습니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
+현재 구현의 설정 가능한 가상 호가 V1 기본값은 다음과 같습니다: `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V1 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 10레벨이고 인접 레벨은 유효 호가 1틱 간격이며, 미국 BID는 `$0.01`에서 조기 종료할 수 있습니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
 
-`trading.orderbook.enabled`는 가상 호가 생성·조회만 제어합니다. 지정가 접수·취소·만료·체결은 별도 유스케이스이며 호가 플래그로 함께 켜거나 끄지 않습니다. 신규 접수와 #122 체결 워커는 상시 활성입니다. 사용 가능한 호가가 없으면 워커는 물량을 만들지 않고 보류합니다.
+가상 호가 생성·조회는 상시 활성입니다. 호가는 정규장 중 유효한 시세가 있을 때만 생성합니다. 지정가 접수·취소·만료·체결은 별도 유스케이스입니다. 사용 가능한 호가가 없으면 워커는 물량을 만들지 않고 보류합니다.
 
 캘린더가 필요한 로직은 기존 [MarketCalendarPort](../back/src/main/java/com/baedang/market/port/MarketCalendarPort.java)와 [MarketSessionProvider](../back/src/main/java/com/baedang/market/port/MarketSessionProvider.java)를 주입받아 사용하세요. 외부 호출이나 캐시를 별도로 복제하지 않습니다.
 
@@ -347,7 +347,7 @@ API·환율 조회 모듈은 HTTP 호출을 수행하는 클라이언트이며 �
 | --- | --- | --- |
 | [api.ts](../front/src/lib/api.ts) | `ApiError`, `getRankings`, `getCandles`, `placeOrder` 등 API별 함수 | API 호출과 code/message/data 처리 재사용. 내부 `request()`는 private |
 | [order-retry-policy.ts](../front/src/lib/order-retry-policy.ts) | `generateClientOrderId()`, `nextClientOrderId(policy, currentId)` | SAME 또는 정책 없음: 기존 ID, NEW: 새 ID, NOT_RETRYABLE: null. 멱등성 키이며 인증용 난수가 아님 |
-| [exchange-rate.ts](../front/src/lib/exchange-rate.ts) | `fetchExchangeRate()` | 화면용 환율 조회. 실패 시 기본값으로 대체하므로 체결용 환율 근거로 사용하지 않음 |
+| [exchange-rate.ts](../front/src/lib/exchange-rate.ts) | `fetchExchangeRate()` | 실패를 Provider에 전달하며 마지막 정상값·시각을 보존하고 실패 상태를 표시합니다. 임의 기본값은 없으며 체결 환율의 출처가 아닙니다 |
 | [candle-chart-data.ts](../front/src/lib/candle-chart-data.ts) | `toCandlestickData`, `toVolumeData` | 차트 숫자 데이터 변환·시간 정렬·중복 제거. 정산용 계산이 아님 |
 | [exchange-rate-chart-data.ts](../front/src/lib/exchange-rate-chart-data.ts) | `toLinePoints`, `isTimeVisible`, `formatTickMark` | 환율 차트 다운샘플링·시간축 표시. 원본 저장 데이터는 변경하지 않음 |
 | [chart-colors.ts](../front/src/lib/chart-colors.ts) | `resolveCssColor(name, fallback)` | CSS 변수를 차트용 색상으로 변환. DOM이 없는 환경에서는 fallback |
@@ -380,7 +380,7 @@ QuoteRefreshCoordinator는 정기·온디맨드 현재가 조회의 진행 중 �
 
 거래용 조회는 QuoteRefreshCoordinator를 주입하여 **트랜잭션 밖에서** requireFresh(stock, maxAge)를 호출합니다. 원본 quoteAt이 신선하면 재사용하고 아니면 갱신 후 누락/미래/오래된 시세를 거절합니다. 주문·캔들·세션·환율·거래 상태 조회는 하지 않습니다. OrderMarketDataService가 주문에 연결하고 주문 서비스가 나머지 계약을 검증합니다. refresh(stock)는 화면용 갱신으로 실패 시 기존값 표시 여부는 호출자가 결정합니다. 일봉 백필 정책은 그대로입니다.
 
-QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미래 시각을 검증하고 원자적 JDBC UPSERT를 수행합니다. 오래된 quoteAt 및 같은 quoteAt의 오래된 수집 응답은 최신 값을 덮지 않습니다. 현재가 갱신은 prev_close와 상하한가를 보존하고 updatePrevClose는 해당 컬럼만 변경합니다. 신규 테이블/migration은 없습니다.
+QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규장 시각을 검증한 뒤 짧은 JDBC 트랜잭션으로 시세를 저장한다. 기준가 복구는 새로 조회한 일봉을 별도로 검증하고 시세의 거래소 현지 거래일이 유지될 때만 기준가를 갱신한다. 같은 거래일의 새 시세는 복구를 막지 않는다. 새 거래일에서는 이전 기준가를 폐기하고, 같은 거래일의 검증된 기준가는 보존한다. 역순 응답은 무시한다. V10은 prev_close_date만 추가하며 상하한가는 보존한다.
 
 설정: trading.quote-collection.refresh-interval=5s, dispatch-interval=25ms, background-concurrency=3, background-requests-per-second=8, max-in-flight-stocks=1000, request-timeout=20s. ExternalHttpConfig는 자동 구성 RestClient 빌더에 toss.connect-timeout=2s/read-timeout=5s를 적용해 무응답 I/O가 슬롯을 영구 점유하지 않게 합니다. coordinator 대기 timeout은 전체 큐/HTTP 작업을 합친 총 응답시간 보장이 아닙니다.
 
@@ -396,6 +396,12 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 
 ### 지정가 체결 공통 구성요소 (#122)
 
+- `exchangeRateTaskScheduler`: 분 단위 환율 수집 전용 단일 스레드입니다. 공용 시장 배치와 분리하지만 Toss 클라이언트의 공유 TPS 제한은 유지합니다.
+- `ExchangeRateRepository.findHistoryBuckets`: SQL에서 KST 자정 기준 버킷별 마지막 원본 행만 선택하며 정밀도와 원본 시각을 보존합니다. 표시 이력 전용이며 체결은 집계하지 않은 최신 행을 사용합니다.
+
+- `ExchangeRateScheduler` / `ExchangeRateLoadService` / `ExchangeRatePersistenceService`: 매분 Toss 환율을 수집·검증하여 DB에 갱신합니다. `valid_from`, `valid_until`, `collected_at`, `rate`, `mid_rate`를 보존하며 같은 시작 시각의 오래된 수신 응답은 최신 관측값을 덮어쓰지 않습니다.
+- `ExecutionExchangeRateProviderBridge`: 기본 조회는 캐시 없이 DB 최신 행을 읽습니다. MarketOrderService만 누락/만료 시 금융 트랜잭션 밖에서 `refreshUnavailableForMarketOrder()`를 호출하고 DB를 한 번 재조회합니다. `rate`를 사용하고 원본 유효기간과 미래 수신 시각을 검증하며 누락/만료 환율을 대체 사용하지 않습니다. 금융 트랜잭션은 잠금 후 전달받은 스냅샷을 재검증합니다. `ExchangeRateService`와 계좌 평가는 같은 DB를 쓰되 `midRate` 우선 표시 정책을 유지합니다. 최신/이력 API는 `validFrom`을 제공하며 프론트 최신 환율 폴링은 1분입니다. 정기 수집과 복구는 `ExchangeRateLoadService`의 전용 단일 스레드 exchangeRateRefreshExecutor에서 실행하는 Future를 공유합니다. 최초 호출자도 작업 큐/API 시간을 포함해 trading.exchange-rate-refresh-wait(기본 5초)까지만 기다립니다. 시간 초과로 공유 작업을 취소하지 않으며 늦게 완료된 결과는 후속 요청이 사용합니다. 완료 후 재호출 제한은 5초이며 환율 TTL이 아닙니다. 실패·동일 만료 응답이면 시장가 요청은 SAME_CLIENT_ORDER_ID로 실패하고 기동 수집은 추가하지 않습니다.
+
 - `LimitOrderExecutionPlanner.plan(...)`: 체결과 미리보기에서 공유하는 순수 호가 선택기입니다. 누적 차액은 `LimitOrderSettlementCalculator`를 사용하고 매수 가능 정수 수량은 이진 탐색합니다. DB/HTTP 의존성을 넣지 않습니다.
 - `LimitOrderExecutionService.prepare(stockId, side)` / `execute(orderId, selectedPreparation)`: NEVER 경계입니다. 후보 선정 전에 준비하고 선정 당시 버전/환율을 실행에 전달합니다. 실행은 컨텍스트를 새로 준비하며 근거가 바뀌면 PRIORITY_CHANGED를 반환합니다. 같은 버전의 revision/금융 락 충돌만 최대 1회 재시도하며 후순위를 새 버전/환율에서 자동 재시도하지 않습니다.
 - `LimitExecutionProgress`: 단일 인스턴스의 종목·방향별 가격 커서를 bookVersion/환율 값에 연결하며 revision은 초기화 키가 아닙니다. `LimitOrderTransactionService`가 발행하는 `LimitOrderAcceptedEvent`의 AFTER_COMMIT 리스너는 실행 중 선정을 무효화하지 않고 대기 알림을 가장 선순위 한 건으로 합칩니다. `advance` 후 다음 `position`에서 갱신된 커서와 알림을 비교해 페이지 토큰을 변경하며 선순위 접수일 때만 처음으로 돌아갑니다. 워커는 접수가 멈추길 기다리지 않고 방문 예산 안에서 계속 진행합니다. 전체 순회 후 관찰되지 않은 그룹의 커서와 대기 알림을 함께 제거합니다. 다중 인스턴스 잠금이나 영속 주문 상태로 사용하지 않습니다.
@@ -403,3 +409,26 @@ QuoteSnapshotPersistenceService는 가격 양수/저장 정밀도·통화·미�
 - `LimitOrderPreviewService`: 같은 선택기를 사용하되 쓰기·자원 예약을 하지 않습니다. `LimitExecutionPreviewResponse.avgExecutionPrice`는 표시용 KRW 0 / USD 2자리이며 금액을 역산하는 데 사용하지 않습니다.
 - `Account.settleReservedBuy`, `Holding.settleReservedSell`: 자유 예수금/매도 가능 수량이 아니라 이미 동결된 자원을 소비합니다. 호출부가 주문별 한도를 검증하고 같은 금융 트랜잭션을 사용합니다. 전량 매수 후 남은 동결액은 명시적으로 해제합니다.
 - `LimitOrderExecutionWorker`: 생성/만료 스케줄러와 분리된 `limitExecutionTaskScheduler`에서 상시 실행합니다. 예산/커서와 미리보기 필드는 `api-spec.ko.md`를 참고합니다.
+
+## 거래일·종가 복구 (#173)
+
+- `MarketTradingDayPolicy`: `calendar(country, date)`, `quoteTradeDate(country, instant)`, `previousTradingDay(country, date)`. 기존 캘린더 Port와 캐시를 재사용한다.
+- `DailyCandlePersistenceService.upsert(stockId, currency, country, candles, requestedAt)`: 외부 요청 전 시각으로 확정일을 검사하고 저장한 `List<DailyCandle>`을 반환한다. 기준가 복구는 이 반환값에서 정확한 날짜를 선택한다. 수집·저장은 공통 조정자 안에서 실행한다.
+- `PrevCloseUpdateService.update(country)` / `recover(stock)`: 최신 확정 일봉과 정확한 직전 거래일의 종가를 확보한다. 배경 대상은 랭킹·활성 지정가 종목이고 상세 조회는 비랭킹도 복구한다. 장 마감 후 일봉으로 복구한 가격의 `quote_at`은 캘린더 종료 시각이다. 복구가 새 정규장 가격을 덮어쓰지 않는다.
+- `trading.reference-recovery.initial-delay=5s`, `interval=1m`: 기동 후 누락 작업을 보충하고 실패를 재시도한다. `referenceRecoveryScheduler` 전용 스레드를 사용한다.
+- `MinuteCandlePersistenceService.upsert(stockId, country, candles)`: 봉 시작 시각이 정규장 `[open, close)`에 해당하는 분봉만 저장한다.
+
+`MarketStatusService`도 시장별 현지 날짜를 사용하고 기존 캘린더 Port 캐시를 공유한다. 상태 응답 시각의 KST 표현은 유지한다.
+
+`QuoteSnapshotPersistenceService.repairReference(stock, expected, reference)`는 이번 외부 조회로 검증한 일봉만 받는다. 직전 거래일을 검증하고 quote_at에서 파생한 거래소 현지 거래일이 그대로일 때 기준가만 갱신한다. 같은 거래일의 새 시세는 허용하며 다른 거래일로 넘어가면 차단한다. 현재가·수집 시각은 보존한다. `saveRecoveredClose`는 조회한 행이 그대로일 때만 확정 종가로 교체한다.
+
+`DailyCandleFetchCoordinator.withStockLock(stockId, operation)`을 정기 수집·시드·상세 백필·기준가 복구에서 공유한다. 외부 요청 시작부터 저장 완료까지 같은 종목을 직렬화한다. 락은 단일 애플리케이션 인스턴스 범위이며 다중 인스턴스 수집에는 별도 분산 조정이 필요하다.
+
+
+### 캘린더 공통 정책과 일봉 완료 판정
+
+- 캘린더를 사용하는 서비스는 `MarketTradingDayPolicy.calendar(country, date)`로 국가별 조회 및 응답 검증을 공유한다. 캐싱 데코레이터도 동일한 `MarketCalendarDay.requireMatching` 검증을 적용한 뒤 저장하므로 국가·날짜가 다른 응답은 캐시되지 않는다. 실패 처리(배치 생략 또는 예외 전달)는 호출부가 유지한다.
+- `MarketCalendarDay.isRegularSessionAt(instant)`는 시장 개장 여부·분봉 시작 시각에 사용하는 `[개장, 마감)` 판정이다. `acceptsRegularQuoteAt(instant)`는 마감 시각의 시세까지 허용한다. `isFinalizedAt(requestedAt)`는 마감 후 10분 조건을 공유하며, 실제 일봉 확정에는 외부 요청 시작 시각을 넘긴다.
+- 일봉 공통 잠금 안에서 백필 상태를 한 번 확인하고 조회·저장한다. 현재가 전용 잠금을 일봉 경로에서 다시 획득하지 않는다. 현재가와 일봉은 서로 다른 잠금을 유지한다.
+- 시드 성공·백필 완료·해당 날짜 갱신 완료·후속 주봉 갱신은 `DailyCandlePersistenceService.upsert`가 반환한 저장 대상 행으로 판단한다. 미확정 일봉만 받은 경우 완료를 기록하지 않고 다음 요청에서 재시도한다. 정기 수집도 반환된 행에 기대 거래일이 있어야 성공이다.
+- 날짜 변환은 기존 `MarketCountry.zoneId()`를 사용한다. 새 날짜 변환 서비스·범용 수집기·추가 캐시는 만들지 않는다.

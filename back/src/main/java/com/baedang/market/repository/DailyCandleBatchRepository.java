@@ -3,6 +3,7 @@ package com.baedang.market.repository;
 import com.baedang.market.entity.DailyCandle;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Date;
 import java.sql.Types;
@@ -34,6 +35,7 @@ public class DailyCandleBatchRepository {
     }
 
     /** 일봉 목록을 단일 배치로 UPSERT 합니다. */
+    @Transactional
     public void upsertAll(List<DailyCandle> candles) {
         if (candles.isEmpty()) return;
         jdbcTemplate.batchUpdate(

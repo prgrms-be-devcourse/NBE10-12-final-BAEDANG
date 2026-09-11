@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Service
@@ -51,12 +52,12 @@ public class OrderBookQueryService {
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(symbol, marketCountry)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
 
-        if (!properties.enabled() || !stock.isTradable()) {
+        if (!stock.isTradable()) {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
         }
 
         Instant now = clock.instant();
-        if (!stockRepository.isQuoteTarget(stock.getStockId(), now.atOffset(java.time.ZoneOffset.UTC))) {
+        if (!stockRepository.isQuoteTarget(stock.getStockId(), now.atOffset(ZoneOffset.UTC))) {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
         }
         MarketSessionStatus session = marketSessionProvider.currentSession(marketCountry, now);

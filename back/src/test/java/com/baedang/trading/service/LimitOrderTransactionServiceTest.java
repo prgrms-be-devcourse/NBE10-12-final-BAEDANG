@@ -34,6 +34,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -86,7 +87,7 @@ class LimitOrderTransactionServiceTest {
     @BeforeEach
     void setUp() {
         service = new LimitOrderTransactionService(accounts, orders, holdings, stocks, quotes, policy, clock,
-                mock(org.springframework.context.ApplicationEventPublisher.class));
+                mock(ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
         krStock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);

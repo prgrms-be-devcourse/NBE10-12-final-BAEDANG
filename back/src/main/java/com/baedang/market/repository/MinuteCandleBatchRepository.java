@@ -3,6 +3,7 @@ package com.baedang.market.repository;
 import com.baedang.market.entity.MinuteCandle;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Types;
 import java.util.List;
@@ -28,6 +29,7 @@ public class MinuteCandleBatchRepository {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    @Transactional
     public void upsertAll(List<MinuteCandle> candles) {
         if (candles.isEmpty()) return;
         jdbcTemplate.batchUpdate(

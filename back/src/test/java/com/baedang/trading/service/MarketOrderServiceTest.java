@@ -11,18 +11,20 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
+import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.OrderInput;
-import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
-import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.OrderInput;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
-import com.baedang.trading.entity.OrderSide;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -38,11 +40,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class MarketOrderServiceTest {
@@ -53,8 +55,9 @@ class MarketOrderServiceTest {
     @Mock MarketSessionProvider marketSessionProvider;
     @Mock ExecutionExchangeRateProvider exchangeRateProvider;
 
-    @Test
-    void 미국_시장가는_캐시_원본_수신시각과_유효기간을_트랜잭션에_전달한다() {
+    @org.junit.jupiter.params.ParameterizedTest
+    @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+    void 미국_시장가는_유효한_DB환율을_사용하고_만료시에만_한번_복구한다(boolean expired) {
         Instant now = Instant.parse("2026-09-04T01:00:00Z");
         var at = now.atOffset(ZoneOffset.UTC);
         var snapshot = new ExecutionExchangeRateSnapshot(new BigDecimal("1383.601234"),
@@ -67,7 +70,12 @@ class MarketOrderServiceTest {
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US))
                 .thenReturn(Optional.of(Stock.create("AAPL", MarketCountry.US, "NASDAQ", "애플", null, "USD", "STOCK", true)));
         when(marketSessionProvider.currentSession(MarketCountry.US, now)).thenReturn(new MarketSessionStatus(true, Instant.MAX));
-        when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
+        if (expired) {
+            when(exchangeRateProvider.currentUsdKrwSnapshot())
+                    .thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND)).thenReturn(snapshot);
+        } else {
+            when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(snapshot);
+        }
         when(transactionService.execute(eq(1L), eq(command), any())).thenReturn(MarketOrderResult.rejected(ErrorCode.INSUFFICIENT_CASH));
         var service = new MarketOrderService(orderPolicy, transactionService, stockRepository,
                 marketSessionProvider, exchangeRateProvider, new MarketOrderResponseAssembler(), Clock.fixed(now, ZoneOffset.UTC), preparedMarketData());
@@ -79,6 +87,7 @@ class MarketOrderServiceTest {
         assertThat(captor.getValue().checkedAt()).isEqualTo(now);
         assertThat(captor.getValue().executionRate()).isEqualTo(snapshot.rate());
         verify(exchangeRateProvider, never()).currentUsdKrwRate();
+        verify(exchangeRateProvider, org.mockito.Mockito.times(expired ? 1 : 0)).refreshUnavailableForMarketOrder();
     }
 
     @Test
@@ -336,10 +345,10 @@ class MarketOrderServiceTest {
     }
 
     private OrderMarketDataService preparedMarketData() {
-        OrderMarketDataService service = org.mockito.Mockito.mock(OrderMarketDataService.class);
-        org.mockito.Mockito.lenient().when(service.refreshStatus(org.mockito.ArgumentMatchers.any()))
+        OrderMarketDataService service = Mockito.mock(OrderMarketDataService.class);
+        Mockito.lenient().when(service.refreshStatus(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(service.prepareEstimate(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(service.prepareEstimate(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         return service;
     }

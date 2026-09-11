@@ -171,7 +171,7 @@ public class CandleQueryService {
             List<Candle> candles = marketDataPort.fetchCandles(
                     stock.getSymbol(), CandleInterval.ONE_MINUTE, count);
             CandleCurrencyValidator.validate(stock, candles);
-            persistenceService.upsert(stock.getStockId(), candles);
+            persistenceService.upsert(stock.getStockId(), stock.getMarketCountry(), candles);
             fetchCache.markFetched(stock.getStockId(), clock.instant());
         } finally {
             lock.unlock();
