@@ -8,7 +8,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-/** First run after startup, then retry missing references regardless of wall-clock cron time. */
+/** 서버 시작 후 누락된 기준가를 복구하고 특정 cron 시각과 무관하게 주기적으로 재시도한다. */
 @Component
 @ConditionalOnProperty(prefix = "toss", name = "enabled", havingValue = "true")
 public class PrevCloseUpdateScheduler {

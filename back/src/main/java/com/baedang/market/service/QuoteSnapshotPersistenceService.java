@@ -60,7 +60,7 @@ public class QuoteSnapshotPersistenceService {
             try {
                 Optional<LocalDate> tradeDate = tradingDays.quoteTradeDate(stock.getMarketCountry(), quote.quoteAt().toInstant());
                 if (tradeDate.isEmpty()) continue;
-                // Price ingestion never trusts pre-existing daily rows as reference evidence.
+                // 현재가 저장 시 기존 일봉 행만으로 기준가가 검증되었다고 판단하지 않는다.
             } catch (RuntimeException unavailableSession) {
                 log.warn("Session validation failed: stockId={} type={}", stock.getStockId(), unavailableSession.getClass().getSimpleName());
                 continue;
@@ -80,7 +80,7 @@ public class QuoteSnapshotPersistenceService {
         return updated;
     }
 
-    /** Only pass a reference returned by this recovery's validated external fetch. */
+    /** 이번 복구의 외부 조회에서 검증해 반환한 기준가 일봉만 전달한다. */
     @Transactional(propagation = Propagation.NEVER)
     public int repairReference(Stock stock, QuoteSnapshot expected, DailyCandle reference) {
         if (reference == null) return 0;
@@ -90,7 +90,7 @@ public class QuoteSnapshotPersistenceService {
         return repository.repairReference(expected, stock.getMarketCountry(), reference.getTradeDate(), reference.getClosePrice());
     }
 
-    /** Only pass rows returned by this recovery's validated external fetch, never a legacy DB lookup. */
+    /** 기존 DB 조회 결과 대신 이번 복구의 외부 조회에서 검증해 반환한 일봉만 전달한다. */
     @Transactional(propagation = Propagation.NEVER)
     public int saveRecoveredClose(Stock stock, QuoteSnapshot expected, DailyCandle close, DailyCandle reference,
             OffsetDateTime collectedAt) {

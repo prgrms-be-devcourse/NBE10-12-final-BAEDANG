@@ -82,7 +82,7 @@ class PrevCloseUpdateIntegrationTest {
         assertThat(q.getQuoteAt().atZoneSameInstant(stock.getMarketCountry().zoneId()).toLocalDate()).isEqualTo("2026-09-11");
         assertThat(q.getPrevCloseDate()).isEqualTo("2026-09-10");
         assertThat(q.changeRate()).isEqualByComparingTo("0.1");
-        when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:00:00Z")); // Monday KST, Sunday New York
+        when(clock.instant()).thenReturn(Instant.parse("2026-09-14T00:00:00Z")); // 한국은 월요일이지만 뉴욕은 일요일이다.
         assertThat(recovery.recover(stock)).isFalse();
         assertThat(snapshots.findById(stock.getStockId()).orElseThrow().changeRate()).isEqualByComparingTo("0.1");
         verify(data, times(1)).fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200);
@@ -259,7 +259,7 @@ class PrevCloseUpdateIntegrationTest {
     @Test void referenceRecoverySurvivesNewerQuotesWithinSameExchangeTradingDay() {
         for (MarketCountry country : MarketCountry.values()) {
             Stock stock = stock(country);
-            // US crosses KST midnight while remaining on Monday in New York.
+            // 한국 시간 자정을 지나도 뉴욕에서는 월요일인 미국 시세를 검증한다.
             Instant started = country == MarketCountry.KR
                     ? Instant.parse("2026-09-14T00:05:00Z") : Instant.parse("2026-09-14T14:59:59Z");
             when(clock.instant()).thenReturn(started);

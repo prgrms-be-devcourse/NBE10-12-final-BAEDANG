@@ -8,7 +8,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.stream.IntStream;
 
-/** Single-instance serialization of each daily-candle fetch and its committed write. */
+/** 단일 인스턴스에서 같은 종목의 일봉 조회부터 저장 커밋까지 순서대로 실행한다. */
 @Component
 public class DailyCandleFetchCoordinator {
     private final ReentrantLock[] locks = IntStream.range(0, 64)

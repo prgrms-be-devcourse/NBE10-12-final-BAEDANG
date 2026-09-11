@@ -68,7 +68,7 @@ public class StockRankingLoadService {
     ) {
         stockRepository.findByMarketCountryAndIsRankedTrue(marketCountry).forEach(Stock::clearRanking);
         overwriteRanking(marketCountry, entries);
-        // Aggregation time cannot certify a regular-session quote or its reference date.
+        // 랭킹 집계 시각만으로 정규장 시세나 기준가 날짜를 검증할 수 없다.
     }
 
     private void overwriteRanking(

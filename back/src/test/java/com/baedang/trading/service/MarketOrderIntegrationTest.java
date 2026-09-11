@@ -147,7 +147,7 @@ class MarketOrderIntegrationTest {
 
     @Test
     void 비랭킹_시세없는_종목은_외부조회후_체결하고_멱등재요청은_외부조회를_생략한다() {
-        // This integration suite simulates an open session independent of wall-clock execution time.
+        // 실제 테스트 실행 시각과 무관하게 정규장이 열린 상황을 구성한다.
         when(marketCalendarPort.fetchKrMarketCalendar(any())).thenAnswer(invocation -> {
             LocalDate date = invocation.getArgument(0);
             OffsetDateTime start = date.atStartOfDay(MarketCountry.KR.zoneId()).toOffsetDateTime();

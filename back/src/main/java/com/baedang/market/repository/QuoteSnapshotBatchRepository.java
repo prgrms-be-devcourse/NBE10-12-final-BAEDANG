@@ -58,7 +58,7 @@ public class QuoteSnapshotBatchRepository {
         return updated;
     }
 
-    /** Repair the same trading day even after newer ticks; never replay a price or collection time. */
+    /** 같은 거래일의 새 시세가 들어와도 기준가만 복구하며 가격과 수집 시각은 보존한다. */
     @Transactional
     public int repairReference(QuoteSnapshot expected, MarketCountry country, LocalDate referenceDate, BigDecimal close) {
         return jdbcTemplate.update("""
@@ -69,7 +69,7 @@ public class QuoteSnapshotBatchRepository {
                 expected.getQuoteAt().atZoneSameInstant(country.zoneId()).toLocalDate(), referenceDate, close);
     }
 
-    /** A fetched close may replace a legacy extended-hours quote, but only if the observed row is unchanged. */
+    /** 조회했던 스냅샷이 그대로일 때만 기존 장외 시세를 검증된 종가로 교체한다. */
     @Transactional
     public int saveRecoveredClose(QuoteSnapshot candidate, QuoteSnapshot expected) {
         if (expected == null) {

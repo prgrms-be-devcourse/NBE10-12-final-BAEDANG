@@ -21,7 +21,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
-/** Startup and periodic recovery. The displayed quote's trade date owns its reference. */
+/** 서버 시작 및 주기적 복구를 담당한다. 기준가는 표시 중인 시세의 거래일에 맞춘다. */
 @Service
 public class PrevCloseUpdateService {
     private static final Logger log = LoggerFactory.getLogger(PrevCloseUpdateService.class);
@@ -72,7 +72,7 @@ public class PrevCloseUpdateService {
         return new PrevCloseUpdateResult(targets, recovered);
     }
 
-    /** Also used by detail reads for non-ranked stocks. Never substitutes last_price for a close. */
+    /** 랭킹 밖 종목의 상세 조회에서도 사용한다. last_price를 종가 대신 사용하지 않는다. */
     public boolean recover(Stock stock) {
         return coordinator.withStockLock(stock.getStockId(), () -> recoverLocked(stock));
     }
@@ -95,7 +95,7 @@ public class PrevCloseUpdateService {
         if (retainCurrent && current.getPrevCloseDate() != null && !referenceDate.equals(current.getPrevCloseDate())) {
             quotePersistence.clearMismatchedReference(current, referenceDate);
         }
-        // Always refetch missing/mismatched reference evidence, even when old DB rows exist.
+        // 기존 DB 일봉이 있어도 기준가가 없거나 날짜가 맞지 않으면 반드시 다시 조회한다.
         Instant requestedAt = clock.instant();
         List<Candle> fetched = data.fetchCandles(stock.getSymbol(), CandleInterval.ONE_DAY, 200);
         List<DailyCandle> verified = dailyPersistence.upsert(stock.getStockId(), stock.getCurrency(), country, fetched, requestedAt);
