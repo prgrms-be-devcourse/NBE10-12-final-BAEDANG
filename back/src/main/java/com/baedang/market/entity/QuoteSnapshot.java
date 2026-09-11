@@ -94,10 +94,13 @@ public class QuoteSnapshot {
         this.lowerLimit = lowerLimit;
     }
 
-    /** 등락률. prevClose 가 없거나 0 이면 null 을 돌려줍니다 (0% 로 속이지 않습니다). */
+    /** 검증된 기준가가 없거나 양수가 아니면 등락률은 null을 반환한다. */
     public BigDecimal changeRate() {
-        if (getPrevClose() == null || prevClose.signum() <= 0) return null;
-        return lastPrice.subtract(prevClose).divide(prevClose, 6, RoundingMode.HALF_UP);
+        BigDecimal referenceClose = getPrevClose();
+        if (referenceClose == null || referenceClose.signum() <= 0) {
+            return null;
+        }
+        return lastPrice.subtract(referenceClose).divide(referenceClose, 6, RoundingMode.HALF_UP);
     }
 
     public Long getStockId() { return stockId; }
