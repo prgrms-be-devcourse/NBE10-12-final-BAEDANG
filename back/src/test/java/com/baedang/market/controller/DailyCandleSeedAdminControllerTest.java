@@ -9,6 +9,7 @@ import com.baedang.market.service.DailyCandleSeedService.SeedResult;
 import com.baedang.stock.entity.MarketCountry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
@@ -51,7 +52,7 @@ class DailyCandleSeedAdminControllerTest {
                 .andExpect(jsonPath("$.skipped").value(0));
 
         verify(dailyCandleSeedService).seedAll();
-        verify(dailyCandleSeedService, never()).seed(org.mockito.ArgumentMatchers.any());
+        verify(dailyCandleSeedService, never()).seed(ArgumentMatchers.any());
     }
 
     @Test

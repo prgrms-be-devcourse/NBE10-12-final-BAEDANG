@@ -3,13 +3,16 @@ package com.baedang.market.provider;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.market.service.MarketTradingDayPolicy;
 import com.baedang.stock.entity.MarketCountry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -46,7 +49,7 @@ class MarketSessionProviderBridgeTest {
 
     @BeforeEach
     void setUp() {
-        bridge = new MarketSessionProviderBridge(new CachingMarketCalendarPort(marketCalendarPort));
+        bridge = new MarketSessionProviderBridge(new MarketTradingDayPolicy(new CachingMarketCalendarPort(marketCalendarPort)));
     }
 
     @Test
@@ -70,10 +73,10 @@ class MarketSessionProviderBridgeTest {
         when(marketCalendarPort.fetchKrMarketCalendar(DATE))
                 .thenReturn(openDay(MarketCountry.KR, KR_OPEN, KR_CLOSE));
         when(marketCalendarPort.fetchKrMarketCalendar(nextDate))
-                .thenReturn(closedDay(MarketCountry.KR, null));
+                .thenReturn(closedDay(MarketCountry.KR, nextDate, null));
 
         bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION);
-        bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION.plus(java.time.Duration.ofDays(1)));
+        bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION.plus(Duration.ofDays(1)));
 
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(DATE);
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(nextDate);
@@ -83,10 +86,8 @@ class MarketSessionProviderBridgeTest {
     void KR과_US는_서로_다른_캐시_키라_한쪽_캐싱이_다른쪽_호출에_영향을_주지_않는다() {
         when(marketCalendarPort.fetchKrMarketCalendar(DATE))
                 .thenReturn(openDay(MarketCountry.KR, KR_OPEN, KR_CLOSE));
-        when(marketCalendarPort.fetchUsMarketCalendar(DATE))
-                .thenReturn(closedDay(MarketCountry.US, null));
         when(marketCalendarPort.fetchUsMarketCalendar(DATE.minusDays(1)))
-                .thenReturn(closedDay(MarketCountry.US, null));
+                .thenReturn(closedDay(MarketCountry.US, DATE.minusDays(1), null));
 
         bridge.currentSession(MarketCountry.KR, DURING_KR_SESSION);
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
@@ -94,20 +95,19 @@ class MarketSessionProviderBridgeTest {
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
 
         verify(marketCalendarPort, times(1)).fetchKrMarketCalendar(DATE);
-        verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE);
-        // US는 오늘이 닫혀 있으면 전날도 확인하는 기존 로직 그대로 — 그 전날 조회도 캐싱된다.
+        verify(marketCalendarPort, Mockito.never()).fetchUsMarketCalendar(DATE);
+        // 한국 날짜와 무관하게 America/New_York 현지 날짜만 조회한다.
         verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE.minusDays(1));
     }
 
     @Test
-    void US_전날_확인도_캐싱된다() {
-        when(marketCalendarPort.fetchUsMarketCalendar(DATE)).thenReturn(closedDay(MarketCountry.US, null));
-        when(marketCalendarPort.fetchUsMarketCalendar(DATE.minusDays(1))).thenReturn(closedDay(MarketCountry.US, null));
+    void US_현지_날짜만_조회하고_캐싱한다() {
+        when(marketCalendarPort.fetchUsMarketCalendar(DATE.minusDays(1))).thenReturn(closedDay(MarketCountry.US, DATE.minusDays(1), null));
 
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
         bridge.currentSession(MarketCountry.US, DURING_KR_SESSION);
 
-        verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE);
+        verify(marketCalendarPort, Mockito.never()).fetchUsMarketCalendar(DATE);
         verify(marketCalendarPort, times(1)).fetchUsMarketCalendar(DATE.minusDays(1));
     }
 
@@ -115,7 +115,7 @@ class MarketSessionProviderBridgeTest {
         return new MarketCalendarDay(country, DATE, true, openAt, closeAt, null);
     }
 
-    private static MarketCalendarDay closedDay(MarketCountry country, OffsetDateTime nextOpensAt) {
-        return new MarketCalendarDay(country, DATE, false, null, null, nextOpensAt);
+    private static MarketCalendarDay closedDay(MarketCountry country, LocalDate date, OffsetDateTime nextOpensAt) {
+        return new MarketCalendarDay(country, date, false, null, null, nextOpensAt);
     }
 }

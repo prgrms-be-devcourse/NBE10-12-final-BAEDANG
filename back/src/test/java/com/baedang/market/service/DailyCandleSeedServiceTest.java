@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
@@ -8,13 +9,17 @@ import com.baedang.market.service.DailyCandleSeedService.SeedResult;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Answers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -25,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -42,11 +48,23 @@ class DailyCandleSeedServiceTest {
     @Mock DailyCandlePersistenceService persistenceService;
     @Mock DailyCandleRepository dailyCandleRepository;
 
+    @BeforeEach
+    void setUp() {
+        lenient().when(persistenceService.upsert(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            Long stockId = call.getArgument(0);
+            MarketCountry country = call.getArgument(2);
+            List<Candle> input = call.getArgument(3);
+            return input.stream().map(candle -> new DailyCandle(stockId,
+                    candle.candleAt().atZoneSameInstant(country.zoneId()).toLocalDate(),
+                    candle.openPrice(), candle.highPrice(), candle.lowPrice(), candle.closePrice(), candle.volume())).toList();
+        });
+    }
+
     /** universeSize 는 넉넉히 잡습니다. 호출 페이싱은 TossSecuritiesClient 전역 RateLimiter 책임이라 여기서 다루지 않습니다. */
     private DailyCandleSeedService service() {
         return new DailyCandleSeedService(
                 marketDataPort, stockRepository, persistenceService,
-                dailyCandleRepository, 100);
+                dailyCandleRepository, Clock.fixed(Instant.parse("2026-09-15T22:00:00Z"), ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 100);
     }
 
     @Test
@@ -65,8 +83,8 @@ class DailyCandleSeedServiceTest {
         SeedResult result = service().seed(MarketCountry.KR);
 
         verify(marketDataPort, never()).fetchCandles(eq("005930"), any(), anyInt());
-        verify(persistenceService).upsert(2L, "KRW", candles);
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService).upsert(2L, "KRW", MarketCountry.KR, candles, Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(1);
         assertThat(result.skipped()).isEqualTo(1);
@@ -100,8 +118,8 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seed(MarketCountry.KR);
 
-        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any());
-        verify(persistenceService, never()).upsert(eq(1L), anyString(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), anyString(), any(), any(), any());
+        verify(persistenceService, never()).upsert(eq(1L), anyString(), any(), any(), any());
         assertThat(result.success()).isEqualTo(1);
         assertThat(result.failure()).isEqualTo(1);
     }
@@ -118,7 +136,7 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seed(MarketCountry.KR);
 
-        verify(persistenceService, never()).upsert(any(), anyString(), any());
+        verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
         assertThat(result.success()).isZero();
         assertThat(result.failure()).isEqualTo(1);
     }
@@ -156,10 +174,22 @@ class DailyCandleSeedServiceTest {
 
         SeedResult result = service().seedAll();
 
-        verify(persistenceService).upsert(1L, "KRW", List.of(candle("KRW")));
-        verify(persistenceService).upsert(2L, "USD", List.of(candle("USD")));
+        verify(persistenceService).upsert(1L, "KRW", MarketCountry.KR, List.of(candle("KRW")), Instant.parse("2026-09-15T22:00:00Z"));
+        verify(persistenceService).upsert(2L, "USD", MarketCountry.US, List.of(candle("USD")), Instant.parse("2026-09-15T22:00:00Z"));
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(2);
+    }
+
+    @Test
+    void unfinishedRowsAreNotCountedAsSuccessfulSeed() {
+        Stock stock = mockStock(1L, "005930", "KRW");
+        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any())).thenReturn(List.of(stock));
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, SEED_COUNT))
+                .thenReturn(List.of(candle("KRW")));
+        doReturn(List.of()).when(persistenceService).upsert(any(), any(), any(), any(), any());
+        SeedResult result = service().seed(MarketCountry.KR);
+        assertThat(result.success()).isZero();
+        assertThat(result.failure()).isOne();
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {
@@ -168,7 +198,7 @@ class DailyCandleSeedServiceTest {
             case "getSymbol" -> symbol;
             case "getCurrency" -> currency;
             case "getMarketCountry" -> currency.equalsIgnoreCase("USD") ? MarketCountry.US : MarketCountry.KR;
-            default -> org.mockito.Answers.RETURNS_DEFAULTS.answer(invocation);
+            default -> Answers.RETURNS_DEFAULTS.answer(invocation);
         });
     }
 

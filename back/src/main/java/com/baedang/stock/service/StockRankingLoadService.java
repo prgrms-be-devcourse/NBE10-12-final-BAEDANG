@@ -1,8 +1,6 @@
 package com.baedang.stock.service;
 
 import com.baedang.global.normalizer.DomainNormalizer;
-import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.repository.QuoteSnapshotBatchRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.RankingEntry;
@@ -15,17 +13,10 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.Clock;
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -35,21 +26,15 @@ public class StockRankingLoadService {
 
     private final RankingPort rankingPort;
     private final StockRepository stockRepository;
-    private final QuoteSnapshotBatchRepository quoteSnapshotBatchRepository;
-    private final Clock clock;
     private final StockRankingLoadService self;
 
     public StockRankingLoadService(
             RankingPort rankingPort,
             StockRepository stockRepository,
-            QuoteSnapshotBatchRepository quoteSnapshotBatchRepository,
-            Clock clock,
             @Lazy StockRankingLoadService self
     ) {
         this.rankingPort = rankingPort;
         this.stockRepository = stockRepository;
-        this.quoteSnapshotBatchRepository = quoteSnapshotBatchRepository;
-        this.clock = clock;
         this.self = self;
     }
 
@@ -81,31 +66,14 @@ public class StockRankingLoadService {
             List<RankingEntry> entries,
             OffsetDateTime rankedAt
     ) {
-        OffsetDateTime collectedAt = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
-        OffsetDateTime quoteAt = rankedAt == null ? collectedAt : rankedAt;
-
-        Set<Long> previouslyRanked = clearRanking(marketCountry);
-        Map<Long, RankingEntry> targets =
-                overwriteRanking(marketCountry, entries, previouslyRanked);
-        syncQuotes(marketCountry, targets, quoteAt, collectedAt);
+        stockRepository.findByMarketCountryAndIsRankedTrue(marketCountry).forEach(Stock::clearRanking);
+        overwriteRanking(marketCountry, entries);
+        // 랭킹 집계 시각만으로 정규장 시세나 기준가 날짜를 검증할 수 없다.
     }
 
-    /** @return 직전 유니버스의 stock_id 집합. 이번 주 신규 편입 판별에 쓴다. */
-    private Set<Long> clearRanking(MarketCountry marketCountry) {
-        List<Stock> previous = stockRepository.findByMarketCountryAndIsRankedTrue(marketCountry);
-        previous.forEach(Stock::clearRanking);
-
-        return previous.stream()
-                .map(Stock::getStockId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toCollection(HashSet::new));
-    }
-
-    /** @return 신규 편입 종목의 {@code stock_id → 랭킹 엔트리}. 시세 초기화 대상이다. */
-    private Map<Long, RankingEntry> overwriteRanking(
+    private void overwriteRanking(
             MarketCountry marketCountry,
-            List<RankingEntry> entries,
-            Set<Long> previouslyRanked
+            List<RankingEntry> entries
     ) {
         Map<String, Stock> stocksSymbolMap = stockRepository
                 .findByMarketCountryAndSymbolIn(
@@ -120,7 +88,6 @@ public class StockRankingLoadService {
                 ));
 
         List<String> unknownSymbols = new ArrayList<>();
-        Map<Long, RankingEntry> targets = new LinkedHashMap<>();
 
         for (RankingEntry entry : entries) {
             String symbol = DomainNormalizer.symbol(entry.symbol());
@@ -138,10 +105,6 @@ public class StockRankingLoadService {
             }
 
             stock.applyRanking(entry.rank(), entry.tradingAmount());
-
-            if (isNewlyRanked(stock, previouslyRanked) && hasMatchingCurrency(stock, entry)) {
-                targets.put(stock.getStockId(), entry);
-            }
         }
 
         if (!unknownSymbols.isEmpty()) {
@@ -154,112 +117,5 @@ public class StockRankingLoadService {
             );
         }
 
-        return targets;
-    }
-
-    private void syncQuotes(
-            MarketCountry marketCountry,
-            Map<Long, RankingEntry> targets,
-            OffsetDateTime quoteAt,
-            OffsetDateTime collectedAt
-    ) {
-        if (targets.isEmpty()) return;
-
-        List<QuoteSnapshot> quoteSnapshots = new ArrayList<>();
-        int skippedCount = 0;
-
-        for (Map.Entry<Long, RankingEntry> target : targets.entrySet()) {
-            Long stockId = target.getKey();
-            RankingEntry entry = target.getValue();
-
-            if (!isTrustworthy(entry)) {
-                skippedCount++;
-                continue;
-            }
-
-            QuoteSnapshot quoteSnapshot = new QuoteSnapshot(
-                    stockId,
-                    entry.lastPrice(),
-                    DomainNormalizer.currency(entry.currency()),
-                    quoteAt,
-                    collectedAt
-            );
-
-            if (isUsablePrevClose(entry.basePrice())) {
-                quoteSnapshot.updatePrevClose(entry.basePrice());
-            } else {
-                // 0% 로 속이지 않는다 — prev_close 를 비워두면 등락률이 null 로 나간다.
-                // 이미 값이 있는 행은 UPSERT 의 COALESCE 가 기존 값을 지켜준다.
-                log.warn(
-                        "StockRankingLoadService: 기준가가 유효하지 않아 prev_close 를 세팅하지 않습니다. "
-                                + "(symbol={}, basePrice={})",
-                        entry.symbol(),
-                        entry.basePrice()
-                );
-            }
-
-            quoteSnapshots.add(quoteSnapshot);
-        }
-
-        quoteSnapshotBatchRepository.saveBulk(quoteSnapshots);
-
-        log.info(
-                "StockRankingLoadService(marketCountry={}): 신규 편입 {}건 시세 초기화 "
-                        + "(UPSERT={}, 건너뜀={})",
-                marketCountry,
-                targets.size(),
-                quoteSnapshots.size(),
-                skippedCount
-        );
-    }
-
-    private boolean isNewlyRanked(Stock stock, Set<Long> previouslyRanked) {
-        return stock.getStockId() != null && !previouslyRanked.contains(stock.getStockId());
-    }
-
-    private boolean hasMatchingCurrency(Stock stock, RankingEntry entry) {
-        String stockCurrency = stock.getCurrency();
-        String entryCurrency = entry.currency();
-
-        if (stockCurrency == null
-                || stockCurrency.isBlank()
-                || entryCurrency == null
-                || entryCurrency.isBlank()
-                || !stockCurrency.trim().equalsIgnoreCase(entryCurrency.trim())) {
-            log.warn(
-                    "StockRankingLoadService: 랭킹 통화 불일치로 시세 초기화를 건너뜁니다. "
-                            + "(symbol={}, stockCurrency={}, rankingCurrency={})",
-                    stock.getSymbol(),
-                    stockCurrency,
-                    entryCurrency
-            );
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 현재가는 토스 랭킹 응답의 필수 필드다. 비어 있다면 응답 자체가 스펙과 다르다는 뜻이므로
-     * 같은 엔트리의 기준가도 믿지 않고 통째로 건너뛴다 — prev_close 도 갱신하지 않는다.
-     *
-     * <p>통화는 {@code hasMatchingCurrency} 가 이미 걸러낸 뒤라 여기서 다시 보지 않는다.
-     */
-    private boolean isTrustworthy(RankingEntry entry) {
-        if (entry.lastPrice() == null || entry.lastPrice().signum() <= 0) {
-            log.warn(
-                    "StockRankingLoadService: 토스 랭킹 응답이 스펙과 다릅니다 — 현재가(lastPrice)는 필수인데 "
-                            + "비어 있거나 유효하지 않아 해당 엔트리를 신뢰하지 않고 시세 갱신을 건너뜁니다. "
-                            + "(symbol={}, rank={}, lastPrice={})",
-                    entry.symbol(),
-                    entry.rank(),
-                    entry.lastPrice()
-            );
-            return false;
-        }
-        return true;
-    }
-
-    private boolean isUsablePrevClose(BigDecimal basePrice) {
-        return basePrice != null && basePrice.signum() > 0;
     }
 }

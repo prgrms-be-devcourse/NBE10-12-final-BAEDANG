@@ -3,6 +3,7 @@ package com.baedang.orderbook.service;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
@@ -14,15 +15,18 @@ import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.stock.service.StockTradingStatusService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
@@ -57,17 +61,17 @@ import static org.mockito.Mockito.when;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookHttpIntegrationTest {
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+    @MockitoBean
+    StockTradingStatusService tradingStatuses;
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.market.port.MarketDataPort currentPricePort;
+    @MockitoBean
+    MarketDataPort currentPricePort;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void prepareTradingStatusBoundary() {
-        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(tradingStatuses.requireCurrent(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+        Mockito.lenient().when(tradingStatuses.refreshBatch(ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 

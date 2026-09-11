@@ -1,33 +1,40 @@
 package com.baedang.orderbook.service;
-import com.baedang.TradingApplication;
-import com.baedang.orderbook.config.OrderBookProperties;
-import com.baedang.orderbook.model.GeneratedOrderBook;
-import com.baedang.orderbook.model.StockDescriptor;
-import org.springframework.boot.WebApplicationType;
-import org.springframework.boot.builder.SpringApplicationBuilder;
-import org.springframework.context.ConfigurableApplicationContext;
 
+import com.baedang.TradingApplication;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
-import com.baedang.orderbook.entity.OrderBookVersion;
+import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.entity.OrderBookLevel;
+import com.baedang.orderbook.entity.OrderBookVersion;
+import com.baedang.orderbook.model.GeneratedOrderBook;
+import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
 import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import com.baedang.stock.port.StockInfo;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.stock.service.StockTradingStatusPersistenceService;
+import com.baedang.stock.service.StockTradingStatusService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
@@ -49,8 +56,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -63,17 +70,17 @@ import static org.mockito.Mockito.mock;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class OrderBookLifecycleIntegrationTest {
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.stock.service.StockTradingStatusService tradingStatuses;
+    @MockitoBean
+    StockTradingStatusService tradingStatuses;
 
-    @org.springframework.test.context.bean.override.mockito.MockitoBean
-    com.baedang.market.port.MarketDataPort currentPricePort;
+    @MockitoBean
+    MarketDataPort currentPricePort;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void prepareTradingStatusBoundary() {
-        org.mockito.Mockito.lenient().when(tradingStatuses.requireCurrent(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(tradingStatuses.requireCurrent(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(tradingStatuses.refreshBatch(org.mockito.ArgumentMatchers.anyList()))
+        Mockito.lenient().when(tradingStatuses.refreshBatch(ArgumentMatchers.anyList()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -143,16 +150,16 @@ class OrderBookLifecycleIntegrationTest {
         return versionRepository.findByStockIdAndIsActiveTrue(krStock.getStockId());
     }
 
-    @Autowired com.baedang.stock.service.StockTradingStatusPersistenceService statusPersistence;
+    @Autowired StockTradingStatusPersistenceService statusPersistence;
 
     @Test
     void 상태_갱신은_랭킹을_보존하고_거래정지_확인후_호가를_닫는다() {
         scheduler.refreshOrderBooks();
         assertThat(activeVersion()).isPresent();
         statusPersistence.update(krStock.getStockId(), MarketCountry.KR,
-                new com.baedang.stock.port.StockInfo(krStock.getSymbol(), "changed", null, null,
+                new StockInfo(krStock.getSymbol(), "changed", null, null,
                         "KOSPI", "STOCK", true, "ACTIVE", "KRW", null, null, null, null,
-                        new com.baedang.stock.port.StockInfo.KrMarketDetail(false, false, true, null)));
+                        new StockInfo.KrMarketDetail(false, false, true, null)));
         Stock refreshed = stockRepository.findById(krStock.getStockId()).orElseThrow();
         assertThat(refreshed.getIsRanked()).isTrue();
         assertThat(refreshed.getName()).isEqualTo(krStock.getName());
@@ -415,8 +422,8 @@ class OrderBookRestartTestConfiguration {
     }
     @Bean
     @Primary
-    com.baedang.stock.service.StockTradingStatusService restartTradingStatuses() {
-        com.baedang.stock.service.StockTradingStatusService service = mock(com.baedang.stock.service.StockTradingStatusService.class);
+    StockTradingStatusService restartTradingStatuses() {
+        StockTradingStatusService service = mock(StockTradingStatusService.class);
         when(service.refreshBatch(any())).thenAnswer(invocation -> invocation.getArgument(0));
         return service;
     }

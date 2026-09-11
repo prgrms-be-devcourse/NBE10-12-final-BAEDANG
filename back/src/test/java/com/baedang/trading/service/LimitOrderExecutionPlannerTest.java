@@ -1,12 +1,15 @@
 package com.baedang.trading.service;
 
 import com.baedang.stock.entity.MarketCountry;
+import com.baedang.trading.dto.LimitExecutionPreviewResponse;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.CumulativeSettlementState;
+import com.baedang.trading.model.LimitExecutionBook;
 import com.baedang.trading.model.LimitExecutionPlan;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -69,9 +72,9 @@ class LimitOrderExecutionPlannerTest {
     @Test
     void 표시용_평균을_센트로_반올림해도_정산합계는_그대로다() {
         LimitExecutionPlan plan = buy("3", "420042", "1400", List.of(level(1,"99","1"),level(2,"100","2")));
-        java.time.Instant now = java.time.Instant.parse("2026-09-09T01:00:00Z");
-        com.baedang.trading.dto.LimitExecutionPreviewResponse response = com.baedang.trading.dto.LimitExecutionPreviewResponse.from(
-                new com.baedang.trading.model.LimitExecutionBook(1L,0L,now,now,List.of()),plan,2,now);
+        Instant now = Instant.parse("2026-09-09T01:00:00Z");
+        LimitExecutionPreviewResponse response = LimitExecutionPreviewResponse.from(
+                new LimitExecutionBook(1L,0L,now,now,List.of()),plan,2,now);
         assertThat(response.avgExecutionPrice()).isEqualTo("99.67");
         assertThat(response.grossAmountKrw()).isEqualTo("418600");
     }

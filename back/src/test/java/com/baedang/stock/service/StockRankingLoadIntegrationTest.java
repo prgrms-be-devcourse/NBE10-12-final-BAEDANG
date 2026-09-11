@@ -32,12 +32,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.when;
 
-/**
- * 단위 테스트는 리포지토리가 목이라 <b>배치에 실린 값</b>까지만 보고, UPSERT 가 실제로 무엇을 바꿨는지는 보지 못한다.
- * 행이 있을 때와 없을 때 {@code ON CONFLICT} 분기가 갈리고,
- * {@code COALESCE} 가 기존 {@code prev_close} 를 지키는지,
- * 5초 수집기가 관리하는 {@code last_price} 가 보존되는지는 실제 DB 로만 검증할 수 있다.
- */
+/** 랭킹 집계가 검증된 시장 가격을 덮어쓰면 안 된다. */
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
 @SpringBootTest(properties = {
@@ -79,113 +74,22 @@ class StockRankingLoadIntegrationTest {
     }
 
     @Test
-    void 스냅샷이_없던_신규_편입_종목은_INSERT_된다() {
-        Stock 신규 = saveStock(MarketCountry.KR, false);
-
-        service.applyRanking(MarketCountry.KR, List.of(entry(1, 신규.getSymbol())), RANKED_AT);
+    void 랭킹_집계시각과_가격으로_시세를_초기화하지_않는다() {
+        Stock added = saveStock(MarketCountry.KR, false);
+        service.applyRanking(MarketCountry.KR, List.of(entry(1, added.getSymbol())), RANKED_AT);
         flushAndClear();
-
-        assertThat(lastPrice(신규)).isEqualByComparingTo("70000");
-        assertThat(prevClose(신규)).isEqualByComparingTo("69000");
-        assertThat(currency(신규)).isEqualTo("KRW");
-        // 주입된 Clock 기준 UTC 로 저장된다 (시스템 기본 타임존이 아니다).
-        assertThat(collectedAt(신규).toInstant()).isEqualTo(NOW.toInstant());
-        assertThat(stockRepository.findById(신규.getStockId()).orElseThrow().getIsRanked()).isTrue();
+        assertThat(quoteSnapshotRepository.findById(added.getStockId())).isEmpty();
+        assertThat(stockRepository.findById(added.getStockId()).orElseThrow().getIsRanked()).isTrue();
     }
 
     @Test
-    void 스냅샷이_있던_신규_편입_종목은_prev_close만_UPDATE_된다() {
-        // 랭킹 밖이었지만 누가 상세를 열어 on-demand 로 채워진 상태.
-        Stock 신규 = saveStock(MarketCountry.KR, false);
-        saveSnapshot(신규, "71000", "50000");
-
-        service.applyRanking(MarketCountry.KR, List.of(entry(1, 신규.getSymbol())), RANKED_AT);
+    void 재편입_종목의_검증된_가격과_기준가를_보존한다() {
+        Stock added = saveStock(MarketCountry.KR, false);
+        saveSnapshot(added, "71000", "50000");
+        service.applyRanking(MarketCountry.KR, List.of(entry(1, added.getSymbol())), RANKED_AT);
         flushAndClear();
-
-        assertThat(prevClose(신규)).isEqualByComparingTo("69000");
-        // 실시간 수집기가 관리하는 값이라 덮어쓰면 안 된다.
-        assertThat(lastPrice(신규)).isEqualByComparingTo("71000");
-    }
-
-    @Test
-    void 지난주에도_랭킹이던_종목의_prev_close는_그대로다() {
-        Stock 유지 = saveStock(MarketCountry.KR, true);
-        saveSnapshot(유지, "71000", "50000");
-
-        service.applyRanking(MarketCountry.KR, List.of(entry(1, 유지.getSymbol())), RANKED_AT);
-        flushAndClear();
-
-        // 08:50 배치가 일봉 종가로 관리하는 값이므로 랭킹이 건드리지 않는다.
-        assertThat(prevClose(유지)).isEqualByComparingTo("50000");
-    }
-
-    @Test
-    void 기준가가_없으면_prev_close가_비어_있는_스냅샷이_INSERT_된다() {
-        Stock 신규 = saveStock(MarketCountry.KR, false);
-
-        service.applyRanking(
-                MarketCountry.KR,
-                List.of(entry(1, 신규.getSymbol(), new BigDecimal("70000"), BigDecimal.ZERO)),
-                RANKED_AT);
-        flushAndClear();
-
-        // INSERT 는 ON CONFLICT 절을 타지 않으므로 기준가가 없으면 그대로 비어 있다.
-        // 등락률을 0% 로 속이지 않고 null 로 내보내기 위한 것이다.
-        assertThat(lastPrice(신규)).isEqualByComparingTo("70000");
-        assertThat(prevClose(신규)).isNull();
-    }
-
-    @Test
-    void 기준가가_없어도_이미_있던_prev_close는_지우지_않는다() {
-        Stock 신규 = saveStock(MarketCountry.KR, false);
-        saveSnapshot(신규, "71000", "50000");
-
-        service.applyRanking(
-                MarketCountry.KR,
-                List.of(entry(1, 신규.getSymbol(), new BigDecimal("70000"), BigDecimal.ZERO)),
-                RANKED_AT);
-        flushAndClear();
-
-        // UPSERT 가 COALESCE 없이 EXCLUDED 를 그대로 쓰면 멀쩡한 값이 NULL 이 되고 화면 등락률이 사라진다.
-        assertThat(prevClose(신규)).isEqualByComparingTo("50000");
-    }
-
-    @Test
-    void 현재가가_없으면_기존_행의_prev_close도_갱신하지_않는다() {
-        Stock 신규 = saveStock(MarketCountry.KR, false);
-        saveSnapshot(신규, "71000", "50000");
-
-        service.applyRanking(
-                MarketCountry.KR,
-                List.of(entry(1, 신규.getSymbol(), null, new BigDecimal("69000"))),
-                RANKED_AT);
-        flushAndClear();
-
-        // 현재가는 토스 응답의 필수 필드라, 비어 있으면 응답이 스펙과 다르다는 뜻이다.
-        // 같은 엔트리의 기준가도 신뢰하지 않고 통째로 건너뛴다.
-        assertThat(prevClose(신규)).isEqualByComparingTo("50000");
-        assertThat(lastPrice(신규)).isEqualByComparingTo("71000");
-    }
-
-    @Test
-    void 현재가가_없는_종목_때문에_유니버스_전체가_롤백되지_않는다() {
-        Stock 정상 = saveStock(MarketCountry.KR, false);
-        Stock 결측 = saveStock(MarketCountry.KR, false);
-
-        // 배치는 전부 아니면 전무다. 걸러내지 않고 실어 보내면 NOT NULL 위반으로
-        // 배치 전체가 죽고 트랜잭션이 롤백돼 이번 주 랭킹 적재가 통째로 날아간다.
-        service.applyRanking(
-                MarketCountry.KR,
-                List.of(
-                        entry(1, 정상.getSymbol()),
-                        entry(2, 결측.getSymbol(), null, new BigDecimal("69000"))),
-                RANKED_AT);
-        flushAndClear();
-
-        assertThat(prevClose(정상)).isEqualByComparingTo("69000");
-        assertThat(quoteSnapshotRepository.findById(결측.getStockId())).isEmpty();
-        // 시세를 못 채워도 랭킹 자체는 두 종목 모두 반영된다.
-        assertThat(stockRepository.findById(결측.getStockId()).orElseThrow().getIsRanked()).isTrue();
+        assertThat(lastPrice(added)).isEqualByComparingTo("71000");
+        assertThat(prevClose(added)).isEqualByComparingTo("50000");
     }
 
     private void flushAndClear() {
@@ -235,7 +139,7 @@ class StockRankingLoadIntegrationTest {
                 RANKED_AT,
                 RANKED_AT
         );
-        snapshot.updatePrevClose(new BigDecimal(prevClose));
+        snapshot.applyReference(snapshot.getQuoteAt().toLocalDate().minusDays(1), new BigDecimal(prevClose));
         quoteSnapshotRepository.saveAndFlush(snapshot);
     }
 

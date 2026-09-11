@@ -1,6 +1,6 @@
 package com.baedang.market.service;
 
-import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.global.config.JpaConfig;
 import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotBatchRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -9,10 +9,13 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.repository.TradeOrderRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
 import org.springframework.data.domain.PageRequest;
@@ -21,24 +24,36 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
+
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @Testcontainers
 @DataJpaTest(properties = {"spring.jpa.hibernate.ddl-auto=validate", "spring.sql.init.mode=never"})
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
-@Import({QuoteSnapshotBatchRepository.class, QuoteSnapshotPersistenceService.class,
-        com.baedang.global.config.JpaConfig.class})
+@Import({QuoteSnapshotBatchRepository.class,
+        JpaConfig.class})
 class QuoteCollectionIntegrationTest {
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
             DockerImageName.parse("timescale/timescaledb:latest-pg18").asCompatibleSubstituteFor("postgres"));
     @Autowired StockRepository stocks;
     @Autowired TradeOrderRepository orders;
-    @Autowired QuoteSnapshotPersistenceService persistence;
+    @Autowired QuoteSnapshotBatchRepository batch;
+    QuoteSnapshotPersistenceService persistence;
+
+    @BeforeEach
+    void configurePolicy() {
+        MarketTradingDayPolicy policy = Mockito.mock(MarketTradingDayPolicy.class);
+        Mockito.when(policy.quoteTradeDate(ArgumentMatchers.any(), ArgumentMatchers.any()))
+                .thenReturn(Optional.of(NOW.toLocalDate()));
+        persistence = new QuoteSnapshotPersistenceService(batch, policy);
+    }
     @Autowired JdbcTemplate jdbc;
     private static final OffsetDateTime NOW = OffsetDateTime.parse("2026-09-09T01:00:00Z");
 
@@ -46,7 +61,7 @@ class QuoteCollectionIntegrationTest {
     void 역순응답과_같은시각_늦은응답에서도_최신가격과_기타컬럼을_보존한다() {
         Stock stock = stock(false);
         persistence.saveOrUpdate(List.of(stock), List.of(price(stock, "100", NOW)), NOW);
-        jdbc.update("UPDATE quote_snapshot SET prev_close=90, upper_limit=130, lower_limit=70 WHERE stock_id=?", stock.getStockId());
+        jdbc.update("UPDATE quote_snapshot SET prev_close=90, prev_close_date=DATE '2026-09-08', upper_limit=130, lower_limit=70 WHERE stock_id=?", stock.getStockId());
         assertThat(persistence.saveOrUpdate(List.of(stock), List.of(price(stock, "80", NOW.minusSeconds(1))), NOW.plusSeconds(1))).isZero();
         assertThat(persistence.saveOrUpdate(List.of(stock), List.of(price(stock, "101", NOW)), NOW.plusSeconds(2))).isEqualTo(1);
         assertThat(persistence.saveOrUpdate(List.of(stock), List.of(price(stock, "99", NOW)), NOW.plusSeconds(1))).isZero();
@@ -55,7 +70,6 @@ class QuoteCollectionIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT upper_limit FROM quote_snapshot WHERE stock_id=?", BigDecimal.class, stock.getStockId())).isEqualByComparingTo("130");
         assertThat(jdbc.queryForObject("SELECT lower_limit FROM quote_snapshot WHERE stock_id=?", BigDecimal.class, stock.getStockId())).isEqualByComparingTo("70");
         assertThat(jdbc.queryForObject("SELECT quote_at FROM quote_snapshot WHERE stock_id=?", OffsetDateTime.class, stock.getStockId()).toInstant()).isEqualTo(NOW.toInstant());
-        persistence.updatePrevClose(stock.getStockId(), new BigDecimal("95"));
         assertThat(jdbc.queryForObject("SELECT last_price FROM quote_snapshot WHERE stock_id=?", BigDecimal.class, stock.getStockId())).isEqualByComparingTo("101");
     }
 
