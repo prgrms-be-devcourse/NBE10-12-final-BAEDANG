@@ -4,15 +4,12 @@ import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
-import javax.crypto.SecretKey;
-
-import org.springframework.stereotype.Component;
-
 import javax.crypto.SecretKey;
 
 @Component
@@ -43,21 +40,18 @@ public class JwtTokenProvider {
             throw new IllegalArgumentException("올바르지 않는 Base64 JWT 시크릿 키입니다.", e);
         }
 
-        //jwt 전용 clock 사용
-        io.jsonwebtoken.Clock jwtClock = () -> Date.from(clock.instant());
-
         this.accessParser = Jwts.parser()
                 .verifyWith(key)
                 .requireIssuer(properties.issuer())
                 .require(CLAIM_TOKEN_TYPE, TYPE_ACCESS)
-                .clock(jwtClock)
+                .clock(() -> Date.from(clock.instant()))
                 .build();
 
         this.refreshParser = Jwts.parser()
                 .verifyWith(key)
                 .requireIssuer(properties.issuer())
                 .require(CLAIM_TOKEN_TYPE, TYPE_REFRESH)
-                .clock(jwtClock)
+                .clock(() -> Date.from(clock.instant()))
                 .build();
     }
 

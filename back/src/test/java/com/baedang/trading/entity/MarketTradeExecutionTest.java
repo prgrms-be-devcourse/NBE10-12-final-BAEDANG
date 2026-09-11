@@ -45,10 +45,16 @@ class MarketTradeExecutionTest {
     static Stream<ExecutionRateEvidence> invalidEvidence() {
         return Stream.of(null,
                 new ExecutionRateEvidence(RATE, AT.minusSeconds(1), AT.minusSeconds(1), AT),
-                new ExecutionRateEvidence(RATE, AT.minusSeconds(60), AT.minusMinutes(5), AT.plusMinutes(5)),
                 new ExecutionRateEvidence(RATE, AT.plusNanos(1), AT, AT.plusSeconds(30)),
                 new ExecutionRateEvidence(RATE, AT, AT.plusNanos(1), AT.plusSeconds(30)),
                 new ExecutionRateEvidence(new BigDecimal("1400"), AT, AT, AT.plusSeconds(30)));
+    }
+
+    @Test
+    void 수신후_60초가_지나도_원본유효기간_안이면_체결을_기록한다() {
+        ExecutionRateEvidence evidence = new ExecutionRateEvidence(RATE,
+                AT.minusMinutes(2), AT.minusMinutes(5), AT.plusMinutes(5));
+        assertThat(TradeExecution.market(order(), AMOUNT, evidence, AT).getExchangeRate()).isEqualTo(RATE);
     }
 
     @Test

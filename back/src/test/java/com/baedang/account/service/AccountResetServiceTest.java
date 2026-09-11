@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -60,7 +61,7 @@ class AccountResetServiceTest {
     void 활성_계좌를_종료하고_다음_회차와_초기지급_원장을_생성한다() {
         Account current = Account.open(7L, 1, INITIAL_CASH, OPENED_AT);
         ReflectionTestUtils.setField(current, "accountId", 1L);
-        Account saved = org.mockito.Mockito.mock(Account.class);
+        Account saved = Mockito.mock(Account.class);
         when(saved.getAccountId()).thenReturn(2L);
         when(saved.getRoundNo()).thenReturn(2);
         when(saved.getInitialCash()).thenReturn(INITIAL_CASH);
@@ -96,7 +97,7 @@ class AccountResetServiceTest {
     void 바로_이전_종료계좌로_재시도하면_현재_회차를_그대로_반환한다() {
         Account closed = Account.open(7L, 1, INITIAL_CASH, OPENED_AT);
         closed.close(RESET_INSTANT.atOffset(ZoneOffset.UTC));
-        Account active = org.mockito.Mockito.mock(Account.class);
+        Account active = Mockito.mock(Account.class);
         when(active.getAccountId()).thenReturn(2L);
         when(active.getRoundNo()).thenReturn(2);
         when(active.getInitialCash()).thenReturn(INITIAL_CASH);
@@ -117,7 +118,7 @@ class AccountResetServiceTest {
     void 두_회차_이상_지난_계좌_ID는_충돌로_거절한다() {
         Account closed = Account.open(7L, 1, INITIAL_CASH, OPENED_AT);
         closed.close(RESET_INSTANT.atOffset(ZoneOffset.UTC));
-        Account active = org.mockito.Mockito.mock(Account.class);
+        Account active = Mockito.mock(Account.class);
         when(active.getRoundNo()).thenReturn(3);
         when(accountRepository.findByAccountIdAndUserIdForUpdate(1L, 7L))
                 .thenReturn(Optional.of(closed));

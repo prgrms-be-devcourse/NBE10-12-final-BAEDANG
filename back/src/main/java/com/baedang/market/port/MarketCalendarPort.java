@@ -23,7 +23,7 @@ public interface MarketCalendarPort {
     /**
      * 국내(KR) 장 운영 정보를 조회한다.
      *
-     * @param date 조회할 날짜 (보통 오늘)
+     * @param date 조회할 거래소 현지 날짜 (KR: Asia/Seoul)
      */
     MarketCalendarDay fetchKrMarketCalendar(LocalDate date);
 
@@ -31,7 +31,7 @@ public interface MarketCalendarPort {
      * 해외(US) 장 운영 정보를 조회한다. DST 여부에 따라 정규장 시각이 달라지는데,
      * 이 계산은 Toss 가 해주므로 여기서 별도 분기가 필요 없다.
      *
-     * @param date 조회할 날짜 (보통 오늘, KST 기준)
+     * @param date 조회할 거래소 현지 날짜 (US: America/New_York)
      */
     MarketCalendarDay fetchUsMarketCalendar(LocalDate date);
 }

@@ -5,8 +5,10 @@ import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.orderbook.config.OrderBookProperties;
+import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.GeneratedOrderBook;
+import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
@@ -19,15 +21,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.PessimisticLockingFailureException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -37,6 +39,7 @@ import org.testcontainers.utility.DockerImageName;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -45,8 +48,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 /**
@@ -271,10 +274,10 @@ class OrderBookPublicationIntegrationTest {
         Long initialVersionId = publicationService.publish(generatedBook(41L), BASE.plusSeconds(600)).orElseThrow();
 
         GeneratedOrderBook valid = generatedBook(42L);
-        var invalidLevels = new java.util.ArrayList<>(valid.levels());
+        var invalidLevels = new ArrayList<>(valid.levels());
         // level_depth 1 중복을 추가하여 uq_order_book_level 유니크 제약 위반 유발
-        invalidLevels.add(new com.baedang.orderbook.model.GeneratedOrderBookLevel(
-                com.baedang.orderbook.entity.OrderBookSide.ASK, 1, new BigDecimal("70100"), BigDecimal.TEN));
+        invalidLevels.add(new GeneratedOrderBookLevel(
+                OrderBookSide.ASK, 1, new BigDecimal("70100"), BigDecimal.TEN));
         GeneratedOrderBook corrupt = new GeneratedOrderBook(
                 valid.stockId(), valid.basePrice(), valid.currency(), valid.quoteAt(), valid.generatedAt(),
                 valid.policyVersion(), valid.seed(), invalidLevels);

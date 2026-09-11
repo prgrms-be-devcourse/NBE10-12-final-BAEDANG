@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.function.Predicate;
 
 /**
  * 보유 종목을 투자 성향 MBTI 4축으로 분류하는 순수 계산기(DB·시각 비의존).
@@ -120,7 +121,7 @@ public class InvestmentTypeClassifier {
                 .orElse(BigDecimal.ZERO);
     }
 
-    private static BigDecimal sum(List<HoldingSlice> slices, java.util.function.Predicate<HoldingSlice> filter) {
+    private static BigDecimal sum(List<HoldingSlice> slices, Predicate<HoldingSlice> filter) {
         return slices.stream()
                 .filter(filter)
                 .map(s -> s.evalWon() == null ? BigDecimal.ZERO : s.evalWon())

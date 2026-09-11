@@ -1,15 +1,14 @@
 package com.baedang.market.provider;
 
 import com.baedang.market.port.MarketCalendarDay;
-import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.market.service.MarketTradingDayPolicy;
 import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 
 /**
  * {@link MarketSessionProvider}의 구현체.
@@ -29,47 +28,18 @@ import java.time.ZoneId;
 @Component
 public class MarketSessionProviderBridge implements MarketSessionProvider {
 
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private final MarketTradingDayPolicy tradingDays;
 
-    private final MarketCalendarPort marketCalendarPort;
-
-    public MarketSessionProviderBridge(MarketCalendarPort marketCalendarPort) {
-        this.marketCalendarPort = marketCalendarPort;
+    public MarketSessionProviderBridge(MarketTradingDayPolicy tradingDays) {
+        this.tradingDays = tradingDays;
     }
 
     @Override
     public MarketSessionStatus currentSession(MarketCountry marketCountry, Instant now) {
-        LocalDate today = now.atZone(KST).toLocalDate();
-
-        if (marketCountry == MarketCountry.KR) {
-            return statusOf(krCalendar(today), now);
-        }
-
-        // 미국 정규장은 KST 기준 자정을 넘기므로(예: 22:30~익일 05:00),
-        // 오늘 날짜 조회만으로는 자정 이후 시간대를 놓칠 수 있어 전날 조회분도 함께 확인한다.
-        MarketSessionStatus todayStatus = statusOf(usCalendar(today), now);
-        if (todayStatus.open()) {
-            return todayStatus;
-        }
-        return statusOf(usCalendar(today.minusDays(1)), now);
-    }
-
-    private MarketCalendarDay krCalendar(LocalDate date) {
-        return marketCalendarPort.fetchKrMarketCalendar(date);
-    }
-
-    private MarketCalendarDay usCalendar(LocalDate date) {
-        return marketCalendarPort.fetchUsMarketCalendar(date);
-    }
-
-    private MarketSessionStatus statusOf(MarketCalendarDay day, Instant now) {
-        if (!day.isOpen() || day.regularOpenAt() == null || day.regularCloseAt() == null) {
-            return MarketSessionStatus.closed();
-        }
-        Instant openAt = day.regularOpenAt().toInstant();
-        Instant closeAt = day.regularCloseAt().toInstant();
-        return !now.isBefore(openAt) && now.isBefore(closeAt)
-                ? new MarketSessionStatus(true, closeAt)
+        LocalDate today = now.atZone(marketCountry.zoneId()).toLocalDate();
+        MarketCalendarDay day = tradingDays.calendar(marketCountry, today);
+        return day.isRegularSessionAt(now)
+                ? new MarketSessionStatus(true, day.regularCloseAt().toInstant())
                 : MarketSessionStatus.closed();
     }
 }

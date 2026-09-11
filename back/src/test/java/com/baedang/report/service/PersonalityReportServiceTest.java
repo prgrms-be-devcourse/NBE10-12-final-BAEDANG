@@ -18,6 +18,7 @@ import com.baedang.user.entity.Account;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -74,7 +75,7 @@ class PersonalityReportServiceTest {
     }
 
     private static Stock stock(long stockId, StockCategory category, MarketCountry market, String leverage) {
-        Stock stock = org.mockito.Mockito.mock(Stock.class);
+        Stock stock = Mockito.mock(Stock.class);
         lenient().when(stock.getStockId()).thenReturn(stockId);
         lenient().when(stock.getSymbol()).thenReturn("SYM" + stockId);
         lenient().when(stock.getName()).thenReturn("종목" + stockId);

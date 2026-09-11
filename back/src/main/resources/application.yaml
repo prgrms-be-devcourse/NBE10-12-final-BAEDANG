@@ -109,6 +109,15 @@ kis:
   industry-cache-ttl: ${KIS_INDUSTRY_CACHE_TTL:30d}
   load-financials: ${KIS_LOAD_FINANCIALS:false}
 
+# ── KRX KIND — 시장조치(서킷브레이커·사이드카) 수집 ──────────────────────────
+krx:
+  market-events:
+    enabled: ${KRX_MARKET_EVENTS_ENABLED:false}
+    base-url: ${KRX_MARKET_EVENTS_BASE_URL:https://kind.krx.co.kr}
+    poll-interval: ${KRX_MARKET_EVENTS_POLL_INTERVAL:15s}
+    connect-timeout: ${KRX_MARKET_EVENTS_CONNECT_TIMEOUT:3s}
+    read-timeout: ${KRX_MARKET_EVENTS_READ_TIMEOUT:5s}
+
 # ── 거래 정책 ────────────────────────────────────────────────────────────────
 #   요율은 DB 에 저장하지 않습니다. 여기가 유일한 정의 지점이고,
 #   테이블에는 계산 결과값(trade_order.fee / trade_order.tax)만 들어갑니다.
@@ -170,7 +179,6 @@ trading:
 
   # 전체 사용자 공유 가상 호가 정책 (V1)
   orderbook:
-    enabled: ${ORDERBOOK_ENABLED:false}
     policy-version: V1
     refresh-interval: 3s
     refresh-initial-delay: ${ORDERBOOK_REFRESH_INITIAL_DELAY:0s}

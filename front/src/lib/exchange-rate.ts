@@ -1,69 +1,49 @@
-/**
- * 환율(USD/KRW) 조회. 정책상 거래는 원화로만 제공되고, 미국 종목의 달러 데이터는
- * 프론트에서 환율을 곱해 원화로 환산해 보여주기로 결정했습니다 (건우님 회의 기록,
- * 2026-08-26 — 주식 랭킹·마이페이지의 미국 종목 표시가 대상).
- *
- * <p>환율은 1시간에 한 번 갱신되는 정책이라({@code docs/erd.md} 참고),
- * {@link import("@/components/ExchangeRateProvider").ExchangeRateProvider} 가
- * 이 함수를 최초 1회 + 매 1시간마다 다시 호출해서 값을 갱신합니다.
- *
- * <p>`GET /api/exchange-rates/latest`(back/src/main/java/com/baedang/market)를 호출합니다.
- * 백엔드가 안 떠 있거나 아직 환율 데이터가 없을 때는(EXCHANGE_RATE_NOT_FOUND 등)
- * 배너 자체가 깨지면 안 되므로 기본값으로 대체합니다. 다만 "데이터가 아직 없다"처럼
- * 예상 가능한 실패와 그 외의 예상 못한 에러(응답 형식이 깨졌다 등)는 구분해서,
- * 후자는 콘솔에 남겨 조용히 묻히지 않게 합니다.
- */
-
-import { ApiError, getExchangeRateLatest } from "@/lib/api";
+import { getExchangeRateLatest } from "@/lib/api";
 
 export type ExchangeRateInfo = {
-  rate: number; // 1 USD당 원화
-  changeAmount: number; // 전일 자정(00:00 KST) 대비 등락(원)
-  changeRate: number; // 전일 자정(00:00 KST) 대비 등락률(비율, 0.0016 = +0.16%)
+  rate: number;
+  changeAmount: number;
+  changeRate: number;
   updatedAt: Date;
 };
 
-/** 백엔드 호출이 실패했을 때의 대체값 겸 초기 렌더링용 값. */
-export const DEFAULT_USD_KRW_RATE = 1398.5;
-const DEFAULT_CHANGE_AMOUNT = 2.3;
-const DEFAULT_CHANGE_RATE = 0.0016;
-
-const DEFAULT_INFO: Omit<ExchangeRateInfo, "updatedAt"> = {
-  rate: DEFAULT_USD_KRW_RATE,
-  changeAmount: DEFAULT_CHANGE_AMOUNT,
-  changeRate: DEFAULT_CHANGE_RATE,
+export type ExchangeRateState = {
+  rate: number | null;
+  changeAmount: number | null;
+  changeRate: number | null;
+  updatedAt: Date | null;
+  isLoading: boolean;
+  hasError: boolean;
 };
 
-/**
- * 백엔드가 내려준 숫자 문자열을 안전하게 파싱한다. `Number("")`는 `0`을 반환해
- * `Number.isNaN` 검사를 그냥 통과해버리므로(빈 문자열이 "유효한 0"으로 둔갑),
- * 빈 문자열·문자열이 아닌 값을 먼저 걸러내고, `Number.isFinite`로 `Infinity`
- * 같은 값도 함께 배제한다 (oxcm07님 리뷰, PR #53).
- */
+export const INITIAL_EXCHANGE_RATE_STATE: ExchangeRateState = {
+  rate: null, changeAmount: null, changeRate: null, updatedAt: null,
+  isLoading: true, hasError: false,
+};
+
+/** 실패 시 마지막 정상 환율과 원본 시각을 보존합니다. 최초 실패는 값 없음 상태입니다. */
+export function exchangeRateStateAfterRefresh(previous: ExchangeRateState, info: ExchangeRateInfo | null): ExchangeRateState {
+  return info
+    ? { ...info, isLoading: false, hasError: false }
+    : { ...previous, isLoading: false, hasError: true };
+}
+
 function parseFiniteNumber(value: unknown): number {
   if (typeof value !== "string" || value.trim() === "") return NaN;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : NaN;
 }
 
-export async function fetchExchangeRate(): Promise<ExchangeRateInfo> {
-  try {
-    const latest = await getExchangeRateLatest();
-    const rate = parseFiniteNumber(latest.rate);
-    const changeAmount = parseFiniteNumber(latest.changeAmount);
-    const changeRate = parseFiniteNumber(latest.changeRate);
-    // 백엔드 응답 필드가 숫자로 파싱 안 되면(형식 오류·빈 문자열 등) 조용히 NaN을
-    // 내보내는 대신 명시적으로 실패시켜 아래 catch의 기본값 대체 경로를 타게 한다.
-    if ([rate, changeAmount, changeRate].some((n) => Number.isNaN(n))) {
-      throw new Error(`환율 응답 형식이 올바르지 않아요: ${JSON.stringify(latest)}`);
-    }
-    return { rate, changeAmount, changeRate, updatedAt: new Date(latest.rateAt) };
-  } catch (err) {
-    // 아직 데이터가 없는 경우(EXCHANGE_RATE_NOT_FOUND — 서비스 초기 등)는 예상 가능한
-    // 실패라 조용히 기본값으로 대체하지만, 그 외 예상 못한 에러는 콘솔에 남겨서
-    // "배너가 계속 기본값만 보여준다"는 증상의 원인을 나중에 추적할 수 있게 한다.
-    const expected = err instanceof ApiError && err.code === "EXCHANGE_RATE_NOT_FOUND";
-    if (!expected) console.warn("환율 조회 실패, 기본값으로 대체합니다.", err);
-    return { ...DEFAULT_INFO, updatedAt: new Date() };
+/** 실패를 호출부에 전달합니다. 임의 환율이나 현재 시각으로 대체하지 않습니다. */
+export async function fetchExchangeRate(signal?: AbortSignal): Promise<ExchangeRateInfo> {
+  const latest = await getExchangeRateLatest("USD", "KRW", signal);
+  const rate = parseFiniteNumber(latest.rate);
+  const changeAmount = parseFiniteNumber(latest.changeAmount);
+  const changeRate = parseFiniteNumber(latest.changeRate);
+  const updatedAt = new Date(latest.validFrom);
+  if ([rate, changeAmount, changeRate].some((n) => !Number.isFinite(n))
+      || rate <= 0 || typeof latest.validFrom !== "string" || !Number.isFinite(updatedAt.getTime())) {
+    throw new Error("환율 응답 형식이 올바르지 않아요");
   }
+  return { rate, changeAmount, changeRate, updatedAt };
 }

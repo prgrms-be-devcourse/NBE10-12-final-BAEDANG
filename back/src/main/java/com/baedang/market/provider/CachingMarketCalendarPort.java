@@ -39,7 +39,7 @@ public class CachingMarketCalendarPort implements MarketCalendarPort {
     public MarketCalendarDay fetchKrMarketCalendar(LocalDate date) {
         return calendarCache.computeIfAbsent(
                 new CacheKey(MarketCountry.KR, date),
-                key -> delegate.fetchKrMarketCalendar(key.tradeDate())
+                key -> validated(delegate.fetchKrMarketCalendar(key.tradeDate()), key)
         );
     }
 
@@ -47,8 +47,13 @@ public class CachingMarketCalendarPort implements MarketCalendarPort {
     public MarketCalendarDay fetchUsMarketCalendar(LocalDate date) {
         return calendarCache.computeIfAbsent(
                 new CacheKey(MarketCountry.US, date),
-                key -> delegate.fetchUsMarketCalendar(key.tradeDate())
+                key -> validated(delegate.fetchUsMarketCalendar(key.tradeDate()), key)
         );
+    }
+
+    private MarketCalendarDay validated(MarketCalendarDay day, CacheKey key) {
+        // null 응답은 computeIfAbsent가 캐시하지 않으므로 다음 호출에서 재시도한다.
+        return day == null ? null : MarketCalendarDay.requireMatching(day, key.marketCountry(), key.tradeDate());
     }
 
     int entryCount() {

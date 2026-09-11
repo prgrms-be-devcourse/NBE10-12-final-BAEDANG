@@ -5,11 +5,13 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
-import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.OrderMarketContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -44,8 +46,8 @@ class OrderPolicyTest {
 
     @ParameterizedTest
     @CsvSource({"0,-1,2,1,true", "0,-1,2,2,false", "-59,-100,3600,0,true",
-            "-59,-100,3600,1,false", "1,-100,3600,0,false", "0,1,3600,0,false"})
-    void 컨텍스트가_신선해도_환율의_유효구간과_TTL은_따로_검증한다(
+            "-59,-100,3600,1,true", "1,-100,3600,0,false", "0,1,3600,0,false"})
+    void 컨텍스트가_신선해도_원본환율의_유효구간과_미래수신을_검증한다(
             long fetchedOffset, long fromOffset, long untilOffset, long nowOffset, boolean valid) {
         var evidence = new ExecutionRateEvidence(new BigDecimal("1383.601234"),
                 QUOTE_AT.plusSeconds(fetchedOffset), QUOTE_AT.plusSeconds(fromOffset), QUOTE_AT.plusSeconds(untilOffset));
@@ -139,8 +141,8 @@ class OrderPolicyTest {
     }
 
     @ParameterizedTest
-    @org.junit.jupiter.params.provider.NullAndEmptySource
-    @org.junit.jupiter.params.provider.ValueSource(strings = {" ", "0", "1000001", "1.5", "abc", "111111111111111111111111111111111"})
+    @NullAndEmptySource
+    @ValueSource(strings = {" ", "0", "1000001", "1.5", "abc", "111111111111111111111111111111111"})
     void 잘못된_수량은_문제필드와_재시도정책을_제공한다(String quantity) {
         assertThatThrownBy(() -> policy.parseInput(1L, UUID.randomUUID().toString(), "005930", "KR", "BUY", quantity))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
