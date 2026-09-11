@@ -739,6 +739,7 @@ export function InvestupIntro({
         <p
           style={{
             margin: '0 0 18px',
+            textAlign: 'center',
             fontSize: 13,
             fontWeight: 500,
             letterSpacing: '.22em',
@@ -750,7 +751,8 @@ export function InvestupIntro({
         </p>
         <h2
           style={{
-            margin: '0 0 clamp(32px, 5vh, 56px)',
+            margin: '0 auto clamp(32px, 5vh, 56px)',
+            textAlign: 'center',
             fontSize: 'clamp(28px, 4vw, 52px)',
             fontWeight: 700,
             letterSpacing: '-.035em',
@@ -822,6 +824,7 @@ export function InvestupIntro({
         <p
           style={{
             margin: '0 0 18px',
+            textAlign: 'center',
             fontSize: 13,
             fontWeight: 500,
             letterSpacing: '.22em',
@@ -833,7 +836,8 @@ export function InvestupIntro({
         </p>
         <h2
           style={{
-            margin: '0 0 clamp(32px, 5vh, 56px)',
+            margin: '0 auto clamp(32px, 5vh, 56px)',
+            textAlign: 'center',
             fontSize: 'clamp(28px, 4vw, 52px)',
             fontWeight: 700,
             letterSpacing: '-.035em',
