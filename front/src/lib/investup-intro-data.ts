@@ -74,6 +74,12 @@ export const CMP = [
 /** 접힌(스켈레톤) 상태의 행 너비 */
 export const CMP_SKELETON_W = ['78%', '68%', '58%', '48%'] as const;
 
+/* ── 제목 단어별 스크롤 연동 등장(블러+상승) — toss.im/#assets "공부할 필요 없이
+ * 누구나 금융 전문가로" 문구와 같은 효과. 단어 배열로 나눠 각자 스크롤 진행률에
+ * 따라 독립적으로 나타나게 한다(순서대로 시작 시점을 살짝씩 늦춘다). ───────── */
+export const STEPS_TITLE_WORDS = ['이렇게', '사용해요'] as const;
+export const COMPARE_TITLE_WORDS = ['증권사', '앱과', '무엇이', '다른가요?'] as const;
+
 /* ── 지구본: 저해상도 세계지도 비트맵 (64×32) ──── */
 
 type Run = [number, ...Array<[number, number]>];

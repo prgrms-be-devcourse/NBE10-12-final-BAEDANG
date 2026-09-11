@@ -17,6 +17,8 @@ import {
   T,
   TIMING,
   STEPS,
+  STEPS_TITLE_WORDS,
+  COMPARE_TITLE_WORDS,
   CMP,
   CMP_SKELETON_W,
   GLOBE_DOTS,
@@ -71,8 +73,6 @@ export function InvestupIntro({
     geom: { cx: 0, cy: 0, R: 1 },
     cw: null as number | null,
     ch: null as number | null,
-    stepsTitleOn: false,
-    titleOn: false,
     cardOn: false,
     lastY: null as number | null,
   });
@@ -344,26 +344,42 @@ export function InvestupIntro({
       }
     };
 
-    /** 02/03 제목: 한 번만 트리거되는 노출 (CSS 트랜지션이 끝까지 재생되도록 직접 쓰기) */
+    /**
+     * 02/03 제목: 단어별 스크롤 연동 등장(블러+상승) — toss.im/#assets의 "공부할 필요
+     * 없이 누구나 금융 전문가로" 문구와 같은 방식. 한 번 트리거되고 끝나는 CSS
+     * 트랜지션이 아니라, 스크롤 위치의 연속 함수로 매 프레임 직접 써서 스크롤을
+     * 올리면 다시 흐려지며 가라앉는다(실제로 확인한 toss.im의 동작과 동일).
+     * 단어마다 시작 시점을 살짝씩 늦춰서 왼쪽부터 순서대로 나타나게 한다.
+     * 반환값(0~1)은 "이 제목이 얼마나 나타났는지"라 뒤이은 카드 등장 타이밍을
+     * 잡는 데 재사용한다.
+     */
+    const updateWordsReveal = (container: HTMLElement | null): number => {
+      if (!container) return 0;
+      const rect = container.getBoundingClientRect();
+      const start = window.innerHeight * 0.92;
+      const end = window.innerHeight * 0.52;
+      const p = clamp01((start - rect.top) / (start - end));
+      const words = container.querySelectorAll<HTMLElement>(':scope > .iv-word');
+      const n = words.length;
+      words.forEach((w, i) => {
+        const localStart = n > 1 ? (i / n) * 0.6 : 0;
+        const localP = clamp01((p - localStart) / 0.5);
+        const eased = 1 - Math.pow(1 - localP, 3);
+        w.style.opacity = eased.toFixed(3);
+        w.style.filter = `blur(${(16 * (1 - eased)).toFixed(1)}px)`;
+        w.style.transform = `translateY(${(24 * (1 - eased)).toFixed(1)}px)`;
+      });
+      return p;
+    };
+
     const tick = () => {
       const a = A.current;
 
-      const st = stepsTitleRef.current;
-      if (st && !a.stepsTitleOn && st.getBoundingClientRect().top < window.innerHeight * 0.88) {
-        a.stepsTitleOn = true;
-        st.style.opacity = '1';
-        st.style.transform = 'translateY(0%)';
-      }
-
-      const t = titleRef.current;
-      if (t && !a.titleOn && t.getBoundingClientRect().top < window.innerHeight * 0.88) {
-        a.titleOn = true;
-        t.style.opacity = '1';
-        t.style.transform = 'translateY(0%)';
-      }
+      updateWordsReveal(stepsTitleRef.current);
+      const compareTitleP = updateWordsReveal(titleRef.current);
 
       const c = cardRef.current;
-      if (c && !a.cardOn && a.titleOn && c.getBoundingClientRect().top < window.innerHeight * 0.72) {
+      if (c && !a.cardOn && compareTitleP > 0.85 && c.getBoundingClientRect().top < window.innerHeight * 0.72) {
         a.cardOn = true;
         c.style.opacity = '1';
         c.style.transform = 'translateY(0px)';
@@ -761,21 +777,22 @@ export function InvestupIntro({
             maxWidth: '18em',
             wordBreak: 'keep-all',
             textWrap: 'pretty' as never,
-            overflow: 'hidden',
           }}
         >
-          {/* 초기 포즈는 인라인, 트리거 시 1회 직접 DOM 쓰기 */}
-          <span
-            ref={stepsTitleRef}
-            style={{
-              display: 'inline-block',
-              opacity: 0,
-              transform: 'translateY(110%)',
-              transition:
-                'opacity .8s cubic-bezier(.2,.9,.24,1), transform 1s cubic-bezier(.2,.9,.24,1)',
-            }}
-          >
-            이렇게 사용해요
+          {/* 초기 포즈는 인라인, 이후 스크롤 위치에 따라 매 프레임 직접 DOM 쓰기
+              (updateWordsReveal) — 단어마다 순서대로 블러+상승에서 선명하게 나타난다. */}
+          <span ref={stepsTitleRef}>
+            {STEPS_TITLE_WORDS.map((w, i) => (
+              <Fragment key={w}>
+                <span
+                  className="iv-word"
+                  style={{ display: 'inline-block', opacity: 0, filter: 'blur(16px)', transform: 'translateY(24px)' }}
+                >
+                  {w}
+                </span>
+                {i < STEPS_TITLE_WORDS.length - 1 && ' '}
+              </Fragment>
+            ))}
           </span>
         </h2>
         <Reveal delay={0} duration={1}>
@@ -846,21 +863,22 @@ export function InvestupIntro({
             maxWidth: '18em',
             wordBreak: 'keep-all',
             textWrap: 'pretty' as never,
-            overflow: 'hidden',
           }}
         >
-          {/* 초기 포즈는 인라인, 트리거 시 1회 직접 DOM 쓰기 */}
-          <span
-            ref={titleRef}
-            style={{
-              display: 'inline-block',
-              opacity: 0,
-              transform: 'translateY(110%)',
-              transition:
-                'opacity .8s cubic-bezier(.2,.9,.24,1), transform 1s cubic-bezier(.2,.9,.24,1)',
-            }}
-          >
-            증권사 앱과 무엇이 다른가요?
+          {/* 초기 포즈는 인라인, 이후 스크롤 위치에 따라 매 프레임 직접 DOM 쓰기
+              (updateWordsReveal) — 단어마다 순서대로 블러+상승에서 선명하게 나타난다. */}
+          <span ref={titleRef}>
+            {COMPARE_TITLE_WORDS.map((w, i) => (
+              <Fragment key={w}>
+                <span
+                  className="iv-word"
+                  style={{ display: 'inline-block', opacity: 0, filter: 'blur(16px)', transform: 'translateY(24px)' }}
+                >
+                  {w}
+                </span>
+                {i < COMPARE_TITLE_WORDS.length - 1 && ' '}
+              </Fragment>
+            ))}
           </span>
         </h2>
 
