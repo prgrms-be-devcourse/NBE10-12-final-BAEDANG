@@ -55,13 +55,14 @@ class StockLikeServiceIntegrationTest {
     }
 
     @Test
-    void 이미_등록된_종목을_다시_등록해도_한_행만_남는다() {
+    void 이미_등록된_종목을_다시_등록해도_한_행만_남고_같은_id를_돌려준다() {
         Long stock = createStock();
 
-        service.like(user, stock);
-        service.like(user, stock);
+        Long firstId = service.like(user, stock);
+        Long secondId = service.like(user, stock);
 
         assertThat(likeCount(user, stock)).isEqualTo(1);
+        assertThat(secondId).isNotNull().isEqualTo(firstId);
     }
 
     @Test

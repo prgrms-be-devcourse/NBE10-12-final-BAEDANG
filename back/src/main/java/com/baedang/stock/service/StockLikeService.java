@@ -44,11 +44,15 @@ public class StockLikeService {
     private static final int MAX_SIZE = 50;
 
     @Transactional
-    public void like(Long userId, Long stockId) {
+    public Long like(Long userId, Long stockId) {
         if (!stockRepository.existsById(stockId)) {
             throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "stockId=" + stockId);
         }
         stockLikeRepository.insertIfAbsent(userId, stockId);
+        return stockLikeRepository.findByUserIdAndStockId(userId, stockId)
+                .orElseThrow(() -> new IllegalStateException(
+                        "관심 종목 등록 직후 조회 실패: userId=" + userId + ", stockId=" + stockId))
+                .getStockLikeId();
     }
 
     @Transactional

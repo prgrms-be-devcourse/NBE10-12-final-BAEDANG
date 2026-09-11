@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface StockLikeRepository extends JpaRepository<StockLike, Long> {
 
@@ -17,6 +18,8 @@ public interface StockLikeRepository extends JpaRepository<StockLike, Long> {
             ON CONFLICT (user_id, stock_id) DO NOTHING
             """, nativeQuery = true)
     void insertIfAbsent(@Param("userId") Long userId, @Param("stockId") Long stockId);
+
+    Optional<StockLike> findByUserIdAndStockId(Long userId, Long stockId);
 
     @Modifying
     @Query("DELETE FROM StockLike l WHERE l.userId = :userId AND l.stockLikeId = :stockLikeId")

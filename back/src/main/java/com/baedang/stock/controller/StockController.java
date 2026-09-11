@@ -4,6 +4,7 @@ import com.baedang.stock.dto.CandleResponse;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.dto.StockLikePageResponse;
 import com.baedang.stock.dto.StockLikeRequest;
+import com.baedang.stock.dto.StockLikeResponse;
 import com.baedang.stock.dto.StockSearchResponse;
 import com.baedang.stock.dto.StockDetailResponse;
 import com.baedang.stock.dto.StockFinancialResponse;
@@ -99,12 +100,11 @@ public class StockController {
     }
 
     @PostMapping("/likes")
-    public ResponseEntity<Void> like(
+    public ResponseEntity<StockLikeResponse> like(
             @AuthenticationPrincipal Long userId,
             @Valid @RequestBody StockLikeRequest request
     ) {
-        stockLikeService.like(userId, request.stockId());
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(new StockLikeResponse(stockLikeService.like(userId, request.stockId())));
     }
 
     @GetMapping("/likes")
