@@ -26,4 +26,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByEmail(String email);
 
     boolean existsByNickname(String nickname);
+
+    /** 합성(시드) 회원 수. 시딩 멱등성 판정에 씁니다(#152). */
+    long countBySeedTrue();
 }

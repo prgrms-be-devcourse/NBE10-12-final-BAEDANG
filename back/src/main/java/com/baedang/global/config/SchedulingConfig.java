@@ -127,6 +127,22 @@ public class SchedulingConfig {
         return executor;
     }
 
+    /**
+     * 리더보드 배치를 공용 스케줄러와 분리한 단일 스레드에서 실행한다(설계문서 §6.4·#145).
+     *
+     * <p>전 자격 계좌를 순회 평가하는 DB-heavy 작업이라 공유 풀에 얹지 않고 전용 스레드에
+     * 직렬화한다. 하루 1회 저트래픽 창(US 폐장~KR 개장)에만 커넥션 1개를 점유한다.
+     */
+    @Bean(name = "leaderboardTaskScheduler")
+    public ThreadPoolTaskScheduler leaderboardTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("leaderboard-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
+
     /** KIS 재무 수집을 공용 스케줄러와 분리하고 중복 트리거 대기열을 제한합니다. */
     @Bean(name = "stockFinancialTaskExecutor")
     public ThreadPoolTaskExecutor stockFinancialTaskExecutor() {

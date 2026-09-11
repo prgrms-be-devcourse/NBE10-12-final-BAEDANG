@@ -37,6 +37,10 @@ public class User extends BaseEntity {
     @Column(name = "status", nullable = false, length = 20)
     private UserStatus status;
 
+    /** 개발/데모용 합성 회원 여부. 프로덕션 리더보드·리포트는 {@code false} 만 집계합니다(#152). */
+    @Column(name = "is_seed", nullable = false)
+    private boolean seed;
+
     /**
      * JPA 전용 기본 생성자.
      *
@@ -47,11 +51,12 @@ public class User extends BaseEntity {
     protected User() {
     }
 
-    private User(String email, String passwordHash, String nickname) {
+    private User(String email, String passwordHash, String nickname, boolean seed) {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
         this.status = UserStatus.ACTIVE;
+        this.seed = seed;
     }
 
     /**
@@ -62,7 +67,12 @@ public class User extends BaseEntity {
      * 안 부르고 {@code .build()} 해도 컴파일이 되지만, 이건 안 됩니다.
      */
     public static User create(String email, String passwordHash, String nickname) {
-        return new User(email, passwordHash, nickname);
+        return new User(email, passwordHash, nickname, false);
+    }
+
+    /** 개발/데모용 합성 회원. {@code is_seed=true} 로 실유저와 분리합니다(#152 시딩). */
+    public static User createSeed(String email, String passwordHash, String nickname) {
+        return new User(email, passwordHash, nickname, true);
     }
 
     public void changeNickname(String nickname) {
@@ -99,5 +109,9 @@ public class User extends BaseEntity {
 
     public UserStatus getStatus() {
         return status;
+    }
+
+    public boolean isSeed() {
+        return seed;
     }
 }
