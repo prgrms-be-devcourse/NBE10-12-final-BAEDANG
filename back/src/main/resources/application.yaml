@@ -186,6 +186,10 @@ trading:
 
 # ── 투자 성향 리포트 / 리더보드 ──────────────────────────────────────────────
 report:
+  # 4주 이상 보유 성과 섹션의 임계(표시용). 투자 MBTI 판정엔 영향 없음.
+  holding-period-weeks: ${REPORT_HOLDING_PERIOD_WEEKS:4}
+  # 투자 MBTI 축 비중을 평균낼 원가 구성 창(주). 체결 재생으로 이 창을 시점별 복원해 평균한다(§6.2).
+  mbti-window-weeks: ${REPORT_MBTI_WINDOW_WEEKS:4}
   seed:
     # 개발/데모용 합성 포트폴리오 시딩 관리자 트리거 활성 플래그(기본 false, #152 검증 게이트).
     #   true 일 때만 POST /internal/admin/seed/portfolios 가 등록됩니다.

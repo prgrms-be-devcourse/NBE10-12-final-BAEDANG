@@ -11,12 +11,15 @@ import java.util.List;
 /**
  * 보유 종목을 투자 성향 MBTI 4축으로 분류하는 순수 계산기(DB·시각 비의존).
  *
- * <p>모든 축은 <b>평가금액 가중 비중</b>을 컷오프로 가른다. 컷오프는 초안값이며, 실제 분포를
- * 본 뒤 튜닝한다(설계문서 §4.1, Phase 3). 지금은 상수로 두고, 추후 설정값으로 뺀다.
+ * <p>각 축은 <b>비중</b>을 컷오프로 가른다. 라이브 경로(§6.2)는 4주 창의 <b>원가(cost) 구성</b>을
+ * 시점별로 복원해 축 비중을 뽑고({@link #shares}), 그 <b>일별 비중을 평균</b>낸 값으로 판정한다
+ * ({@link #classifyFromShares}). 판정은 정밀 비중 그대로 하고 반올림은 표시용({@link #SHARE_SCALE})
+ * 으로만 한다(경계값이 반올림 때문에 유형을 넘나들지 않게, fix ②). 컷오프는 시딩 분포로 검증했다
+ * (2026-09-11: 개별주 0.50 유지 확정).
  *
- * <p><b>Axis 4(공격/안정)는 Phase 1 프록시</b> — 레버리지·인버스 비중만 본다. 보유 종목의
- * 가격 변동성은 daily_candle 이 필요해 후속으로 미룬다(설계문서 §4). 그래서 변동성 큰
- * 개별주만 담은 계좌도 "안정"으로 읽힐 수 있음(의도된 한계).
+ * <p><b>Axis 4(공격/안정)는 프록시</b> — 레버리지·인버스 비중만 본다. 보유 종목의 가격 변동성은
+ * daily_candle 이 필요해 후속으로 미룬다(설계문서 §4). 그래서 변동성 큰 개별주만 담은 계좌도
+ * "안정"으로 읽힐 수 있음(의도된 한계).
  */
 @Component
 public class InvestmentTypeClassifier {
@@ -34,6 +37,8 @@ public class InvestmentTypeClassifier {
     static final BigDecimal AGGRESSIVE_CUTOFF = new BigDecimal("0.20");
 
     private static final int SHARE_SCALE = 4;
+    /** 일별 비중을 평균낼 때는 반올림 누적 오차를 줄이려 높은 정밀도로 계산한다. */
+    private static final int TIMELINE_SHARE_SCALE = 10;
 
     /** 분류기 입력 한 건 — 보유 종목의 원화 평가금액과 분류에 필요한 종목 속성. */
     public record HoldingSlice(
@@ -44,64 +49,68 @@ public class InvestmentTypeClassifier {
     ) {
     }
 
-    public InvestmentProfile classify(List<HoldingSlice> slices) {
-        int holdingCount = slices.size();
+    /**
+     * 한 시점의 슬라이스로 4축 비중만 계산한다(분류 판정은 하지 않음). 원가 4주 평균(§6.2)이
+     * 일별 비중을 뽑아 평균낼 때 쓴다. 평가액(=그 시점 원가)이 없으면 {@code null}.
+     * 평균 누적 오차를 줄이려 높은 정밀도({@link #TIMELINE_SHARE_SCALE})로 나눈다.
+     */
+    public AxisShares shares(List<HoldingSlice> slices) {
         BigDecimal total = sum(slices, s -> true);
         if (total.signum() <= 0) {
-            // 평가액이 없으면(전액 현금 등) 비중을 계산할 수 없다.
-            return InvestmentProfile.unclassified(holdingCount);
+            return null;
         }
-
-        // 판정은 반올림 전 원금액으로, 표시(share)는 반올림한 값으로 — 둘을 섞지 말 것.
-        BigDecimal domesticAmount = sum(slices, s -> s.market() == MarketCountry.KR);
-        BigDecimal individualAmount = sum(slices, InvestmentTypeClassifier::isIndividual);
-        BigDecimal aggressiveAmount = sum(slices, InvestmentTypeClassifier::isAggressive);
-        BigDecimal top1Amount = maxEval(slices);
-
-        // 비중은 분류 여부와 무관하게 항상 담는다(리포트 계약). 종목 수는 유형 판정에만 쓴다.
-        BigDecimal domesticShare = share(domesticAmount, total);
-        BigDecimal individualShare = share(individualAmount, total);
-        BigDecimal aggressiveShare = share(aggressiveAmount, total);
-        BigDecimal top1Share = share(top1Amount, total);
-
-        if (holdingCount < MIN_HOLDINGS_FOR_CLASSIFICATION) {
-            // 유형은 정하지 않되(미분류/신규) 계산한 비중은 그대로 내려 준다.
-            return new InvestmentProfile(
-                    false, null, domesticShare, individualShare, top1Share, aggressiveShare, holdingCount);
-        }
-
-        InvestmentType type = new InvestmentType(
-                atLeast(top1Amount, total, CONCENTRATION_TOP1_CUTOFF)
-                        ? InvestmentType.Diversification.CONCENTRATED
-                        : InvestmentType.Diversification.DIVERSIFIED,
-                atLeast(domesticAmount, total, DOMESTIC_CUTOFF)
-                        ? InvestmentType.Market.DOMESTIC
-                        : InvestmentType.Market.GLOBAL,
-                atLeast(individualAmount, total, INDIVIDUAL_CUTOFF)
-                        ? InvestmentType.Instrument.INDIVIDUAL
-                        : InvestmentType.Instrument.FUND,
-                atLeast(aggressiveAmount, total, AGGRESSIVE_CUTOFF)
-                        ? InvestmentType.Risk.AGGRESSIVE
-                        : InvestmentType.Risk.STABLE
-        );
-        return new InvestmentProfile(
-                true, type, domesticShare, individualShare, top1Share, aggressiveShare, holdingCount);
+        return new AxisShares(
+                timelineShare(sum(slices, s -> s.market() == MarketCountry.KR), total),
+                timelineShare(sum(slices, InvestmentTypeClassifier::isIndividual), total),
+                timelineShare(maxEval(slices), total),
+                timelineShare(sum(slices, InvestmentTypeClassifier::isAggressive), total));
     }
 
-    /** 반올림 없이 {@code 비중 >= 컷오프} 판정. {@code part >= total × cutoff} 로 비교한다. */
-    private static boolean atLeast(BigDecimal part, BigDecimal total, BigDecimal cutoff) {
-        return part.compareTo(total.multiply(cutoff)) >= 0;
+    /**
+     * 이미 계산된(예: 4주 평균) 비중으로 유형을 판정한다. 비중이 곧 판정 지표이므로 컷오프와
+     * 직접 비교한다({@code 비중 >= 컷오프}). <b>판정은 넘어온 정밀 비중 그대로</b> 하고, 반올림은
+     * 표시용({@link #SHARE_SCALE}자리)으로만 한다 — 경계값(예 0.49996)이 반올림 때문에 유형을
+     * 넘나들지 않게(설계문서 fix ②). 종목 수가 부족하면 유형을 정하지 않되 비중은 담는다.
+     */
+    public InvestmentProfile classifyFromShares(AxisShares shares, int holdingCount) {
+        if (shares == null) {
+            return InvestmentProfile.unclassified(holdingCount);
+        }
+        BigDecimal domestic = shares.domesticShare();
+        BigDecimal individual = shares.individualShare();
+        BigDecimal top1 = shares.top1Share();
+        BigDecimal aggressive = shares.aggressiveShare();
+        InvestmentType type = holdingCount < MIN_HOLDINGS_FOR_CLASSIFICATION ? null : new InvestmentType(
+                top1.compareTo(CONCENTRATION_TOP1_CUTOFF) >= 0
+                        ? InvestmentType.Diversification.CONCENTRATED : InvestmentType.Diversification.DIVERSIFIED,
+                domestic.compareTo(DOMESTIC_CUTOFF) >= 0
+                        ? InvestmentType.Market.DOMESTIC : InvestmentType.Market.GLOBAL,
+                individual.compareTo(INDIVIDUAL_CUTOFF) >= 0
+                        ? InvestmentType.Instrument.INDIVIDUAL : InvestmentType.Instrument.FUND,
+                aggressive.compareTo(AGGRESSIVE_CUTOFF) >= 0
+                        ? InvestmentType.Risk.AGGRESSIVE : InvestmentType.Risk.STABLE);
+        // 표시용 반올림(판정과 분리).
+        return new InvestmentProfile(type != null, type,
+                display(domestic), display(individual), display(top1), display(aggressive), holdingCount);
+    }
+
+    private static BigDecimal display(BigDecimal share) {
+        return share.setScale(SHARE_SCALE, RoundingMode.HALF_UP);
     }
 
     /** 개별주 축의 개별주(S) 쪽 = 개별주 + 우선주. ETF·ETN 은 펀드(E) 쪽. */
-    private static boolean isIndividual(HoldingSlice s) {
+    public static boolean isIndividual(HoldingSlice s) {
         return s.category() == StockCategory.INDIVIDUAL || s.category() == StockCategory.PREFERRED;
     }
 
     /** 공격 = 레버리지(배율 2 이상) 또는 인버스(음수). 일반 ETF(1.0)·일반주(null)는 제외. */
-    private static boolean isAggressive(HoldingSlice s) {
+    public static boolean isAggressive(HoldingSlice s) {
         BigDecimal lf = s.leverageFactor();
         return lf != null && (lf.abs().compareTo(BigDecimal.valueOf(2)) >= 0 || lf.signum() < 0);
+    }
+
+    private static BigDecimal timelineShare(BigDecimal part, BigDecimal total) {
+        return part.divide(total, TIMELINE_SHARE_SCALE, RoundingMode.HALF_UP);
     }
 
     private static BigDecimal maxEval(List<HoldingSlice> slices) {
@@ -116,9 +125,5 @@ public class InvestmentTypeClassifier {
                 .filter(filter)
                 .map(s -> s.evalWon() == null ? BigDecimal.ZERO : s.evalWon())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
-
-    private static BigDecimal share(BigDecimal part, BigDecimal total) {
-        return part.divide(total, SHARE_SCALE, RoundingMode.HALF_UP);
     }
 }
