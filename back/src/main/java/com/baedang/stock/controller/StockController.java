@@ -79,12 +79,13 @@ public class StockController {
 
     @GetMapping("/rankings")
     public ResponseEntity<RankingResponse> rankings(
+            @AuthenticationPrincipal Long userId,
             @RequestParam String market,
             @RequestParam(defaultValue = "20") int size,
             @RequestParam(required = false) String cursor
     ) {
         return ResponseEntity.ok(
-                rankingService.getRankings(market, size, cursor)
+                rankingService.getRankings(market, size, cursor, userId)
         );
     }
 

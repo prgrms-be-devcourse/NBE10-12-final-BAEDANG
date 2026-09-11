@@ -153,6 +153,7 @@ public class StockControllerTest {
         RankingResponse response = new RankingResponse(
                 List.of(new RankingResponse.Item(
                         1,
+                        1L,
                         "005930",
                         "삼성전자",
                         "KOSPI",
@@ -166,11 +167,12 @@ public class StockControllerTest {
                         "0.023069",
                         "1240000000000",
                         null,
-                        true
+                        true,
+                        null
                 )), "next-cursor", true
         );
 
-        when(rankingService.getRankings("KR", 20, null)).thenReturn(response);
+        when(rankingService.getRankings("KR", 20, null, null)).thenReturn(response);
 
         mockMvc.perform(
                         get("/api/stocks/rankings")
@@ -184,13 +186,13 @@ public class StockControllerTest {
                 .andExpect(jsonPath("$.nextCursor").value("next-cursor"))
                 .andExpect(jsonPath("$.hasNext").value(true));
 
-        verify(rankingService).getRankings("KR", 20, null);
+        verify(rankingService).getRankings("KR", 20, null, null);
     }
 
     @Test
     @DisplayName("cursor를 다음 페이지 조회에 전달한다")
     void t5() throws Exception {
-        when(rankingService.getRankings("US", 20, "cursor-value"))
+        when(rankingService.getRankings("US", 20, "cursor-value", null))
                 .thenReturn(new RankingResponse(List.of(),null,false));
 
         mockMvc.perform(
@@ -200,7 +202,7 @@ public class StockControllerTest {
                         .param("cursor", "cursor-value")
         ).andExpect(status().isOk());
 
-        verify(rankingService).getRankings("US", 20, "cursor-value");
+        verify(rankingService).getRankings("US", 20, "cursor-value", null);
     }
 
     @Test

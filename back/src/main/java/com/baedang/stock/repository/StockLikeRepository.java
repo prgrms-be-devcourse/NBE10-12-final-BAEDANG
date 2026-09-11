@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -20,6 +21,8 @@ public interface StockLikeRepository extends JpaRepository<StockLike, Long> {
     void insertIfAbsent(@Param("userId") Long userId, @Param("stockId") Long stockId);
 
     Optional<StockLike> findByUserIdAndStockId(Long userId, Long stockId);
+
+    List<StockLike> findByUserIdAndStockIdIn(Long userId, Collection<Long> stockIds);
 
     @Modifying
     @Query("DELETE FROM StockLike l WHERE l.userId = :userId AND l.stockLikeId = :stockLikeId")
