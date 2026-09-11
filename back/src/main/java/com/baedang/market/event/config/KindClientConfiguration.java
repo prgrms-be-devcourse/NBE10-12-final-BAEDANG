@@ -71,9 +71,8 @@ public class KindClientConfiguration {
             KindRssParser rssParser,
             KindViewerParser viewerParser,
             KindMarketEventDetailParser detailParser,
-            org.springframework.beans.factory.ObjectProvider<Clock> clockProvider
+            Clock clock
     ) {
-        Clock clock = clockProvider.getIfAvailable(Clock::systemUTC);
         return new KindMarketEventAdapter(
                 httpClient,
                 uriPolicy,

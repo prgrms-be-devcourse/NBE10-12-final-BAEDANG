@@ -46,6 +46,14 @@ class KrxMarketEventPropertiesTest {
     }
 
     @Test
+    void clock_is_a_required_dependency_not_a_fallback() {
+        new ApplicationContextRunner()
+                .withUserConfiguration(KindClientConfiguration.class)
+                .withPropertyValues("krx.market-events.enabled=true")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
     void custom_properties_bind_successfully() {
         contextRunner
                 .withPropertyValues(
