@@ -380,7 +380,7 @@ QuoteRefreshCoordinator는 정기·온디맨드 현재가 조회의 진행 중 �
 
 거래용 조회는 QuoteRefreshCoordinator를 주입하여 **트랜잭션 밖에서** requireFresh(stock, maxAge)를 호출합니다. 원본 quoteAt이 신선하면 재사용하고 아니면 갱신 후 누락/미래/오래된 시세를 거절합니다. 주문·캔들·세션·환율·거래 상태 조회는 하지 않습니다. OrderMarketDataService가 주문에 연결하고 주문 서비스가 나머지 계약을 검증합니다. refresh(stock)는 화면용 갱신으로 실패 시 기존값 표시 여부는 호출자가 결정합니다. 일봉 백필 정책은 그대로입니다.
 
-QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규장 시각을 검증한 뒤 짧은 JDBC 트랜잭션으로 시세를 저장한다. 기준가 복구는 새로 조회한 일봉을 별도로 검증하고 시세의 거래소 현지 거래일이 유지될 때만 기준가를 갱신한다. 같은 거래일의 새 시세는 복구를 막지 않는다. 새 거래일에서는 이전 기준가를 폐기하고, 같은 거래일의 검증된 기준가는 보존한다. 역순 응답은 무시한다. V8은 prev_close_date만 추가하며 상하한가는 보존한다.
+QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규장 시각을 검증한 뒤 짧은 JDBC 트랜잭션으로 시세를 저장한다. 기준가 복구는 새로 조회한 일봉을 별도로 검증하고 시세의 거래소 현지 거래일이 유지될 때만 기준가를 갱신한다. 같은 거래일의 새 시세는 복구를 막지 않는다. 새 거래일에서는 이전 기준가를 폐기하고, 같은 거래일의 검증된 기준가는 보존한다. 역순 응답은 무시한다. V10은 prev_close_date만 추가하며 상하한가는 보존한다.
 
 설정: trading.quote-collection.refresh-interval=5s, dispatch-interval=25ms, background-concurrency=3, background-requests-per-second=8, max-in-flight-stocks=1000, request-timeout=20s. ExternalHttpConfig는 자동 구성 RestClient 빌더에 toss.connect-timeout=2s/read-timeout=5s를 적용해 무응답 I/O가 슬롯을 영구 점유하지 않게 합니다. coordinator 대기 timeout은 전체 큐/HTTP 작업을 합친 총 응답시간 보장이 아닙니다.
 
@@ -417,3 +417,12 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 `QuoteSnapshotPersistenceService.repairReference(stock, expected, reference)`는 이번 외부 조회로 검증한 일봉만 받는다. 직전 거래일을 검증하고 quote_at에서 파생한 거래소 현지 거래일이 그대로일 때 기준가만 갱신한다. 같은 거래일의 새 시세는 허용하며 다른 거래일로 넘어가면 차단한다. 현재가·수집 시각은 보존한다. `saveRecoveredClose`는 조회한 행이 그대로일 때만 확정 종가로 교체한다.
 
 `DailyCandleFetchCoordinator.withStockLock(stockId, operation)`을 정기 수집·시드·상세 백필·기준가 복구에서 공유한다. 외부 요청 시작부터 저장 완료까지 같은 종목을 직렬화한다. 락은 단일 애플리케이션 인스턴스 범위이며 다중 인스턴스 수집에는 별도 분산 조정이 필요하다.
+
+
+### 캘린더 공통 정책과 일봉 완료 판정
+
+- 캘린더를 사용하는 서비스는 `MarketTradingDayPolicy.calendar(country, date)`로 국가별 조회 및 응답 검증을 공유한다. 캐싱 데코레이터도 동일한 `MarketCalendarDay.requireMatching` 검증을 적용한 뒤 저장하므로 국가·날짜가 다른 응답은 캐시되지 않는다. 실패 처리(배치 생략 또는 예외 전달)는 호출부가 유지한다.
+- `MarketCalendarDay.isRegularSessionAt(instant)`는 시장 개장 여부·분봉 시작 시각에 사용하는 `[개장, 마감)` 판정이다. `acceptsRegularQuoteAt(instant)`는 마감 시각의 시세까지 허용한다. `isFinalizedAt(requestedAt)`는 마감 후 10분 조건을 공유하며, 실제 일봉 확정에는 외부 요청 시작 시각을 넘긴다.
+- 일봉 공통 잠금 안에서 백필 상태를 한 번 확인하고 조회·저장한다. 현재가 전용 잠금을 일봉 경로에서 다시 획득하지 않는다. 현재가와 일봉은 서로 다른 잠금을 유지한다.
+- 시드 성공·백필 완료·해당 날짜 갱신 완료·후속 주봉 갱신은 `DailyCandlePersistenceService.upsert`가 반환한 저장 대상 행으로 판단한다. 미확정 일봉만 받은 경우 완료를 기록하지 않고 다음 요청에서 재시도한다. 정기 수집도 반환된 행에 기대 거래일이 있어야 성공이다.
+- 날짜 변환은 기존 `MarketCountry.zoneId()`를 사용한다. 새 날짜 변환 서비스·범용 수집기·추가 캐시는 만들지 않는다.
