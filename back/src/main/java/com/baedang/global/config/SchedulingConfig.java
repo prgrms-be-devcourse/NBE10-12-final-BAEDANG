@@ -19,6 +19,16 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 @EnableConfigurationProperties(QuoteCollectionProperties.class)
 public class SchedulingConfig {
 
+    /** 상하한가의 순차 API 대기가 현재가/호가 공급을 막지 않도록 분리합니다. */
+    @Bean(name = "priceLimitTaskScheduler")
+    public ThreadPoolTaskScheduler priceLimitTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("price-limit-");
+        return scheduler;
+    }
+
+
     /** 체결의 외부 준비/락 대기가 호가 공급이나 만료 처리를 막지 않도록 분리합니다. 항상 실행합니다. */
     @Bean(name = "limitExecutionTaskScheduler")
     public ThreadPoolTaskScheduler limitExecutionTaskScheduler() {
