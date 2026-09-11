@@ -860,14 +860,15 @@ export function InvestupIntro({
           </span>
         </h2>
         <Reveal delay={0} duration={1}>
-          {/* 제목과의 간격을 많이 띄워달라는 요청 — 비교 섹션 카드 때와 같은
-              값(clamp(64px, 11vh, 140px))을 재사용했다. */}
+          {/* 제목과의 간격을 많이 띄워달라는 요청 — 처음엔 비교 섹션 카드와 같은
+              값(clamp(64px, 11vh, 140px))을 썼는데, 조금 더 띄워달라는 후속
+              요청으로 다시 키웠다. */}
           <div
             style={{
               display: 'flex',
               flexWrap: 'wrap',
               gap: 'clamp(16px, 2vw, 28px)',
-              marginTop: 'clamp(64px, 11vh, 140px)',
+              marginTop: 'clamp(90px, 14vh, 170px)',
             }}
           >
             {STEPS.map((s) => (
