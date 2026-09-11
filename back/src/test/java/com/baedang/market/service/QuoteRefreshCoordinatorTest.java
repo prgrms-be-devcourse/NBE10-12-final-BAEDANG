@@ -9,13 +9,16 @@ import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.Stock;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.LongStream;
+
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -36,7 +39,7 @@ class QuoteRefreshCoordinatorTest {
         when(data.fetchPrices(List.of("S1"))).thenReturn(List.of(price("S1")));
         when(snapshots.findById(1L)).thenReturn(Optional.of(quote));
         assertThat(coordinator.submitBackground(List.of(stock), NOW.plusSeconds(10))).isTrue();
-        java.util.concurrent.atomic.AtomicReference<Thread> waiter = new java.util.concurrent.atomic.AtomicReference<>();
+        AtomicReference<Thread> waiter = new AtomicReference<>();
         try (ExecutorService executor = Executors.newSingleThreadExecutor(task -> {
             Thread thread = new Thread(task);
             waiter.set(thread);
@@ -44,7 +47,7 @@ class QuoteRefreshCoordinatorTest {
         })) {
             Future<QuoteSnapshot> future = executor.submit(() -> coordinator.refresh(stock));
             // refresh가 공유 future에서 기다리는 동안 배경 요청을 완료합니다.
-            org.awaitility.Awaitility.await().atMost(Duration.ofSeconds(1))
+            Awaitility.await().atMost(Duration.ofSeconds(1))
                     .until(() -> waiter.get() != null && waiter.get().getState() == Thread.State.TIMED_WAITING);
             tasks.getFirst().run();
             assertThat(future.get(1, TimeUnit.SECONDS)).isSameAs(quote);

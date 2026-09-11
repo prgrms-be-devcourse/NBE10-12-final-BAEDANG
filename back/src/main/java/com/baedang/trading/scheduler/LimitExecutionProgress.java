@@ -1,5 +1,6 @@
 package com.baedang.trading.scheduler;
 
+import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.LimitExecutionPreparation;
 import com.baedang.trading.model.LimitOrderAcceptedEvent;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate;
@@ -76,7 +77,7 @@ public class LimitExecutionProgress {
     private boolean precedes(Group group, Candidate candidate, Candidate other) {
         int priceOrder = candidate.price().compareTo(other.price());
         if (priceOrder != 0) {
-            return group.side() == com.baedang.trading.entity.OrderSide.BUY ? priceOrder > 0 : priceOrder < 0;
+            return group.side() == OrderSide.BUY ? priceOrder > 0 : priceOrder < 0;
         }
         int timeOrder = candidate.orderedAt().toInstant().compareTo(other.orderedAt().toInstant());
         return timeOrder < 0 || (timeOrder == 0 && candidate.orderId() < other.orderId());

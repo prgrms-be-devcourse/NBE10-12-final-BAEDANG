@@ -6,7 +6,10 @@ import com.baedang.user.entity.Account;
 import com.baedang.user.repository.AccountRepository;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.springframework.dao.CannotAcquireLockException;
+import org.springframework.dao.DataAccessResourceFailureException;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -74,17 +77,17 @@ class LimitOrderExpirationServiceTest {
         Account account = mock(Account.class);
         when(account.getUserId()).thenReturn(1L);
         when(account.getAccountId()).thenReturn(50L);
-        when(orders.expired(any(), org.mockito.ArgumentMatchers.eq(101L), any())).thenReturn(List.of());
-        when(orders.expired(any(), org.mockito.ArgumentMatchers.eq(100L), any())).thenReturn(List.of());
-        org.mockito.Mockito.doReturn(List.of(first, second), List.of(first))
-                .when(orders).expired(any(), org.mockito.ArgumentMatchers.eq(0L), any());
+        when(orders.expired(any(), ArgumentMatchers.eq(101L), any())).thenReturn(List.of());
+        when(orders.expired(any(), ArgumentMatchers.eq(100L), any())).thenReturn(List.of());
+        Mockito.doReturn(List.of(first, second), List.of(first))
+                .when(orders).expired(any(), ArgumentMatchers.eq(0L), any());
         if ("missing-account".equals(failure)) {
             when(accounts.findById(50L)).thenReturn(Optional.empty(), Optional.of(account));
         } else {
             when(accounts.findById(50L)).thenReturn(Optional.of(account));
             RuntimeException error = "lock".equals(failure)
                     ? new CannotAcquireLockException("lock timeout")
-                    : new org.springframework.dao.DataAccessResourceFailureException("connection unavailable");
+                    : new DataAccessResourceFailureException("connection unavailable");
             when(transactions.close(1L, 50L, 100L, true)).thenThrow(error).thenReturn(null);
         }
         LimitOrderExpirationService service = new LimitOrderExpirationService(orders, accounts,
@@ -92,7 +95,7 @@ class LimitOrderExpirationServiceTest {
         service.expireDue();
         verify(transactions).close(1L, 50L, 101L, true);
         service.expireDue();
-        verify(transactions, org.mockito.Mockito.times("missing-account".equals(failure) ? 1 : 2))
+        verify(transactions, Mockito.times("missing-account".equals(failure) ? 1 : 2))
                 .close(1L, 50L, 100L, true);
         verify(first, never()).expire(any());
         verify(second, never()).expire(any());

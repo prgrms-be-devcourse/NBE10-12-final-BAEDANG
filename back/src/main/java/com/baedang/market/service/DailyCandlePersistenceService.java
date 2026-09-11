@@ -5,48 +5,55 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.repository.DailyCandleBatchRepository;
+import com.baedang.stock.entity.MarketCountry;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * 일봉 데이터를 검증하고 KST 기준 날짜로 변환하여 daily_candle 테이블에 저장하는 서비스.
+ * 일봉 데이터를 검증하고 거래소 현지 거래일로 변환하여 daily_candle 테이블에 저장하는 서비스.
  */
 @Service
 public class DailyCandlePersistenceService {
 
-    private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private final LatestCompletedTradingDayResolver resolver;
 
     private final DailyCandleBatchRepository dailyCandleBatchRepository;
 
-    public DailyCandlePersistenceService(DailyCandleBatchRepository dailyCandleBatchRepository) {
+    public DailyCandlePersistenceService(DailyCandleBatchRepository dailyCandleBatchRepository, LatestCompletedTradingDayResolver resolver) {
         this.dailyCandleBatchRepository = dailyCandleBatchRepository;
+        this.resolver = resolver;
     }
 
-    /** 일봉 목록을 KST 기준 날짜로 변환하여 저장합니다. */
-    @Transactional
-    public void upsert(Long stockId, String stockCurrency, List<Candle> candles) {
+    /** 일봉 목록을 거래소 현지 거래일로 변환하여 저장합니다. */
+    @Transactional(propagation = Propagation.NEVER)
+    public List<DailyCandle> upsert(Long stockId, String stockCurrency, MarketCountry country, List<Candle> candles, Instant requestedAt) {
         if (candles == null) {
             throw invalidCandle(stockId, "candles=null");
         }
-        if (candles.isEmpty()) return;
+        if (candles.isEmpty()) return List.of();
         if (stockId == null) {
             throw invalidCandle(null, "종목 식별 정보가 비어 있음");
         }
         validateCurrency(stockId, stockCurrency, candles);
 
+        LocalDate finalizedThrough = resolver.resolve(country, requestedAt).orElse(null);
+        if (finalizedThrough == null) throw invalidCandle(stockId, "확정 거래일 확인 실패");
         Set<LocalDate> tradeDates = new HashSet<>();
         List<DailyCandle> rows = candles.stream()
-                .map(candle -> toRow(stockId, candle, tradeDates))
+                .map(candle -> toRow(stockId, candle, country, tradeDates))
+                .filter(row -> !row.getTradeDate().isAfter(finalizedThrough))
                 .toList();
 
         dailyCandleBatchRepository.upsertAll(rows);
+        return rows;
     }
 
     /** 토스 응답 통화와 종목 통화 일치 여부 검증 */
@@ -68,10 +75,11 @@ public class DailyCandlePersistenceService {
     private DailyCandle toRow(
             Long stockId,
             Candle candle,
+            MarketCountry country,
             Set<LocalDate> tradeDates
     ) {
         validateValues(stockId, candle);
-        LocalDate tradeDate = candle.candleAt().atZoneSameInstant(KST).toLocalDate();
+        LocalDate tradeDate = candle.candleAt().atZoneSameInstant(country.zoneId()).toLocalDate();
         if (!tradeDates.add(tradeDate)) {
             throw invalidCandle(stockId, "중복 거래일=" + tradeDate);
         }

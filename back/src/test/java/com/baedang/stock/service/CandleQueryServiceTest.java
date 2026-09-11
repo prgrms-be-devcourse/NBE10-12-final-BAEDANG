@@ -1,22 +1,26 @@
 package com.baedang.stock.service;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.entity.MinuteCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.CandleAggregateRepository;
-import com.baedang.stock.model.CandleQueryInterval;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.market.repository.MinuteCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import com.baedang.stock.model.CandleQueryInterval;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Pageable;
 
@@ -31,8 +35,8 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -69,6 +73,7 @@ class CandleQueryServiceTest {
                 .thenReturn(Optional.of(stock));
         when(stock.getStockId()).thenReturn(10L);
         when(stock.getSymbol()).thenReturn("005930");
+        Mockito.lenient().when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
         when(stock.getCurrency()).thenReturn("KRW");
     }
 
@@ -77,7 +82,7 @@ class CandleQueryServiceTest {
         DailyCandle recent = daily(LocalDate.of(2026, 8, 28), "110");
         DailyCandle old = daily(LocalDate.of(2026, 8, 27), "100");
         when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
-                org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.any()))
+                ArgumentMatchers.eq(10L), ArgumentMatchers.any()))
                 .thenReturn(List.of(recent, old));
 
         var response = service.getCandles("005930", "KR", "1d", "6M");
@@ -91,12 +96,12 @@ class CandleQueryServiceTest {
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(dailyCandleRepository).findByStockIdOrderByTradeDateDesc(
-                org.mockito.ArgumentMatchers.eq(10L), pageable.capture());
+                ArgumentMatchers.eq(10L), pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(130);
         verify(marketDataPort, never()).fetchCandles(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyInt());
+                ArgumentMatchers.any(),
+                ArgumentMatchers.any(),
+                ArgumentMatchers.anyInt());
         // 랭킹 밖 종목의 일봉 백필(이슈 #75)은 이 훅을 거쳐 이뤄진다 — 실제 채우는 로직
         // 자체는 StockOnDemandQuoteServiceTest에서 검증한다.
         verify(stockOnDemandQuoteService).ensureDailyCandles(stock);
@@ -108,19 +113,19 @@ class CandleQueryServiceTest {
         when(minuteCandleRepository.findTopByStockIdOrderByCandleAtDesc(10L))
                 .thenReturn(Optional.of(recent));
         when(minuteCandleRepository.findByStockIdOrderByCandleAtDesc(
-                org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.any()))
+                ArgumentMatchers.eq(10L), ArgumentMatchers.any()))
                 .thenReturn(List.of(recent));
 
         var response = service.getCandles("005930", "KR", "1m", "1D");
 
         assertThat(response.items()).hasSize(1);
         verify(marketDataPort, never()).fetchCandles(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyInt());
+                ArgumentMatchers.any(),
+                ArgumentMatchers.any(),
+                ArgumentMatchers.anyInt());
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(minuteCandleRepository).findByStockIdOrderByCandleAtDesc(
-                org.mockito.ArgumentMatchers.eq(10L), pageable.capture());
+                ArgumentMatchers.eq(10L), pageable.capture());
         assertThat(pageable.getValue().getPageSize()).isEqualTo(200);
     }
 
@@ -136,14 +141,14 @@ class CandleQueryServiceTest {
         when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_MINUTE, 200))
                 .thenReturn(List.of(fetched));
         when(minuteCandleRepository.findByStockIdOrderByCandleAtDesc(
-                org.mockito.ArgumentMatchers.eq(10L), org.mockito.ArgumentMatchers.any()))
+                ArgumentMatchers.eq(10L), ArgumentMatchers.any()))
                 .thenReturn(List.of(minute(fetched.candleAt(), "105")));
 
         service.getCandles("005930", "KR", "1m", "1D");
         service.getCandles("005930", "KR", "1m", "1D");
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_MINUTE, 200);
-        verify(persistenceService, times(1)).upsert(10L, List.of(fetched));
+        verify(persistenceService, times(1)).upsert(10L, MarketCountry.KR, List.of(fetched));
     }
 
     @Test
@@ -158,12 +163,12 @@ class CandleQueryServiceTest {
                 .thenReturn(List.of(mismatched));
 
         assertThatThrownBy(() -> service.getCandles("005930", "KR", "1m", "1D"))
-                .isInstanceOf(com.baedang.global.error.BusinessException.class)
-                .extracting(exception -> ((com.baedang.global.error.BusinessException) exception).getErrorCode())
-                .isEqualTo(com.baedang.global.error.ErrorCode.QUOTE_CURRENCY_MISMATCH);
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
 
         verify(persistenceService, never()).upsert(
-                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
     }
 
 
@@ -199,9 +204,9 @@ class CandleQueryServiceTest {
         assertThat(response.items()).extracting(item -> item.close()).containsExactly("130");
         verify(stockOnDemandQuoteService).ensureDailyCandles(stock);
         verify(marketDataPort, never()).fetchCandles(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyInt());
+                ArgumentMatchers.any(),
+                ArgumentMatchers.any(),
+                ArgumentMatchers.anyInt());
     }
 
     private CandleAggregateRepository.AggregateCandle aggregate(

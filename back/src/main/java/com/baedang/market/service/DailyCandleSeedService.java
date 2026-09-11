@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -48,6 +50,8 @@ public class DailyCandleSeedService {
     private final StockRepository stockRepository;
     private final DailyCandlePersistenceService persistenceService;
     private final DailyCandleRepository dailyCandleRepository;
+    private final DailyCandleFetchCoordinator coordinator;
+    private final Clock clock;
     private final int universeSize;
 
     public DailyCandleSeedService(
@@ -55,8 +59,12 @@ public class DailyCandleSeedService {
             StockRepository stockRepository,
             DailyCandlePersistenceService persistenceService,
             DailyCandleRepository dailyCandleRepository,
+            Clock clock,
+            DailyCandleFetchCoordinator coordinator,
             @Value("${trading.universe-size:100}") int universeSize
     ) {
+        this.clock = clock;
+        this.coordinator = coordinator;
         this.marketDataPort = marketDataPort;
         this.stockRepository = stockRepository;
         this.persistenceService = persistenceService;
@@ -102,16 +110,19 @@ public class DailyCandleSeedService {
 
         for (Stock stock : targets) {
             try {
-                List<Candle> candles = marketDataPort.fetchCandles(
-                        stock.getSymbol(), CandleInterval.ONE_DAY, SEED_CANDLE_COUNT);
-                if (candles.isEmpty()) {
-                    log.warn("[daily-candle-seed] 빈 응답: market={} symbol={}",
-                            marketCountry, stock.getSymbol());
-                    failure++;
-                    continue;
-                }
-                persistenceService.upsert(stock.getStockId(), stock.getCurrency(), candles);
-                success++;
+                boolean stored = coordinator.withStockLock(stock.getStockId(), () -> {
+                    Instant requestedAt = clock.instant();
+                    List<Candle> candles = marketDataPort.fetchCandles(
+                            stock.getSymbol(), CandleInterval.ONE_DAY, SEED_CANDLE_COUNT);
+                    if (candles.isEmpty()) {
+                        log.warn("[daily-candle-seed] 빈 응답: market={} symbol={}",
+                                marketCountry, stock.getSymbol());
+                        return false;
+                    }
+                    return !persistenceService.upsert(stock.getStockId(), stock.getCurrency(),
+                            stock.getMarketCountry(), candles, requestedAt).isEmpty();
+                });
+                if (stored) success++; else failure++;
             } catch (Exception e) {
                 failure++;
                 log.warn("[daily-candle-seed] 시드 실패: market={} symbol={} reason={}",

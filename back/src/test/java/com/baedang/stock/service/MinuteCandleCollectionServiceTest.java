@@ -106,8 +106,8 @@ class MinuteCandleCollectionServiceTest {
 
         service.collectOpenMarkets();
 
-        verify(persistenceService).upsert(eq(1L), any());
-        verify(persistenceService).upsert(eq(2L), any());
+        verify(persistenceService).upsert(eq(1L), any(), any());
+        verify(persistenceService).upsert(eq(2L), any(), any());
         // US는 닫혀 있으니 US 쪽 종목 조회 자체가 없어야 한다.
         verify(stockRepository, never()).findRankedByMarketCountry(eq(MarketCountry.US), any());
     }
@@ -160,7 +160,7 @@ class MinuteCandleCollectionServiceTest {
         service.collectOpenMarkets();
 
         // stockA(통화 불일치)는 저장 시도 자체가 없어야 하고, stockB는 정상 저장돼야 한다.
-        verify(persistenceService, never()).upsert(eq(1L), any());
-        verify(persistenceService, times(1)).upsert(eq(2L), any());
+        verify(persistenceService, never()).upsert(eq(1L), any(), any());
+        verify(persistenceService, times(1)).upsert(eq(2L), any(), any());
     }
 }

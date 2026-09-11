@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Optional;
 
 /**
@@ -71,7 +72,7 @@ public class OrderBookPublicationService {
         Instant lockedAt = clock.instant();
 
         if (!stock.isTradable()
-                || !stockRepository.isQuoteTarget(stock.getStockId(), lockedAt.atOffset(java.time.ZoneOffset.UTC))
+                || !stockRepository.isQuoteTarget(stock.getStockId(), lockedAt.atOffset(ZoneOffset.UTC))
                 || !lockedAt.isBefore(sessionValidUntil)
                 || !isValidQuoteTime(generated.quoteAt(), lockedAt)) {
             if (active != null) active.close(lockedAt);
@@ -107,7 +108,7 @@ public class OrderBookPublicationService {
         Stock stock = stockRepository.findByIdForUpdate(stockId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
         Instant now = clock.instant();
-        if (!stockRepository.isQuoteTarget(stockId, now.atOffset(java.time.ZoneOffset.UTC))) {
+        if (!stockRepository.isQuoteTarget(stockId, now.atOffset(ZoneOffset.UTC))) {
             versionRepository.findActiveForUpdate(stockId).ifPresent(version -> version.close(clock.instant()));
         }
     }

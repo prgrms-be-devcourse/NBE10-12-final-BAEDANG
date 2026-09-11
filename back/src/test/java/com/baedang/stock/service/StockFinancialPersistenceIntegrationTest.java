@@ -1,36 +1,16 @@
 package com.baedang.stock.service;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-
-import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.transaction.annotation.Transactional;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
-
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.stock.entity.FinancialPeriodType;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import com.baedang.stock.entity.StockFinancialPeriod;
+import com.baedang.stock.entity.StockFinancialSync;
+import com.baedang.stock.entity.StockIndustry;
 import com.baedang.stock.port.StockFinancialInfoPort.BalanceSheet;
+import com.baedang.stock.port.StockFinancialInfoPort.IncomeStatement;
 import com.baedang.stock.port.StockFinancialInfoPort.IndustryClassification;
 import com.baedang.stock.port.StockFinancialInfoPort.IndustryData;
-import com.baedang.stock.port.StockFinancialInfoPort.IncomeStatement;
 import com.baedang.stock.port.StockFinancialInfoPort.PeriodData;
 import com.baedang.stock.port.StockFinancialInfoPort.Ratios;
 import com.baedang.stock.repository.StockFinancialPeriodRepository;
@@ -39,6 +19,28 @@ import com.baedang.stock.repository.StockIndustryRepository;
 import com.baedang.stock.repository.StockRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -229,18 +231,18 @@ class StockFinancialPersistenceIntegrationTest {
 
     @Test
     void entity_factories_reject_missing_or_invalid_keys() {
-        assertThatThrownBy(() -> com.baedang.stock.entity.StockFinancialPeriod.create(
+        assertThatThrownBy(() -> StockFinancialPeriod.create(
                 null, FinancialPeriodType.ANNUAL, "202512"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> com.baedang.stock.entity.StockFinancialPeriod.create(
+        assertThatThrownBy(() -> StockFinancialPeriod.create(
                 1L, null, "202512"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> com.baedang.stock.entity.StockFinancialPeriod.create(
+        assertThatThrownBy(() -> StockFinancialPeriod.create(
                 1L, FinancialPeriodType.ANNUAL, "20251"))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> com.baedang.stock.entity.StockFinancialSync.create(null))
+        assertThatThrownBy(() -> StockFinancialSync.create(null))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> com.baedang.stock.entity.StockIndustry.create(
+        assertThatThrownBy(() -> StockIndustry.create(
                 null, industry("STD"), Instant.now()))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new PeriodData(

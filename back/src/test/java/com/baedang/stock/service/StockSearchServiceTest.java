@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
@@ -133,9 +134,9 @@ public class StockSearchServiceTest {
     }
 
     private Stock stubStock(String name, String chosung) {
-        Stock s = org.mockito.Mockito.mock(Stock.class);
-        org.mockito.Mockito.lenient().when(s.getName()).thenReturn(name);
-        org.mockito.Mockito.lenient().when(s.getNameChosung()).thenReturn(chosung);
+        Stock s = Mockito.mock(Stock.class);
+        Mockito.lenient().when(s.getName()).thenReturn(name);
+        Mockito.lenient().when(s.getNameChosung()).thenReturn(chosung);
         return s;
     }
 }

@@ -3,9 +3,9 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
-import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -21,7 +21,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -244,10 +246,10 @@ class MarketOrderQuoteServiceTest {
     }
 
     private OrderMarketDataService preparedMarketData() {
-        OrderMarketDataService service = org.mockito.Mockito.mock(OrderMarketDataService.class);
-        org.mockito.Mockito.lenient().when(service.refreshStatus(org.mockito.ArgumentMatchers.any()))
+        OrderMarketDataService service = Mockito.mock(OrderMarketDataService.class);
+        Mockito.lenient().when(service.refreshStatus(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(service.prepareEstimate(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(service.prepareEstimate(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         return service;
     }

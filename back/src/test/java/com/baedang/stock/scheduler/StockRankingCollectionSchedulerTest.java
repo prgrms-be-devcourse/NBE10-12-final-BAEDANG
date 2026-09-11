@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.support.CronExpression;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.time.ZoneId;
@@ -73,7 +74,7 @@ class StockRankingCollectionSchedulerTest {
      * 스프링 크론은 6필드(초 포함)라, 5필드로 착각해 한 칸씩 밀려 써도 문자열 비교로는
      * 잡히지 않는다. zone 도 애너테이션에서 그대로 읽어 쓰므로 타임존이 바뀌면 함께 깨진다.
      */
-    private java.time.Instant 다음_발화_시각(String methodName) throws NoSuchMethodException {
+    private Instant 다음_발화_시각(String methodName) throws NoSuchMethodException {
         Scheduled schedule = StockRankingCollectionScheduler.class
                 .getMethod(methodName)
                 .getAnnotation(Scheduled.class);

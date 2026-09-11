@@ -11,18 +11,20 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
+import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.OrderInput;
-import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.MarketOrderReceipt;
 import com.baedang.trading.model.MarketOrderResult;
-import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.OrderInput;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
-import com.baedang.trading.entity.OrderSide;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -38,11 +40,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.mock;
 
 @ExtendWith(MockitoExtension.class)
 class MarketOrderServiceTest {
@@ -343,10 +345,10 @@ class MarketOrderServiceTest {
     }
 
     private OrderMarketDataService preparedMarketData() {
-        OrderMarketDataService service = org.mockito.Mockito.mock(OrderMarketDataService.class);
-        org.mockito.Mockito.lenient().when(service.refreshStatus(org.mockito.ArgumentMatchers.any()))
+        OrderMarketDataService service = Mockito.mock(OrderMarketDataService.class);
+        Mockito.lenient().when(service.refreshStatus(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
-        org.mockito.Mockito.lenient().when(service.prepareEstimate(org.mockito.ArgumentMatchers.any()))
+        Mockito.lenient().when(service.prepareEstimate(ArgumentMatchers.any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         return service;
     }
