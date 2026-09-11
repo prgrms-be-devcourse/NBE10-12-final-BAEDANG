@@ -47,6 +47,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -83,6 +84,15 @@ class StockOnDemandQuoteServiceTest {
 
     @BeforeEach
     void setUp() {
+        lenient().when(dailyCandlePersistenceService.upsert(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            Long stockId = call.getArgument(0);
+            MarketCountry country = call.getArgument(2);
+            List<Candle> input = call.getArgument(3);
+            return input.stream().map(candle -> new DailyCandle(stockId,
+                    candle.candleAt().atZoneSameInstant(country.zoneId()).toLocalDate(),
+                    candle.openPrice(), candle.highPrice(), candle.lowPrice(), candle.closePrice(), candle.volume())).toList();
+        });
+
         service = new StockOnDemandQuoteService(
                 marketDataPort,
                 quoteSnapshotRepository,
@@ -260,7 +270,8 @@ class StockOnDemandQuoteServiceTest {
                 });
         doAnswer(invocation -> {
             backfilled.set(true);
-            return null;
+            return List.of(new DailyCandle(10L, LocalDate.of(2026, 8, 28),
+                    BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE));
         }).when(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
 
         int threadCount = 5;
@@ -388,9 +399,6 @@ class StockOnDemandQuoteServiceTest {
         stubBackfillNeeded(expectedTradeDate);
         when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
                 .thenReturn(List.of(candle(expectedTradeDate, "100")));
-        when(dailyCandleRepository.findByStockIdAndTradeDate(10L, expectedTradeDate))
-                .thenReturn(Optional.of(new DailyCandle(10L, expectedTradeDate,
-                        BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)));
         doThrow(new RuntimeException("refresh 실패"))
                 .when(candleAggregateRepository).refreshWeekly();
 
@@ -399,6 +407,53 @@ class StockOnDemandQuoteServiceTest {
 
         verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
         verify(dailyCandlePersistenceService, times(1)).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
+    }
+
+    @Test
+    void dailyBackfillDoesNotWaitForTheSeparateQuoteRefreshLock() throws Exception {
+        AtomicBoolean historyAvailable = new AtomicBoolean(true);
+        CountDownLatch quoteStarted = new CountDownLatch(1);
+        CountDownLatch releaseQuote = new CountDownLatch(1);
+        when(dailyCandleRepository.hasAtLeastCandles(10L, 200)).thenAnswer(call -> historyAvailable.get());
+        when(coordinator.refresh(stock)).thenAnswer(call -> {
+            quoteStarted.countDown();
+            assertThat(releaseQuote.await(5, TimeUnit.SECONDS)).isTrue();
+            return null;
+        });
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
+                .thenReturn(List.of(candle(LocalDate.of(2026, 8, 28), "100")));
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<QuoteSnapshot> quote = executor.submit(() -> service.ensureQuote(stock, null));
+            try {
+                assertThat(quoteStarted.await(5, TimeUnit.SECONDS)).isTrue();
+                historyAvailable.set(false);
+                Future<?> backfill = executor.submit(() -> service.ensureDailyCandles(stock));
+                backfill.get(2, TimeUnit.SECONDS);
+                verify(dailyCandlePersistenceService).upsert(eq(10L), eq("KRW"), eq(MarketCountry.KR), any(), any());
+            } finally {
+                releaseQuote.countDown();
+            }
+            quote.get(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    void rejectedUnfinishedCandlesDoNotCompleteBackfillOrRefreshWeekly() {
+        LocalDate date = LocalDate.of(2026, 8, 28);
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 200))
+                .thenReturn(List.of(candle(date, "100")));
+        doReturn(List.of(), List.of(new DailyCandle(10L, date, BigDecimal.ONE, BigDecimal.ONE,
+                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE)))
+                .when(dailyCandlePersistenceService).upsert(any(), any(), any(), any(), any());
+
+        service.ensureDailyCandles(stock);
+        verifyNoInteractions(candleAggregateRepository);
+        service.ensureDailyCandles(stock);
+        service.ensureDailyCandles(stock);
+
+        verify(marketDataPort, times(2)).fetchCandles("005930", CandleInterval.ONE_DAY, 200);
+        verify(candleAggregateRepository).refreshWeekly();
     }
 
     /** 일봉 200개는 있지만 최신 확정 거래일보다 오래돼서 백필이 필요한 상태. */

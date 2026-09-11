@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketCalendarDay;
@@ -9,6 +10,7 @@ import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -29,6 +31,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -46,11 +49,23 @@ class DailyCandleCollectionServiceTest {
     @Mock DailyCandleRepository dailyCandleRepository;
     @Mock MarketCalendarPort marketCalendarPort;
 
+    @BeforeEach
+    void setUp() {
+        lenient().when(persistenceService.upsert(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            Long stockId = call.getArgument(0);
+            MarketCountry country = call.getArgument(2);
+            List<Candle> input = call.getArgument(3);
+            return input.stream().map(candle -> new DailyCandle(stockId,
+                    candle.candleAt().atZoneSameInstant(country.zoneId()).toLocalDate(),
+                    candle.openPrice(), candle.highPrice(), candle.lowPrice(), candle.closePrice(), candle.volume())).toList();
+        });
+    }
+
     /** universeSize=2 로 고정하여 테스트 속도를 높입니다. */
     private DailyCandleCollectionService service() {
         return new DailyCandleCollectionService(
                 marketDataPort, stockRepository, persistenceService,
-                dailyCandleRepository, marketCalendarPort,
+                dailyCandleRepository, new MarketTradingDayPolicy(marketCalendarPort),
                 Clock.fixed(NOW, ZoneOffset.UTC), new DailyCandleFetchCoordinator(), 2);
     }
 

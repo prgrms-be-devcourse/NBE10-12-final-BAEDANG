@@ -3,7 +3,6 @@ package com.baedang.market.service;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketCalendarDay;
-import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.repository.DailyCandleRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -37,7 +36,7 @@ public class DailyCandleCollectionService {
     private final StockRepository stockRepository;
     private final DailyCandlePersistenceService persistenceService;
     private final DailyCandleRepository dailyCandleRepository;
-    private final MarketCalendarPort marketCalendarPort;
+    private final MarketTradingDayPolicy tradingDays;
     private final DailyCandleFetchCoordinator coordinator;
     private final Clock clock;
     private final int universeSize;
@@ -47,7 +46,7 @@ public class DailyCandleCollectionService {
             StockRepository stockRepository,
             DailyCandlePersistenceService persistenceService,
             DailyCandleRepository dailyCandleRepository,
-            MarketCalendarPort marketCalendarPort,
+            MarketTradingDayPolicy tradingDays,
             Clock clock,
             DailyCandleFetchCoordinator coordinator,
             @Value("${trading.universe-size:100}") int universeSize
@@ -56,7 +55,7 @@ public class DailyCandleCollectionService {
         this.stockRepository = stockRepository;
         this.persistenceService = persistenceService;
         this.dailyCandleRepository = dailyCandleRepository;
-        this.marketCalendarPort = marketCalendarPort;
+        this.tradingDays = tradingDays;
         this.clock = clock;
         this.coordinator = coordinator;
         this.universeSize = universeSize;
@@ -109,8 +108,9 @@ public class DailyCandleCollectionService {
                                 candles.stream().map(c -> tradeDate(c, marketCountry)).toList());
                         return false;
                     }
-                    persistenceService.upsert(stock.getStockId(), stock.getCurrency(), stock.getMarketCountry(), candles, requestedAt);
-                    return true;
+                    return persistenceService.upsert(stock.getStockId(), stock.getCurrency(),
+                            stock.getMarketCountry(), candles, requestedAt).stream()
+                            .anyMatch(row -> context.expectedTradeDate().equals(row.getTradeDate()));
                 });
                 if (stored) successCount++;
             } catch (Exception e) {
@@ -135,29 +135,18 @@ public class DailyCandleCollectionService {
         LocalDate tradeDate = now.atZone(marketCountry.zoneId()).toLocalDate();
         MarketCalendarDay calendarDay;
         try {
-            calendarDay = switch (marketCountry) {
-                case KR -> marketCalendarPort.fetchKrMarketCalendar(tradeDate);
-                case US -> marketCalendarPort.fetchUsMarketCalendar(tradeDate);
-            };
+            calendarDay = tradingDays.calendar(marketCountry, tradeDate);
         } catch (Exception exception) {
             log.warn("[daily-candle] 시장 캘린더 조회 실패: market={} tradeDate={} reason={}",
                     marketCountry, tradeDate, exception.getMessage());
             return Optional.empty();
         }
 
-        if (calendarDay == null
-                || calendarDay.marketCountry() != marketCountry
-                || !tradeDate.equals(calendarDay.tradeDate())) {
-            log.warn("[daily-candle] 시장 캘린더 응답 불일치: market={} tradeDate={}",
-                    marketCountry, tradeDate);
-            return Optional.empty();
-        }
         if (!calendarDay.isOpen()) {
             log.info("[daily-candle] 휴장일 수집 생략: market={} tradeDate={}", marketCountry, tradeDate);
             return Optional.empty();
         }
-        if (calendarDay.regularCloseAt() == null
-                || now.isBefore(calendarDay.regularCloseAt().plusMinutes(10).toInstant())) {
+        if (!calendarDay.isFinalizedAt(now)) {
             log.warn("[daily-candle] 정규장 마감 전 수집 생략: market={} tradeDate={}",
                     marketCountry, tradeDate);
             return Optional.empty();

@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.market.entity.DailyCandle;
 import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
@@ -8,6 +9,7 @@ import com.baedang.market.service.DailyCandleSeedService.SeedResult;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -28,6 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -44,6 +47,18 @@ class DailyCandleSeedServiceTest {
     @Mock StockRepository stockRepository;
     @Mock DailyCandlePersistenceService persistenceService;
     @Mock DailyCandleRepository dailyCandleRepository;
+
+    @BeforeEach
+    void setUp() {
+        lenient().when(persistenceService.upsert(any(), any(), any(), any(), any())).thenAnswer(call -> {
+            Long stockId = call.getArgument(0);
+            MarketCountry country = call.getArgument(2);
+            List<Candle> input = call.getArgument(3);
+            return input.stream().map(candle -> new DailyCandle(stockId,
+                    candle.candleAt().atZoneSameInstant(country.zoneId()).toLocalDate(),
+                    candle.openPrice(), candle.highPrice(), candle.lowPrice(), candle.closePrice(), candle.volume())).toList();
+        });
+    }
 
     /** universeSize 는 넉넉히 잡습니다. 호출 페이싱은 TossSecuritiesClient 전역 RateLimiter 책임이라 여기서 다루지 않습니다. */
     private DailyCandleSeedService service() {
@@ -163,6 +178,18 @@ class DailyCandleSeedServiceTest {
         verify(persistenceService).upsert(2L, "USD", MarketCountry.US, List.of(candle("USD")), Instant.parse("2026-09-15T22:00:00Z"));
         assertThat(result.total()).isEqualTo(2);
         assertThat(result.success()).isEqualTo(2);
+    }
+
+    @Test
+    void unfinishedRowsAreNotCountedAsSuccessfulSeed() {
+        Stock stock = mockStock(1L, "005930", "KRW");
+        when(stockRepository.findRankedByMarketCountry(eq(MarketCountry.KR), any())).thenReturn(List.of(stock));
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, SEED_COUNT))
+                .thenReturn(List.of(candle("KRW")));
+        doReturn(List.of()).when(persistenceService).upsert(any(), any(), any(), any(), any());
+        SeedResult result = service().seed(MarketCountry.KR);
+        assertThat(result.success()).isZero();
+        assertThat(result.failure()).isOne();
     }
 
     private Stock mockStock(Long id, String symbol, String currency) {

@@ -119,8 +119,8 @@ public class DailyCandleSeedService {
                                 marketCountry, stock.getSymbol());
                         return false;
                     }
-                    persistenceService.upsert(stock.getStockId(), stock.getCurrency(), stock.getMarketCountry(), candles, requestedAt);
-                    return true;
+                    return !persistenceService.upsert(stock.getStockId(), stock.getCurrency(),
+                            stock.getMarketCountry(), candles, requestedAt).isEmpty();
                 });
                 if (stored) success++; else failure++;
             } catch (Exception e) {
