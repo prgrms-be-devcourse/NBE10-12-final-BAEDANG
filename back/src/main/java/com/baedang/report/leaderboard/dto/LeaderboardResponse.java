@@ -28,12 +28,21 @@ public record LeaderboardResponse(
     ) {
     }
 
-    /** 내 순위 구간. {@code topPercent} 는 1/5/10/25/50/75 중 하나이거나 하위권이면 null. */
+    /**
+     * 내 순위 구간. {@code topPercent} 는 1/5/10/25/50/75 중 하나이거나 하위권이면 null.
+     * 유형 관련 필드(typeCode·typeLabel·typeRank·typeParticipants·typePercent)는 내 유형 내 순위다 —
+     * 미분류(유형 없음)면 모두 null.
+     */
     public record MeSection(
             int rank,
             String returnRate,
             Integer topPercent,
-            List<Entry> neighbors
+            List<Entry> neighbors,
+            String typeCode,
+            String typeLabel,
+            Integer typeRank,
+            Integer typeParticipants,
+            Integer typePercent
     ) {
     }
 

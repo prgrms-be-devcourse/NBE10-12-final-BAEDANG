@@ -61,4 +61,31 @@ public record InvestmentType(
     public String label() {
         return diversification.label + "·" + market.label + "·" + instrument.label + "·" + risk.label + "형";
     }
+
+    /** 저장된 유형 코드(예: {@code CKSB})를 유형으로 복원한다. 리더보드 유형 비교에서 라벨을 얻을 때 쓴다. */
+    public static InvestmentType fromCode(String code) {
+        if (code == null || code.length() != 4) {
+            throw new IllegalArgumentException("유형 코드는 4자여야 합니다: " + code);
+        }
+        Diversification d = null;
+        for (Diversification v : Diversification.values()) {
+            if (v.letter == code.charAt(0)) { d = v; }
+        }
+        Market m = null;
+        for (Market v : Market.values()) {
+            if (v.letter == code.charAt(1)) { m = v; }
+        }
+        Instrument i = null;
+        for (Instrument v : Instrument.values()) {
+            if (v.letter == code.charAt(2)) { i = v; }
+        }
+        Risk r = null;
+        for (Risk v : Risk.values()) {
+            if (v.letter == code.charAt(3)) { r = v; }
+        }
+        if (d == null || m == null || i == null || r == null) {
+            throw new IllegalArgumentException("알 수 없는 유형 코드: " + code);
+        }
+        return new InvestmentType(d, m, i, r);
+    }
 }

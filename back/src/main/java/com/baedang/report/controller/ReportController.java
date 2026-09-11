@@ -2,6 +2,7 @@ package com.baedang.report.controller;
 
 import com.baedang.report.dto.PersonalityReportResponse;
 import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardTypesResponse;
 import com.baedang.report.leaderboard.service.LeaderboardQueryService;
 import com.baedang.report.service.PersonalityReportService;
 import org.springframework.http.ResponseEntity;
@@ -38,5 +39,11 @@ public class ReportController {
             @AuthenticationPrincipal Long userId
     ) {
         return ResponseEntity.ok(leaderboardQueryService.getLeaderboard(userId));
+    }
+
+    /** 유형별 성과 비교(최신 배치 스냅샷·같은 라운드 코호트·as-of 노출). 미분류 제외. */
+    @GetMapping("/leaderboard/types")
+    public ResponseEntity<LeaderboardTypesResponse> getLeaderboardTypes() {
+        return ResponseEntity.ok(leaderboardQueryService.getTypeComparison());
     }
 }
