@@ -80,6 +80,20 @@ export const CMP_SKELETON_W = ['78%', '68%', '58%', '48%'] as const;
 export const STEPS_TITLE_WORDS = ['이렇게', '사용해요'] as const;
 export const COMPARE_TITLE_WORDS = ['증권사', '앱과', '무엇이', '다른가요?'] as const;
 
+/** 비교 섹션 제목 아래 한 줄 설명 — 제목과 같은 단어별 등장 효과를 쓰기 위해
+ * 똑같이 단어 배열로 나눴다. */
+export const COMPARE_SUBTITLE_WORDS = [
+  '증권사',
+  '앱은',
+  '거래를',
+  '체결시키는',
+  '도구고,',
+  '저희는',
+  '거래를',
+  '이해시키는',
+  '도구예요.',
+] as const;
+
 /* ── 지구본: 저해상도 세계지도 비트맵 (64×32) ──── */
 
 type Run = [number, ...Array<[number, number]>];

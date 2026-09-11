@@ -19,6 +19,7 @@ import {
   STEPS,
   STEPS_TITLE_WORDS,
   COMPARE_TITLE_WORDS,
+  COMPARE_SUBTITLE_WORDS,
   CMP,
   CMP_SKELETON_W,
   GLOBE_DOTS,
@@ -33,6 +34,10 @@ import './investup-intro.css';
 // 분석 중 문구("N가지 확인 중…")가 1→2→...→CMP.length로 한 단계씩 오르는 간격.
 // 정확히 CMP.length 걸음으로 나눠 분석 소요 시간(2400ms)에 딱 맞춘다.
 const CMP_STEP_MS = 2400 / CMP.length;
+
+// 비교 섹션 제목/부제 단어별 등장 효과에서, 단어마다 시작을 얼마나 늦출지(초).
+// 제목과 부제가 "동일한 애니메이션 효과"이려면 이 값도 똑같이 써야 한다.
+const WORD_STAGGER_S = 0.07;
 
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
 type CmpState = { phase: 0 | 1 | 2; val: number; open: boolean };
@@ -55,6 +60,7 @@ export function InvestupIntro({
   const globeRef = useRef<HTMLCanvasElement | null>(null);
   const stepsTitleRef = useRef<HTMLSpanElement | null>(null);
   const titleRef = useRef<HTMLSpanElement | null>(null);
+  const subtitleRef = useRef<HTMLSpanElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const zoomSecRef = useRef<HTMLElement | null>(null);
   const zoomCardRef = useRef<HTMLDivElement | null>(null);
@@ -78,8 +84,18 @@ export function InvestupIntro({
     cw: null as number | null,
     ch: null as number | null,
     cardOn: false,
+    titleShown: false,
+    subShown: false,
     lastY: null as number | null,
   });
+
+  // 비교 섹션 제목/부제 — 화면에 들어오면 한 번에 전체가 나타나는 방식(요청:
+  // "스크롤을 한 번만 내려도 문구 속 내용이 다 등장"). 스크롤 위치의 연속
+  // 함수로 매 프레임 다시 그리는 대신, 한 번 트리거되면 끝나는 React 상태로
+  // 관리한다 — 이 파일의 다른 "1회성 전환"들(cmp, step, heroIn 등)과 같은
+  // 패턴이다(계속 값이 바뀌는 연속 스크롤 값만 직접 DOM 쓰기로 처리한다).
+  const [titleRevealed, setTitleRevealed] = useState(false);
+  const [subRevealed, setSubRevealed] = useState(false);
 
   // rAF 루프/이벤트 핸들러 안에서 최신 값을 읽기 위한 ref. 렌더 중 직접 대입하면
   // "Cannot access refs during render" 린트 규칙에 걸리므로, 커밋 이후(effect)에
@@ -359,13 +375,16 @@ export function InvestupIntro({
     };
 
     /**
-     * 02/03 제목: 단어별 스크롤 연동 등장(블러+상승) — toss.im/#assets의 "공부할 필요
-     * 없이 누구나 금융 전문가로" 문구와 같은 방식. 한 번 트리거되고 끝나는 CSS
-     * 트랜지션이 아니라, 스크롤 위치의 연속 함수로 매 프레임 직접 써서 스크롤을
-     * 올리면 다시 흐려지며 가라앉는다(실제로 확인한 toss.im의 동작과 동일).
+     * 02 "이렇게 사용해요" 제목: 단어별 스크롤 연동 등장(블러+상승) — toss.im/#assets의
+     * "공부할 필요 없이 누구나 금융 전문가로" 문구와 같은 방식. 한 번 트리거되고
+     * 끝나는 CSS 트랜지션이 아니라, 스크롤 위치의 연속 함수로 매 프레임 직접 써서
+     * 스크롤을 올리면 다시 흐려지며 가라앉는다(실제로 확인한 toss.im의 동작과 동일).
      * 단어마다 시작 시점을 살짝씩 늦춰서 왼쪽부터 순서대로 나타나게 한다.
-     * 반환값(0~1)은 "이 제목이 얼마나 나타났는지"라 뒤이은 카드 등장 타이밍을
-     * 잡는 데 재사용한다.
+     *
+     * 03 "증권사 앱과 무엇이 다른가요?" 제목/부제는 더 이상 이 함수를 쓰지 않는다 —
+     * "스크롤을 한 번만 내려도 다 등장"하도록 tick() 안에서 화면 진입 여부만
+     * 한 번 검사해 titleRevealed/subRevealed React 상태를 한 번 켜고, 단어별
+     * 등장은 CSS transition-delay로 재생한다(아래 JSX 참고).
      */
     const updateWordsReveal = (container: HTMLElement | null): number => {
       if (!container) return 0;
@@ -390,10 +409,25 @@ export function InvestupIntro({
       const a = A.current;
 
       updateWordsReveal(stepsTitleRef.current);
-      const compareTitleP = updateWordsReveal(titleRef.current);
+
+      // 비교 제목/부제: 연속 스크럽이 아니라 화면에 들어오면(rect.top이 임계값
+      // 아래로 내려오면) 한 번만 트리거되는 전체 등장 — 짧은 스크롤 한 번으로도
+      // 문구 전체가 나타난다. 부제는 제목이 이미 나타난 뒤에만 검사하므로,
+      // 제목이 보인 다음 스크롤을 한 번 더 내려야 나타난다(둘 사이 간격을
+      // 넉넉히 띄워둬서 한 번의 스크롤에 둘 다 동시에 걸리지 않게 했다).
+      const titleEl = titleRef.current;
+      if (titleEl && !a.titleShown && titleEl.getBoundingClientRect().top < window.innerHeight * 0.92) {
+        a.titleShown = true;
+        setTitleRevealed(true);
+      }
+      const subEl = subtitleRef.current;
+      if (subEl && a.titleShown && !a.subShown && subEl.getBoundingClientRect().top < window.innerHeight * 0.92) {
+        a.subShown = true;
+        setSubRevealed(true);
+      }
 
       const c = cardRef.current;
-      if (c && !a.cardOn && compareTitleP > 0.85 && c.getBoundingClientRect().top < window.innerHeight * 0.72) {
+      if (c && !a.cardOn && c.getBoundingClientRect().top < window.innerHeight * 0.72) {
         a.cardOn = true;
         c.style.opacity = '1';
         c.style.transform = 'translateY(0px)';
@@ -881,14 +915,21 @@ export function InvestupIntro({
             textWrap: 'pretty' as never,
           }}
         >
-          {/* 초기 포즈는 인라인, 이후 스크롤 위치에 따라 매 프레임 직접 DOM 쓰기
-              (updateWordsReveal) — 단어마다 순서대로 블러+상승에서 선명하게 나타난다. */}
+          {/* 화면에 들어오면(titleRevealed) 전체 단어가 한 번에 나타난다 — 단어마다
+              WORD_STAGGER_S만큼 시작을 늦춰 왼쪽부터 순서대로 나타나 보이지만,
+              스크롤을 더 내릴 필요 없이 짧은 스크롤 한 번으로 전체가 재생된다. */}
           <span ref={titleRef}>
             {COMPARE_TITLE_WORDS.map((w, i) => (
               <Fragment key={w}>
                 <span
                   className="iv-word"
-                  style={{ display: 'inline-block', opacity: 0, filter: 'blur(16px)', transform: 'translateY(24px)' }}
+                  style={{
+                    display: 'inline-block',
+                    opacity: titleRevealed ? 1 : 0,
+                    filter: titleRevealed ? 'blur(0px)' : 'blur(16px)',
+                    transform: titleRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                    transition: `opacity .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, filter .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, transform .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s`,
+                  }}
                 >
                   {w}
                 </span>
@@ -898,10 +939,12 @@ export function InvestupIntro({
           </span>
         </h2>
 
-        {/* 제목을 보충하는 한 줄 설명 — 제목과는 marginTop으로 크게 띄웠다. */}
+        {/* 제목을 보충하는 한 줄 설명 — 제목과는 marginTop으로 크게 띄웠고(요청에
+            따라 한 번 더 넓혔다), 제목이 나타난 뒤 스크롤을 한 번 더 내리면
+            제목과 똑같은 단어별 등장 효과(subRevealed)로 나타난다. */}
         <p
           style={{
-            margin: 'clamp(40px, 7vh, 80px) auto 0',
+            margin: 'clamp(80px, 13vh, 160px) auto 0',
             textAlign: 'center',
             fontSize: 'clamp(15px, 1.6vw, 18px)',
             lineHeight: 1.6,
@@ -911,7 +954,25 @@ export function InvestupIntro({
             textWrap: 'pretty' as never,
           }}
         >
-          증권사 앱은 거래를 체결시키는 도구고, 저희는 거래를 이해시키는 도구예요.
+          <span ref={subtitleRef}>
+            {COMPARE_SUBTITLE_WORDS.map((w, i) => (
+              <Fragment key={`${w}-${i}`}>
+                <span
+                  className="iv-word"
+                  style={{
+                    display: 'inline-block',
+                    opacity: subRevealed ? 1 : 0,
+                    filter: subRevealed ? 'blur(0px)' : 'blur(16px)',
+                    transform: subRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                    transition: `opacity .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, filter .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, transform .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s`,
+                  }}
+                >
+                  {w}
+                </span>
+                {i < COMPARE_SUBTITLE_WORDS.length - 1 && ' '}
+              </Fragment>
+            ))}
+          </span>
         </p>
 
         {/* 제목과의 간격을 더 띄우고(marginTop), 카드를 가운데로 정렬했다
