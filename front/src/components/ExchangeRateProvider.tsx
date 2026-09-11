@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { INITIAL_EXCHANGE_RATE_STATE, exchangeRateStateAfterRefresh, fetchExchangeRate, type ExchangeRateState } from "@/lib/exchange-rate";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
 import { createHistoryRefresh } from "@/lib/exchange-rate-history-refresh";
 
-const REFRESH_INTERVAL_MS = 60 * 1000; // DB 환율 수집과 동일하게 1분마다 화면 값을 갱신합니다.
+const REFRESH_INTERVAL_MS = 60 * 1000; // 탭이 보이는 동안 1분마다 화면 환율을 갱신합니다.
 
 const ExchangeRateContext = createContext<ExchangeRateState | null>(null);
 
@@ -16,19 +17,22 @@ const ExchangeRateContext = createContext<ExchangeRateState | null>(null);
 export function ExchangeRateProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<ExchangeRateState>(INITIAL_EXCHANGE_RATE_STATE);
 
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+
   useEffect(() => {
     const request = createHistoryRefresh(fetchExchangeRate,
       (info) => setState((previous) => exchangeRateStateAfterRefresh(previous, info)),
       () => setState((previous) => exchangeRateStateAfterRefresh(previous, null)),
       () => {},
     );
+    refreshRef.current = request.refresh;
     void request.refresh();
-    const intervalId = setInterval(request.refresh, REFRESH_INTERVAL_MS);
     return () => {
       request.dispose();
-      clearInterval(intervalId);
+      refreshRef.current = null;
     };
   }, []);
+  useVisiblePolling(() => { void refreshRef.current?.(); }, REFRESH_INTERVAL_MS);
 
   return <ExchangeRateContext.Provider value={state}>{children}</ExchangeRateContext.Provider>;
 }
