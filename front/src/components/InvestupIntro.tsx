@@ -165,19 +165,34 @@ export function InvestupIntro({
   // useCallback으로 감싸 참조가 안정적으로 유지되게 했다 — 프레임 루프
   // effect(아래, deps: [])가 이 함수들을 호출하므로 exhaustive-deps 규칙을
   // 만족시키려면 안정적인 참조가 필요하다.
+  // tick() 안의 스크롤 방향 판정은 cmpRef.current.open/.phase를 읽는데, 이 ref는
+  // 원래 `useEffect(() => { cmpRef.current = cmp }, [cmp])`로만 동기화됐다 —
+  // 즉 setCmp를 부른 뒤 "렌더 → 커밋 → effect 실행"이 끝나야 ref가 갱신된다.
+  // 사용자가 스크롤을 맨 밑까지 내렸다가 빠르게 다시 올릴 때(트랙패드 관성
+  // 스크롤 등)는 scroll 이벤트가 그 렌더 사이클보다 훨씬 빨리 여러 번 연달아
+  // 들어올 수 있어서, tick()이 몇 프레임 동안 "아직 갱신되지 않은" open 값을
+  // 읽게 되고 그 사이에 방향이 다시 바뀌면 재전개(collapseCmp(false)) 판정을
+  // 통째로 놓칠 수 있었다 — 그러면 카드가 접힌 채로 영영 안 풀렸다("분석완료"/
+  // 문장/4행이 다시 안 나타나는 버그). 그래서 setCmp를 부르는 바로 그 자리에서
+  // cmpRef.current도 함께 동기로 갱신한다 — 렌더를 기다리지 않으므로 다음
+  // tick()이 항상 최신 값을 본다(effect의 동기화는 안전망으로 남겨둔다).
   const startCmp = useCallback(() => {
     const timers = cmpTimers.current;
     window.clearInterval(timers.tick);
     window.clearTimeout(timers.done);
     let step = 1;
-    setCmp({ phase: 1, val: step / CMP.length, open: true });
+    const initial: CmpState = { phase: 1, val: step / CMP.length, open: true };
+    cmpRef.current = initial;
+    setCmp(initial);
     timers.tick = window.setInterval(() => {
       step = Math.min(CMP.length, step + 1);
+      cmpRef.current = { ...cmpRef.current, val: step / CMP.length };
       setCmp((s) => ({ ...s, val: step / CMP.length }));
       if (step >= CMP.length) window.clearInterval(timers.tick);
     }, CMP_STEP_MS);
     timers.done = window.setTimeout(() => {
       window.clearInterval(timers.tick);
+      cmpRef.current = { ...cmpRef.current, phase: 2 };
       setCmp((s) => ({ ...s, phase: 2 }));
     }, 2400);
   }, []);
@@ -185,11 +200,13 @@ export function InvestupIntro({
   const collapseCmp = useCallback((collapse: boolean) => {
     const timers = cmpTimers.current;
     window.clearInterval(timers.idle);
+    cmpRef.current = { ...cmpRef.current, open: !collapse };
     setCmp((s) => ({ ...s, open: !collapse }));
     if (collapse) {
       let step = 0;
       timers.idle = window.setInterval(() => {
         step = (step % CMP.length) + 1;
+        cmpRef.current = { ...cmpRef.current, val: step / CMP.length };
         setCmp((s) => ({ ...s, val: step / CMP.length }));
       }, CMP_STEP_MS);
     }
