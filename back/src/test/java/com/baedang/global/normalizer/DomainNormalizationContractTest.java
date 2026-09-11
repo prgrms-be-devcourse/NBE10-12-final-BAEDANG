@@ -70,7 +70,7 @@ class DomainNormalizationContractTest {
     @NullSource
     @ValueSource(strings = {"", " ", "JP"})
     void 상세와_랭킹의_시장코드_오류문구는_각각_유지한다(String market) {
-        StockDetailService detailService = new StockDetailService(null, null, null, null);
+        StockDetailService detailService = new StockDetailService(null, null, null, null, null);
         RankingService rankingService = new RankingService(null, null, null);
 
         assertThatThrownBy(() -> detailService.getDetail("005930", market))
