@@ -47,6 +47,7 @@ export function InvestupIntro({
   const charted = step >= 5;
 
   const globeRef = useRef<HTMLCanvasElement | null>(null);
+  const stepsTitleRef = useRef<HTMLSpanElement | null>(null);
   const titleRef = useRef<HTMLSpanElement | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const zoomSecRef = useRef<HTMLElement | null>(null);
@@ -70,6 +71,7 @@ export function InvestupIntro({
     geom: { cx: 0, cy: 0, R: 1 },
     cw: null as number | null,
     ch: null as number | null,
+    stepsTitleOn: false,
     titleOn: false,
     cardOn: false,
     lastY: null as number | null,
@@ -342,9 +344,16 @@ export function InvestupIntro({
       }
     };
 
-    /** 03 Compare: 한 번만 트리거되는 노출 (CSS 트랜지션이 끝까지 재생되도록 직접 쓰기) */
+    /** 02/03 제목: 한 번만 트리거되는 노출 (CSS 트랜지션이 끝까지 재생되도록 직접 쓰기) */
     const tick = () => {
       const a = A.current;
+
+      const st = stepsTitleRef.current;
+      if (st && !a.stepsTitleOn && st.getBoundingClientRect().top < window.innerHeight * 0.88) {
+        a.stepsTitleOn = true;
+        st.style.opacity = '1';
+        st.style.transform = 'translateY(0%)';
+      }
 
       const t = titleRef.current;
       if (t && !a.titleOn && t.getBoundingClientRect().top < window.innerHeight * 0.88) {
@@ -725,28 +734,49 @@ export function InvestupIntro({
           background: T.practicesBg,
         }}
       >
-        <Reveal delay={0} duration={1}>
-          <h2
+        {/* 아래 03 Compare의 eyebrow + 마스크 슬라이드업 제목과 완전히 같은 스타일·효과 —
+            글자만 다르다. */}
+        <p
+          style={{
+            margin: '0 0 18px',
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: '.22em',
+            textTransform: 'uppercase',
+            color: T.eyebrowInk,
+          }}
+        >
+          가입부터 첫 거래까지 3단계
+        </p>
+        <h2
+          style={{
+            margin: '0 0 clamp(32px, 5vh, 56px)',
+            fontSize: 'clamp(28px, 4vw, 52px)',
+            fontWeight: 700,
+            letterSpacing: '-.035em',
+            lineHeight: 1.28,
+            color: T.sectionHeadInk,
+            maxWidth: '18em',
+            wordBreak: 'keep-all',
+            textWrap: 'pretty' as never,
+            overflow: 'hidden',
+          }}
+        >
+          {/* 초기 포즈는 인라인, 트리거 시 1회 직접 DOM 쓰기 */}
+          <span
+            ref={stepsTitleRef}
             style={{
-              margin: '0 0 8px',
-              textAlign: 'center',
-              fontSize: 28,
-              fontWeight: 800,
-              color: T.sectionHeadInk,
+              display: 'inline-block',
+              opacity: 0,
+              transform: 'translateY(110%)',
+              transition:
+                'opacity .8s cubic-bezier(.2,.9,.24,1), transform 1s cubic-bezier(.2,.9,.24,1)',
             }}
           >
             이렇게 사용해요
-          </h2>
-          <p
-            style={{
-              margin: '0 0 clamp(40px, 6vh, 56px)',
-              textAlign: 'center',
-              fontSize: 15,
-              color: T.eyebrowInk,
-            }}
-          >
-            가입부터 첫 거래까지 3단계
-          </p>
+          </span>
+        </h2>
+        <Reveal delay={0} duration={1}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(16px, 2vw, 28px)' }}>
             {STEPS.map((s) => (
               <TiltCard
