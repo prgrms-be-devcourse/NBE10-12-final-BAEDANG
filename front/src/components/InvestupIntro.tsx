@@ -871,9 +871,10 @@ export function InvestupIntro({
             등장)로 감쌌는데, "제목이 다 나타난 다음에 카드가 등장"해야 해서
             Reveal 대신 직접 ref에 스타일을 쓴다 — 제목이 트리거되는 순간(tick()의
             stepsShown 분기) 900ms 뒤로 예약된 타이머가 이 스타일을 바꾼다.
-            초기 포즈·keyframe 값(opacity 0→1, translateY(18px)→0)은 Reveal이
-            쓰던 riseIn과 동일하게 맞췄고, "조금 더 늦춰달라"는 요청으로
-            지속시간만 1s → 1.3s로 늘렸다. */}
+            처음엔 Reveal의 riseIn과 같은 translateY(18px)를 썼는데, "등장하는
+            티가 안 난다"는 피드백으로 이동 거리를 64px로 크게 늘렸다(지속시간
+            1.3s는 그대로 — 더 먼 거리를 같은 시간에 움직이니 체감 속도는
+            자연히 조금 더 빨라진다). */}
           <div
             ref={stepsCardsRef}
             style={{
@@ -882,7 +883,7 @@ export function InvestupIntro({
               gap: 'clamp(16px, 2vw, 28px)',
               marginTop: 'clamp(90px, 14vh, 170px)',
               opacity: 0,
-              transform: 'translateY(18px)',
+              transform: 'translateY(64px)',
               transition: 'opacity 1.3s cubic-bezier(.22,1,.36,1), transform 1.3s cubic-bezier(.22,1,.36,1)',
             }}
           >
