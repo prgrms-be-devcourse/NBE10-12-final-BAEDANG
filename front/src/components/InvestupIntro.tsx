@@ -946,7 +946,8 @@ export function InvestupIntro({
           style={{
             margin: 'clamp(80px, 13vh, 160px) auto 0',
             textAlign: 'center',
-            fontSize: 'clamp(15px, 1.6vw, 18px)',
+            fontSize: 'clamp(18px, 2.1vw, 24px)',
+            fontWeight: 600,
             lineHeight: 1.6,
             color: T.cardBodyInk,
             maxWidth: '32em',
