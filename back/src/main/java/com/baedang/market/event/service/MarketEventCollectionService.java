@@ -107,7 +107,19 @@ public class MarketEventCollectionService {
             }
 
             ConfirmedMarketEvent event = confirmed.get();
-            Instant haltUntil = timing.haltUntil(event);
+
+            Instant haltUntil;
+            try {
+                haltUntil = timing.haltUntil(event);
+            } catch (RuntimeException e) {
+                // 시장 캘린더를 신뢰할 수 없으면 이 후보를 저장하지 않는다. 종료시각을 추정해 넣으면
+                // append-only 행이 영구히 틀린 값을 갖고, 다음 폴링은 기존 acptNo를 건너뛰어 고칠 기회가 없다.
+                count("krx.market_event.parse_error", market.name(), "stage", "calendar");
+                log.warn("시장조치 종료시각 계산 실패: market={}, acptNo={}, type={}, cause={}",
+                        market, sourceEventId, event.eventType(), e.toString());
+                return;
+            }
+
             if (persistence.insert(event, haltUntil)) {
                 count("krx.market_event.persisted", market.name(), "type", event.eventType().name());
                 metrics.timer("krx.market_event.delivery_delay", "market", market.name(),

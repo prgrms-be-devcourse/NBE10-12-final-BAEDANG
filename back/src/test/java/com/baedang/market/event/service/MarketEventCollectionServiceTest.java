@@ -18,8 +18,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,6 +42,7 @@ class MarketEventCollectionServiceTest {
     private final MarketEventTimingPolicy timing = mock(MarketEventTimingPolicy.class);
     private final MarketEventPersistenceService persistence = mock(MarketEventPersistenceService.class);
     private final MarketEventRepository repository = mock(MarketEventRepository.class);
+    private final SimpleMeterRegistry metrics = new SimpleMeterRegistry();
 
     private MarketEventCollectionService service;
 
@@ -52,7 +55,7 @@ class MarketEventCollectionServiceTest {
                 timing,
                 persistence,
                 repository,
-                new SimpleMeterRegistry());
+                metrics);
     }
 
     @Test
@@ -133,6 +136,33 @@ class MarketEventCollectionServiceTest {
         verify(timing, never()).haltUntil(any());
     }
 
+    /**
+     * 캘린더 장애는 전송 장애와 다른 사건이다. 둘을 같은 태그로 묶으면 운영에서 "KIND가 죽었나"와
+     * "우리가 종료시각을 못 구했나"를 구별할 수 없다. 후자는 3단계 CB가 차단되지 않는 fail-open이라
+     * 반드시 따로 보여야 한다.
+     */
+    @Test
+    void calendar_failure_is_tagged_separately_and_does_not_stop_the_next_candidate() {
+        MarketEventCandidate first = candidate(KrMarket.KOSPI, "20260713000670");
+        MarketEventCandidate second = candidate(KrMarket.KOSPI, "20260713000671");
+        ConfirmedMarketEvent confirmedFirst = confirmed(first, NOW.minusSeconds(60));
+        ConfirmedMarketEvent confirmedSecond = confirmed(second, NOW.minusSeconds(60));
+
+        when(source.fetchCandidates(KrMarket.KOSPI)).thenReturn(batch(first, second));
+        when(source.fetchConfirmed(first)).thenReturn(Optional.of(confirmedFirst));
+        when(source.fetchConfirmed(second)).thenReturn(Optional.of(confirmedSecond));
+        when(timing.haltUntil(confirmedFirst))
+                .thenThrow(new IllegalStateException("market calendar unavailable"));
+        when(timing.haltUntil(confirmedSecond)).thenReturn(NOW.plusSeconds(300));
+
+        service.collect();
+
+        verify(persistence, never()).insert(eq(confirmedFirst), any());
+        verify(persistence).insert(confirmedSecond, NOW.plusSeconds(300));
+        assertThat(counterCount("krx.market_event.parse_error", "stage", "calendar")).isEqualTo(1.0);
+        assertThat(counterCount("krx.market_event.parse_error", "stage", "fetch")).isZero();
+    }
+
     @Test
     void batch_parse_errors_do_not_block_valid_candidates() {
         MarketEventCandidate valid = candidate(KrMarket.KOSPI, "20260713000664");
@@ -165,6 +195,11 @@ class MarketEventCollectionServiceTest {
 
     private KindRssBatch batch(MarketEventCandidate... candidates) {
         return new KindRssBatch(List.of(candidates), 0);
+    }
+
+    private double counterCount(String name, String tagKey, String tagValue) {
+        var counter = metrics.find(name).tag(tagKey, tagValue).counter();
+        return counter == null ? 0.0 : counter.count();
     }
 
     private MarketEventCandidate candidate(KrMarket market, String sourceEventId) {
