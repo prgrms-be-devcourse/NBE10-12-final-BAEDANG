@@ -1,8 +1,8 @@
 package com.baedang.market.event.client.kind;
 
 import com.baedang.market.event.entity.KrMarket;
-import com.baedang.market.event.entity.MarketEventType;
 import com.baedang.market.event.entity.SidecarDirection;
+import com.baedang.market.event.entity.MarketEventType;
 import com.baedang.market.event.model.ConfirmedMarketEvent;
 import com.baedang.market.event.model.MarketEventCandidate;
 import org.jsoup.Jsoup;
@@ -13,18 +13,22 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.time.format.ResolverStyle;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Predicate;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 public class KindMarketEventDetailParser {
 
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
 
-    private static final Pattern DATE_TIME_PATTERN = Pattern.compile(
-            "(\\d{4})[-년\\s]+(\\d{1,2})[-월\\s]+(\\d{1,2})[일]?\\s+(\\d{1,2})[:시\\s]+(\\d{1,2})[:분\\s]+(\\d{1,2})[초]?"
+    private static final List<DateTimeFormatter> DATE_TIME_FORMATTERS = List.of(
+            DateTimeFormatter.ofPattern("uuuu-MM-dd HH:mm:ss").withResolverStyle(ResolverStyle.STRICT),
+            DateTimeFormatter.ofPattern("uuuu년MM월dd일 HH시mm분ss초").withResolverStyle(ResolverStyle.STRICT),
+            DateTimeFormatter.ofPattern("uuuu-MM-dd HH시mm분ss초").withResolverStyle(ResolverStyle.STRICT)
     );
 
     private final KindUriPolicy uriPolicy;
@@ -56,7 +60,8 @@ public class KindMarketEventDetailParser {
         String detailTitle = normalize(titleElement.text());
         validateTitleMatchesCandidate(detailTitle, candidate);
 
-        String contentRow = rowValue(document, label -> label.contains("내용") || label.contains("조치"));
+        String contentRow = rowValue(document,
+                label -> label.replaceFirst("^\\d+\\.\\s*", "").equals("내용"));
         validateDurationContent(contentRow, candidate);
 
         String dateTimeRow = rowValue(document, label -> label.contains("일자") || label.contains("시각") || label.contains("일시"));
@@ -77,64 +82,53 @@ public class KindMarketEventDetailParser {
     }
 
     private void validateTitleMatchesCandidate(String detailTitle, MarketEventCandidate candidate) {
-        String expectedMarketName = candidate.market() == KrMarket.KOSPI ? "유가증권시장" : "코스닥시장";
-        if (!detailTitle.contains(expectedMarketName)) {
-            throw new IllegalArgumentException("상세 제목 시장 불일치: 기대=" + expectedMarketName + ", 본문=" + detailTitle);
-        }
-
-        if (candidate.eventType() == MarketEventType.CIRCUIT_BREAKER) {
-            if (!detailTitle.contains("일시중단") || !detailTitle.toUpperCase().contains("CB")) {
-                throw new IllegalArgumentException("상세 제목 서킷브레이커 유형 불일치: " + detailTitle);
-            }
-            String expectedStageStr = candidate.circuitBreakerStage() + "단계";
-            if (!detailTitle.contains(expectedStageStr)) {
-                throw new IllegalArgumentException("상세 제목 CB 단계 불일치: 기대=" + expectedStageStr + ", 본문=" + detailTitle);
-            }
-        } else if (candidate.eventType() == MarketEventType.SIDECAR) {
-            String expectedDirection = candidate.sidecarDirection() == SidecarDirection.BUY ? "매수" : "매도";
-            if (!detailTitle.contains(expectedDirection)) {
-                throw new IllegalArgumentException("상세 제목 사이드카 방향 불일치: 기대=" + expectedDirection + ", 본문=" + detailTitle);
-            }
+        KindRssParser.Classification classification =
+                KindRssParser.classifyTitle(detailTitle, candidate.market());
+        if (classification == null
+                || classification.isConflict()
+                || classification.eventType() != candidate.eventType()
+                || !Objects.equals(classification.stage(), candidate.circuitBreakerStage())
+                || classification.direction() != candidate.sidecarDirection()) {
+            throw new IllegalArgumentException("상세 제목이 RSS 후보와 일치하지 않습니다: " + detailTitle);
         }
     }
 
     private void validateDurationContent(String content, MarketEventCandidate candidate) {
+        String compact = normalize(content).replace(" ", "");
         if (candidate.eventType() == MarketEventType.CIRCUIT_BREAKER) {
             if (candidate.circuitBreakerStage() == 1 || candidate.circuitBreakerStage() == 2) {
-                if (!content.contains("20분간")) {
-                    throw new IllegalArgumentException("CB 1·2단계는 20분간 중단 명시가 필요합니다: " + content);
+                String market = candidate.market() == KrMarket.KOSPI ? "유가증권시장" : "코스닥시장";
+                if (!compact.contains("향후20분간")
+                        || !compact.contains(market + "매매거래일시중단")) {
+                    throw new IllegalArgumentException("CB 1·2단계 상세 내용이 올바르지 않습니다: " + content);
                 }
-            } else if (candidate.circuitBreakerStage() == 3) {
-                if (!content.contains("종료")) {
-                    throw new IllegalArgumentException("CB 3단계는 당일 매매거래 종료 명시가 필요합니다: " + content);
-                }
+            } else if (candidate.circuitBreakerStage() == 3
+                    && !compact.contains("당일매매거래종료")) {
+                throw new IllegalArgumentException("CB 3단계는 당일 매매거래 종료 명시가 필요합니다: " + content);
             }
-        } else if (candidate.eventType() == MarketEventType.SIDECAR) {
-            if (!content.contains("5분간")) {
-                throw new IllegalArgumentException("사이드카는 5분간 효력정지 명시가 필요합니다: " + content);
+        } else {
+            String direction = candidate.sidecarDirection() == SidecarDirection.BUY ? "매수" : "매도";
+            if (!compact.contains("향후5분간")
+                    || !compact.contains("프로그램" + direction + "호가효력정지")) {
+                throw new IllegalArgumentException("사이드카 상세 내용이 올바르지 않습니다: " + content);
             }
         }
     }
 
     private Instant parseTriggerTime(String dateTimeText) {
-        Matcher matcher = DATE_TIME_PATTERN.matcher(dateTimeText);
-        if (!matcher.find()) {
-            throw new IllegalArgumentException("상세 공시 발동시각 파싱 실패: " + dateTimeText);
+        String normalized = normalize(dateTimeText);
+        for (DateTimeFormatter formatter : DATE_TIME_FORMATTERS) {
+            try {
+                return LocalDateTime.parse(normalized, formatter).atZone(KST).toInstant();
+            } catch (DateTimeParseException ignored) {
+                // Try the next observed KIND layout.
+            }
         }
-
-        int year = Integer.parseInt(matcher.group(1));
-        int month = Integer.parseInt(matcher.group(2));
-        int day = Integer.parseInt(matcher.group(3));
-        int hour = Integer.parseInt(matcher.group(4));
-        int minute = Integer.parseInt(matcher.group(5));
-        int second = Integer.parseInt(matcher.group(6));
-
-        LocalDateTime localDateTime = LocalDateTime.of(year, month, day, hour, minute, second);
-        return localDateTime.atZone(KST).toInstant();
+        throw new IllegalArgumentException("상세 공시 발동시각 파싱 실패: " + dateTimeText);
     }
 
     private static String rowValue(Document document, Predicate<String> labelMatch) {
-        return document.select(".xforms table tr, table tr").stream()
+        return document.select(".xforms table tr").stream()
                 .filter(row -> !row.select("td").isEmpty())
                 .filter(row -> labelMatch.test(normalize(row.select("td").first().text())))
                 .findFirst()
