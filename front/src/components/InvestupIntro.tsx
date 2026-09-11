@@ -1082,15 +1082,18 @@ export function InvestupIntro({
                   gap: 12,
                   marginTop: 14,
                   overflow: 'hidden',
-                  transition: 'height .9s cubic-bezier(.2,.9,.24,1)',
+                  // 스크롤로 접고 펼 때 더 가볍고 빠르게 느껴지도록 전체 높이·행
+                  // 트랜지션 시간을 대폭 줄였다(요청 전: height .9s / width .8s /
+                  // opacity·filter .5~.55s, 시차도 0.05~0.11s로 컸다).
+                  transition: 'height .35s cubic-bezier(.2,.9,.24,1)',
                 }}
               >
                 {CMP.map((r, i) => {
                   const dim = i / (CMP.length - 1);
-                  const delay = `${(cmpOpen ? i * 0.11 : (CMP.length - 1 - i) * 0.05).toFixed(2)}s`;
+                  const delay = `${(cmpOpen ? i * 0.04 : (CMP.length - 1 - i) * 0.02).toFixed(2)}s`;
                   const cellStyle: React.CSSProperties = {
                     opacity: cmpOpen ? 1 : 0,
-                    transition: `opacity .5s ease ${delay}`,
+                    transition: `opacity .18s ease ${delay}`,
                     whiteSpace: cmpOpen ? 'normal' : 'nowrap',
                     wordBreak: 'keep-all',
                   };
@@ -1112,7 +1115,7 @@ export function InvestupIntro({
                         opacity: cmpOpen ? 1 : Number((0.95 - dim * 0.5).toFixed(2)),
                         filter: `blur(${cmpOpen ? 0 : (dim * 2.2).toFixed(1)}px)`,
                         transformOrigin: '0% 50%',
-                        transition: `width .8s cubic-bezier(.2,.9,.24,1) ${delay}, opacity .55s ease ${delay}, filter .55s ease ${delay}`,
+                        transition: `width .3s cubic-bezier(.2,.9,.24,1) ${delay}, opacity .22s ease ${delay}, filter .22s ease ${delay}`,
                       }}
                     >
                       <span style={{ ...cellStyle, fontSize: 15, fontWeight: 500, letterSpacing: '-.01em', color: '#23456f' }}>
