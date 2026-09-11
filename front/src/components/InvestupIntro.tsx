@@ -1014,19 +1014,25 @@ export function InvestupIntro({
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 6 }}>
                 <span
                   style={{
-                    fontSize: 'clamp(28px, 3.2vw, 38px)',
-                    fontWeight: 700,
-                    letterSpacing: '-.03em',
+                    // 완료 문구가 "4가지가 다릅니다" 같은 짧은 헤드라인에서 문장형으로
+                    // 바뀌어서, 헤드라인용 큰 글씨(clamp(28px,3.2vw,38px)/700)를 그대로
+                    // 쓰면 문장이 여러 줄로 너무 크고 무겁게 나온다. 문단으로 읽히도록
+                    // 크기·굵기·줄간격을 낮췄다(분석 중 숫자는 원래도 짧아 영향 없음).
+                    fontSize: 'clamp(19px, 2.2vw, 25px)',
+                    fontWeight: 600,
+                    lineHeight: 1.45,
+                    letterSpacing: '-.02em',
                     color: '#2b3440',
                     wordBreak: 'keep-all',
                     textWrap: 'pretty' as never,
                   }}
                 >
-                  {/* "N개 항목 비교"는 표현이 밋밋하고 숫자도 들쭉날쭉 튀어 산만했다.
-                      완료 문구("4가지가 다릅니다")와 같은 "가지" 단위로 맞추고,
-                      숫자도 위 startCmp에서 1→2→3→4로 차분히 오르게 바꿨다. 바로 위
-                      eyebrow가 이미 "차이점 분석 중…"이라 "차이점"을 또 넣지 않았다. */}
-                  {cmpOpen ? '4가지가 다릅니다' : `${Math.max(1, Math.round(cmp.val * CMP.length))}가지 확인 중…`}
+                  {/* 분석 중엔 실제 비교 항목 수(CMP.length)만큼 1→2→3→4로 차분히
+                      오르는 숫자(위 startCmp 참고). 완료 문구는 아래 4개 행이 말하는
+                      내용을 한 문장으로 풀어 설명한다. */}
+                  {cmpOpen
+                    ? '거래를 연습하고, 금융 지식과 자신의 투자 성향까지 이해할 수 있도록 돕습니다.'
+                    : `${Math.max(1, Math.round(cmp.val * CMP.length))}가지 확인 중…`}
                 </span>
                 <span
                   style={{
