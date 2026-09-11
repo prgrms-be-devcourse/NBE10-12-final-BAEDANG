@@ -39,10 +39,13 @@ import java.util.Set;
  * 로 차감해 {@code cash_balance = initial_cash − Σ원가} 를 유지한다. 체결/원장은 생략한다
  * (수수료 무시 — 마커로 분리된 시드라 허용). 4주 성과·변화 감지용 백데이트 체결은 후속.
  *
- * <p><b>현실 샘플러:</b> 종목은 거래 유니버스({@code is_ranked})에서 {@code trading_amount}
- * 가중으로 뽑고 비중을 랜덤 배정한다. 유형(MBTI)은 <b>배정이 아니라 emergent</b> 여야
- * 컷오프 튜닝이 유효하다(디자인 매트릭스로 분포를 만들면 순환논리). 유니버스가 개별주에
- * 기울어 있으면 표본도 개별주로 쏠리는데, 그 쏠림 자체가 컷오프 판단의 신호다.
+ * <p><b>현실 샘플러:</b> 종목은 거래 유니버스({@code is_ranked})에서 <b>시장별로</b>
+ * {@code trading_amount} 가중으로 뽑고(계좌마다 국내 편향 무작위 — {@link #marketAwareSample})
+ * 비중을 랜덤 배정한다. 유형(MBTI)은 <b>배정이 아니라 emergent</b> 여야 컷오프 튜닝이
+ * 유효하다(디자인 매트릭스로 분포를 만들면 순환논리). 유니버스가 개별주에 기울어 있으면
+ * 표본도 개별주로 쏠리는데, 그 쏠림 자체가 컷오프 판단의 신호다. 단 시장 간 거래대금 스케일
+ * 차이(미국 ~10배)로 국내/해외 축이 퇴화하지 않도록 <b>시장을 먼저 정하고 시장 안에서만
+ * 가중</b>한다(검증 게이트 2026-09-11).
  *
  * <p><b>멱등:</b> 이미 시드 회원이 있으면 no-op. 재적재는 시드 정리 후 다시 호출한다.
  * <p><b>선행:</b> 종목 마스터·랭킹 적재가 끝나 {@code is_ranked} 유니버스가 채워져 있어야 한다.
@@ -104,10 +107,9 @@ public class PortfolioSeedService {
             return SeedResult.skipped((int) existing);
         }
 
-        List<Stock> universe = new ArrayList<>();
-        universe.addAll(stockRepository.findByMarketCountryAndIsRankedTrue(MarketCountry.KR));
-        universe.addAll(stockRepository.findByMarketCountryAndIsRankedTrue(MarketCountry.US));
-        if (universe.isEmpty()) {
+        List<Stock> krUniverse = stockRepository.findByMarketCountryAndIsRankedTrue(MarketCountry.KR);
+        List<Stock> usUniverse = stockRepository.findByMarketCountryAndIsRankedTrue(MarketCountry.US);
+        if (krUniverse.isEmpty() && usUniverse.isEmpty()) {
             log.warn("is_ranked 유니버스가 비어 있음 — 마스터·랭킹 적재 후 다시 호출하세요");
             return new SeedResult(0, 0, 0, 0);
         }
@@ -126,7 +128,7 @@ public class PortfolioSeedService {
             Account account = accountRepository.save(
                     Account.open(user.getUserId(), 1, initialCash, openedAt));
 
-            holdings += buildPortfolio(account, universe, random, openedAt, now, quotedStocks);
+            holdings += buildPortfolio(account, krUniverse, usUniverse, random, openedAt, now, quotedStocks);
             accounts++;
         }
 
@@ -135,10 +137,10 @@ public class PortfolioSeedService {
     }
 
     /** 한 계좌의 보유를 현실 샘플러로 구성하고, 총원가만큼 예수금을 차감한다. 생성한 보유 수 반환. */
-    private int buildPortfolio(Account account, List<Stock> universe, Random random,
+    private int buildPortfolio(Account account, List<Stock> krUniverse, List<Stock> usUniverse, Random random,
                                OffsetDateTime at, OffsetDateTime now, Set<Long> quotedStocks) {
         int k = 1 + random.nextInt(maxHoldings);
-        List<Stock> picked = weightedSampleWithoutReplacement(universe, k, random);
+        List<Stock> picked = marketAwareSample(krUniverse, usUniverse, k, random);
         double[] weights = randomWeights(picked.size(), random);
         // 초기자본의 30~95% 를 투자(나머지는 현금).
         BigDecimal totalInvest = initialCash
@@ -183,29 +185,47 @@ public class PortfolioSeedService {
         return created;
     }
 
-    /** {@code trading_amount} 가중 비복원 추출. 인기 종목일수록 자주 뽑힌다. */
-    private List<Stock> weightedSampleWithoutReplacement(List<Stock> universe, int k, Random random) {
-        List<Stock> pool = new ArrayList<>(universe);
+    /**
+     * 시장 인지형 비복원 추출. 계좌마다 국내 편향 {@code p}(0=전부 해외, 1=전부 국내)를 무작위로
+     * 주고, 종목마다 시장을 {@code p} 확률로 고른 뒤 <b>그 시장 안에서만</b> {@code trading_amount}
+     * 가중으로 뽑는다.
+     *
+     * <p>시장을 섞어 하나의 풀로 가중하면, 미국 종목의 {@code trading_amount}(원화 명목)가 국내의
+     * ~10배라 표본이 미국으로 쏠려 국내/해외 축이 전부 "해외"로 퇴화한다(검증 게이트 2026-09-11
+     * 발견). 시장을 먼저 정하고 시장 내에서만 가중하면 국내/해외 축이 계좌별로 분포를 갖는다.
+     */
+    private static List<Stock> marketAwareSample(List<Stock> kr, List<Stock> us, int k, Random random) {
+        double domesticBias = random.nextDouble();
+        List<Stock> krPool = new ArrayList<>(kr);
+        List<Stock> usPool = new ArrayList<>(us);
         List<Stock> chosen = new ArrayList<>();
-        int limit = Math.min(k, pool.size());
+        int limit = Math.min(k, krPool.size() + usPool.size());
         for (int n = 0; n < limit; n++) {
-            double total = 0;
-            for (Stock s : pool) {
-                total += weight(s);
+            boolean wantKr = random.nextDouble() < domesticBias;
+            List<Stock> pool = wantKr ? krPool : usPool;
+            if (pool.isEmpty()) {
+                pool = wantKr ? usPool : krPool; // 원하는 시장이 소진되면 다른 시장에서 채운다
             }
-            double dart = random.nextDouble() * total;
-            double acc = 0;
-            int idx = pool.size() - 1;
-            for (int p = 0; p < pool.size(); p++) {
-                acc += weight(pool.get(p));
-                if (dart <= acc) {
-                    idx = p;
-                    break;
-                }
-            }
-            chosen.add(pool.remove(idx));
+            chosen.add(pool.remove(weightedPickIndex(pool, random)));
         }
         return chosen;
+    }
+
+    /** 풀 안에서 {@code trading_amount} 가중으로 한 종목 인덱스를 뽑는다. 인기 종목일수록 자주 뽑힌다. */
+    private static int weightedPickIndex(List<Stock> pool, Random random) {
+        double total = 0;
+        for (Stock s : pool) {
+            total += weight(s);
+        }
+        double dart = random.nextDouble() * total;
+        double acc = 0;
+        for (int p = 0; p < pool.size(); p++) {
+            acc += weight(pool.get(p));
+            if (dart <= acc) {
+                return p;
+            }
+        }
+        return pool.size() - 1;
     }
 
     private static double weight(Stock stock) {
