@@ -41,11 +41,12 @@ const WORD_STAGGER_S = 0.07;
 /* 비교 카드 4개 행("목적"/"실수했을 때"/"수수료·세금"/"사용법 안내")의 스크롤 접기/
  * 펼침 리빌 — toss insurance 채용 페이지(pd-recruit.tossinsu.com) 참고 요청에 맞춰
  * "빠르고 가볍고 자연스러운" 느낌으로 다시 만들었다. width/blur로 모양이 바뀌는
- * 대신 opacity + translateY만 쓴다(레이아웃에 영향을 주는 속성을 피해 리플로우 없이
- * 합성 레이어에서만 처리되므로 더 가볍다). */
-const CMP_ROW_DURATION_MS = 480; // 0.4~0.6s 요청 — 살짝 빠른 쪽
+ * 대신 opacity + transform(scaleX, 왼쪽 축으로 펼쳐지고 접힘)만 쓴다(레이아웃에
+ * 영향을 주는 속성을 피해 리플로우 없이 합성 레이어에서만 처리되므로 더 가볍다).
+ * 처음엔 훨씬 빠르게(480ms) 했는데 너무 빠르다는 피드백을 반영해 살짝 늦췄다. */
+const CMP_ROW_DURATION_MS = 640;
 const CMP_ROW_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'; // 초반 반응이 빠른 ease-out
-const CMP_ROW_STAGGER_MS = 40; // "아주 짧은" 시차 — 4행이 위에서부터 빠르게 순서대로
+const CMP_ROW_STAGGER_MS = 55; // 4행이 위(펼칠 때)/아래(접을 때)부터 순서대로
 
 type PinState = { on: boolean; i: number; x: number; y: number; boxW: number; boxH: number };
 type CmpState = { phase: 0 | 1 | 2; val: number; open: boolean };
