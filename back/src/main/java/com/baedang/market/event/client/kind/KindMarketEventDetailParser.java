@@ -92,14 +92,15 @@ public class KindMarketEventDetailParser {
             throw new IllegalArgumentException("상세 제목이 RSS 후보와 일치하지 않습니다: " + detailTitle);
         }
     }
-
     private void validateDurationContent(String content, MarketEventCandidate candidate) {
         String compact = normalize(content).replace(" ", "");
         if (candidate.eventType() == MarketEventType.CIRCUIT_BREAKER) {
             if (candidate.circuitBreakerStage() == 1 || candidate.circuitBreakerStage() == 2) {
                 String market = candidate.market() == KrMarket.KOSPI ? "유가증권시장" : "코스닥시장";
-                if (!compact.contains("향후20분간")
-                        || !compact.contains(market + "매매거래일시중단")) {
+                boolean haltStatement = compact.contains(market + "의매매거래가중단")
+                        || compact.contains(market + "매매거래일시중단")
+                        || compact.contains(market + "매매거래중단");
+                if (!compact.contains("향후20분간") || !haltStatement) {
                     throw new IllegalArgumentException("CB 1·2단계 상세 내용이 올바르지 않습니다: " + content);
                 }
             } else if (candidate.circuitBreakerStage() == 3
@@ -108,8 +109,11 @@ public class KindMarketEventDetailParser {
             }
         } else {
             String direction = candidate.sidecarDirection() == SidecarDirection.BUY ? "매수" : "매도";
-            if (!compact.contains("향후5분간")
-                    || !compact.contains("프로그램" + direction + "호가효력정지")) {
+            boolean quoteHalt = compact.contains("프로그램" + direction + "호가")
+                    && (compact.contains("호가의효력이정지")
+                    || compact.contains("호가효력이정지")
+                    || compact.contains("호가효력정지"));
+            if (!compact.contains("향후5분간") || !quoteHalt) {
                 throw new IllegalArgumentException("사이드카 상세 내용이 올바르지 않습니다: " + content);
             }
         }

@@ -96,7 +96,7 @@ class KindMarketEventDetailParserTest {
                   <table>
                     <tr><td>1. 조치</td><td>프로그램 매수호가 일시 효력정지 (사이드카 발동)</td></tr>
                     <tr><td>2. 발동일시</td><td>2026년07월15일</td><td>09시06분41초</td></tr>
-                    <tr><td>4. 내용</td><td>향후 5분간 프로그램매수호가 효력정지</td></tr>
+                    <tr><td>4. 내용</td><td>해당 선물 가격 상승으로 향후 5분간 유가증권시장의 프로그램 매수호가 효력이 정지됨</td></tr>
                   </table>
                 </div>
                 """;
