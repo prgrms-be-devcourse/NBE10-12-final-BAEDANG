@@ -902,6 +902,10 @@ export function InvestupIntro({
           background: T.practicesBg,
         }}
       >
+        {/* 바로 아래 제목과 같은 titleRevealed 플래그로 나타난다 — 지연 없이
+            바로 시작해서(제목 단어들은 WORD_STAGGER_S만큼씩 늦게 시작) eyebrow가
+            먼저 살짝 떠오르고 그다음 제목이 순서대로 이어지는 느낌을 만든다.
+            제목보다 작은 요소라 이동 거리(12px)·블러(8px)도 절반 정도로 옅게 줬다. */}
         <p
           style={{
             margin: '0 0 18px',
@@ -911,6 +915,10 @@ export function InvestupIntro({
             letterSpacing: '.22em',
             textTransform: 'uppercase',
             color: T.eyebrowInk,
+            opacity: titleRevealed ? 1 : 0,
+            filter: titleRevealed ? 'blur(0px)' : 'blur(8px)',
+            transform: titleRevealed ? 'translateY(0px)' : 'translateY(12px)',
+            transition: 'opacity .6s cubic-bezier(.2,.9,.24,1), filter .6s cubic-bezier(.2,.9,.24,1), transform .6s cubic-bezier(.2,.9,.24,1)',
           }}
         >
           difference
