@@ -254,6 +254,48 @@ class KindMarketEventDetailParserTest {
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
+    /**
+     * 공식 1단계 공시 본문은 3단계를 "당일 유가증권시장 매매거래 종료"로 설명한다.
+     * 3단계 공시 자체도 같은 표현을 쓸 수 있으므로 시장명이 끼어든 문구를 거부해서는 안 된다.
+     */
+    @Test
+    void stage_three_accepts_market_scoped_close_statement() {
+        MarketEventCandidate candidate = circuitBreakerCandidate(3);
+        String html = detailHtml(
+                "유가증권시장 매매거래 일시중단(3단계 CB 발동)",
+                "2026-07-13 13:28:32",
+                "당일 유가증권시장 매매거래 종료");
+
+        assertThat(parser.parse(candidate, detailUri(candidate), html, Instant.now()).triggeredAt())
+                .isEqualTo(Instant.parse("2026-07-13T04:28:32Z"));
+    }
+
+    @Test
+    void stage_three_accepts_kosdaq_close_statement_and_rejects_other_market() {
+        MarketEventCandidate kosdaq = new MarketEventCandidate(
+                KrMarket.KOSDAQ,
+                "20260805000300",
+                MarketEventType.CIRCUIT_BREAKER,
+                3,
+                null,
+                Instant.parse("2026-08-05T01:00:00Z"),
+                "코스닥시장 매매거래 일시중단(3단계 CB 발동)",
+                URI.create("https://kind.krx.co.kr/common/disclsviewer.do?method=search&acptNo=20260805000300"));
+
+        assertThat(parser.parse(kosdaq, detailUri(kosdaq), detailHtml(
+                "코스닥시장 매매거래 일시중단(3단계 CB 발동)",
+                "2026-08-05 10:00:00",
+                "당일 코스닥시장 매매거래 종료"), Instant.now()).triggeredAt())
+                .isEqualTo(Instant.parse("2026-08-05T01:00:00Z"));
+
+        // 다른 시장 이름을 붙인 종료 문구는 통과시키지 않는다.
+        assertThatThrownBy(() -> parser.parse(kosdaq, detailUri(kosdaq), detailHtml(
+                "코스닥시장 매매거래 일시중단(3단계 CB 발동)",
+                "2026-08-05 10:00:00",
+                "당일 유가증권시장 매매거래 종료"), Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test
     void rejects_rows_outside_xforms_document() {
         MarketEventCandidate candidate = circuitBreakerCandidate(1);

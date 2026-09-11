@@ -103,9 +103,16 @@ public class KindMarketEventDetailParser {
                 if (!compact.contains("향후20분간") || !haltStatement) {
                     throw new IllegalArgumentException("CB 1·2단계 상세 내용이 올바르지 않습니다: " + content);
                 }
-            } else if (candidate.circuitBreakerStage() == 3
-                    && !compact.contains("당일매매거래종료")) {
-                throw new IllegalArgumentException("CB 3단계는 당일 매매거래 종료 명시가 필요합니다: " + content);
+            } else if (candidate.circuitBreakerStage() == 3) {
+                // 1·2단계와 대칭으로 시장명이 끼어든 표현을 허용한다. 브랜치의 공식 1단계 공시 본문이
+                // 3단계를 설명할 때 "당일 유가증권시장 매매거래 종료"로 적고 있다.
+                String market = candidate.market() == KrMarket.KOSPI ? "유가증권시장" : "코스닥시장";
+                boolean closeStatement = compact.contains("당일매매거래종료")
+                        || compact.contains("당일" + market + "매매거래종료")
+                        || compact.contains("당일" + market + "의매매거래종료");
+                if (!closeStatement) {
+                    throw new IllegalArgumentException("CB 3단계는 당일 매매거래 종료 명시가 필요합니다: " + content);
+                }
             }
         } else {
             String direction = candidate.sidecarDirection() == SidecarDirection.BUY ? "매수" : "매도";
