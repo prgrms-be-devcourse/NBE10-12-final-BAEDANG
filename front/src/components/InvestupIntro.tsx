@@ -746,7 +746,7 @@ export function InvestupIntro({
             color: T.eyebrowInk,
           }}
         >
-          가입부터 첫 거래까지 3단계
+          three steps
         </p>
         <h2
           style={{
