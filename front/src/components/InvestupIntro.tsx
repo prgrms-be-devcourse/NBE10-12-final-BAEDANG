@@ -860,7 +860,16 @@ export function InvestupIntro({
           </span>
         </h2>
         <Reveal delay={0} duration={1}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'clamp(16px, 2vw, 28px)' }}>
+          {/* 제목과의 간격을 많이 띄워달라는 요청 — 비교 섹션 카드 때와 같은
+              값(clamp(64px, 11vh, 140px))을 재사용했다. */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: 'clamp(16px, 2vw, 28px)',
+              marginTop: 'clamp(64px, 11vh, 140px)',
+            }}
+          >
             {STEPS.map((s) => (
               <TiltCard
                 key={s.step}
