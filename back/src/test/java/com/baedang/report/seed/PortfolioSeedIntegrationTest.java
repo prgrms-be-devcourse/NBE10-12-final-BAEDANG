@@ -55,7 +55,7 @@ class PortfolioSeedIntegrationTest {
     @Autowired JdbcTemplate jdbc;
 
     private PortfolioSeedService service() {
-        return new PortfolioSeedService(users, accounts, holdings, quotes, stocks,
+        return new PortfolioSeedService(users, accounts, holdings, quotes, stocks, jdbc,
                 INITIAL_CASH, ACCOUNT_COUNT, 4, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -117,6 +117,45 @@ class PortfolioSeedIntegrationTest {
         for (Holding holding : allHoldings) {
             assertThat(quotes.findById(holding.getStockId())).isPresent();
         }
+    }
+
+    @Test
+    void 보유마다_백데이트_매수체결을_적재하고_보유와_정합한다() {
+        seedUniverse();
+
+        service().seed();
+
+        long holdingRows = holdings.count();
+        Integer orderRows = jdbc.queryForObject("SELECT count(*) FROM trade_order", Integer.class);
+        Integer execRows = jdbc.queryForObject("SELECT count(*) FROM trade_execution", Integer.class);
+        // 보유당 매수 1건 → 주문·체결 수 = 보유 수.
+        assertThat(orderRows).isEqualTo((int) holdingRows);
+        assertThat(execRows).isEqualTo((int) holdingRows);
+
+        // 전부 FILLED·BUY·MARKET.
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM trade_order WHERE NOT (side='BUY' AND order_type='MARKET' AND status='FILLED')",
+                Integer.class)).isZero();
+
+        // BUY 정산 규칙: net = gross, tax·sec = 0.
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM trade_execution WHERE net_amount_krw <> gross_amount_krw OR tax_krw <> 0 OR sec_fee_usd <> 0",
+                Integer.class)).isZero();
+
+        // 체결 수량이 보유 수량과 일치(보유↔체결 정합).
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM holding h
+                JOIN trade_order o ON o.account_id = h.account_id AND o.stock_id = h.stock_id
+                JOIN trade_execution e ON e.order_id = o.order_id
+                WHERE e.quantity <> h.quantity
+                """, Integer.class)).isZero();
+
+        // 체결 시각은 개설~현재(백데이트) 사이이고 종목마다 분산돼 창 내 구성이 변한다.
+        OffsetDateTime nowUtc = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC);
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM trade_execution WHERE executed_at > ?", Integer.class, nowUtc)).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT count(DISTINCT executed_at) FROM trade_execution", Integer.class)).isGreaterThan(1);
     }
 
     @Test

@@ -14,12 +14,14 @@ import com.baedang.user.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
@@ -27,6 +29,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * 개발/데모용 합성(시드) 포트폴리오 적재 서비스 (#152 Phase 2 검증 게이트).
@@ -36,8 +39,15 @@ import java.util.Set;
  *
  * <p><b>도메인 팩토리 하이브리드((c)):</b> 보유는 {@link Holding#firstBuy}/{@link Holding#addBuy}
  * 로 만들어 원가·평단가 불변식을 코드가 강제하고, 예수금은 {@link Account#debitMarketBuy}
- * 로 차감해 {@code cash_balance = initial_cash − Σ원가} 를 유지한다. 체결/원장은 생략한다
- * (수수료 무시 — 마커로 분리된 시드라 허용). 4주 성과·변화 감지용 백데이트 체결은 후속.
+ * 로 차감해 {@code cash_balance = initial_cash − Σ원가} 를 유지한다. 원장은 생략한다
+ * (수수료·세금 무시 — 마커로 분리된 시드라 허용).
+ *
+ * <p><b>백데이트 체결:</b> 종목마다 매수 {@code trade_order}(FILLED·MARKET) + {@code trade_execution}
+ * 한 건을 <b>계좌 개설~현재 사이로 분산된 시각</b>에 적재한다. 종목이 서로 다른 시점에 편입되므로
+ * 4주 창 안에서 원가 구성이 변해, 원가 4주 <b>평균</b> 분류기(§6.2)가 스냅샷과 다른 입력을 갖는다.
+ * 체결 팩토리({@link com.baedang.trading.entity.TradeExecution#market})는 완전 정합한 주문·환율
+ * 근거를 요구해 대량 시드엔 과중하므로 {@link JdbcTemplate}로 직접 적재한다(수수료·세금 0이라
+ * {@code net = gross}, BUY 정산 규칙 충족). 보유와 체결이 어긋나지 않게 같은 단가·수량·환율을 쓴다.
  *
  * <p><b>현실 샘플러:</b> 종목은 거래 유니버스({@code is_ranked})에서 <b>시장별로</b>
  * {@code trading_amount} 가중으로 뽑고(계좌마다 국내 편향 무작위 — {@link #marketAwareSample})
@@ -66,6 +76,7 @@ public class PortfolioSeedService {
     private final HoldingRepository holdingRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final StockRepository stockRepository;
+    private final JdbcTemplate jdbcTemplate;
     private final BigDecimal initialCash;
     private final int accountCount;
     private final int maxHoldings;
@@ -77,6 +88,7 @@ public class PortfolioSeedService {
             HoldingRepository holdingRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
             StockRepository stockRepository,
+            JdbcTemplate jdbcTemplate,
             @Value("${trading.initial-cash}") BigDecimal initialCash,
             @Value("${report.seed.account-count:50}") int accountCount,
             @Value("${report.seed.max-holdings:8}") int maxHoldings,
@@ -87,6 +99,7 @@ public class PortfolioSeedService {
         this.holdingRepository = holdingRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.stockRepository = stockRepository;
+        this.jdbcTemplate = jdbcTemplate;
         this.initialCash = initialCash;
         this.accountCount = accountCount;
         this.maxHoldings = maxHoldings;
@@ -164,8 +177,12 @@ public class PortfolioSeedService {
             BigDecimal krwCost = priceKrw.multiply(quantity);
             BigDecimal usdCost = us ? nativePrice.multiply(quantity) : BigDecimal.ZERO;
 
+            // 종목마다 매수 시각을 개설~현재 사이로 분산 → 4주 창 안에서 구성이 변한다.
+            OffsetDateTime buyAt = staggeredBuyTime(at, now, random);
             holdingRepository.save(Holding.firstBuy(
-                    account.getAccountId(), stock.getStockId(), quantity, usdCost, krwCost, at));
+                    account.getAccountId(), stock.getStockId(), quantity, usdCost, krwCost, buyAt));
+            insertBuyExecution(account.getAccountId(), stock.getStockId(), quantity,
+                    nativePrice, us ? SEED_USD_KRW : BigDecimal.ONE, krwCost, buyAt);
             spent = spent.add(krwCost);
             created++;
 
@@ -183,6 +200,42 @@ public class PortfolioSeedService {
             account.debitMarketBuy(spent); // cash_balance = initial − Σ원가 (managed 엔티티, 트랜잭션 커밋 시 flush)
         }
         return created;
+    }
+
+    /** 개설~현재 사이의 무작위 매수 시각. 종목마다 달라 4주 창 안에서 구성이 변한다. */
+    private static OffsetDateTime staggeredBuyTime(OffsetDateTime openedAt, OffsetDateTime now, Random random) {
+        long span = Duration.between(openedAt, now).getSeconds();
+        return span <= 0 ? openedAt : openedAt.plusSeconds((long) (random.nextDouble() * span));
+    }
+
+    /**
+     * 매수 체결 한 건을 {@code trade_order}(FILLED·MARKET) + {@code trade_execution} 로 직접 적재한다.
+     * 수수료·세금 0이라 {@code net = gross} 라 BUY 정산 규칙({@code net = gross + fee})을 만족한다.
+     * 보유와 어긋나지 않게 같은 단가·수량·환율을 쓰고, 원화 거래대금은 정수 원으로 반올림한다.
+     */
+    private void insertBuyExecution(long accountId, long stockId, BigDecimal quantity,
+                                    BigDecimal nativePrice, BigDecimal exchangeRate, BigDecimal krwCost,
+                                    OffsetDateTime at) {
+        BigDecimal grossKrw = krwCost.setScale(0, RoundingMode.HALF_UP);
+        OffsetDateTime ts = at;
+        Long orderId = jdbcTemplate.queryForObject("""
+                INSERT INTO trade_order(
+                        account_id, stock_id, client_order_id, side, order_type, quantity, status,
+                        quote_at, exchange_rate, executed_price, gross_amount, fee, tax, net_amount,
+                        filled_quantity, execution_count, last_executed_at, reserved_cash, ordered_at, closed_at)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', ?, 'FILLED', ?, ?, ?, ?, 0, 0, ?, ?, 1, ?, 0, ?, ?)
+                RETURNING order_id
+                """, Long.class,
+                accountId, stockId, UUID.randomUUID(), quantity, ts, exchangeRate, nativePrice,
+                grossKrw, grossKrw, quantity, ts, ts, ts);
+
+        jdbcTemplate.update("""
+                INSERT INTO trade_execution(
+                        order_id, execution_key, sequence_no, quantity, price, exchange_rate,
+                        sec_fee_usd, gross_amount_krw, fee_krw, tax_krw, net_amount_krw, quote_at, executed_at, book_level_id)
+                VALUES (?, ?, 1, ?, ?, ?, 0, ?, 0, 0, ?, ?, ?, NULL)
+                """,
+                orderId, UUID.randomUUID(), quantity, nativePrice, exchangeRate, grossKrw, grossKrw, ts, ts);
     }
 
     /**
