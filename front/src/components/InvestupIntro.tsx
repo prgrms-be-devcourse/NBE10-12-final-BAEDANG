@@ -822,7 +822,9 @@ export function InvestupIntro({
         id="practices"
         style={{
           position: 'relative',
-          padding: 'clamp(80px, 12vh, 160px) clamp(24px, 5vw, 96px) clamp(96px, 14vh, 180px)',
+          // 위쪽 여백만 늘렸다 — 지구본(01 Hero)과 "GET STARTED" 사이 간격을
+          // 많이 띄워달라는 요청.
+          padding: 'clamp(160px, 22vh, 280px) clamp(24px, 5vw, 96px) clamp(96px, 14vh, 180px)',
           background: T.practicesBg,
         }}
       >
