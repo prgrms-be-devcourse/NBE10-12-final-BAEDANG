@@ -375,7 +375,15 @@ export function InvestupIntro({
       // 방향을 반대로(아래에서 위로 갈수록 옅어지게) 해달라는 요청 —
       // 그라데이션 선(위→아래)은 그대로 두고 색 stop만 뒤집었다(위쪽
       // 끝은 투명, 아래쪽 끝은 진하게).
-      const globeGlow = ctx.createLinearGradient(0, Math.max(0, g.cy - g.R), 0, f.h);
+      // 옅어지는 범위를 더 넓게 해달라는 후속 요청 — 위쪽 끝(topY)은
+      // 그대로 두고, 진한 색이 되는 아래쪽 끝(botY)을 보이는 캔버스
+      // 바닥(f.h)보다 더 아래로 늘렸다. 그러면 실제로 보이는 캔버스
+      // 영역(0~f.h)은 전체 그라데이션 중 일부(botY 이전)만 차지하게
+      // 돼서, 화면에는 최대 진하기(0.45)까지 다 차오르지 못한 채 좀 더
+      // 넓은 구간에 걸쳐 천천히 옅어지는 것처럼 보인다.
+      const topY = Math.max(0, g.cy - g.R);
+      const botY = topY + (f.h - topY) * 1.7;
+      const globeGlow = ctx.createLinearGradient(0, topY, 0, botY);
       globeGlow.addColorStop(0, 'rgba(127,182,227,0)');
       globeGlow.addColorStop(1, 'rgba(127,182,227,0.45)');
       ctx.fillStyle = globeGlow;
