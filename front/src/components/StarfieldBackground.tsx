@@ -26,7 +26,9 @@ export type StarfieldBackgroundProps = {
   active: boolean;
   /** 별 개수. */
   starCount?: number;
-  /** 별이 퍼져나가는 기준 속도. 값을 키우면 더 빠르게 스쳐 지나간다. */
+  /** 별이 퍼져나가는 기준 속도. 값을 키우면 더 빠르게, 줄이면 더 느리게
+   * 스쳐 지나간다. 처음엔 60이었는데 "좀 더 느리게" 해달라는 요청으로
+   * 기본값을 32로 낮췄다. */
   speed?: number;
 };
 
@@ -52,7 +54,7 @@ export function StarfieldBackground({
   style,
   active,
   starCount = 260,
-  speed = 60,
+  speed = 32,
 }: StarfieldBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
