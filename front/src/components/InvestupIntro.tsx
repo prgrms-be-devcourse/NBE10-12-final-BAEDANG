@@ -607,7 +607,9 @@ export function InvestupIntro({
   const shimmer = (side: 'left' | 'right', animate: boolean): React.CSSProperties => ({
     position: 'absolute',
     inset: 0,
-    background: `radial-gradient(48% 48% at 50% 50%, ${T.dotInk} 0%, rgba(0,0,0,0) 78%)`,
+    // 도트 자체 색(T.dotInk)은 그대로 두고, 훑고 지나가는 하이라이트만 살짝
+    // 더 옅게(T.dotShimmerInk) 해달라는 요청을 반영했다.
+    background: `radial-gradient(48% 48% at 50% 50%, ${T.dotShimmerInk} 0%, rgba(0,0,0,0) 78%)`,
     mixBlendMode: 'screen',
     opacity: 0.5,
     backgroundRepeat: 'no-repeat',

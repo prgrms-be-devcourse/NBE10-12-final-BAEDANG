@@ -26,6 +26,10 @@ export const T = {
   cardTitleInk: '#071829',
   cardBodyInk: '#1e3a52',
   dotInk: '#7fb6e3',
+  /** 도트 패턴을 훑고 지나가는 발광 하이라이트(shimmer) 전용 색 — dotInk보다
+   * 살짝 더 옅은 하늘색. 도트 자체 색은 그대로 두고 이 색만 옅게 해달라는
+   * 요청으로 따로 뺐다. */
+  dotShimmerInk: '#9fc8ea',
   dotMax: 0.85,
   /** 확대되는 사각형 / CTA 배경 */
   deepInk: '#0f3868',
