@@ -27,7 +27,6 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
-import { GradientSweepText } from './GradientSweepText';
 import { StarfieldBackground } from './StarfieldBackground';
 import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
@@ -1430,10 +1429,13 @@ export function InvestupIntro({
                 효과(opacity/blur/translateY/transition 값이 동일) —
                 ctaLineRevealed가 titleRevealed와 같은 역할을 한다.
                 "5,000만원"과 "으로" 사이는 공백 없이 붙고, "으로" 다음에서
-                줄바꿈된다. "5,000만원"에는 파란 그라데이션이 훑고 지나가는
-                효과(GradientSweepText)를 추가로 입혔다 — 이 단어의 blur-in
-                등장(지연 2 × WORD_STAGGER_S + 0.6s 재생 시간, 대략 0.74s
-                뒤 완료)이 끝나고 나서 훑고 지나가도록 delay를 넉넉히 줬다. */}
+                줄바꿈된다. "5,000만원"은 원래 파란 그라데이션이 훑고
+                지나가는 애니메이션(GradientSweepText)이었는데, 그 애니메이션
+                자체를 없애고 아래(진한 파랑)에서 위로 갈수록 옅어지는(흰색에
+                가까워지는) 정적인 세로 그라데이션으로 바꿔달라는 요청으로
+                교체했다 — 더 이상 애니메이션이 없어서 GradientSweepText가
+                필요 없어졌고, 그 컴포넌트와 전용 CSS(.iv-sweep-gradient 등)는
+                이 단어에만 쓰이던 것이라 함께 정리했다. */}
             <p
               style={{
                 margin: 0,
@@ -1458,9 +1460,17 @@ export function InvestupIntro({
                     }}
                   >
                     {w === '5,000만원' ? (
-                      <GradientSweepText active={ctaLineRevealed} delay={0.85}>
+                      <span
+                        style={{
+                          backgroundImage: 'linear-gradient(to top, #6ca6f3 0%, #ffffff 100%)',
+                          WebkitBackgroundClip: 'text',
+                          backgroundClip: 'text',
+                          WebkitTextFillColor: 'transparent',
+                          color: 'transparent',
+                        }}
+                      >
                         {w}
-                      </GradientSweepText>
+                      </span>
                     ) : (
                       w
                     )}
