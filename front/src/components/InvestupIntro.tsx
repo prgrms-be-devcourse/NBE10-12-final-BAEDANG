@@ -813,6 +813,23 @@ export function InvestupIntro({
               cursor: 'crosshair',
             }}
           />
+          {/* 지구본에 그라데이션을 적용해달라는 요청 — 바로 위 히어로 상단에
+              추가한 파랑 글로우와 똑같은 색(T.dotInk, 중심 45% 알파 →
+              투명)을 재사용하되, "위에서 아래로 갈수록 옅어지게" 해달라는
+              요청이라 방향만 세로(linear-gradient)로 바꿨다. 캔버스 위에
+              겹치는 순수 색 오버레이라 pointerEvents: none으로 지구본의
+              마우스 오버(핀 호버) 인터랙션은 그대로 통과시킨다. 핀
+              팝업(아래)이 이 오버레이보다 나중에 그려지므로 팝업은 항상
+              또렷하게 위에 보인다. */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              pointerEvents: 'none',
+              background: `linear-gradient(180deg, ${T.dotInk}73 0%, ${T.dotInk}00 100%)`,
+            }}
+          />
           {pin.on && (
             <div
               style={{
