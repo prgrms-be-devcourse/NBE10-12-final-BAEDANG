@@ -26,6 +26,7 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
+import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
 
@@ -1390,7 +1391,10 @@ export function InvestupIntro({
                 스크럽이었다. */}
             <a
               ref={ctaBtnRef}
-              className="iv-cta-btn"
+              // iv-hover-swap: 호버/포커스 시 안의 SwapText가 반응하게 하는
+              // 트리거 클래스(investup-intro.css 참고) — iv-cta-btn과는
+              // 별개라 다른 버튼에도 그대로 재사용할 수 있다.
+              className="iv-cta-btn iv-hover-swap"
               href={ctaHref}
               style={{
                 marginTop: 'clamp(10px, 2vh, 20px)',
@@ -1417,7 +1421,7 @@ export function InvestupIntro({
                   'opacity .6s cubic-bezier(.2,.9,.24,1), filter .6s cubic-bezier(.2,.9,.24,1), transform .6s cubic-bezier(.2,.9,.24,1), background-color .28s ease',
               }}
             >
-              시작하기
+              <SwapText>시작하기</SwapText>
             </a>
           </div>
         </div>

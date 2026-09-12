@@ -129,3 +129,50 @@
 .iv-cta-btn:hover {
   background: var(--iv-cta-hover);
 }
+
+/* 버튼 텍스트가 호버 시 아래→위로 교체되는 효과 — toss.im/#ads 참고.
+   SwapText.tsx가 같은 텍스트를 두 벌(iv-swap-original/iv-swap-hover) 겹쳐
+   렌더링하면, 부모에 이 iv-hover-swap 클래스가 있을 때만 반응한다 — 특정
+   버튼(iv-cta-btn)에 종속되지 않은 별도 트리거 클래스라 다른 버튼에도 그대로
+   재사용할 수 있다. opacity가 아니라 transform: translateY()만 움직여서
+   "실제로 이동하는" 느낌을 낸다. */
+.iv-swap {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.iv-swap-original,
+.iv-swap-hover {
+  display: block;
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.24, 1);
+  will-change: transform;
+}
+
+.iv-swap-hover {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  transform: translateY(100%);
+}
+
+.iv-hover-swap:hover .iv-swap-original,
+.iv-hover-swap:focus-visible .iv-swap-original {
+  transform: translateY(-100%);
+}
+
+.iv-hover-swap:hover .iv-swap-hover,
+.iv-hover-swap:focus-visible .iv-swap-hover {
+  transform: translateY(0);
+}
+
+/* prefers-reduced-motion이면 텍스트가 이동하지 않고 바로 바뀐다(내용이
+   똑같은 텍스트라 사용자는 차이를 못 느낀다 — 애니메이션만 없어진다). */
+@media (prefers-reduced-motion: reduce) {
+  .iv-swap-original,
+  .iv-swap-hover {
+    transition: none;
+  }
+}
