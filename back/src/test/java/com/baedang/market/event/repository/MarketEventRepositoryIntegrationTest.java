@@ -235,7 +235,7 @@ class MarketEventRepositoryIntegrationTest {
      * CHECK가 이 연결을 강제하고, 다른 거절·정상 주문에는 남지 않게 막는다.
      */
     @Test
-    void trade_order_requires_market_event_only_for_cb_rejection() {
+    void trade_order_requires_market_event_for_cb_rejection() {
         assertThat(jdbc.queryForList("""
                 SELECT conname
                 FROM pg_constraint
@@ -248,20 +248,22 @@ class MarketEventRepositoryIntegrationTest {
                 INSERT INTO trade_order
                     (account_id, stock_id, client_order_id, side, order_type, quantity,
                      status, reject_reason, ordered_at, closed_at, market_event_id)
-                VALUES (:accountId, :stockId, :clientOrderId, 'BUY', 'MARKET', 1,
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
                         'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), NULL)
-                """, Map.of("accountId", accountId(), "stockId", stockId(),
-                        "clientOrderId", java.util.UUID.randomUUID())))
+                """, accountId(), stockId(), java.util.UUID.randomUUID()))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
 
+    /** 다른 거절 사유에 CB 이벤트가 붙으면 감사 연결이 거짓이 된다. */
+    @Test
+    void trade_order_forbids_market_event_on_other_rejections() {
         assertThatThrownBy(() -> jdbc.update("""
                 INSERT INTO trade_order
                     (account_id, stock_id, client_order_id, side, order_type, quantity,
                      status, reject_reason, ordered_at, closed_at, market_event_id)
-                VALUES (:accountId, :stockId, :clientOrderId, 'BUY', 'MARKET', 1,
-                        'REJECTED', 'INSUFFICIENT_CASH', now(), now(), :eventId)
-                """, Map.of("accountId", accountId(), "stockId", stockId(),
-                        "clientOrderId", java.util.UUID.randomUUID(), "eventId", eventId())))
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'INSUFFICIENT_CASH', now(), now(), ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -271,35 +273,33 @@ class MarketEventRepositoryIntegrationTest {
                 INSERT INTO trade_order
                     (account_id, stock_id, client_order_id, side, order_type, quantity,
                      status, reject_reason, ordered_at, closed_at, market_event_id)
-                VALUES (:accountId, :stockId, :clientOrderId, 'BUY', 'MARKET', 1,
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
                         'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), 999999999)
-                """, Map.of("accountId", accountId(), "stockId", stockId(),
-                        "clientOrderId", java.util.UUID.randomUUID())))
+                """, accountId(), stockId(), java.util.UUID.randomUUID()))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     private Long accountId() {
         Long userId = jdbc.queryForObject("""
                 INSERT INTO users (email, password_hash, nickname, status, created_at)
-                VALUES (:email, 'hash', :nickname, 'ACTIVE', now())
+                VALUES (?, 'hash', ?, 'ACTIVE', now())
                 RETURNING user_id
-                """, Long.class, Map.of(
-                "email", java.util.UUID.randomUUID() + "@example.com",
-                "nickname", java.util.UUID.randomUUID().toString().substring(0, 8)));
+                """, Long.class, java.util.UUID.randomUUID() + "@example.com",
+                java.util.UUID.randomUUID().toString().substring(0, 8));
         return jdbc.queryForObject("""
                 INSERT INTO account (user_id, round_no, initial_cash, cash_balance, locked_cash, status, opened_at)
-                VALUES (:userId, 1, 0, 0, 0, 'ACTIVE', now())
+                VALUES (?, 1, 0, 0, 0, 'ACTIVE', now())
                 RETURNING account_id
-                """, Long.class, Map.of("userId", userId));
+                """, Long.class, userId);
     }
 
     private Long stockId() {
         return jdbc.queryForObject("""
                 INSERT INTO stock (symbol, market_country, market, name, currency, security_type,
-                                   status, is_ranked, created_at)
-                VALUES (:symbol, 'KR', 'KOSPI', '테스트 종목', 'KRW', 'STOCK', 'ACTIVE', false, now())
+                                   listing_status, is_ranked, created_at, updated_at)
+                VALUES (?, 'KR', 'KOSPI', '테스트 종목', 'KRW', 'STOCK', 'ACTIVE', false, now(), now())
                 RETURNING stock_id
-                """, Long.class, Map.of("symbol", java.util.UUID.randomUUID().toString().substring(0, 6)));
+                """, Long.class, java.util.UUID.randomUUID().toString().substring(0, 6));
     }
 
     private Long eventId() {
