@@ -349,6 +349,26 @@ export function InvestupIntro({
         ctx.fill();
       });
       a.pinDrawn = drawn;
+
+      // 지구본에 위→아래로 옅어지는 파랑 그라데이션을 겹쳐달라는 요청 —
+      // 처음엔 캔버스 전체를 덮는 CSS 오버레이 div로 구현했는데, 지구본은
+      // 이 사각형 캔버스 안에 원(g.cx, g.cy, g.R)으로만 그려지기 때문에
+      // 그라데이션이 원 바깥의 빈 캔버스 영역까지 삐져나와 보였다.
+      // 그래서 CSS 오버레이 대신, 지구본을 그릴 때 쓰는 것과 완전히 같은
+      // 원으로 캔버스 자체를 클립한 뒤 그 안에만 그라데이션을 그린다 —
+      // 지구본 모양이 리사이즈로 바뀌어도(g는 매 프레임 다시 계산된다)
+      // 항상 정확히 같은 원 안에서만 보인다. 색은 히어로 상단 글로우와
+      // 같은 T.dotInk(#7fb6e3) 계열이다.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(g.cx, g.cy, g.R, 0, 6.2832);
+      ctx.clip();
+      const globeGlow = ctx.createLinearGradient(0, g.cy - g.R, 0, g.cy + g.R);
+      globeGlow.addColorStop(0, 'rgba(127,182,227,0.45)');
+      globeGlow.addColorStop(1, 'rgba(127,182,227,0)');
+      ctx.fillStyle = globeGlow;
+      ctx.fillRect(g.cx - g.R, g.cy - g.R, g.R * 2, g.R * 2);
+      ctx.restore();
     };
 
     /** 04 Zoom: 스크롤 진행도를 직접 DOM에 씀 (리렌더 없음) */
@@ -811,23 +831,6 @@ export function InvestupIntro({
               height: '100%',
               display: 'block',
               cursor: 'crosshair',
-            }}
-          />
-          {/* 지구본에 그라데이션을 적용해달라는 요청 — 바로 위 히어로 상단에
-              추가한 파랑 글로우와 똑같은 색(T.dotInk, 중심 45% 알파 →
-              투명)을 재사용하되, "위에서 아래로 갈수록 옅어지게" 해달라는
-              요청이라 방향만 세로(linear-gradient)로 바꿨다. 캔버스 위에
-              겹치는 순수 색 오버레이라 pointerEvents: none으로 지구본의
-              마우스 오버(핀 호버) 인터랙션은 그대로 통과시킨다. 핀
-              팝업(아래)이 이 오버레이보다 나중에 그려지므로 팝업은 항상
-              또렷하게 위에 보인다. */}
-          <div
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              pointerEvents: 'none',
-              background: `linear-gradient(180deg, ${T.dotInk}73 0%, ${T.dotInk}00 100%)`,
             }}
           />
           {pin.on && (
