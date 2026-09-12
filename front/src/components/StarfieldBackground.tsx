@@ -49,10 +49,6 @@ function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }
 
-// 모션 블러(잔상)가 한 프레임마다 얼마나 옅어질지 — 낮을수록 잔상이 길게
-// 남아 블러가 진해지고, 높을수록 잔상이 빨리 사라져 또렷해진다.
-const TRAIL_FADE = 0.22;
-
 export function StarfieldBackground({
   className,
   style,
@@ -145,17 +141,7 @@ export function StarfieldBackground({
       const dtFrames = Math.min(3, (now - lastTime) / (1000 / 60));
       lastTime = now;
 
-      // 모션 블러 — 매 프레임을 완전히 지우는 대신, 이전 프레임에 그려진
-      // 궤적의 alpha를 조금씩만 지운다(destination-out으로 알파만
-      // 깎아내므로 캔버스 자체는 계속 투명하게 유지되어, 뒤에 있는 남색
-      // 패널/그라데이션이 그대로 비쳐 보인다). 그래서 별의 이전 위치가
-      // 한 프레임 만에 사라지지 않고 서서히 흐려지며 남아, 실제로 잔상이
-      // 끌리는 듯한 블러 효과가 난다. TRAIL_FADE를 낮추면 잔상이 더 길게
-      // 남고(더 진한 블러), 높이면 더 짧게 남는다(더 또렷한 점).
-      ctx!.globalCompositeOperation = 'destination-out';
-      ctx!.fillStyle = `rgba(0, 0, 0, ${TRAIL_FADE})`;
-      ctx!.fillRect(0, 0, width, height);
-      ctx!.globalCompositeOperation = 'source-over';
+      ctx!.clearRect(0, 0, width, height);
 
       for (const s of stars) {
         s.pz = s.z;
@@ -178,9 +164,6 @@ export function StarfieldBackground({
         // 별 크기를 조금 더 크게 해달라는 요청 — 최소 굵기와 배율을 함께
         // 키웠다(0.6→0.9, 2.2→3.0).
         ctx!.lineWidth = Math.max(0.9, depthT * 3.0);
-        // 끝이 뭉툭하게 잘리지 않고 둥글게 이어져야 잔상이 자연스럽게
-        // 흐려 보인다.
-        ctx!.lineCap = 'round';
         ctx!.beginPath();
         ctx!.moveTo(prev.sx, prev.sy);
         ctx!.lineTo(cur.sx, cur.sy);
