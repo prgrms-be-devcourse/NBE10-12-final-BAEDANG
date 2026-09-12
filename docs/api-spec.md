@@ -408,8 +408,6 @@ Sidecar items carry `direction` (`BUY` · `SELL`) instead of `stage`; circuit br
 }
 ```
 
-**Circuit-breaker enforcement:** while a circuit breaker is active, new market and limit orders for that market are rejected inside the trading transaction and return `MARKET_TRADING_HALTED` (422) with this event's public data and `retryPolicy=NEW_CLIENT_ORDER_ID`. Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — the rejection happens in the order path.
-
 ---
 
 ## Stocks
@@ -928,6 +926,8 @@ The failure response's `data.retryPolicy` defines how to handle `clientOrderId`.
 Clients must follow `data.retryPolicy` instead of inferring ID reuse from the HTTP status or error code alone. If malformed JSON or another failure has no `retryPolicy`, do not automatically resend the unchanged request.
 
 **Circuit-breaker rejection data.** When a new order is rejected because a circuit breaker is active in the order's market, `data` carries the rejecting event's public fields plus `retryPolicy`. All timestamps are `+09:00`.
+
+Gating applies to **KR stocks in KOSPI and KOSDAQ only**. US stocks and `KR_ETC` are never gated, and a sidecar never blocks an ordinary order — it suspends program trading quotes only. The check runs inside the trading transaction after the account lock, not as a transaction-external preflight.
 
 ```json
 {
