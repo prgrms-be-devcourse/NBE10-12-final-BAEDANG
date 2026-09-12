@@ -20,6 +20,7 @@ import {
   STEPS_TITLE_WORDS,
   COMPARE_TITLE_WORDS,
   COMPARE_SUBTITLE_WORDS,
+  CTA_LINE_WORDS,
   CMP,
   GLOBE_DOTS,
   PINS,
@@ -81,7 +82,6 @@ export function InvestupIntro({
   const wordBRef = useRef<HTMLSpanElement | null>(null);
   const gapRef = useRef<HTMLSpanElement | null>(null);
   const ctaRef = useRef<HTMLDivElement | null>(null);
-  const ctaLineRef = useRef<HTMLParagraphElement | null>(null);
   const ctaBtnRef = useRef<HTMLAnchorElement | null>(null);
 
   /** 리렌더와 무관하게 유지되는 애니메이션 상태 */
@@ -101,6 +101,7 @@ export function InvestupIntro({
     subShown: false,
     zoomWordsShown: false,
     ctaBtnShown: false,
+    ctaLineShown: false,
     lastY: null as number | null,
   });
 
@@ -120,6 +121,9 @@ export function InvestupIntro({
   // "시작하기" 버튼에도 같은 방식을 적용해달라는 요청 — 역시 titleRevealed와
   // 완전히 같은 패턴이다.
   const [ctaBtnRevealed, setCtaBtnRevealed] = useState(false);
+  // "모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요."에도 같은
+  // 방식을 적용해달라는 요청 — 역시 titleRevealed와 완전히 같은 패턴이다.
+  const [ctaLineRevealed, setCtaLineRevealed] = useState(false);
 
   // prefers-reduced-motion: 켜져 있으면 비교 카드 4행 리빌의 이동·시차를 없애고
   // 거의 즉시 전환되게 한다(요청 16번). 마운트 후 실제 값으로 갱신하고, 사용자가
@@ -419,18 +423,14 @@ export function InvestupIntro({
       if (cta) {
         cta.style.opacity = q.toFixed(3);
         cta.style.pointerEvents = q > 0.5 ? 'auto' : 'none';
-        const stage = (from: number) => 1 - Math.pow(1 - clamp01((q - from) / (1 - from || 1)), 3);
-        const rise = (el: HTMLElement | null, from: number) => {
-          if (!el) return;
-          const k = stage(from);
-          el.style.opacity = k.toFixed(3);
-          el.style.transform = `translateY(${((1 - k) * 44).toFixed(1)}px)`;
-        };
-        rise(ctaLineRef.current, 0.08);
-        // "시작하기" 버튼은 03 Compare 제목과 같은 1회성 등장 방식으로 바꿨다 —
-        // 연속 스크럽(rise) 대신, CTA가 나타나는 구간에 들어서면(예전 rise의
-        // from값과 같은 지점인 q > 0.3) 한 번만 ctaBtnRevealed를 켜고
-        // 나머지는 JSX의 CSS transition이 재생한다.
+        // CTA 문구/버튼 둘 다 03 Compare 제목과 같은 1회성 등장 방식으로
+        // 바꿨다 — 예전엔 CTA 진행률(q)에 따라 매 프레임 rise()로 계산하는
+        // 연속 스크럽이었는데, 이제는 각자 예전 rise의 시작 지점(from)과
+        // 같은 지점에서 한 번만 켜고 나머지는 JSX의 CSS transition이 재생한다.
+        if (!a.ctaLineShown && q > 0.08) {
+          a.ctaLineShown = true;
+          setCtaLineRevealed(true);
+        }
         if (!a.ctaBtnShown && q > 0.3) {
           a.ctaBtnShown = true;
           setCtaBtnRevealed(true);
@@ -1370,8 +1370,11 @@ export function InvestupIntro({
               pointerEvents: 'none',
             }}
           >
+            {/* "기존 증권사 서비스와 무엇이 다른가요?" 제목과 완전히 같은 등장
+                효과(opacity/blur/translateY/transition 값이 동일) —
+                ctaLineRevealed가 titleRevealed와 같은 역할을 한다.
+                "5,000만원으로" 다음에서 줄바꿈된다. */}
             <p
-              ref={ctaLineRef}
               style={{
                 margin: 0,
                 fontSize: 'clamp(28px, 4.2vw, 58px)',
@@ -1382,7 +1385,23 @@ export function InvestupIntro({
                 wordBreak: 'keep-all',
               }}
             >
-              모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요.
+              {CTA_LINE_WORDS.map((w, i) => (
+                <Fragment key={`${w}-${i}`}>
+                  <span
+                    className="iv-word"
+                    style={{
+                      display: 'inline-block',
+                      opacity: ctaLineRevealed ? 1 : 0,
+                      filter: ctaLineRevealed ? 'blur(0px)' : 'blur(16px)',
+                      transform: ctaLineRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                      transition: `opacity .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, filter .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, transform .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s`,
+                    }}
+                  >
+                    {w}
+                  </span>
+                  {i < CTA_LINE_WORDS.length - 1 && (w === '5,000만원으로' ? <br /> : ' ')}
+                </Fragment>
+              ))}
             </p>
             {/* "기존 증권사 서비스와 무엇이 다른가요?" 제목과 완전히 같은 등장
                 효과(opacity/blur/translateY/transition 값이 동일) —

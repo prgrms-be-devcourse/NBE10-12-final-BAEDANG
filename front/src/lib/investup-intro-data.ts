@@ -92,6 +92,19 @@ export const COMPARE_SUBTITLE_WORDS = [
   '도구예요.',
 ] as const;
 
+/** 04 Zoom 섹션 CTA 문구 — 역시 제목과 같은 단어별 등장 효과를 쓰기 위해
+ * 단어 배열로 나눴다. "5,000만원으로" 다음에서 줄바꿈된다(컴포넌트에서
+ * 이 단어를 기준으로 <br/>을 넣는다). */
+export const CTA_LINE_WORDS = [
+  '모의',
+  '투자금',
+  '5,000만원으로',
+  '나만의',
+  '투자',
+  '연습을',
+  '시작해보세요.',
+] as const;
+
 /* ── 지구본: 저해상도 세계지도 비트맵 (64×32) ──── */
 
 type Run = [number, ...Array<[number, number]>];
