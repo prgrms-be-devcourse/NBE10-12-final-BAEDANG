@@ -286,3 +286,112 @@
     display: none;
   }
 }
+
+/* "시작하기" 버튼 호버 시 꼬였다가 복원되며 Confetti가 터지는 인터랙션 —
+   AnimatedStartButton.tsx 참고. transform은 버튼(<a>) 자신이 아니라 그
+   안의 이 래퍼에만 건다 — <a> 자신에는 스크롤 등장 애니메이션의
+   translateY transform이 이미 걸려 있어서, 같은 엘리먼트에 두 transform을
+   같이 걸면 하나가 다른 하나를 덮어써 버리기 때문이다. */
+.iv-btn-twist-inner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: 50% 50%;
+}
+
+.iv-btn-twist-play {
+  animation-name: iv-btn-twist;
+  animation-duration: 620ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes iv-btn-twist {
+  /* 고무판/리본이 한 번 비틀렸다가 풀리는 느낌 — 단순 rotate(360deg) 대신
+     rotate + skewX + scaleX/scaleY를 함께 움직인다("꼬임"은 시각적 착시일
+     뿐 버튼의 실제 width/height/padding은 전혀 바뀌지 않는다). 0%→19%는
+     꼬임이 막 시작되는 구간, 19%→40%는 꼬임이 빠르게 강해지는 구간이라
+     ease-in 계열(cubic-bezier(0.4,0,1,1))로 가속감을 줬고, 40%(최대 꼬임)
+     이후 복원 구간은 이 파일 전반에서 쓰는 ease-out 계열
+     (cubic-bezier(0.22,1,0.36,1))로 바꿔서 통통 튀지 않고 자연스럽게
+     안정되도록 했다. rotate/skewX 값을 키우면 더 강하게 꼬이고, scaleX/Y를
+     1에 가깝게 두면 덜 찌그러진다. */
+  0% {
+    transform: rotate(0deg) skewX(0deg) scaleX(1) scaleY(1);
+    animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+  19% {
+    transform: rotate(-3deg) skewX(-8deg) scaleX(0.95) scaleY(0.97);
+    animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  }
+  40% {
+    transform: rotate(4deg) skewX(10deg) scaleX(0.9) scaleY(0.94);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  56% {
+    transform: rotate(3deg) skewX(7deg) scaleX(0.92) scaleY(0.95);
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  100% {
+    transform: rotate(0deg) skewX(0deg) scaleX(1) scaleY(1);
+  }
+}
+
+/* Confetti — 버튼을 감싸는 컨테이너(position: relative인 wrapper span) 안
+   에서만 절대 위치로 나타난다. left/top/width/height를 프레임마다 바꾸지
+   않고 transform + opacity만 움직이므로 페이지 레이아웃에 전혀 영향을
+   주지 않는다. */
+.iv-confetti-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* 조각마다 rotateX/rotateY를 살짝 줘서 평면적인 CSS particle처럼
+     보이지 않게 하기 위한 3D 원근감. */
+  perspective: 800px;
+  z-index: 6;
+}
+
+.iv-confetti-piece {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+  animation-name: iv-confetti-burst;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: forwards;
+}
+
+@keyframes iv-confetti-burst {
+  /* --iv-cf-dx/dy(최종 이동 거리)와 --iv-cf-rz/rx/ry(최종 회전각)는
+     AnimatedStartButton.tsx가 조각마다 랜덤하게 계산해 인라인 style로
+     넘겨준다 — 방향·거리·회전이 조각마다 조금씩 달라 방사형으로 흩어지는
+     느낌이 난다. ease-out 커브라 초반에 빠르게 퍼졌다가 서서히 멈춘다. */
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(0, 0) rotateZ(0deg) rotateX(0deg) rotateY(0deg)
+      scale(0.5);
+  }
+  16% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) translate(var(--iv-cf-dx), var(--iv-cf-dy))
+      rotateZ(var(--iv-cf-rz)) rotateX(var(--iv-cf-rx)) rotateY(var(--iv-cf-ry)) scale(1);
+  }
+}
+
+/* prefers-reduced-motion이면 버튼 꼬임과 Confetti를 모두 없앤다 — 버튼의
+   실제 클릭 기능·포커스 이동에는 영향이 없다(AnimatedStartButton.tsx의
+   JS 쪽에서도 이 상태면 애니메이션을 아예 트리거하지 않아 이중으로
+   막아둔다). */
+@media (prefers-reduced-motion: reduce) {
+  .iv-btn-twist-play {
+    animation: none;
+  }
+  .iv-confetti-piece {
+    display: none;
+  }
+}
