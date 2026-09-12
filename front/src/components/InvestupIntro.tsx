@@ -362,7 +362,8 @@ export function InvestupIntro({
       const eg = grow < 0.5 ? 2.6 * grow * grow * grow : 1 - Math.pow(1 - grow, 2.1);
       const q = clamp01((p - 0.72) / 0.2); // CTA 등장
 
-      const barW = Math.max(9, vw * 0.0085);
+      // 세로 막대 굵기 — 가느다란 얇은 선으로 보이도록 줄였다(기존 9~16px대 → 3~4px대).
+      const barW = Math.max(3, vw * 0.0022);
       const tw = barW + eg * (vw * 2.05 - barW);
       const th = eb * vh * 0.42 + eg * (vh * 2.4 - vh * 0.42);
 
