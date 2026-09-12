@@ -1367,6 +1367,31 @@ export function InvestupIntro({
             }}
           />
 
+          {/* 배경 중앙에 현재 배경색(deepInk)보다 더 어두운 남색이 퍼지는
+              그라데이션을 넣어달라는 요청 — 남색 패널(zIndex 3) 바로 위에
+              깔아 중심이 더 짙어 보이게 하고, 별(zIndex 4)이 그 위에서
+              반짝이도록 별보다는 아래에 뒀다. deepInk보다 더 어두운
+              색으로는 이 파일에서 이미 쓰고 있는 sectionHeadInk(#071829)를
+              그대로 재사용했다(새 색을 만들지 않고 기존 팔레트 안에서
+              해결). 중앙(0%)에서 진하다가 60% 지점에서 투명해져 원래
+              deepInk 배경과 자연스럽게 이어진다. */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 3,
+              background: `radial-gradient(circle at 50% 50%, ${T.sectionHeadInk} 0%, rgba(7, 24, 41, 0) 60%)`,
+              pointerEvents: 'none',
+              // 남색 패널 자신은 스크롤에 따라 transform: scale()로 커지는
+              // 중이라 이 오버레이도 무작정 항상 100% 크기로 보이면 안
+              // 된다 — 별(StarfieldBackground)과 같은 타이밍
+              // (ctaLineRevealed)에 맞춰 함께 페이드인한다.
+              opacity: ctaLineRevealed ? 1 : 0,
+              transition: 'opacity 1.2s ease',
+            }}
+          />
+
           {/* "모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요." 문구
               배경에 별이 등장하는 효과를 넣어달라는 요청 — 참고 화면
               (toss.im/career/event/frontend-2026)의 별 효과는 실제로는
