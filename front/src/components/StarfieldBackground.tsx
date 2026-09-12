@@ -49,6 +49,12 @@ function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
 }
 
+// 별이 처음엔 느리다가 갈수록 빨라진 뒤 일정 속도로 유지되게 하는
+// "워밍업" 구간 — RAMP_UP_MS 동안 속도가 (speed * RAMP_START_RATIO)에서
+// speed까지 끌어올려지고, 그 뒤로는 speed로 고정된다.
+const RAMP_UP_MS = 3200;
+const RAMP_START_RATIO = 0.12;
+
 export function StarfieldBackground({
   className,
   style,
@@ -132,6 +138,7 @@ export function StarfieldBackground({
 
     let raf = 0;
     let lastTime = performance.now();
+    const startTime = lastTime;
 
     function frame(now: number) {
       raf = requestAnimationFrame(frame);
@@ -141,11 +148,20 @@ export function StarfieldBackground({
       const dtFrames = Math.min(3, (now - lastTime) / (1000 / 60));
       lastTime = now;
 
+      // 처음엔 느리다가 갈수록 빨라진 다음 일정 속도를 유지해달라는
+      // 요청 — 시작 시점(startTime)부터 RAMP_UP_MS 동안만 속도를
+      // rampStartSpeed에서 speed까지 easeOutCubic 곡선으로 끌어올리고,
+      // 그 뒤로는 speed로 고정한다(한 번만 일어나는 "워밍업"이라 매
+      // 프레임 다시 계산해도 rampT가 1을 넘으면 더 이상 변하지 않는다).
+      const rampT = Math.min(1, (now - startTime) / RAMP_UP_MS);
+      const eased = 1 - (1 - rampT) ** 3;
+      const currentSpeed = lerp(speed * RAMP_START_RATIO, speed, eased);
+
       ctx!.clearRect(0, 0, width, height);
 
       for (const s of stars) {
         s.pz = s.z;
-        s.z -= speed * dtFrames;
+        s.z -= currentSpeed * dtFrames;
         if (s.z <= 1) {
           Object.assign(s, spawnStar(true));
           continue;
