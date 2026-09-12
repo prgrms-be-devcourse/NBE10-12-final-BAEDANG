@@ -60,6 +60,7 @@ class MarketOrderTransactionServiceTest {
     @Mock OrderPolicy orderPolicy;
     @Mock MarketOrderPolicy marketOrderPolicy;
     @Mock com.baedang.market.event.service.MarketTradingHaltPolicy marketTradingHaltPolicy;
+    @Mock com.baedang.market.event.repository.MarketEventRepository marketEventRepository;
 
     private Clock clock;
     private MarketOrderTransactionService service;
@@ -77,7 +78,8 @@ class MarketOrderTransactionServiceTest {
         service = new MarketOrderTransactionService(
                 accountRepository, stockRepository, quoteSnapshotRepository, holdingRepository,
                 tradeOrderRepository, ledgerEntryRepository, tradeExecutionRepository, ledgerService,
-                amountCalculator, orderPolicy, marketOrderPolicy, marketTradingHaltPolicy, clock);
+                amountCalculator, orderPolicy, marketOrderPolicy, marketTradingHaltPolicy,
+                marketEventRepository, clock);
     }
 
     // ==========================================
@@ -426,7 +428,6 @@ class MarketOrderTransactionServiceTest {
         when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
         when(marketTradingHaltPolicy.activeFor(stock, NOW)).thenReturn(Optional.empty());
-        when(orderPolicy.validateExecutionContextFresh(context, NOW)).thenReturn(null);
         when(quoteSnapshotRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.execute(USER_ID, command, context))
@@ -440,9 +441,12 @@ class MarketOrderTransactionServiceTest {
         inOrder.verify(orderPolicy).validateExecutionContextFresh(context, NOW);
     }
 
-    /** KR이 아닌 시장은 CB 판정 대상이 아니므로 정상 흐름이 이어진다. */
+    /**
+     * 미국 종목은 CB 대상이 아니므로 정책이 빈 값을 돌려주고 정상 흐름이 이어진다. 조회 자체는
+     * 정책이 시장을 판단하므로 호출된다 — 비적용 판단의 소유자는 정책이다.
+     */
     @Test
-    void execute_미국종목은_CB_조회를_하지_않는다() {
+    void execute_미국종목은_CB_거절되지_않는다() {
         MarketOrderCommand command = command("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE);
 
         Account account = createAccount();
@@ -451,17 +455,17 @@ class MarketOrderTransactionServiceTest {
         OrderMarketContext usContext = new OrderMarketContext(
                 MarketCountry.US, true, NOW.plusSeconds(3600),
                 ExecutionRateEvidence.from(new com.baedang.market.port.ExecutionExchangeRateSnapshot(
-                        new BigDecimal("1383.600000"), AT, AT, NOW.plusSeconds(60))), NOW);
+                        new BigDecimal("1383.600000"), AT, AT, AT.plusSeconds(60))), NOW);
 
         when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
         when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
         when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US)).thenReturn(Optional.of(usStock));
+        when(marketTradingHaltPolicy.activeFor(usStock, NOW)).thenReturn(Optional.empty());
         when(quoteSnapshotRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.execute(USER_ID, command, usContext))
-                .isInstanceOf(BusinessException.class);
-
-        org.mockito.Mockito.verifyNoInteractions(marketTradingHaltPolicy);
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.QUOTE_NOT_FOUND));
     }
 
     // ==========================================

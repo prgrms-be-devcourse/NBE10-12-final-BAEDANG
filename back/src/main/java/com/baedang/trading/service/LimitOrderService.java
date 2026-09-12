@@ -18,6 +18,7 @@ import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.LimitOrderCommand;
+import com.baedang.trading.model.LimitOrderResult;
 import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
@@ -32,6 +33,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -99,7 +101,7 @@ public class LimitOrderService {
                 LimitOrderRequestPolicy.price(request.limitPrice(), currency),
                 currency
         );
-        Optional<OrderDetailResponse> existing = transactions.existing(userId, command);
+        Optional<LimitOrderResult> existing = transactions.existing(userId, command);
         if (existing.isPresent()) {
             return unwrap(existing.get());
         }
@@ -150,12 +152,20 @@ public class LimitOrderService {
         }
     }
 
-    private OrderDetailResponse unwrap(OrderDetailResponse result) {
-        if (result.status() == OrderStatus.REJECTED) {
-            throw new BusinessException(ErrorCode.valueOf(result.rejectReason()),
-                    ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+    private OrderDetailResponse unwrap(LimitOrderResult result) {
+        if (result.rejected()) {
+            // 커밋된 REJECTED는 새 ID로 재시도하도록 안내한다. CB 거절이면 이벤트 데이터를 함께 내보낸다.
+            throw new BusinessException(
+                    ErrorCode.valueOf(result.response().rejectReason()),
+                    rejectionResponse(result.rejectionData()));
         }
-        return result;
+        return result.response();
+    }
+
+    private Map<String, Object> rejectionResponse(Map<String, Object> eventData) {
+        Map<String, Object> response = new LinkedHashMap<>(eventData);
+        response.putAll(ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+        return response;
     }
 
     public OrderDetailResponse cancel(Long userId, Long orderId) {

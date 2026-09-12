@@ -147,6 +147,10 @@ class MarketOrderIntegrationTest {
 
     @BeforeEach
     void setUpProviders() {
+        // CB 이벤트는 시장 전체를 막으므로 테스트 간에 남으면 뒤따르는 모든 KOSPI 주문이 거절된다.
+        // 거절 주문이 FK로 참조하므로 주문을 먼저 지운다.
+        jdbcTemplate.execute("DELETE FROM trade_order WHERE market_event_id IS NOT NULL");
+        jdbcTemplate.execute("DELETE FROM market_event");
         when(marketSessionProvider.currentSession(any(), any()))
                 .thenReturn(new MarketSessionStatus(true, Instant.MAX));
         when(marketSessionProvider.isOpen(any(), any())).thenReturn(true);
@@ -1267,8 +1271,8 @@ class MarketOrderIntegrationTest {
         OffsetDateTime orderedAt = stored.getOrderedAt();
         marketEventRepository.saveAndFlush(MarketEvent.circuitBreaker(
                 MarketEventSource.KRX_KIND, "20260713000713", KrMarket.KOSPI, 2,
-                orderedAt.minusSeconds(60), orderedAt.plusSeconds(7200),
-                orderedAt.minusSeconds(30), orderedAt.minusSeconds(20),
+                orderedAt.minusSeconds(60).toInstant(), orderedAt.plusSeconds(7200).toInstant(),
+                orderedAt.minusSeconds(30).toInstant(), orderedAt.minusSeconds(20).toInstant(),
                 "유가증권시장 매매거래 일시중단(2단계 CB 발동)", SOURCE_URL));
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
@@ -1307,10 +1311,10 @@ class MarketOrderIntegrationTest {
     @Test
     void 사이드카만_있으면_시장가_주문이_정상_체결된다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        Instant now = Instant.now();
         marketEventRepository.saveAndFlush(MarketEvent.sidecar(
                 MarketEventSource.KRX_KIND, "20260713000715", KrMarket.KOSPI, SidecarDirection.BUY,
-                now.minusMinutes(1), now.plusMinutes(5), now.minusMinutes(1), now,
+                now.minusSeconds(60), now.plusSeconds(300), now.minusSeconds(60), now,
                 "유가증권시장 매수 사이드카(Side car) 발동", SOURCE_URL));
 
         MarketOrderResponse response = marketOrderService.place(fixture.userId(), request(fixture, "BUY", "2"));
@@ -1331,10 +1335,10 @@ class MarketOrderIntegrationTest {
     }
 
     private MarketEvent saveActiveCb(String acptNo) {
-        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        Instant now = Instant.now();
         return marketEventRepository.saveAndFlush(MarketEvent.circuitBreaker(
                 MarketEventSource.KRX_KIND, acptNo, KrMarket.KOSPI, 1,
-                now.minusMinutes(2), now.plusMinutes(18), now.minusMinutes(2), now.minusMinutes(1),
+                now.minusSeconds(120), now.plusSeconds(1080), now.minusSeconds(120), now.minusSeconds(60),
                 "유가증권시장 매매거래 일시중단(1단계 CB 발동)", SOURCE_URL));
     }
 

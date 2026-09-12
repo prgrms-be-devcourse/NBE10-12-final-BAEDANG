@@ -85,9 +85,11 @@ public class MarketOrderService {
 
     private MarketOrderResponse unwrap(MarketOrderResult result) {
         if (result.rejected()) {
-            // 트랜잭션 서비스가 REJECTED 행을 커밋한 뒤 예외로 변환합니다.
-            throw new BusinessException(
-                    result.rejectionReason(), ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+            // 트랜잭션 서비스가 REJECTED 행을 커밋한 뒤 예외로 변환합니다. CB 거절이면 이벤트 데이터를
+            // 함께 내보내 클라이언트가 어느 시장·단계가 언제 끝나는지 알 수 있게 합니다.
+            Map<String, Object> response = new LinkedHashMap<>(result.rejectionData());
+            response.putAll(ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+            throw new BusinessException(result.rejectionReason(), response);
         }
         return responseAssembler.assemble(result.receipt());
     }

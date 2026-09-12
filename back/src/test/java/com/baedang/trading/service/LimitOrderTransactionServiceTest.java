@@ -68,6 +68,7 @@ class LimitOrderTransactionServiceTest {
     @Mock private OrderPolicy policy;
     @Mock private EntityManager entityManager;
     @Mock private com.baedang.market.event.service.MarketTradingHaltPolicy marketTradingHaltPolicy;
+    @Mock private com.baedang.market.event.repository.MarketEventRepository marketEventRepository;
 
     private static final Long USER_ID = 1L;
     private static final Long ACCOUNT_ID = 10L;
@@ -88,7 +89,7 @@ class LimitOrderTransactionServiceTest {
     @BeforeEach
     void setUp() {
         service = new LimitOrderTransactionService(accounts, orders, holdings, stocks, quotes, policy, clock,
-                marketTradingHaltPolicy, mock(ApplicationEventPublisher.class));
+                marketTradingHaltPolicy, marketEventRepository, mock(ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
         krStock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
@@ -155,9 +156,9 @@ class LimitOrderTransactionServiceTest {
             when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
             when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
 
-            Optional<OrderDetailResponse> result = service.existing(USER_ID, command);
+            Optional<com.baedang.trading.model.LimitOrderResult> result = service.existing(USER_ID, command);
             assertThat(result).isPresent();
-            assertThat(result.get().orderId()).isEqualTo(1L);
+            assertThat(result.get().response().orderId()).isEqualTo(1L);
         }
 
         @ParameterizedTest(name = "기존 주문과 {0}이면 DUPLICATE_ORDER")
@@ -192,7 +193,7 @@ class LimitOrderTransactionServiceTest {
             when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
             when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
 
-            Optional<OrderDetailResponse> result = service.existing(USER_ID, command);
+            Optional<com.baedang.trading.model.LimitOrderResult> result = service.existing(USER_ID, command);
             assertThat(result).isEmpty();
         }
 
@@ -296,7 +297,8 @@ class LimitOrderTransactionServiceTest {
             when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(existingOrder));
             when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
 
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), mock(LimitOrderPricing.Price.class));
+            com.baedang.trading.model.LimitOrderResult result = service.accept(USER_ID, command, marketContext(true), mock(LimitOrderPricing.Price.class));
+            OrderDetailResponse response = result.response();
             assertThat(response.orderId()).isEqualTo(1L);
         }
 
@@ -376,7 +378,8 @@ class LimitOrderTransactionServiceTest {
             LimitOrderPricing.Price price = new LimitOrderPricing.Price(
                     new BigDecimal("50000"), new BigDecimal("500000"), DUMMY_AMOUNT);
 
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(marketOpen), price);
+            com.baedang.trading.model.LimitOrderResult accepted = service.accept(USER_ID, command, marketContext(marketOpen), price);
+            OrderDetailResponse response = accepted.response();
             assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
             assertThat(response.rejectReason()).isEqualTo(reason.name());
         }
@@ -395,7 +398,8 @@ class LimitOrderTransactionServiceTest {
             LimitOrderPricing.Price price = new LimitOrderPricing.Price(
                     new BigDecimal("50000"), new BigDecimal("100000000"), DUMMY_AMOUNT);
 
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
+            com.baedang.trading.model.LimitOrderResult accepted = service.accept(USER_ID, command, marketContext(true), price);
+            OrderDetailResponse response = accepted.response();
             assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
             assertThat(response.rejectReason()).isEqualTo(ErrorCode.INSUFFICIENT_CASH.name());
         }
@@ -415,7 +419,8 @@ class LimitOrderTransactionServiceTest {
             LimitOrderPricing.Price price = new LimitOrderPricing.Price(
                     new BigDecimal("50000"), BigDecimal.ZERO, DUMMY_AMOUNT);
 
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
+            com.baedang.trading.model.LimitOrderResult accepted = service.accept(USER_ID, command, marketContext(true), price);
+            OrderDetailResponse response = accepted.response();
             assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
             assertThat(response.rejectReason()).isEqualTo(ErrorCode.INSUFFICIENT_QUANTITY.name());
         }
@@ -437,7 +442,8 @@ class LimitOrderTransactionServiceTest {
             LimitOrderPricing.Price price = new LimitOrderPricing.Price(
                     new BigDecimal("50000"), BigDecimal.ZERO, DUMMY_AMOUNT);
 
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
+            com.baedang.trading.model.LimitOrderResult accepted = service.accept(USER_ID, command, marketContext(true), price);
+            OrderDetailResponse response = accepted.response();
             assertThat(response.status()).isEqualTo(OrderStatus.REJECTED);
             assertThat(response.rejectReason()).isEqualTo(ErrorCode.INSUFFICIENT_QUANTITY.name());
         }
@@ -458,7 +464,8 @@ class LimitOrderTransactionServiceTest {
                     new BigDecimal("50000"), reserve, DUMMY_AMOUNT);
 
             BigDecimal initialLockedCash = activeAccount.getLockedCash();
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
+            com.baedang.trading.model.LimitOrderResult accepted = service.accept(USER_ID, command, marketContext(true), price);
+            OrderDetailResponse response = accepted.response();
 
             assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
             assertThat(activeAccount.getLockedCash()).isEqualByComparingTo(initialLockedCash.add(reserve));
@@ -503,19 +510,6 @@ class LimitOrderTransactionServiceTest {
         }
 
         @Test
-        void 취소는_halt_정책을_조회하지_않는다() {
-            TradeOrder pending = createPendingOrder(
-                    OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
-            when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
-            when(orders.findForUpdate(1L)).thenReturn(Optional.of(pending));
-            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-
-            service.close(USER_ID, ACCOUNT_ID, 1L, false);
-
-            org.mockito.Mockito.verifyNoInteractions(marketTradingHaltPolicy);
-        }
-
-        @Test
         void 매도_정상_접수_성공시_보유수량_동결_및_PENDING_저장() {
             LimitOrderCommand command = sellCommand(BigDecimal.TEN, new BigDecimal("50000"));
             Holding holding = Holding.firstBuy(ACCOUNT_ID, STOCK_ID, new BigDecimal("20"), BigDecimal.ZERO, new BigDecimal("1000000"), AT.minusHours(1));
@@ -533,7 +527,8 @@ class LimitOrderTransactionServiceTest {
                     new BigDecimal("50000"), BigDecimal.ZERO, DUMMY_AMOUNT);
 
             BigDecimal initialLockedQty = holding.getLockedQuantity();
-            OrderDetailResponse response = service.accept(USER_ID, command, marketContext(true), price);
+            com.baedang.trading.model.LimitOrderResult accepted = service.accept(USER_ID, command, marketContext(true), price);
+            OrderDetailResponse response = accepted.response();
 
             assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
             assertThat(holding.getLockedQuantity()).isEqualByComparingTo(initialLockedQty.add(BigDecimal.TEN));
@@ -585,6 +580,24 @@ class LimitOrderTransactionServiceTest {
             assertThatThrownBy(() -> service.close(USER_ID, ACCOUNT_ID, 2L, false))
                     .isInstanceOfSatisfying(BusinessException.class, e ->
                             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ORDER_NOT_FOUND));
+        }
+
+        /** CB 중에도 취소는 허용된다. 종료 경로는 halt 정책을 전혀 조회하지 않는다. */
+        @Test
+        void 취소는_halt_정책을_조회하지_않는다() {
+            TradeOrder filledOrder = mock(TradeOrder.class);
+            when(filledOrder.getAccountId()).thenReturn(ACCOUNT_ID);
+            when(filledOrder.getStockId()).thenReturn(STOCK_ID);
+            when(filledOrder.getOrderType()).thenReturn(OrderType.LIMIT);
+            when(filledOrder.isActive()).thenReturn(false);
+
+            when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
+            when(orders.findForUpdate(1L)).thenReturn(Optional.of(filledOrder));
+            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
+
+            service.close(USER_ID, ACCOUNT_ID, 1L, false);
+
+            org.mockito.Mockito.verifyNoInteractions(marketTradingHaltPolicy);
         }
 
         @Test
