@@ -67,6 +67,7 @@ class LimitOrderTransactionServiceTest {
     @Mock private QuoteSnapshotRepository quotes;
     @Mock private OrderPolicy policy;
     @Mock private EntityManager entityManager;
+    @Mock private com.baedang.market.event.service.MarketTradingHaltPolicy marketTradingHaltPolicy;
 
     private static final Long USER_ID = 1L;
     private static final Long ACCOUNT_ID = 10L;
@@ -87,7 +88,7 @@ class LimitOrderTransactionServiceTest {
     @BeforeEach
     void setUp() {
         service = new LimitOrderTransactionService(accounts, orders, holdings, stocks, quotes, policy, clock,
-                mock(ApplicationEventPublisher.class));
+                marketTradingHaltPolicy, mock(ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
         krStock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
@@ -461,6 +462,57 @@ class LimitOrderTransactionServiceTest {
 
             assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
             assertThat(activeAccount.getLockedCash()).isEqualByComparingTo(initialLockedCash.add(reserve));
+        }
+
+        /**
+         * CB 거절은 접수 트랜잭션 안에서만 판정한다. 현금·수량을 동결하지 않고, 판정에 사용한
+         * market_event_id를 저장해 같은 ID 재요청이 최초 이벤트를 정확히 재생할 수 있게 한다.
+         */
+        @Test
+        void CB가_활성이면_동결없이_정확한_이벤트로_REJECTED를_저장한다() {
+            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
+            var halt = new com.baedang.market.event.model.ActiveMarketHalt(
+                    77L, com.baedang.market.event.entity.KrMarket.KOSPI, 1,
+                    OffsetDateTime.parse("2026-07-13T13:28:32+09:00"),
+                    OffsetDateTime.parse("2026-07-13T13:48:32+09:00"));
+
+            when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
+            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
+            when(stocks.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(krStock));
+            when(marketTradingHaltPolicy.activeFor(krStock, NOW)).thenReturn(Optional.of(halt));
+            when(orders.save(any(TradeOrder.class))).thenAnswer(i -> i.getArgument(0));
+
+            LimitOrderPricing.Price price = new LimitOrderPricing.Price(
+                    new BigDecimal("50000"), new BigDecimal("500000"), DUMMY_AMOUNT);
+
+            BigDecimal initialLockedCash = activeAccount.getLockedCash();
+            var result = service.accept(USER_ID, command, marketContext(true), price);
+
+            assertThat(result.response().status()).isEqualTo(OrderStatus.REJECTED);
+            assertThat(result.response().rejectReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED.name());
+            assertThat(result.rejectionData())
+                    .containsEntry("market", "KOSPI")
+                    .containsEntry("stage", 1)
+                    .doesNotContainKey("eventId");
+            assertThat(activeAccount.getLockedCash()).isEqualByComparingTo(initialLockedCash);
+
+            org.mockito.ArgumentCaptor<TradeOrder> captor = org.mockito.ArgumentCaptor.forClass(TradeOrder.class);
+            verify(orders).save(captor.capture());
+            assertThat(captor.getValue().getMarketEventId()).isEqualTo(77L);
+            verify(holdings, never()).findByAccountIdAndStockIdForUpdate(any(), any());
+        }
+
+        @Test
+        void 취소는_halt_정책을_조회하지_않는다() {
+            TradeOrder pending = createPendingOrder(
+                    OrderSide.BUY, BigDecimal.TEN, new BigDecimal("50000"), new BigDecimal("500000"));
+            when(accounts.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
+            when(orders.findForUpdate(1L)).thenReturn(Optional.of(pending));
+            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
+
+            service.close(USER_ID, ACCOUNT_ID, 1L, false);
+
+            org.mockito.Mockito.verifyNoInteractions(marketTradingHaltPolicy);
         }
 
         @Test
