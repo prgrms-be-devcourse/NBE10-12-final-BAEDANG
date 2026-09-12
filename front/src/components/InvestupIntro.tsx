@@ -98,6 +98,7 @@ export function InvestupIntro({
     stepsShown: false,
     titleShown: false,
     subShown: false,
+    zoomWordsShown: false,
     lastY: null as number | null,
   });
 
@@ -111,6 +112,9 @@ export function InvestupIntro({
   // "GET STARTED"/"투자의 첫걸음, 이렇게 시작해요"에도 같은 방식을 적용해달라는
   // 요청 — titleRevealed와 완전히 같은 패턴이다.
   const [stepsRevealed, setStepsRevealed] = useState(false);
+  // "첫 투자는 오늘, 첫 실수는 0원"에도 같은 방식을 적용해달라는 요청 — 역시
+  // titleRevealed와 완전히 같은 패턴이다.
+  const [zoomWordsRevealed, setZoomWordsRevealed] = useState(false);
 
   // prefers-reduced-motion: 켜져 있으면 비교 카드 4행 리빌의 이동·시차를 없애고
   // 거의 즉시 전환되게 한다(요청 16번). 마운트 후 실제 값으로 갱신하고, 사용자가
@@ -348,13 +352,16 @@ export function InvestupIntro({
       const vw = window.innerWidth;
       const vh = window.innerHeight;
 
-      // 두 문구가 각각 아래에서 올라옴
-      [wordARef.current, wordBRef.current].forEach((el, i) => {
-        if (!el) return;
-        const k = 1 - Math.pow(1 - clamp01((p - i * 0.04) / 0.1), 3);
-        el.style.opacity = k.toFixed(3);
-        el.style.transform = `translateY(${((1 - k) * 56).toFixed(1)}px)`;
-      });
+      // "기존 증권사 서비스와 무엇이 다른가요?"와 똑같은 1회성 등장 방식으로
+      // 바꿨다 — 예전엔 p(스크롤 진행률)에 따라 매 프레임 opacity/translateY를
+      // 계산하는 연속 스크럽이었는데, 이제는 이 섹션에 들어오면(p가 조금이라도
+      // 움직이면) 한 번만 트리거해서 zoomWordsRevealed를 켜고, 나머지는 JSX의
+      // CSS transition이 재생한다(아래 참고).
+      const a = A.current;
+      if (!a.zoomWordsShown && p > 0.02) {
+        a.zoomWordsShown = true;
+        setZoomWordsRevealed(true);
+      }
 
       const bar = clamp01((p - 0.2) / 0.26); // 세로 직선이 길어지는 구간
       const eb = 1 - Math.pow(1 - bar, 4);
@@ -367,7 +374,6 @@ export function InvestupIntro({
       const tw = barW + eg * (vw * 2.05 - barW);
       const th = eb * vh * 0.42 + eg * (vh * 2.4 - vh * 0.42);
 
-      const a = A.current;
       if (a.cw == null || a.ch == null) {
         a.cw = tw;
         a.ch = th;
@@ -1263,11 +1269,40 @@ export function InvestupIntro({
               pointerEvents: 'none',
             }}
           >
-            <span ref={wordARef} style={{ display: 'block', flex: '1 1 0', minWidth: 0, textAlign: 'right', opacity: 0 }}>
+            {/* "기존 증권사 서비스와 무엇이 다른가요?" 제목과 완전히 같은
+                등장 효과(opacity/blur/translateY/transition 값이 동일) —
+                zoomWordsRevealed가 titleRevealed와 같은 역할을 한다. 두
+                문구를 COMPARE_TITLE_WORDS의 단어들처럼 취급해 같은
+                WORD_STAGGER_S만큼 시차를 준다. */}
+            <span
+              ref={wordARef}
+              style={{
+                display: 'block',
+                flex: '1 1 0',
+                minWidth: 0,
+                textAlign: 'right',
+                opacity: zoomWordsRevealed ? 1 : 0,
+                filter: zoomWordsRevealed ? 'blur(0px)' : 'blur(16px)',
+                transform: zoomWordsRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                transition: 'opacity .6s cubic-bezier(.2,.9,.24,1), filter .6s cubic-bezier(.2,.9,.24,1), transform .6s cubic-bezier(.2,.9,.24,1)',
+              }}
+            >
               첫 투자는 오늘,
             </span>
             <span ref={gapRef} style={{ display: 'block', width: 26, flex: '0 0 auto' }} />
-            <span ref={wordBRef} style={{ display: 'block', flex: '1 1 0', minWidth: 0, textAlign: 'left', opacity: 0 }}>
+            <span
+              ref={wordBRef}
+              style={{
+                display: 'block',
+                flex: '1 1 0',
+                minWidth: 0,
+                textAlign: 'left',
+                opacity: zoomWordsRevealed ? 1 : 0,
+                filter: zoomWordsRevealed ? 'blur(0px)' : 'blur(16px)',
+                transform: zoomWordsRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                transition: `opacity .6s cubic-bezier(.2,.9,.24,1) ${WORD_STAGGER_S}s, filter .6s cubic-bezier(.2,.9,.24,1) ${WORD_STAGGER_S}s, transform .6s cubic-bezier(.2,.9,.24,1) ${WORD_STAGGER_S}s`,
+              }}
+            >
               첫 실수는 0원
             </span>
           </div>
