@@ -706,6 +706,23 @@ export function InvestupIntro({
           }}
         />
 
+        {/* 위 배경 그라데이션 위에 겹치는 두 번째 파랑 그라데이션 — 화면
+            상단 정중앙에 부드럽게 뭉치는 "빛 뭉치" 느낌을 더한다. 새 색을
+            만들지 않고 이 화면(히어로)의 좌·우 도트 패턴에 이미 쓰는
+            T.dotInk(#7fb6e3)를 재사용했다. 위쪽 배경 그라데이션과 같은
+            타이밍(lifted)에 함께 사라진다. */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: 'none',
+            background: `radial-gradient(55% 45% at 50% 0%, ${T.dotInk}73 0%, ${T.dotInk}00 70%)`,
+            opacity: lifted ? 0 : 1,
+            transition: 'opacity 1.6s cubic-bezier(.16,1,.3,1)',
+          }}
+        />
+
         {/* 좌·우 상단 도트 패턴 + 발광 하이라이트 */}
         <div style={dotLayer('left', lifted, charted)}>
           <div style={shimmer('left', charted)} />
