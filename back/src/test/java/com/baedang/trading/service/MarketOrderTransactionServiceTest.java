@@ -347,6 +347,73 @@ class MarketOrderTransactionServiceTest {
     // ==========================================
 
     /**
+     * 멱등 재생은 저장된 이벤트로 데이터를 복원한다. 그 이벤트의 시장이 주문 종목의 시장과 다르면
+     * 다른 시장의 CB 데이터를 안내하게 되므로 재생하지 않고 INTERNAL_ERROR로 끊는다.
+     */
+    @Test
+    void execute_재생시_이벤트_시장이_주문_시장과_다르면_INTERNAL_ERROR() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+        TradeOrder halted = createHaltedOrder(88L);
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID))
+                .thenReturn(Optional.of(halted));
+        when(marketEventRepository.findById(88L)).thenReturn(Optional.of(cbEvent(
+                com.baedang.market.event.entity.KrMarket.KOSDAQ, 88L)));
+
+        assertThatThrownBy(() -> service.execute(USER_ID, command, context))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+    }
+
+    @Test
+    void execute_재생시_같은_시장_이벤트면_데이터를_복원한다() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+        TradeOrder halted = createHaltedOrder(88L);
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID))
+                .thenReturn(Optional.of(halted));
+        when(marketEventRepository.findById(88L)).thenReturn(Optional.of(cbEvent(
+                com.baedang.market.event.entity.KrMarket.KOSPI, 88L)));
+
+        MarketOrderResult result = service.execute(USER_ID, command, context);
+
+        assertThat(result.rejectionReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+        assertThat(result.rejectionData()).containsEntry("market", "KOSPI").containsEntry("stage", 1);
+    }
+
+    private TradeOrder createHaltedOrder(Long marketEventId) {
+        TradeOrder order = TradeOrder.rejectedMarketOrderByHalt(
+                ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY,
+                BigDecimal.ONE, marketEventId, AT);
+        ReflectionTestUtils.setField(order, "orderId", 50L);
+        return order;
+    }
+
+    private com.baedang.market.event.entity.MarketEvent cbEvent(
+            com.baedang.market.event.entity.KrMarket market, Long marketEventId) {
+        com.baedang.market.event.entity.MarketEvent event =
+                com.baedang.market.event.entity.MarketEvent.circuitBreaker(
+                        com.baedang.market.event.entity.MarketEventSource.KRX_KIND,
+                        "20260713000658", market, 1,
+                        Instant.parse("2026-07-13T04:28:32Z"), Instant.parse("2026-07-13T04:48:32Z"),
+                        Instant.parse("2026-07-13T04:29:00Z"), Instant.parse("2026-07-13T04:29:07Z"),
+                        "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
+                        java.net.URI.create("https://kind.krx.co.kr/event"));
+        ReflectionTestUtils.setField(event, "marketEventId", marketEventId);
+        return event;
+    }
+
+    /**
      * CB는 account 잠금 뒤에만 판정한다. 락 대기 중 CB가 시작된 주문을 잡으려면 종목 조회 직후,
      * execution-context 신선도 검증보다 앞에서 확인해야 한다.
      */

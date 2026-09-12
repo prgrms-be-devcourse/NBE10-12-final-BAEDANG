@@ -582,6 +582,66 @@ class LimitOrderTransactionServiceTest {
                             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ORDER_NOT_FOUND));
         }
 
+        /**
+         * 멱등 재생은 저장된 이벤트 시장이 주문 종목 시장과 같을 때만 데이터를 복원한다. 다르면
+         * 다른 시장의 CB 데이터를 안내하게 되므로 INTERNAL_ERROR로 끊는다.
+         */
+        @Test
+        void 재생시_이벤트_시장이_주문_시장과_다르면_INTERNAL_ERROR() {
+            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
+            TradeOrder halted = haltedOrder(88L);
+
+            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
+            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(halted));
+            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
+            when(marketEventRepository.findById(88L)).thenReturn(Optional.of(cbEvent(
+                    com.baedang.market.event.entity.KrMarket.KOSDAQ, 88L)));
+
+            assertThatThrownBy(() -> service.existing(USER_ID, command))
+                    .isInstanceOfSatisfying(BusinessException.class,
+                            e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+        }
+
+        @Test
+        void 재생시_같은_시장_이벤트면_데이터를_복원한다() {
+            LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
+            TradeOrder halted = haltedOrder(88L);
+
+            when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
+            when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(halted));
+            when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
+            when(marketEventRepository.findById(88L)).thenReturn(Optional.of(cbEvent(
+                    com.baedang.market.event.entity.KrMarket.KOSPI, 88L)));
+
+            var result = service.existing(USER_ID, command).orElseThrow();
+
+            assertThat(result.response().status()).isEqualTo(OrderStatus.REJECTED);
+            assertThat(result.rejectionData()).containsEntry("market", "KOSPI").containsEntry("stage", 1);
+        }
+
+        private TradeOrder haltedOrder(Long marketEventId) {
+            TradeOrder order = TradeOrder.rejectedLimitOrderByHalt(
+                    ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY, BigDecimal.TEN,
+                    new BigDecimal("50000"), new BigDecimal("50000"), "KRW", BigDecimal.ONE,
+                    marketEventId, AT);
+            ReflectionTestUtils.setField(order, "orderId", 1L);
+            return order;
+        }
+
+        private com.baedang.market.event.entity.MarketEvent cbEvent(
+                com.baedang.market.event.entity.KrMarket market, Long marketEventId) {
+            com.baedang.market.event.entity.MarketEvent event =
+                    com.baedang.market.event.entity.MarketEvent.circuitBreaker(
+                            com.baedang.market.event.entity.MarketEventSource.KRX_KIND,
+                            "20260713000658", market, 1,
+                            Instant.parse("2026-07-13T04:28:32Z"), Instant.parse("2026-07-13T04:48:32Z"),
+                            Instant.parse("2026-07-13T04:29:00Z"), Instant.parse("2026-07-13T04:29:07Z"),
+                            "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
+                            java.net.URI.create("https://kind.krx.co.kr/event"));
+            ReflectionTestUtils.setField(event, "marketEventId", marketEventId);
+            return event;
+        }
+
         /** CB 중에도 취소는 허용된다. 종료 경로는 halt 정책을 전혀 조회하지 않는다. */
         @Test
         void 취소는_halt_정책을_조회하지_않는다() {

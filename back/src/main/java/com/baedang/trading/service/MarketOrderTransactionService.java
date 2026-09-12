@@ -274,7 +274,7 @@ public class MarketOrderTransactionService {
                 if (reason == ErrorCode.MARKET_TRADING_HALTED) {
                     // orderedAt 시점의 활성 이벤트를 재검색하면, 최초 거절 뒤 늦게 수집된 더 긴 CB가
                     // 선택돼 응답 데이터가 바뀔 수 있다. 저장된 FK로 최초 판정 이벤트를 그대로 복원한다.
-                    return MarketOrderResult.rejected(reason, haltDataOf(order));
+                    return MarketOrderResult.rejected(reason, haltDataOf(order, stock));
                 }
                 return MarketOrderResult.rejected(reason);
             } catch (IllegalArgumentException | NullPointerException e) {
@@ -294,23 +294,32 @@ public class MarketOrderTransactionService {
     }
 
     /**
-     * CB 거절 주문의 오류 데이터를 저장된 이벤트 ID로 복원한다. FK 대상이 없거나 CB가 아니면
-     * 재생 데이터를 지어낼 수 없으므로 {@code INTERNAL_ERROR}로 끊는다 — 빈 Map으로 성공처럼 보이게
-     * 하면 클라이언트가 원인 없이 재시도하게 된다.
+     * CB 거절 주문의 오류 데이터를 저장된 이벤트 ID로 복원한다.
+     *
+     * <p>FK는 행 존재만 보장하므로, 주문 종목의 시장과 이벤트 시장이 같은지도 여기서 확인한다.
+     * 다른 시장의 CB 데이터를 재생하면 클라이언트가 잘못된 시장·단계를 안내받는다. FK 대상이 없거나,
+     * CB가 아니거나, 시장이 어긋나면 재생 데이터를 지어낼 수 없으므로 {@code INTERNAL_ERROR}로 끊는다 —
+     * 빈 Map으로 성공처럼 보이게 하면 클라이언트가 원인 없이 재시도하게 된다.
      */
-    private Map<String, Object> haltDataOf(TradeOrder order) {
+    private Map<String, Object> haltDataOf(TradeOrder order, Stock stock) {
         Long eventId = order.getMarketEventId();
         if (eventId == null) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR,
                     "CB rejection without market_event_id: orderId=" + order.getOrderId());
         }
+        com.baedang.market.event.entity.KrMarket expected =
+                com.baedang.market.event.entity.KrMarket.fromStockMarket(stock.getMarket())
+                        .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR,
+                                "CB rejection on unsupported market: orderId=" + order.getOrderId()
+                                        + ", market=" + stock.getMarket()));
         return marketEventRepository.findById(eventId)
                 .filter(event -> event.getEventType() == com.baedang.market.event.entity.MarketEventType.CIRCUIT_BREAKER)
+                .filter(event -> event.getMarket() == expected)
                 .map(ActiveMarketHalt::from)
                 .map(ActiveMarketHalt::asErrorData)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR,
-                        "market_event missing for CB rejection: orderId=" + order.getOrderId()
-                                + ", marketEventId=" + eventId));
+                        "market_event mismatch for CB rejection: orderId=" + order.getOrderId()
+                                + ", marketEventId=" + eventId + ", expectedMarket=" + expected));
     }
 
     private void verifySameRequest(TradeOrder order, Account account, Stock stock, OrderTerms terms) {
