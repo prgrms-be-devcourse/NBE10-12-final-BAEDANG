@@ -99,6 +99,7 @@ export function InvestupIntro({
     titleShown: false,
     subShown: false,
     zoomWordsShown: false,
+    ctaBtnShown: false,
     lastY: null as number | null,
   });
 
@@ -115,6 +116,9 @@ export function InvestupIntro({
   // "첫 투자는 오늘, 첫 실수는 0원"에도 같은 방식을 적용해달라는 요청 — 역시
   // titleRevealed와 완전히 같은 패턴이다.
   const [zoomWordsRevealed, setZoomWordsRevealed] = useState(false);
+  // "시작하기" 버튼에도 같은 방식을 적용해달라는 요청 — 역시 titleRevealed와
+  // 완전히 같은 패턴이다.
+  const [ctaBtnRevealed, setCtaBtnRevealed] = useState(false);
 
   // prefers-reduced-motion: 켜져 있으면 비교 카드 4행 리빌의 이동·시차를 없애고
   // 거의 즉시 전환되게 한다(요청 16번). 마운트 후 실제 값으로 갱신하고, 사용자가
@@ -422,7 +426,14 @@ export function InvestupIntro({
           el.style.transform = `translateY(${((1 - k) * 44).toFixed(1)}px)`;
         };
         rise(ctaLineRef.current, 0.08);
-        rise(ctaBtnRef.current, 0.3);
+        // "시작하기" 버튼은 03 Compare 제목과 같은 1회성 등장 방식으로 바꿨다 —
+        // 연속 스크럽(rise) 대신, CTA가 나타나는 구간에 들어서면(예전 rise의
+        // from값과 같은 지점인 q > 0.3) 한 번만 ctaBtnRevealed를 켜고
+        // 나머지는 JSX의 CSS transition이 재생한다.
+        if (!a.ctaBtnShown && q > 0.3) {
+          a.ctaBtnShown = true;
+          setCtaBtnRevealed(true);
+        }
       }
     };
 
@@ -1372,6 +1383,11 @@ export function InvestupIntro({
             >
               모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요.
             </p>
+            {/* "기존 증권사 서비스와 무엇이 다른가요?" 제목과 완전히 같은 등장
+                효과(opacity/blur/translateY/transition 값이 동일) —
+                ctaBtnRevealed가 titleRevealed와 같은 역할을 한다. 예전엔
+                CTA 진행률(q)에 따라 매 프레임 rise()로 계산하는 연속
+                스크럽이었다. */}
             <a
               ref={ctaBtnRef}
               className="iv-cta-btn"
@@ -1391,6 +1407,14 @@ export function InvestupIntro({
                 letterSpacing: '-.01em',
                 textDecoration: 'none',
                 boxShadow: '0 18px 44px rgba(4,20,42,.34)',
+                opacity: ctaBtnRevealed ? 1 : 0,
+                filter: ctaBtnRevealed ? 'blur(0px)' : 'blur(16px)',
+                transform: ctaBtnRevealed ? 'translateY(0px)' : 'translateY(24px)',
+                // .iv-cta-btn 클래스의 hover 트랜지션(background-color .28s ease,
+                // investup-intro.css 참고)이 인라인 transition에 덮이지 않도록
+                // 여기서도 같이 나열했다.
+                transition:
+                  'opacity .6s cubic-bezier(.2,.9,.24,1), filter .6s cubic-bezier(.2,.9,.24,1), transform .6s cubic-bezier(.2,.9,.24,1), background-color .28s ease',
               }}
             >
               시작하기
