@@ -408,7 +408,7 @@ Sidecar items carry `direction` (`BUY` · `SELL`) instead of `stage`; circuit br
 }
 ```
 
-**Planned enforcement:** blocking new orders during a circuit breaker belongs to the order path and ships in a later change (Part 4/#166). Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — it does not gate anything.
+**Circuit-breaker enforcement:** while a circuit breaker is active, new market and limit orders for that market are rejected inside the trading transaction and return `MARKET_TRADING_HALTED` (422) with this event's public data and `retryPolicy=NEW_CLIENT_ORDER_ID`. Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — the rejection happens in the order path.
 
 ---
 
@@ -927,6 +927,25 @@ The failure response's `data.retryPolicy` defines how to handle `clientOrderId`.
 
 Clients must follow `data.retryPolicy` instead of inferring ID reuse from the HTTP status or error code alone. If malformed JSON or another failure has no `retryPolicy`, do not automatically resend the unchanged request.
 
+**Circuit-breaker rejection data.** When a new order is rejected because a circuit breaker is active in the order's market, `data` carries the rejecting event's public fields plus `retryPolicy`. All timestamps are `+09:00`.
+
+```json
+{
+  "code": "MARKET_TRADING_HALTED",
+  "message": "현재 해당 시장의 매매거래가 일시 중단됐어요",
+  "data": {
+    "market": "KOSPI",
+    "eventType": "CIRCUIT_BREAKER",
+    "stage": 1,
+    "triggeredAt": "2026-07-13T13:28:32+09:00",
+    "haltUntil": "2026-07-13T13:48:32+09:00",
+    "retryPolicy": "NEW_CLIENT_ORDER_ID"
+  }
+}
+```
+
+The rejected order row stores the `market_event_id` it was decided against. A retry with the same `clientOrderId` replays that exact event's data — including after the circuit breaker has expired or a later, longer circuit breaker was collected — so the terminal response never changes. A market rejection stores no quote/reference/rate evidence; a limit rejection retains the user's requested price/currency and the acceptance rate (needed for idempotent comparison) but no quote evidence and no reservation.
+
 **Response · 201**
 ```json
 {
@@ -979,6 +998,7 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 | Code | HTTP | Default retry policy | Screen text |
 |---|---|---|---|
 | `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_TRADING_HALTED` | 422 | `NEW_CLIENT_ORDER_ID` | 현재 해당 시장의 매매거래가 일시 중단됐어요 |
 | `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
 | `STOCK_NOT_TRADABLE` | 422 | read `data.retryPolicy` for the actual path | 현재 거래를 지원하지 않는 종목이에요 |
 | `STOCK_SUSPENDED` | 422 | read `data.retryPolicy` for the actual path | 거래정지 종목이에요 |

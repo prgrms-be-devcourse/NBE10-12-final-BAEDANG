@@ -247,7 +247,7 @@ quote_snapshot.prev_close
 | `order_type` | VARCHAR(10) | `MARKET` / `LIMIT`. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
 | `status` | VARCHAR(20) | MARKET은 FILLED/REJECTED로 즉시 확정. LIMIT은 PENDING → PARTIALLY_FILLED → FILLED 또는 활성 잔여분 CANCELED/EXPIRED. 계좌 잠금 아래 상태·체결 순번을 검증하며 EXPIRED는 저장된 정규 세션 종료 시각 기준. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
 | `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
 | `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
@@ -260,12 +260,13 @@ quote_snapshot.prev_close
 
 지정가 주문의 추가 컬럼:
 
-| 컬럼                                                     | 용도                                                                            |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `limit_price`                                            | 지정가. NUMERIC(19,4), 종목 통화 기준                                           |
-| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각                                       |
-| `reserved_cash`                                          | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
-| `expires_at`, `closed_at`                                | 접수 세션 종료 시각 / 실제 주문 종료 시각                                       |
+| 컬럼 | 용도 |
+|---|---|
+| `limit_price` | 지정가. NUMERIC(19,4), 종목 통화 기준 |
+| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각 |
+| `reserved_cash` | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
+| `expires_at`, `closed_at` | 접수 세션 종료 시각 / 실제 주문 종료 시각 |
+| `market_event_id` | `market_event` FK. **`MARKET_TRADING_HALTED` 거절에만** 설정하고 다른 주문은 NULL입니다. 거절을 결정한 정확한 서킷브레이커 이벤트를 고정하므로, CB가 만료된 뒤나 더 긴 CB가 늦게 수집된 뒤에도 멱등 재생이 최초 오류 데이터를 반환합니다. `ck_trade_order_market_event_rejection` CHECK가 `status=REJECTED` + 이 사유 + non-null 이벤트 조합을 요구하고, 그 외 주문에는 NULL을 강제합니다 |
 
 수수료율·세율·SEC 최소액은 `.env`의 `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE`, `A_TAX_MIN_USD`를 프로젝트 고정값으로 사용합니다. 주문별 요율/계산 버전은 저장하지 않습니다. 재시작·재배포에도 동일한 설정을 유지하며, 활성 주문이 있는 동안 변경하지 않습니다. 체결마다 달라질 수 있는 환율과는 별개의 정책입니다.
 

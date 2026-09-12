@@ -250,7 +250,7 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 | `order_type` | VARCHAR(10) | MARKET / LIMIT. |
 | `quantity` | NUMERIC(19,6) | order quantity. KR is whole shares but US allows fractional — NUMERIC leaves room. |
 | `status` | VARCHAR(20) | MARKET immediately settles as FILLED/REJECTED. LIMIT: PENDING → PARTIALLY_FILLED → FILLED, or active remainder → CANCELED/EXPIRED. Validate state/sequence under the account lock. Expiration uses the stored regular-session close. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
 | `reference_price` | NUMERIC(19,4) | Price in the stock currency used to evaluate a `REJECTED` order. Kept separate from `executed_price` because no fill occurred. |
 | `executed_price` | NUMERIC(19,4) | fill price. **In the stock's currency** (USD for US stocks). KRW conversion stored separately in `gross_amount`. |
 | `quote_at` | TIMESTAMPTZ | Quote timestamp used for either fill or rejection evaluation. Copied from `quote_snapshot.quote_at`. |
@@ -263,12 +263,13 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 
 Additional limit-order columns:
 
-| Columns                                                  | Purpose                                                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `limit_price`                                            | Limit price, NUMERIC(19,4) in the stock currency                                                       |
-| `filled_quantity`, `execution_count`, `last_executed_at` | Cumulative filled quantity, applied sequence and latest fill time                                      |
-| `reserved_cash`                                          | Current KRW reserve for the unfilled remainder, NUMERIC(19,4); zero for SELL, MARKET and closed orders |
-| `expires_at`, `closed_at`                                | Accepted session close / actual order closure                                                          |
+| Columns | Purpose |
+|---|---|
+| `limit_price` | Limit price, NUMERIC(19,4) in the stock currency |
+| `filled_quantity`, `execution_count`, `last_executed_at` | Cumulative filled quantity, applied sequence and latest fill time |
+| `reserved_cash` | Current KRW reserve for the unfilled remainder, NUMERIC(19,4); zero for SELL, MARKET and closed orders |
+| `expires_at`, `closed_at` | Accepted session close / actual order closure |
+| `market_event_id` | BIGINT FK to `market_event`; set **only** on a `MARKET_TRADING_HALTED` rejection, otherwise NULL. Pins the exact circuit-breaker event that decided the rejection so an idempotent replay returns the original error data even after the halt expired or a later, longer circuit breaker was collected. The `ck_trade_order_market_event_rejection` CHECK requires the combination `status=REJECTED` + this reason + a non-null event, and NULL for every other order |
 
 Fee/tax rates and the SEC minimum use the project-fixed `.env` settings `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE` and `A_TAX_MIN_USD`. No per-order rates or calculation version are stored. Keep the same settings across restarts/deployments; do not change them while active orders exist. This is separate from FX, which may differ between execution transactions.
 

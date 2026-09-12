@@ -407,7 +407,7 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
 }
 ```
 
-**후속 적용 예정:** CB 중 신규 주문 차단은 주문 경로의 일이고 후속 변경(Part 4/#166)에서 들어갑니다. 사이드카는 프로그램 매매 호가만 정지시키므로 일반 주문은 그대로 허용됩니다. 이 엔드포인트는 사실만 조회하며 아무것도 차단하지 않습니다.
+**서킷브레이커 차단:** 활성 서킷브레이커가 있는 시장의 신규 시장가·지정가 주문은 거래 트랜잭션 안에서 거절되고, 이 이벤트의 공개 데이터와 `retryPolicy=NEW_CLIENT_ORDER_ID`를 담아 `MARKET_TRADING_HALTED`(422)를 반환합니다. 사이드카는 프로그램 매매 호가만 정지시키므로 일반 주문은 그대로 허용됩니다. 이 엔드포인트는 사실만 조회하며, 실제 차단은 주문 경로에서 일어납니다.
 
 ---
 
@@ -936,6 +936,25 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 
 클라이언트는 HTTP 상태나 오류 코드만으로 ID 재사용 여부를 추론하지 않고, 응답에 포함된 `data.retryPolicy`를 우선합니다. `retryPolicy`가 없는 잘못된 JSON 등의 요청은 기존 요청을 그대로 자동 재전송하지 않습니다.
 
+**서킷브레이커 거절 데이터.** 주문 시장에 활성 서킷브레이커가 있어 신규 주문이 거절되면 `data`에 거절을 일으킨 이벤트의 공개 필드와 `retryPolicy`가 담깁니다. 모든 시각은 `+09:00`입니다.
+
+```json
+{
+  "code": "MARKET_TRADING_HALTED",
+  "message": "현재 해당 시장의 매매거래가 일시 중단됐어요",
+  "data": {
+    "market": "KOSPI",
+    "eventType": "CIRCUIT_BREAKER",
+    "stage": 1,
+    "triggeredAt": "2026-07-13T13:28:32+09:00",
+    "haltUntil": "2026-07-13T13:48:32+09:00",
+    "retryPolicy": "NEW_CLIENT_ORDER_ID"
+  }
+}
+```
+
+거절 주문 행은 판정에 사용한 `market_event_id`를 저장합니다. 같은 `clientOrderId`로 재요청하면 **그 정확한 이벤트**의 데이터를 재생하므로, 서킷브레이커가 만료된 뒤나 더 긴 다른 서킷브레이커가 늦게 수집된 뒤에도 최종 응답이 바뀌지 않습니다. 시장가 거절은 quote/reference/rate 증거를 남기지 않고, 지정가 거절은 멱등 비교에 필요한 사용자 입력 가격·통화와 접수 환율만 유지하며 quote 증거와 동결은 남기지 않습니다.
+
 **Response · 201**
 ```json
 {
@@ -988,6 +1007,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 | 코드 | HTTP | 기본 재시도 정책 | 화면 문구 |
 |---|---|---|---|
 | `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_TRADING_HALTED` | 422 | `NEW_CLIENT_ORDER_ID` | 현재 해당 시장의 매매거래가 일시 중단됐어요 |
 | `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
 | `STOCK_NOT_TRADABLE` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 현재 거래를 지원하지 않는 종목이에요 |
 | `STOCK_SUSPENDED` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 거래정지 종목이에요 |
