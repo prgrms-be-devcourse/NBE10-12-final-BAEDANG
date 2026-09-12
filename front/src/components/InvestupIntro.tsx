@@ -1349,6 +1349,11 @@ export function InvestupIntro({
               gap: 'clamp(14px, 2vh, 22px)',
               padding: '0 clamp(24px, 6vw, 96px)',
               textAlign: 'center',
+              // 문구 뒤에 어두운 남색 그라데이션 — 위쪽은 진하고 아래로 갈수록
+              // 옅어져 투명해진다(문구가 있는 위쪽의 대비를 높여준다). 이 div
+              // 자체의 opacity(스크롤에 따라 0→q)를 그대로 같이 타므로 등장할
+              // 때 그라데이션도 함께 페이드인된다.
+              background: 'linear-gradient(180deg, rgba(4,14,28,.62) 0%, rgba(4,14,28,0) 65%)',
               opacity: 0,
               pointerEvents: 'none',
             }}
