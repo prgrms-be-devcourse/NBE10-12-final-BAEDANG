@@ -234,10 +234,19 @@
      나타나는 텀을 좀 더 짧게" 해달라는 요청으로, 훑는 속도는 그대로
      두고 화면 밖에서 쉬는 정지 구간만 3.9s→1.5s로 줄였다 — 그래서
      사이클 전체 길이가 13s→10.6s로 짧아졌다(= 다음 sweep이 더 빨리
-     시작된다). 속도 조절 지점 — duration(10.6s 중 sweep 구간이 몇
-     %인지는 아래 keyframe의 85.85% 지점과 함께 바뀐다)과 easing을
-     여기서 바꾼다. */
-  animation: iv-sweep 10.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+     시작된다).
+     easing: 원래 cubic-bezier(0.22, 1, 0.36, 1)(강한 ease-out)을 썼는데,
+     이 곡선은 sweep 후반부로 갈수록 background-position 이동 속도가
+     급격히 느려지다가 거의 멈추는 지점에서 opacity가 71.13%→85.85%
+     구간 동안 1→0으로 빠지는 keyframe과 겹치면서, 빛이 부드럽게
+     지나가지 않고 마지막 글자 몇 개 위에서 "잠깐 멈췄다 반짝 사그라드는"
+     것처럼 보였다(사용자가 말한 "은근히 반짝이며/물결이 일렁이는"
+     현상의 원인). linear로 바꿔 sweep 전체 구간에서 이동 속도와
+     밝기 변화가 항상 일정하게 유지되도록 해서 이 깜빡임/일렁임을
+     없앴다. 속도 조절 지점 — duration(10.6s 중 sweep 구간이 몇 %인지는
+     아래 keyframe의 85.85% 지점과 함께 바뀐다)과 easing을 여기서
+     바꾼다. */
+  animation: iv-sweep 10.6s linear infinite;
 }
 
 @keyframes iv-sweep {
