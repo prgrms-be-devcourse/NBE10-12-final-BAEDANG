@@ -372,9 +372,12 @@ export function InvestupIntro({
       ctx.beginPath();
       ctx.arc(g.cx, g.cy, g.R, 0, 6.2832);
       ctx.clip();
+      // 방향을 반대로(아래에서 위로 갈수록 옅어지게) 해달라는 요청 —
+      // 그라데이션 선(위→아래)은 그대로 두고 색 stop만 뒤집었다(위쪽
+      // 끝은 투명, 아래쪽 끝은 진하게).
       const globeGlow = ctx.createLinearGradient(0, Math.max(0, g.cy - g.R), 0, f.h);
-      globeGlow.addColorStop(0, 'rgba(127,182,227,0.45)');
-      globeGlow.addColorStop(1, 'rgba(127,182,227,0)');
+      globeGlow.addColorStop(0, 'rgba(127,182,227,0)');
+      globeGlow.addColorStop(1, 'rgba(127,182,227,0.45)');
       ctx.fillStyle = globeGlow;
       ctx.fillRect(g.cx - g.R, g.cy - g.R, g.R * 2, g.R * 2);
       ctx.restore();
