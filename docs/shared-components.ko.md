@@ -410,6 +410,42 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - `Account.settleReservedBuy`, `Holding.settleReservedSell`: 자유 예수금/매도 가능 수량이 아니라 이미 동결된 자원을 소비합니다. 호출부가 주문별 한도를 검증하고 같은 금융 트랜잭션을 사용합니다. 전량 매수 후 남은 동결액은 명시적으로 해제합니다.
 - `LimitOrderExecutionWorker`: 생성/만료 스케줄러와 분리된 `limitExecutionTaskScheduler`에서 상시 실행합니다. 예산/커서와 미리보기 필드는 `api-spec.ko.md`를 참고합니다.
 
+## KRX 시장조치 — 서킷브레이커·사이드카 (#165)
+
+**이 파이프라인은 거래 가능 여부를 판단한다.** 입력이 외부 사이트의, 공격자가 고를 수 있는 텍스트이므로 경계는 관례가 아니라 계약으로 좁힙니다.
+
+### 수집 경계
+
+- `KindUriPolicy`: 화이트리스트만 허용합니다. RSS 경로는 query 고정, viewer는 `method`와 14자리 `acptNo`, 본문은 `/external/{y}/{m}/{d}/{6}/{14}/{5}.htm` 패턴입니다. 타 호스트·`http`·비표준 포트·user-info·fragment·traversal은 **요청이 나가기 전에** 거절합니다 — 거절된 URI는 I/O가 되지 않습니다.
+- `KindHttpClient.getText(uri, maxBytes)`: GET 전용, `Redirect.NEVER`, 1 MiB 초과는 **전체 거절**, UTF-8 고정입니다. 응답 본문과 전체 query 문자열은 로그에 남기지 않습니다.
+- 클라이언트는 주입해서 쓰고 호출자 안에서 `RestClient`를 만들지 않습니다. 외부 호출은 DB 트랜잭션 없이 실행하며(`Propagation.NEVER`), 기본값 `krx.market-events.enabled=false`에서는 스케줄러도 클라이언트 빈도 호출도 생기지 않습니다.
+
+### 3홉 파싱, 그리고 왜 3홉인가
+
+1. `KindRssParser` — JDK XML에 DTD·외부 엔티티·외부 DTD/스키마를 모두 끄고 100건 상한을 둡니다. 제목 분류, `acptNo`, `pubDate`로 후보를 만듭니다.
+2. `KindViewerParser` — viewer HTML에서 `/external/` 링크가 **정확히 1개**여야 하고, 그 `acptNo`가 viewer 쿼리와 일치해야 합니다.
+3. `KindMarketEventDetailParser` — jsoup, 라벨로 찾은 행(행 번호 금지), 엄격한 시각 형식, 그리고 발동시각.
+
+**`pubDate`는 게시 시각이지 발동시각이 아닙니다.** fixture 실측으로 실제 발동보다 19~28초 늦고, `haltUntil`은 `triggeredAt`에서 계산합니다. RSS만으로는 "언제부터 거래가 중단됐나"를 답할 수 없고 상세 공시만이 답할 수 있습니다. 반대로 `acptNo`를 열거할 수 있는 곳은 RSS뿐입니다. 그래서 둘 다 필요하고, KIND 사이트 구조가 강제하는 viewer 홉이 하나 더 붙습니다.
+
+상세 단계에서 제목을 다시 분류하고 명시된 지속시간을 재확인하므로, 자기 공시와 어긋나는 후보는 저장되지 않습니다. 부분 파싱값으로 거래를 막지 않습니다.
+
+### 저장과 스케줄링
+
+- `MarketEventPersistenceService.insert(confirmed, haltUntil)`: 이벤트 하나씩 짧은 REQUIRED 트랜잭션으로 저장합니다. 이미 있으면 `false`를 반환합니다.
+- `MarketEventCollectionService.collect()`: 두 시장을 도는 `Propagation.NEVER`입니다. 시장 실패는 그 시장만, 후보 실패는 그 후보만 건너뜁니다. 캘린더 실패는 전송 실패(`stage=fetch`)와 구분해 `stage=calendar`로 태깅합니다 — 전자는 fail-open 위험(3단계 CB의 종료시각을 못 구하면 저장되지 않음)이고 후자는 외부 장애입니다. 실패 시 기존 `halt_until`을 연장하지 않습니다.
+- 중복 방지는 사전 확인이 아니라 DB `(source, source_event_id)` UNIQUE입니다. 두 인스턴스가 `existsBySourceAndSourceEventId`를 모두 통과할 수 있고, 두 번째 insert를 막는 것은 제약뿐입니다. `DataIntegrityViolationException`은 그 행이 실제로 존재할 때만 정상 중복으로 분류하고 아니면 재전파합니다 — 그렇지 않으면 잘못된 데이터가 중복으로 숨습니다.
+- `MarketEventCollectionScheduler`: `marketEventTaskScheduler`(단일 스레드)에 `fixedDelay` 15초, 그리고 `ApplicationReadyEvent`에서 1회 시작 시도입니다. `MarketSessionProvider.isOpen(KR, now)`일 때만 수집합니다. 세션 조회 실패와 수집 실패를 모두 삼켜 한 주기의 예외가 루프를 멈추지 않게 합니다. 전용 스케줄러를 쓰고 공용 `taskScheduler`를 쓰지 않습니다.
+- 지표 `krx.market_event.poll/candidate/persisted/parse_error/delivery_delay`의 태그는 닫힌 열거형만 씁니다(`market`, `type`, `result`, `stage`). `acptNo`·제목·URL은 태그로 쓰지 않습니다.
+
+### 조회와 소비
+
+- `MarketEventQueryService.get(market, date)`: KST 하루를 반개구간 `[from, to)` UTC 범위로 바꿉니다. 100건 상한, `active`는 저장값이 아니라 응답 시각에 계산합니다. 공개 응답 시각은 항상 `+09:00`이고 저장은 UTC입니다.
+- `MarketEventController`: `GET /api/market/events?market=&date=`는 공개입니다. 두 파라미터를 문자열로 받아 파싱 실패를 다른 API와 같은 `INVALID_INPUT` + `data.field`로 내보냅니다 — enum/날짜 바인딩이 프레임워크 메시지를 내보내게 두지 않습니다.
+- 소비자는 `haltUntil`을 읽고 만료를 기다립니다. RSS 해제 공시나 RSS 상태로 재개를 추론하지 않습니다. 수집 장애가 나도 기존 구간은 그대로 남고 스스로 만료됩니다.
+- 사이드카는 프로그램 호가에만 영향을 줍니다 — 일반 주문을 막으면 안 됩니다. 서킷브레이커 주문 차단은 별도 관심사입니다(Part 4/#166).
+
+
 ## 거래일·종가 복구 (#173)
 
 - `MarketTradingDayPolicy`: `calendar(country, date)`, `quoteTradeDate(country, instant)`, `previousTradingDay(country, date)`. 기존 캘린더 Port와 캐시를 재사용한다.

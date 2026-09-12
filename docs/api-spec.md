@@ -2,7 +2,7 @@
 
 > **Version**: Week-3 MVP · 26.09.03 ~ 09.09 · derived from the ERD and wireframe
 
-> **Badges**: 17 endpoints · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
+> **Badges**: 18 endpoints · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
 
 ## Contents
 - [Common Rules](#common-rules)
@@ -357,6 +357,57 @@ FX trend chart
 The database selects the last observation per bucket: `1d` uses 1 minute, `1w` 30 minutes, `1m` 2 hours, `3m` 6 hours, and `1y` 1 day. Buckets align to midnight in Asia/Seoul (KST). Only the requested start through now is included; empty buckets are omitted. The response preserves the selected original `validFrom` and unrounded display rate. Longer periods do not transfer raw minute history. Time-axis and crosshair labels use KST without a timezone suffix: `1d` crosshairs show `YYYY-MM-DD HH:mm`, while other periods show only `YYYY-MM-DD`, independently of graph granularity. Stored timestamps remain UTC.
 
 The history modal refreshes every minute while open and visible. Latest/history requests time out and abort after 10 seconds; disposal also aborts them. Requests do not overlap; late responses are ignored. Refresh follows new points only when the latest point was visible, preserving the zoom width; historical browsing retains its time range. Failure retains the last chart with a warning and retries next cycle. Initial load and period changes fit the chart to the data.
+
+### `GET /market/events`
+KRX market actions (circuit breaker · sidecar) for one market and KST date — public, no login
+
+| Param | Req | Value |
+|---|---|---|
+| `market` | ✅ | `KOSPI` · `KOSDAQ` (case-insensitive) |
+| `date` | ✅ | `yyyy-MM-dd`, interpreted as a **KST** day |
+
+```json
+{
+  "market": "KOSPI",
+  "date": "2026-07-13",
+  "items": [
+    {
+      "eventId": 1,
+      "eventType": "CIRCUIT_BREAKER",
+      "stage": 1,
+      "triggeredAt": "2026-07-13T13:28:32+09:00",
+      "haltUntil": "2026-07-13T13:48:32+09:00",
+      "publishedAt": "2026-07-13T13:29:00+09:00",
+      "receivedAt": "2026-07-13T13:29:07+09:00",
+      "active": true,
+      "title": "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
+      "sourceUrl": "https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm"
+    }
+  ]
+}
+```
+
+Sidecar items carry `direction` (`BUY` · `SELL`) instead of `stage`; circuit breakers carry `stage` (1–3) instead of `direction`. The global Jackson `non_null` setting means the unused field is omitted, not `null`.
+
+**Every timestamp in this response is `+09:00`.** Stored values are UTC; the conversion happens once at the response boundary so the client never has to interpret an offset.
+
+**`active` is a judgment, not a stored column.** It is `triggeredAt <= now < haltUntil`, so an event whose window has passed still appears in history but reports `active: false`. `haltUntil` is exclusive.
+
+**Where `triggeredAt` comes from.** Not the RSS `pubDate` — that is the publication time and runs behind. The collection reads the KRX detail disclosure and uses the actual trigger time recorded there (measured 19–28 s ahead of `pubDate` in the fixtures). See `docs/shared-components.md` for the collection pipeline.
+
+**Scope notes.** This endpoint returns **circuit breaker and sidecar events only** — not general corporate disclosures. Events for a market that never triggered return `items: []`. Ordering is `triggeredAt DESC, eventId DESC` (deterministic for equal timestamps), capped at 100 items per response; the frequency of these events makes cursor pagination unnecessary. Dates outside a market's own calendar still return `[]` — the date is filtered as a KST range, not validated against a trading calendar.
+
+`market` or `date` that cannot be parsed returns `400 INVALID_INPUT` with the offending field in `data.field`:
+
+```json
+{
+  "code": "INVALID_INPUT",
+  "message": "입력값이 올바르지 않아요",
+  "data": { "field": "market" }
+}
+```
+
+**Planned enforcement:** blocking new orders during a circuit breaker belongs to the order path and ships in a later change (Part 4/#166). Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — it does not gate anything.
 
 ---
 
