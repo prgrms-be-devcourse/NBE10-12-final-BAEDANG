@@ -363,7 +363,9 @@ export function InvestupIntro({
         setZoomWordsRevealed(true);
       }
 
-      const bar = clamp01((p - 0.2) / 0.26); // 세로 직선이 길어지는 구간
+      // 선이 더 빠르게 등장하도록 시작 지점을 앞당기고(0.2→0.1) 구간을
+      // 좁혔다(0.26→0.16) — 스크롤을 조금만 내려도 선이 금방 다 자란다.
+      const bar = clamp01((p - 0.1) / 0.16); // 세로 직선이 길어지는 구간
       const eb = 1 - Math.pow(1 - bar, 4);
       const grow = clamp01((p - 0.5) / 0.38); // 정사각형으로 확대되는 구간
       const eg = grow < 0.5 ? 2.6 * grow * grow * grow : 1 - Math.pow(1 - grow, 2.1);
@@ -389,7 +391,10 @@ export function InvestupIntro({
       const w = Math.abs(tw - a.cw) < 0.4 ? tw : a.cw;
       const h = Math.abs(th - a.ch) < 0.4 ? th : a.ch;
 
-      card.style.opacity = bar > 0 ? '1' : '0';
+      // bar > 0이 되는 순간 opacity를 0→1로 그대로 튀게 하던 것 대신, 막대가
+      // 자라는 것과 같은 곡선(eb)으로 함께 서서히 밝아지게 해서 "부드럽게
+      // 등장"하도록 했다.
+      card.style.opacity = eb.toFixed(3);
       // width/height를 매 프레임 바꾸면 리플로우가 생긴다 — 대신 기준 크기를
       // JSX에서 100vw×100vh로 고정해두고(CSS 뷰포트 단위라 리사이즈에도 JS
       // 없이 저절로 맞춰진다), transform: scale()만 매 프레임 써서 확대·축소를
