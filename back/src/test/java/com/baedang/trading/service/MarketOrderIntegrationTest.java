@@ -1286,22 +1286,35 @@ class MarketOrderIntegrationTest {
         assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
     }
 
-    /** CB가 만료된 뒤에도 저장된 결과를 외부 조회 없이 동일하게 반환한다. */
+    /**
+     * CB가 이미 끝난 뒤에도 저장된 결과를 재생한다. 재생은 현재 활성 여부를 묻지 않으므로
+     * 외부 준비 없이 동일한 오류 데이터를 반환한다.
+     *
+     * <p>이미 종료된 CB를 대상으로 거절 주문을 직접 저장해 그 상황을 만든다. `market_event`는
+     * append-only이므로 테스트에서도 `halt_until`을 UPDATE하지 않는다.
+     */
     @Test
     void CB가_만료된_뒤_재요청해도_같은_결과를_반환한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        MarketEvent cb = saveActiveCb("20260713000714");
-        MarketOrderRequest request = request(fixture, "BUY", "2");
-        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request));
+        Instant past = Instant.now().minusSeconds(3600);
+        MarketEvent expired = marketEventRepository.saveAndFlush(MarketEvent.circuitBreaker(
+                MarketEventSource.KRX_KIND, "20260713000714", KrMarket.KOSPI, 1,
+                past.minusSeconds(120), past.minusSeconds(60),
+                past.minusSeconds(120), past.minusSeconds(90),
+                "유가증권시장 매매거래 일시중단(1단계 CB 발동)", SOURCE_URL));
 
-        // CB를 끝난 것으로 바꾸고 재요청한다. append-only라 halt_until을 직접 당긴다.
-        jdbcTemplate.update("UPDATE market_event SET halt_until = ? WHERE market_event_id = ?",
-                OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1), cb.getMarketEventId());
+        MarketOrderRequest request = request(fixture, "BUY", "2");
+        tradeOrderRepository.save(TradeOrder.rejectedMarketOrderByHalt(
+                fixture.accountId(), fixture.stockId(), UUID.fromString(request.clientOrderId()),
+                OrderSide.BUY, new BigDecimal("2"), expired.getMarketEventId(),
+                OffsetDateTime.now(ZoneOffset.UTC)));
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
                 .isInstanceOfSatisfying(BusinessException.class, exception -> {
                     assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
-                    assertThat(exception.getData()).containsEntry("stage", 1);
+                    assertThat(exception.getData())
+                            .containsEntry("stage", 1)
+                            .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
                 });
 
         assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
