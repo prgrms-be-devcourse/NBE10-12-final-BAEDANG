@@ -13,9 +13,14 @@ COMMENT ON COLUMN trade_order.market_event_id IS
     'MARKET_TRADING_HALTED 판정에 사용한 market_event. 멱등 재생이 이 행으로 오류 데이터를 복원한다.';
 
 -- CB 거절에만 필수, 다른 주문·거절에는 금지.
+--
+-- 상태까지 결합한다: reject_reason만 보면 PENDING/FILLED/CANCELED 행이 이 사유와 이벤트 ID를
+-- 들고 있어도 통과한다. CB 거절은 REJECTED 확정 행에만 존재할 수 있다.
 ALTER TABLE trade_order
     ADD CONSTRAINT ck_trade_order_market_event_rejection CHECK (
-        (reject_reason = 'MARKET_TRADING_HALTED' AND market_event_id IS NOT NULL)
-        OR
         (reject_reason IS DISTINCT FROM 'MARKET_TRADING_HALTED' AND market_event_id IS NULL)
+        OR
+        (status = 'REJECTED'
+         AND reject_reason = 'MARKET_TRADING_HALTED'
+         AND market_event_id IS NOT NULL)
     );
