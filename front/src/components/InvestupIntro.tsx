@@ -677,6 +677,27 @@ export function InvestupIntro({
           }}
         />
 
+        {/* 히어로 화면(로고 + "실수는 가볍게, 투자 감각은 제대로") 상단에
+            그라데이션을 넣어달라는 요청 — 색상은 새로 만들지 않고 02
+            Steps의 STEP 1~3 카드가 쓰는 배경 그라데이션 색(연한 하늘색
+            rgba(196,222,248), 알파 0.85→0.4)을 그대로 재사용했다. 카드
+            쪽은 중심에서 퍼지는 radial-gradient였지만, 여기서는 "위에서
+            시작해 아래로 갈수록 옅어지는" 세로 방향으로 달라는 요청이라
+            linear-gradient(180deg, ...)로 바꿨고, 카드처럼 흰색으로
+            끝나면 히어로 배경 전체를 흰 판으로 덮어버리므로 마지막
+            지점만 투명(alpha 0)으로 바꿔 히어로 자체 배경 위에 자연스럽게
+            녹아들게 했다. */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: 'none',
+            background:
+              'linear-gradient(180deg, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, rgba(196,222,248,0) 100%)',
+          }}
+        />
+
         {/* 좌·우 상단 도트 패턴 + 발광 하이라이트 */}
         <div style={dotLayer('left', lifted, charted)}>
           <div style={shimmer('left', charted)} />
