@@ -27,8 +27,8 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
-import { AnimatedStartButton } from './AnimatedStartButton';
 import { GradientSweepText } from './GradientSweepText';
+import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
 
@@ -83,6 +83,7 @@ export function InvestupIntro({
   const wordBRef = useRef<HTMLSpanElement | null>(null);
   const gapRef = useRef<HTMLSpanElement | null>(null);
   const ctaRef = useRef<HTMLDivElement | null>(null);
+  const ctaBtnRef = useRef<HTMLAnchorElement | null>(null);
 
   /** 리렌더와 무관하게 유지되는 애니메이션 상태 */
   const A = useRef({
@@ -1434,16 +1435,14 @@ export function InvestupIntro({
                 효과(opacity/blur/translateY/transition 값이 동일) —
                 ctaBtnRevealed가 titleRevealed와 같은 역할을 한다. 예전엔
                 CTA 진행률(q)에 따라 매 프레임 rise()로 계산하는 연속
-                스크럽이었다.
-                호버 시 아래→위로 텍스트가 바뀌던 기존 SwapText 효과는,
-                이번에 새로 요청받은 "꼬임 → 복원 → Confetti" 인터랙션과
-                같은 hover 트리거를 두고 서로 부딪힌다(텍스트가 버튼과
-                별개로 움직이면 안 된다는 이번 요청의 조건과도 맞지
-                않는다) — 그래서 이 버튼에서는 SwapText 대신
-                AnimatedStartButton으로 교체했다. */}
-            <AnimatedStartButton
+                스크럽이었다. */}
+            <a
+              ref={ctaBtnRef}
+              // iv-hover-swap: 호버/포커스 시 안의 SwapText가 반응하게 하는
+              // 트리거 클래스(investup-intro.css 참고) — iv-cta-btn과는
+              // 별개라 다른 버튼에도 그대로 재사용할 수 있다.
+              className="iv-cta-btn iv-hover-swap"
               href={ctaHref}
-              className="iv-cta-btn"
               style={{
                 // 문구와의 간격을 많이 띄워달라는 요청 — 처음엔
                 // clamp(48px, 8vh, 96px)이었는데, 더 띄워달라는 후속 요청으로
@@ -1478,8 +1477,8 @@ export function InvestupIntro({
                   'opacity .6s cubic-bezier(.2,.9,.24,1), filter .6s cubic-bezier(.2,.9,.24,1), transform .6s cubic-bezier(.2,.9,.24,1), background-color .28s ease',
               }}
             >
-              시작하기
-            </AnimatedStartButton>
+              <SwapText>시작하기</SwapText>
+            </a>
           </div>
         </div>
       </section>
