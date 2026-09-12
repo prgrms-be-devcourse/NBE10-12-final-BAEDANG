@@ -3,6 +3,9 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.event.model.ActiveMarketHalt;
+import com.baedang.market.event.repository.MarketEventRepository;
+import com.baedang.market.event.service.MarketTradingHaltPolicy;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -40,6 +43,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import java.util.Optional;
 
 /** 시장가 주문의 DB 변경을 하나의 트랜잭션으로 즉시 확정합니다. */
@@ -59,6 +63,8 @@ public class MarketOrderTransactionService {
     private final MarketOrderSettlementCalculator amountCalculator;
     private final OrderPolicy orderPolicy;
     private final MarketOrderPolicy marketOrderPolicy;
+    private final MarketTradingHaltPolicy marketTradingHaltPolicy;
+    private final MarketEventRepository marketEventRepository;
     private final Clock clock;
 
     public MarketOrderTransactionService(
@@ -73,6 +79,8 @@ public class MarketOrderTransactionService {
             MarketOrderSettlementCalculator amountCalculator,
             OrderPolicy orderPolicy,
             MarketOrderPolicy marketOrderPolicy,
+            MarketTradingHaltPolicy marketTradingHaltPolicy,
+            MarketEventRepository marketEventRepository,
             Clock clock
     ) {
         this.accountRepository = accountRepository;
@@ -86,6 +94,8 @@ public class MarketOrderTransactionService {
         this.amountCalculator = amountCalculator;
         this.orderPolicy = orderPolicy;
         this.marketOrderPolicy = marketOrderPolicy;
+        this.marketTradingHaltPolicy = marketTradingHaltPolicy;
+        this.marketEventRepository = marketEventRepository;
         this.clock = clock;
     }
 
@@ -138,14 +148,33 @@ public class MarketOrderTransactionService {
         }
 
         rejectChangedRound(account);
-        // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
-        orderPolicy.validateExecutionContextFresh(executionContext, now);
 
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(terms.symbol(), terms.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
         if (stock.getMarketCountry() != executionContext.marketCountry()) {
             throw new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol());
         }
+
+        // CB 판정은 계좌 잠금 이후, context 신선도 검증보다 먼저 합니다. 락 대기 중 CB가 시작된 주문을
+        // 잡으려면 여기여야 하고, 그래야 만료된 context가 CB 거절을 앞지르지 않습니다.
+        // PostgreSQL TIMESTAMPTZ는 마이크로초까지만 보존합니다. 최초 응답의 나노초와 DB 재조회 기반
+        // 멱등 응답이 달라지지 않도록 저장 전에 같은 정밀도로 맞춥니다.
+        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(
+                now.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
+        Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
+        if (halt.isPresent()) {
+            // CB 거절에는 시세가 필요 없으므로 quote/reference/rate 증거를 남기지 않는다. 대신 판정에
+            // 사용한 이벤트를 FK로 고정해, 같은 clientOrderId 재요청이 최초 오류 데이터를 재생한다.
+            TradeOrder halted = tradeOrderRepository.save(TradeOrder.rejectedMarketOrderByHalt(
+                    account.getAccountId(), stock.getStockId(), command.clientOrderId(), terms.side(),
+                    terms.quantity(), halt.get().eventId(), orderedAt));
+            log.info("시장가 주문 CB 거절: orderId={}, accountId={}, stockId={}, marketEventId={}",
+                    halted.getOrderId(), account.getAccountId(), stock.getStockId(), halt.get().eventId());
+            return MarketOrderResult.rejected(ErrorCode.MARKET_TRADING_HALTED, halt.get().asErrorData());
+        }
+
+        // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
+        orderPolicy.validateExecutionContextFresh(executionContext, now);
 
         QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId())
                 .orElseThrow(() -> new BusinessException(
@@ -176,10 +205,6 @@ public class MarketOrderTransactionService {
                     .orElse(null)
                 : null;
         BigDecimal availableQuantity = holding == null ? BigDecimal.ZERO : holding.availableQuantity();
-        // PostgreSQL TIMESTAMPTZ는 마이크로초까지만 보존합니다. 최초 응답의 나노초와
-        // DB 재조회 기반 멱등 응답이 달라지지 않도록 저장 전에 같은 정밀도로 맞춥니다.
-        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(
-                now.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
 
         ErrorCode rejection = marketOrderPolicy.determineRejection(
                 account,
@@ -245,7 +270,13 @@ public class MarketOrderTransactionService {
     private MarketOrderResult existingResult(TradeOrder order, Stock stock) {
         if (order.getStatus() == OrderStatus.REJECTED) {
             try {
-                return MarketOrderResult.rejected(ErrorCode.valueOf(order.getRejectReason()));
+                ErrorCode reason = ErrorCode.valueOf(order.getRejectReason());
+                if (reason == ErrorCode.MARKET_TRADING_HALTED) {
+                    // orderedAt 시점의 활성 이벤트를 재검색하면, 최초 거절 뒤 늦게 수집된 더 긴 CB가
+                    // 선택돼 응답 데이터가 바뀔 수 있다. 저장된 FK로 최초 판정 이벤트를 그대로 복원한다.
+                    return MarketOrderResult.rejected(reason, haltDataOf(order));
+                }
+                return MarketOrderResult.rejected(reason);
             } catch (IllegalArgumentException | NullPointerException e) {
                 throw new BusinessException(ErrorCode.DUPLICATE_ORDER, "orderId=" + order.getOrderId());
             }
@@ -260,6 +291,26 @@ public class MarketOrderTransactionService {
                         ErrorCode.INTERNAL_ERROR, "filled order execution ledger missing: orderId=" + order.getOrderId()));
         return MarketOrderResult.filled(MarketOrderReceipt.from(
                 order, stock, ledgerEntry.getBalanceAfter()));
+    }
+
+    /**
+     * CB 거절 주문의 오류 데이터를 저장된 이벤트 ID로 복원한다. FK 대상이 없거나 CB가 아니면
+     * 재생 데이터를 지어낼 수 없으므로 {@code INTERNAL_ERROR}로 끊는다 — 빈 Map으로 성공처럼 보이게
+     * 하면 클라이언트가 원인 없이 재시도하게 된다.
+     */
+    private Map<String, Object> haltDataOf(TradeOrder order) {
+        Long eventId = order.getMarketEventId();
+        if (eventId == null) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR,
+                    "CB rejection without market_event_id: orderId=" + order.getOrderId());
+        }
+        return marketEventRepository.findById(eventId)
+                .filter(event -> event.getEventType() == com.baedang.market.event.entity.MarketEventType.CIRCUIT_BREAKER)
+                .map(ActiveMarketHalt::from)
+                .map(ActiveMarketHalt::asErrorData)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR,
+                        "market_event missing for CB rejection: orderId=" + order.getOrderId()
+                                + ", marketEventId=" + eventId));
     }
 
     private void verifySameRequest(TradeOrder order, Account account, Stock stock, OrderTerms terms) {

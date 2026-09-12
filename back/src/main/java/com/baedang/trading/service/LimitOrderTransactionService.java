@@ -3,6 +3,9 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.event.model.ActiveMarketHalt;
+import com.baedang.market.event.repository.MarketEventRepository;
+import com.baedang.market.event.service.MarketTradingHaltPolicy;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -17,6 +20,7 @@ import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.LimitOrderAcceptedEvent;
 import com.baedang.trading.model.OrderClosureResult;
 import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.model.LimitOrderResult;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
@@ -34,6 +38,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 import java.util.Optional;
 
 /** account → order → holding 순서로 잠그며 외부 API는 호출하지 않습니다. */
@@ -50,6 +55,8 @@ public class LimitOrderTransactionService {
     private final QuoteSnapshotRepository quotes;
     private final OrderPolicy policy;
     private final Clock clock;
+    private final MarketTradingHaltPolicy marketTradingHaltPolicy;
+    private final MarketEventRepository marketEventRepository;
     private final ApplicationEventPublisher events;
 
     public LimitOrderTransactionService(
@@ -60,6 +67,8 @@ public class LimitOrderTransactionService {
             QuoteSnapshotRepository quotes,
             OrderPolicy policy,
             Clock clock,
+            MarketTradingHaltPolicy marketTradingHaltPolicy,
+            MarketEventRepository marketEventRepository,
             ApplicationEventPublisher events
     ) {
         this.accounts = accounts;
@@ -69,11 +78,13 @@ public class LimitOrderTransactionService {
         this.quotes = quotes;
         this.policy = policy;
         this.clock = clock;
+        this.marketTradingHaltPolicy = marketTradingHaltPolicy;
+        this.marketEventRepository = marketEventRepository;
         this.events = events;
     }
 
     @Transactional(readOnly = true)
-    public Optional<OrderDetailResponse> existing(Long userId, LimitOrderCommand c) {
+    public Optional<LimitOrderResult> existing(Long userId, LimitOrderCommand c) {
         Account account = accounts.findByAccountIdAndUserId(c.accountId(), userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
         Optional<TradeOrder> existing = orders.findByAccountIdAndClientOrderId(account.getAccountId(), c.clientOrderId());
@@ -84,7 +95,7 @@ public class LimitOrderTransactionService {
         return Optional.empty();
     }
 
-    private OrderDetailResponse replay(TradeOrder order, LimitOrderCommand c) {
+    private LimitOrderResult replay(TradeOrder order, LimitOrderCommand c) {
         Stock stock = stocks.findById(order.getStockId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
         OrderTerms t = c.terms();
@@ -97,11 +108,16 @@ public class LimitOrderTransactionService {
                 || order.getRequestedLimitPrice().compareTo(c.requestedPrice()) != 0) {
             throw new BusinessException(ErrorCode.DUPLICATE_ORDER, ClientOrderRetryPolicy.NOT_RETRYABLE.asData());
         }
-        return OrderDetailResponse.from(order, stock);
+        OrderDetailResponse response = OrderDetailResponse.from(order, stock);
+        if (order.getStatus() == OrderStatus.REJECTED
+                && ErrorCode.MARKET_TRADING_HALTED.name().equals(order.getRejectReason())) {
+            return LimitOrderResult.rejected(response, haltDataOf(order));
+        }
+        return LimitOrderResult.normal(response);
     }
 
     @Transactional
-    public OrderDetailResponse accept(
+    public LimitOrderResult accept(
             Long userId,
             LimitOrderCommand c,
             OrderMarketContext context,
@@ -115,10 +131,25 @@ public class LimitOrderTransactionService {
         }
         requireActive(account);
         Instant now = clock.instant();
-        policy.validateExecutionContextFresh(context, now);
         OrderTerms t = c.terms();
         Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(t.symbol(), t.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
+
+        // CB 판정은 접수 트랜잭션 안에서만 한다. context 신선도·시세 검증보다 앞에 두어, 락 대기 중
+        // 시작된 CB가 만료된 context나 stale quote로 가려지지 않게 한다.
+        OffsetDateTime at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
+        if (halt.isPresent()) {
+            // 동결하지 않는다. 판정 이벤트를 FK로 고정해 같은 clientOrderId 재요청이 최초 데이터를 재생한다.
+            TradeOrder rejected = orders.save(TradeOrder.rejectedLimitOrderByHalt(
+                    account.getAccountId(), stock.getStockId(), c.clientOrderId(), t.side(), t.quantity(),
+                    price.limitPrice(), c.requestedPrice(), c.currency(), context.executionRate(),
+                    halt.get().eventId(), at));
+            return LimitOrderResult.rejected(
+                    OrderDetailResponse.from(rejected, stock), halt.get().asErrorData());
+        }
+
+        policy.validateExecutionContextFresh(context, now);
         QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElseThrow(() ->
                 new BusinessException(ErrorCode.QUOTE_NOT_FOUND, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
         if (!policy.hasValidCurrencyForMarket(stock, quote)) {
@@ -140,11 +171,10 @@ public class LimitOrderTransactionService {
         if (reason == null && t.side() == OrderSide.SELL && (holding == null || holding.availableQuantity().compareTo(t.quantity()) < 0)) {
             reason = ErrorCode.INSUFFICIENT_QUANTITY;
         }
-        OffsetDateTime at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
         if (reason != null) {
-            return OrderDetailResponse.from(orders.save(TradeOrder.rejectedLimitOrder(
+            return LimitOrderResult.normal(OrderDetailResponse.from(orders.save(TradeOrder.rejectedLimitOrder(
                     account.getAccountId(), stock.getStockId(), c.clientOrderId(), t.side(), t.quantity(), price.limitPrice(),
-                    c.requestedPrice(), c.currency(), context.executionRate(), reason.name(), at)), stock);
+                    c.requestedPrice(), c.currency(), context.executionRate(), reason.name(), at)), stock));
         }
         if (t.side() == OrderSide.BUY) {
             account.reserveCash(price.reserve());
@@ -157,7 +187,23 @@ public class LimitOrderTransactionService {
                 c.requestedPrice(), c.currency(), context.executionRate()));
         events.publishEvent(new LimitOrderAcceptedEvent(stock.getStockId(), t.side(), accepted.getOrderId(),
                 accepted.getLimitPrice(), accepted.getOrderedAt()));
-        return OrderDetailResponse.from(accepted, stock);
+        return LimitOrderResult.normal(OrderDetailResponse.from(accepted, stock));
+    }
+
+    /** CB 거절 주문의 오류 데이터를 저장된 이벤트 ID로 복원한다. 없거나 CB가 아니면 재생할 수 없다. */
+    private Map<String, Object> haltDataOf(TradeOrder order) {
+        Long eventId = order.getMarketEventId();
+        if (eventId == null) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR,
+                    "CB rejection without market_event_id: orderId=" + order.getOrderId());
+        }
+        return marketEventRepository.findById(eventId)
+                .filter(event -> event.getEventType() == com.baedang.market.event.entity.MarketEventType.CIRCUIT_BREAKER)
+                .map(ActiveMarketHalt::from)
+                .map(ActiveMarketHalt::asErrorData)
+                .orElseThrow(() -> new BusinessException(ErrorCode.INTERNAL_ERROR,
+                        "market_event missing for CB rejection: orderId=" + order.getOrderId()
+                                + ", marketEventId=" + eventId));
     }
 
     /** 만료 경합 결과를 예외가 아닌 값으로 반환하여 종료 및 동결 해제를 먼저 커밋합니다. */
