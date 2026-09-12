@@ -26,8 +26,10 @@ type Props = {
  * 텍스트 자체의 color를 바꾸는 게 아니라, 같은 텍스트를 하나 더 겹쳐두고
  * 그 복제본에만 파란 그라데이션을 background-clip: text로 씌운다 — 그래서
  * "글자 모양대로만 빛이 지나가는" 느낌이 나고, 원본 텍스트의 색·굵기·줄바꿈은
- * 전혀 건드리지 않는다. 뷰포트에 들어오면(또는 `active`가 true가 되면)
- * 한 번만 재생되고, 다시 스크롤해도 반복되지 않는다.
+ * 전혀 건드리지 않는다. 뷰포트에 들어오면(또는 `active`가 true가 되면) 계속
+ * 같은 속도로 반복해서 훑고 지나간다(investup-intro.css의 iv-sweep
+ * keyframe·animation이 무한 반복이다) — 트리거는 한 번만 일어나지만, 그
+ * 뒤로는 멈추지 않고 계속 재생된다.
  */
 export function GradientSweepText({ children, delay = 0, active, className }: Props) {
   const ref = useRef<HTMLSpanElement>(null);
