@@ -27,6 +27,7 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
+import { GradientSweepText } from './GradientSweepText';
 import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
@@ -1405,7 +1406,11 @@ export function InvestupIntro({
             {/* "기존 증권사 서비스와 무엇이 다른가요?" 제목과 완전히 같은 등장
                 효과(opacity/blur/translateY/transition 값이 동일) —
                 ctaLineRevealed가 titleRevealed와 같은 역할을 한다.
-                "5,000만원으로" 다음에서 줄바꿈된다. */}
+                "5,000만원"과 "으로" 사이는 공백 없이 붙고, "으로" 다음에서
+                줄바꿈된다. "5,000만원"에는 파란 그라데이션이 훑고 지나가는
+                효과(GradientSweepText)를 추가로 입혔다 — 이 단어의 blur-in
+                등장(지연 2 × WORD_STAGGER_S + 0.6s 재생 시간, 대략 0.74s
+                뒤 완료)이 끝나고 나서 훑고 지나가도록 delay를 넉넉히 줬다. */}
             <p
               style={{
                 margin: 0,
@@ -1429,9 +1434,15 @@ export function InvestupIntro({
                       transition: `opacity .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, filter .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s, transform .6s cubic-bezier(.2,.9,.24,1) ${(i * WORD_STAGGER_S).toFixed(2)}s`,
                     }}
                   >
-                    {w}
+                    {w === '5,000만원' ? (
+                      <GradientSweepText active={ctaLineRevealed} delay={0.85}>
+                        {w}
+                      </GradientSweepText>
+                    ) : (
+                      w
+                    )}
                   </span>
-                  {i < CTA_LINE_WORDS.length - 1 && (w === '5,000만원으로' ? <br /> : ' ')}
+                  {i < CTA_LINE_WORDS.length - 1 && (w === '5,000만원' ? '' : w === '으로' ? <br /> : ' ')}
                 </Fragment>
               ))}
             </p>

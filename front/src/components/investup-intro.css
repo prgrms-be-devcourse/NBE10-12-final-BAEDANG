@@ -178,3 +178,64 @@
     transition: none;
   }
 }
+
+/* GradientSweepText — 텍스트 위로 파란 그라데이션 빛이 왼쪽에서 오른쪽으로
+   한 번 훑고 지나가는 효과. toss.im/simplicity/sessions/toss-graphic-2-0의
+   "자연스럽게 토스만의 그래픽적 차별점이 희미해졌죠" 문구 효과 참고.
+   중앙에 밝은 파랑, 양쪽으로 부드럽게 흐려지는 "빛의 띠"가 background로
+   깔리고, background-clip: text로 글자 모양에만 보이게 잘라낸다. 실제
+   텍스트 색은 절대 바꾸지 않는다(GradientSweepText.tsx의 기본 텍스트
+   레이어가 원래 색 그대로 유지되고, 이 레이어는 그 위에 겹쳐지는 장식일
+   뿐이다). */
+.iv-sweep-gradient {
+  position: absolute;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+  color: transparent;
+  background-repeat: no-repeat;
+  /* 그라데이션 폭 — 값을 키우면 빛의 띠가 더 넓어지고, 줄이면 더 좁고
+     또렷한 띠가 된다. */
+  background-size: 260% 100%;
+  background-position: -150% 0;
+  /* 색상·그라데이션 폭 조절 지점 — 중앙(46~54%)이 가장 밝고 그 바깥으로
+     퍼지면서 옅어진다. 가운데 두 값(#3182f6, #6ea8ff)을 바꾸면 색이,
+     퍼센트 값을 넓히거나 좁히면 빛의 띠의 두께가 바뀐다. */
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 32%,
+    rgba(49, 130, 246, 0) 40%,
+    #3182f6 46%,
+    #6ea8ff 50%,
+    #3182f6 54%,
+    rgba(49, 130, 246, 0) 60%,
+    transparent 68%,
+    transparent 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.iv-sweep-gradient.iv-sweep-play {
+  /* 애니메이션 속도 조절 지점 — duration(1.2s)과 easing을 여기서 바꾼다. */
+  animation: iv-sweep 1.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes iv-sweep {
+  from {
+    background-position: -150% 0;
+  }
+  to {
+    background-position: 150% 0;
+  }
+}
+
+/* prefers-reduced-motion이면 장식용 그라데이션 레이어를 아예 없앤다 —
+   기본 텍스트 레이어만 남아 내용은 그대로 다 보인다. */
+@media (prefers-reduced-motion: reduce) {
+  .iv-sweep-gradient {
+    display: none;
+  }
+}
