@@ -359,11 +359,20 @@ export function InvestupIntro({
       // 지구본 모양이 리사이즈로 바뀌어도(g는 매 프레임 다시 계산된다)
       // 항상 정확히 같은 원 안에서만 보인다. 색은 히어로 상단 글로우와
       // 같은 T.dotInk(#7fb6e3) 계열이다.
+      // 그라데이션 span: 지구본은 중심(g.cy)이 캔버스 아래로 한참
+      // 벗어나 있고 원의 위쪽 호만 캔버스 안에 보이는 구조라(중심이
+      // 화면 아래에 있는 "지평선" 느낌), 그라데이션을 원의 지름
+      // 전체(g.cy-g.R ~ g.cy+g.R)에 걸쳐 만들면 실제로 눈에 보이는
+      // 캔버스 영역(0~f.h)에서는 전체 그라데이션의 극히 일부(위쪽
+      // 구간)만 보여서 "아래로 갈수록 옅어지는" 변화가 거의 안
+      // 느껴졌다. 그래서 그라데이션 범위를 원의 지름이 아니라 실제로
+      // 보이는 캔버스 높이(원의 위쪽 끝 ~ 캔버스 하단)에 맞춰, 눈에
+      // 보이는 영역 안에서 옅어짐이 다 끝나도록 고쳤다.
       ctx.save();
       ctx.beginPath();
       ctx.arc(g.cx, g.cy, g.R, 0, 6.2832);
       ctx.clip();
-      const globeGlow = ctx.createLinearGradient(0, g.cy - g.R, 0, g.cy + g.R);
+      const globeGlow = ctx.createLinearGradient(0, Math.max(0, g.cy - g.R), 0, f.h);
       globeGlow.addColorStop(0, 'rgba(127,182,227,0.45)');
       globeGlow.addColorStop(1, 'rgba(127,182,227,0)');
       ctx.fillStyle = globeGlow;
