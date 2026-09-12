@@ -1366,21 +1366,6 @@ export function InvestupIntro({
             }}
           />
 
-          {/* 01 Hero의 좌·우 도트 패턴 + 발광 하이라이트와 동일한 디자인·효과를
-              이 화면 하단에도 넣어달라는 요청 — 위 dotLayer/shimmer 함수를
-              그대로 재사용하되 edge='bottom'으로 아래쪽 모서리에 붙이고,
-              히어로의 lifted/charted 대신 이 화면 자체의 등장 신호
-              (ctaLineRevealed로 먼저 보이고, ctaBtnRevealed에서 애니메이션
-              시작 — 히어로의 "먼저 나타나고 뒤이어 움직이기 시작" 순서와
-              같다)를 트리거로 쓴다. 남색 패널(zIndex 3)이 다 채워진 뒤에도
-              보여야 하므로 zIndex만 그 위로 올렸다. */}
-          <div style={{ ...dotLayer('left', ctaLineRevealed, ctaBtnRevealed, 'bottom'), zIndex: 4 }}>
-            <div style={shimmer('left', ctaBtnRevealed)} />
-          </div>
-          <div style={{ ...dotLayer('right', ctaLineRevealed, ctaBtnRevealed, 'bottom'), zIndex: 4 }}>
-            <div style={shimmer('right', ctaBtnRevealed)} />
-          </div>
-
           <div
             ref={ctaRef}
             style={{
