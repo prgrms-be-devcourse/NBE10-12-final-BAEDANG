@@ -686,7 +686,13 @@ export function InvestupIntro({
             linear-gradient(180deg, ...)로 바꿨고, 카드처럼 흰색으로
             끝나면 히어로 배경 전체를 흰 판으로 덮어버리므로 마지막
             지점만 투명(alpha 0)으로 바꿔 히어로 자체 배경 위에 자연스럽게
-            녹아들게 했다. */}
+            녹아들게 했다.
+            처음엔 히어로 섹션 전체(로고+태그라인 → 도트 지구본까지)에
+            계속 떠 있었는데, "맨 처음 로고+태그라인 화면에만 적용하고
+            싶다"는 요청으로 도트 지구본이 등장하는 시점(lifted)에 맞춰
+            사라지게 했다 — 로고가 위로 이동/축소되는 mesh(위 44번째
+            줄)와 같은 opacity·transition 값을 그대로 맞춰 같은 타이밍에
+            함께 옅어진다. */}
         <div
           aria-hidden="true"
           style={{
@@ -695,6 +701,8 @@ export function InvestupIntro({
             pointerEvents: 'none',
             background:
               'linear-gradient(180deg, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, rgba(196,222,248,0) 100%)',
+            opacity: lifted ? 0 : 1,
+            transition: 'opacity 1.6s cubic-bezier(.16,1,.3,1)',
           }}
         />
 
