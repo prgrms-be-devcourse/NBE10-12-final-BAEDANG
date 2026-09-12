@@ -443,7 +443,7 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - `MarketEventQueryService.get(market, date)`: KST 하루를 반개구간 `[from, to)` UTC 범위로 바꿉니다. 100건 상한, `active`는 저장값이 아니라 응답 시각에 계산합니다. 공개 응답 시각은 항상 `+09:00`이고 저장은 UTC입니다.
 - `MarketEventController`: `GET /api/market/events?market=&date=`는 공개입니다. 두 파라미터를 문자열로 받아 파싱 실패를 다른 API와 같은 `INVALID_INPUT` + `data.field`로 내보냅니다 — enum/날짜 바인딩이 프레임워크 메시지를 내보내게 두지 않습니다.
 - 소비자는 `haltUntil`을 읽고 만료를 기다립니다. RSS 해제 공시나 RSS 상태로 재개를 추론하지 않습니다. 수집 장애가 나도 기존 구간은 그대로 남고 스스로 만료됩니다.
-- 사이드카는 프로그램 호가에만 영향을 줍니다 — 일반 주문을 막으면 안 됩니다. 서킷브레이커 주문 차단은 별도 관심사입니다(Part 4/#166).
+- 사이드카는 프로그램 호가에만 영향을 줍니다 — 일반 주문을 막으면 안 됩니다. 서킷브레이커 주문 차단은 거래 트랜잭션 안에서 강제합니다(account 잠금 후 `MarketTradingHaltPolicy.activeFor`). 트랜잭션 밖 사전 거절이 아닙니다.
 
 
 ## 거래일·종가 복구 (#173)
@@ -468,3 +468,12 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - 일봉 공통 잠금 안에서 백필 상태를 한 번 확인하고 조회·저장한다. 현재가 전용 잠금을 일봉 경로에서 다시 획득하지 않는다. 현재가와 일봉은 서로 다른 잠금을 유지한다.
 - 시드 성공·백필 완료·해당 날짜 갱신 완료·후속 주봉 갱신은 `DailyCandlePersistenceService.upsert`가 반환한 저장 대상 행으로 판단한다. 미확정 일봉만 받은 경우 완료를 기록하지 않고 다음 요청에서 재시도한다. 정기 수집도 반환된 행에 기대 거래일이 있어야 성공이다.
 - 날짜 변환은 기존 `MarketCountry.zoneId()`를 사용한다. 새 날짜 변환 서비스·범용 수집기·추가 캐시는 만들지 않는다.
+
+
+## 서킷브레이커 주문 차단
+
+- `MarketTradingHaltPolicy.activeFor(stock, at)` / `requireTradingAllowed(stock, at)`: 해당 종목 시장이 중단됐는지 판정한다. KR KOSPI/KOSDAQ에만 적용하고 `KR_ETC`·미국 시장은 차단하지 않으며 사이드카는 차단 사유가 아니다(저장소 조회가 `CIRCUIT_BREAKER`만 선택). 메모리 캐시 없이 호출마다 DB를 읽고, 거래 트랜잭션 안에서 account 잠금 후 호출해야 한다.
+- `ActiveMarketHalt`: 판정 이벤트. 주문 감사 FK용 eventId를 담는다. `asErrorData()`는 `market`/`eventType`/`stage`/`triggeredAt`/`haltUntil`만 `+09:00`으로 노출하며 `eventId`는 노출하지 않는다.
+- `MarketOrderTransactionService` / `LimitOrderTransactionService`: account 잠금·동시 멱등·account 수명 검증·종목 조회 뒤, execution-context 신선도와 시세 검증 앞에서 정책을 호출한다. 중단이면 `market_event_id`를 담은 `REJECTED` 1건을 저장하고, MARKET은 quote/reference/rate 증거를 남기지 않으며 LIMIT은 동결하지 않는다.
+- 재생: 저장된 `market_event_id`로 최초 거절 데이터를 복원한다. 이벤트가 존재하고 `CIRCUIT_BREAKER`이며 주문 시장과 일치해야 하고, 아니면 다른 이벤트로 대체하지 않고 `INTERNAL_ERROR`를 던진다.
+- Part·이슈 이력은 `docs/superpowers/` 계획 노트에 두고, 이 가이드와 `api-spec`에는 로드맵 좌표를 남기지 않는다.

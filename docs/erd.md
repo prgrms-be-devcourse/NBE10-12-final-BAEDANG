@@ -686,6 +686,8 @@ All three are NULL for MARKET and required for LIMIT. limit_price remains the fi
 
 Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. No legacy row corrections are included.
 
+A circuit-breaker rejection keeps the same LIMIT evidence shape: the requested price/currency and the acceptance rate are stored (they are the idempotency comparison basis and CHECK-required for every LIMIT row), while quote-time evidence and any reservation remain absent — the order is not priced against a quote and no cash or quantity is frozen. `market_event_id` is set only here and only on the stored `REJECTED` row.
+
 ### LIMIT execution indexes (#122)
 
 No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.

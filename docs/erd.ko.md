@@ -686,6 +686,8 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 
 지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 과거 행 보정은 포함하지 않습니다.
 
+서킷브레이커 거절도 같은 지정가 근거 형태를 유지합니다. 사용자 입력 가격·통화와 접수 환율은 저장하고(멱등 비교 기준이며 모든 LIMIT 행에 CHECK로 요구됩니다), quote 시각 근거와 동결은 남기지 않습니다 — quote로 가격을 매기지 않고 현금·수량을 동결하지 않기 때문입니다. `market_event_id`는 오직 이 경로의 저장된 `REJECTED` 행에만 설정합니다.
+
 ### 지정가 체결 인덱스 (#122)
 
 테이블/컬럼 추가는 없습니다. `V7__limit_execution_indexes.sql`에서 잔여 수량이 있는 활성 LIMIT 주문에 부분 인덱스를 추가합니다. 수집 EXISTS용 `ix_order_quote_target(stock_id, expires_at)`, 매수용 `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)`, 매도용 가격 오름차순 인덱스입니다. 방향별 인덱스는 side 조건을 포함합니다. 만료는 조회 시 범위 조건이며 now()를 인덱스 조건에 넣지 않습니다. 계좌 이력/활성 주문/만료 인덱스는 유지합니다.
