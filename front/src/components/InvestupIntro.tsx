@@ -1416,9 +1416,10 @@ export function InvestupIntro({
               className="iv-cta-btn iv-hover-swap"
               href={ctaHref}
               style={{
-                // 문구와의 간격을 많이 띄워달라는 요청 — 부모의 flex gap(최대
-                // 22px)에 더해 marginTop을 크게 키웠다.
-                marginTop: 'clamp(48px, 8vh, 96px)',
+                // 문구와의 간격을 많이 띄워달라는 요청 — 처음엔
+                // clamp(48px, 8vh, 96px)이었는데, 더 띄워달라는 후속 요청으로
+                // 다시 키웠다(부모의 flex gap 최대 22px에 더해진다).
+                marginTop: 'clamp(80px, 13vh, 160px)',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 10,
@@ -1427,11 +1428,13 @@ export function InvestupIntro({
                 // 첨부 사진(토스 스타일 알약형 버튼) 참고 — 완전히 둥근 모서리,
                 // 흰색 대신 옅은 회색 배경, 남색 대신 짙은 무채색 글자,
                 // 무거운 그림자 대신 아주 옅은 그림자로 바꿨다. 배경은 반투명하게
-                // 해달라는 후속 요청으로 다시 rgba로 바꿨다.
+                // 해달라는 후속 요청으로 rgba로 바꿨고, "더 투명하게"라는 요청으로
+                // 알파값을 .55 → .32로 한 번 더 낮췄다.
                 borderRadius: 999,
-                background: 'rgba(236, 238, 241, 0.55)',
+                background: 'rgba(236, 238, 241, 0.32)',
                 color: '#191f28',
-                fontSize: 17,
+                // "시작하기" 글자를 더 키워달라는 요청 — 17 → 19.
+                fontSize: 19,
                 fontWeight: 700,
                 letterSpacing: '-.01em',
                 textDecoration: 'none',
