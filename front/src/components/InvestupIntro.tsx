@@ -432,7 +432,11 @@ export function InvestupIntro({
           a.ctaLineShown = true;
           setCtaLineRevealed(true);
         }
-        if (!a.ctaBtnShown && q > 0.3) {
+        // 버튼이 문구보다 조금 더 늦게 등장하게 해달라는 요청으로
+        // 트리거 지점을 0.3 → 0.4로 늦췄다(그래도 버튼이 실제로 클릭
+        // 가능해지는 지점인 q > 0.5보다는 여전히 앞선다 — 클릭은 되는데
+        // 안 보이는 상태가 되지 않도록).
+        if (!a.ctaBtnShown && q > 0.4) {
           a.ctaBtnShown = true;
           setCtaBtnRevealed(true);
         }
