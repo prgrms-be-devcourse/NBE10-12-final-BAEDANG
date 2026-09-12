@@ -220,20 +220,22 @@
 
 .iv-sweep-gradient.iv-sweep-play {
   /* 한 번만 재생하고 끝내지 않고, 스크롤을 다 내린 뒤에도 계속 같은
-     속도로 반복해서 훑고 지나가게 해달라는 요청 — infinite로 바꿨다.
-     사이클(2.5s) 안에서 실제로 훑고 지나가는 데 걸리는 시간은
-     1.2s(요청한 "일정한 속도")고, 나머지 1.3s는 화면 밖에서 쉬었다가
-     다시 시작한다(쉬지 않고 곧바로 이어지면 눈이 어지러워 보일 수
-     있어 짧은 정지를 뒀다). 속도 조절 지점 — duration(2.5s 중 처음
-     48%가 sweep 구간)과 easing을 여기서 바꾼다. */
-  animation: iv-sweep 2.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+     속도로 반복해서 훑고 지나가게 해달라는 요청으로 infinite로 바꿨는데,
+     그 훑고 지나가는 속도 자체가 너무 빠르다는 후속 피드백으로 많이
+     늦췄다. 사이클(4.5s) 안에서 실제로 훑고 지나가는 데 걸리는 시간은
+     2.8s(느긋한 속도)고, 나머지 1.7s는 화면 밖에서 쉬었다가 다시
+     시작한다(쉬지 않고 곧바로 이어지면 산만해 보일 수 있어 짧은 정지를
+     뒀다). 속도 조절 지점 — duration(4.5s 중 처음 62%가 sweep 구간,
+     아래 keyframe의 62% 지점과 함께 바꿔야 한다)과 easing을 여기서
+     바꾼다. */
+  animation: iv-sweep 4.5s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
 @keyframes iv-sweep {
   0% {
     background-position: -150% 0;
   }
-  48% {
+  62% {
     background-position: 150% 0;
   }
   100% {
