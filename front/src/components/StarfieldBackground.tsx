@@ -27,8 +27,8 @@ export type StarfieldBackgroundProps = {
   /** 별 개수. */
   starCount?: number;
   /** 별이 퍼져나가는 기준 속도. 값을 키우면 더 빠르게, 줄이면 더 느리게
-   * 스쳐 지나간다. 처음엔 60이었는데 "좀 더 느리게" 해달라는 요청으로
-   * 기본값을 32로 낮췄다. */
+   * 스쳐 지나간다. 처음엔 60 → "좀 더 느리게" 요청으로 32 → "조금만 더
+   * 느리게" 요청으로 22까지 낮췄다. */
   speed?: number;
 };
 
@@ -54,7 +54,7 @@ export function StarfieldBackground({
   style,
   active,
   starCount = 260,
-  speed = 32,
+  speed = 22,
 }: StarfieldBackgroundProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -118,7 +118,10 @@ export function StarfieldBackground({
           lerp(STAR_RGB_FAR[1], STAR_RGB_NEAR[1], depthT),
           lerp(STAR_RGB_FAR[2], STAR_RGB_NEAR[2], depthT),
         ];
-        const radius = Math.max(0.5, scale * 0.35);
+        // 별 크기를 조금 더 크게 해달라는 요청으로 최소/배율을 함께
+        // 키웠다(0.5→0.75, 0.35→0.48) — 아래 움직이는 별의 lineWidth와
+        // 같은 비율로 맞췄다.
+        const radius = Math.max(0.75, scale * 0.48);
         ctx.fillStyle = `rgba(${r.toFixed(0)}, ${g.toFixed(0)}, ${b.toFixed(0)}, ${(0.35 + depthT * 0.5).toFixed(2)})`;
         ctx.beginPath();
         ctx.arc(sx, sy, radius, 0, Math.PI * 2);
@@ -158,7 +161,9 @@ export function StarfieldBackground({
         ];
         const alpha = 0.25 + depthT * 0.65;
         ctx!.strokeStyle = `rgba(${r.toFixed(0)}, ${g.toFixed(0)}, ${b.toFixed(0)}, ${alpha.toFixed(2)})`;
-        ctx!.lineWidth = Math.max(0.6, depthT * 2.2);
+        // 별 크기를 조금 더 크게 해달라는 요청 — 최소 굵기와 배율을 함께
+        // 키웠다(0.6→0.9, 2.2→3.0).
+        ctx!.lineWidth = Math.max(0.9, depthT * 3.0);
         ctx!.beginPath();
         ctx!.moveTo(prev.sx, prev.sy);
         ctx!.lineTo(cur.sx, cur.sy);
