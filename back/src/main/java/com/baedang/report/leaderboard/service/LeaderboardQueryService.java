@@ -19,7 +19,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -132,7 +131,7 @@ public class LeaderboardQueryService {
                         a.typeCode(),
                         InvestmentType.fromCode(a.typeCode()).label(),
                         a.count(),
-                        plain(BigDecimal.valueOf(a.avgReturnRate()).setScale(4, RoundingMode.HALF_UP))))
+                        plain(a.avgReturnRate().setScale(4, RoundingMode.HALF_UP))))
                 .toList();
         return new LeaderboardTypesResponse(asOf, types);
     }

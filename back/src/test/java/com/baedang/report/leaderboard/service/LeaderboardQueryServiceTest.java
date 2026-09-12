@@ -14,6 +14,8 @@ import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -112,8 +114,8 @@ class LeaderboardQueryServiceTest {
     void 유형_비교는_유형별_평균수익률을_라벨과_함께_내린다() {
         when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 100)));
         when(snapshotRepository.aggregateByType(AS_OF)).thenReturn(List.of(
-                new TypeAggregate("DKSB", 12, 0.05),
-                new TypeAggregate("CGEB", 5, -0.02)));
+                new TypeAggregate("DKSB", 12, new BigDecimal("0.05")),
+                new TypeAggregate("CGEB", 5, new BigDecimal("-0.02"))));
 
         LeaderboardTypesResponse res = service().getTypeComparison();
 
@@ -123,6 +125,23 @@ class LeaderboardQueryServiceTest {
         assertThat(res.types().get(0).typeLabel()).isEqualTo("분산·국내·개별주·안정형");
         assertThat(res.types().get(0).count()).isEqualTo(12);
         assertThat(res.types().get(0).avgReturnRate()).isEqualTo("0.05");
+        assertThat(res.types().get(1).avgReturnRate()).isEqualTo("-0.02");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "0.10004999999999999999, 0.1",
+            "0.10005, 0.1001",
+            "-0.10004999999999999999, -0.1",
+            "-0.10005, -0.1001",
+            "0.000000, 0"
+    })
+    void 유형_평균은_십진수_정밀도를_유지하다_응답에서만_HALF_UP_반올림한다(String average, String expected) {
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 3)));
+        when(snapshotRepository.aggregateByType(AS_OF)).thenReturn(List.of(
+                new TypeAggregate("DKSB", 3, new BigDecimal(average))));
+
+        assertThat(service().getTypeComparison().types().get(0).avgReturnRate()).isEqualTo(expected);
     }
 
     @Test

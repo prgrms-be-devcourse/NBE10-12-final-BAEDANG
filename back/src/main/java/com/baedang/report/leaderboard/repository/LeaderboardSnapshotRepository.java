@@ -23,14 +23,13 @@ public interface LeaderboardSnapshotRepository extends JpaRepository<Leaderboard
     Optional<LeaderboardSnapshot> findByAsOfAndAccountId(OffsetDateTime asOf, Long accountId);
 
     /** 유형별 평균 수익률·인원(최신 as_of). 미분류(type_code null)는 제외. 평균 높은 순. */
-    @Query("""
-            select new com.baedang.report.leaderboard.dto.TypeAggregate(
-                s.typeCode, count(s), avg(s.returnRate))
-            from LeaderboardSnapshot s
-            where s.asOf = :asOf and s.typeCode is not null
-            group by s.typeCode
-            order by avg(s.returnRate) desc
-            """)
+    @Query(value = """
+            select s.type_code, count(*), avg(s.return_rate)
+            from leaderboard_snapshot s
+            where s.as_of = :asOf and s.type_code is not null
+            group by s.type_code
+            order by avg(s.return_rate) desc
+            """, nativeQuery = true)
     List<TypeAggregate> aggregateByType(@Param("asOf") OffsetDateTime asOf);
 
     /** 같은 유형 인원 수(유형 내 퍼센타일 분모). */
