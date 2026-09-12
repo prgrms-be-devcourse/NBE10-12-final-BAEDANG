@@ -571,25 +571,40 @@ export function InvestupIntro({
     Math.max(8, Math.min((pin.boxH || 500) - 160, pin.y > 176 ? pin.y - 168 : pin.y + 22)),
   );
 
-  const dotLayer = (side: 'left' | 'right'): React.CSSProperties => ({
-    position: 'absolute',
-    [side]: 0,
-    top: 0,
-    width: 'min(26vw, 360px)',
-    height: 'min(26vw, 360px)',
-    zIndex: 2,
-    pointerEvents: 'none',
-    backgroundImage: `radial-gradient(${T.dotInk} 32%, rgba(0,0,0,0) 33%)`,
-    backgroundSize: '13px 13px',
-    backgroundPosition: side === 'left' ? '0 0' : '100% 0',
-    opacity: lifted ? T.dotMax : 0,
-    transition: 'opacity .8s ease',
-    animation: charted ? 'iv-dot-breathe 6.5s ease-in-out 1s infinite' : 'none',
-    maskImage: `radial-gradient(115% 115% at ${side === 'left' ? '0% 0%' : '100% 0%'}, #000 0%, rgba(0,0,0,.6) 46%, rgba(0,0,0,0) 90%)`,
-    WebkitMaskImage: `radial-gradient(115% 115% at ${side === 'left' ? '0% 0%' : '100% 0%'}, #000 0%, rgba(0,0,0,.6) 46%, rgba(0,0,0,0) 90%)`,
-  });
+  // 01 Hero의 좌·우 도트 패턴 + 발광 하이라이트 — 04 Zoom의 CTA 화면 하단에도
+  // "동일한 디자인 및 효과"로 넣어달라는 요청으로, 어느 모서리(edge)에 붙일지와
+  // 보임/애니메이션 시작 여부(visible/animate)를 인자로 받도록 일반화했다.
+  // 원래는 컴포넌트 스코프의 lifted/charted를 직접 읽었는데, 이제 호출하는 쪽이
+  // 각자의 트리거(히어로는 lifted/charted, CTA는 ctaLineRevealed/ctaBtnRevealed)를
+  // 넘겨준다 — 스타일 값 자체는 완전히 그대로다.
+  const dotLayer = (
+    side: 'left' | 'right',
+    visible: boolean,
+    animate: boolean,
+    edge: 'top' | 'bottom' = 'top',
+  ): React.CSSProperties => {
+    const x = side === 'left' ? '0%' : '100%';
+    const y = edge === 'top' ? '0%' : '100%';
+    return {
+      position: 'absolute',
+      [side]: 0,
+      [edge]: 0,
+      width: 'min(26vw, 360px)',
+      height: 'min(26vw, 360px)',
+      zIndex: 2,
+      pointerEvents: 'none',
+      backgroundImage: `radial-gradient(${T.dotInk} 32%, rgba(0,0,0,0) 33%)`,
+      backgroundSize: '13px 13px',
+      backgroundPosition: `${x} ${y}`,
+      opacity: visible ? T.dotMax : 0,
+      transition: 'opacity .8s ease',
+      animation: animate ? 'iv-dot-breathe 6.5s ease-in-out 1s infinite' : 'none',
+      maskImage: `radial-gradient(115% 115% at ${x} ${y}, #000 0%, rgba(0,0,0,.6) 46%, rgba(0,0,0,0) 90%)`,
+      WebkitMaskImage: `radial-gradient(115% 115% at ${x} ${y}, #000 0%, rgba(0,0,0,.6) 46%, rgba(0,0,0,0) 90%)`,
+    };
+  };
 
-  const shimmer = (side: 'left' | 'right'): React.CSSProperties => ({
+  const shimmer = (side: 'left' | 'right', animate: boolean): React.CSSProperties => ({
     position: 'absolute',
     inset: 0,
     background: `radial-gradient(48% 48% at 50% 50%, ${T.dotInk} 0%, rgba(0,0,0,0) 78%)`,
@@ -598,7 +613,7 @@ export function InvestupIntro({
     backgroundRepeat: 'no-repeat',
     backgroundSize: '190% 190%',
     backgroundPosition: side === 'left' ? '0% 0%' : '100% 0%',
-    animation: charted
+    animation: animate
       ? side === 'left'
         ? 'iv-dot-shimmer-l 5.5s linear 1.2s infinite'
         : 'iv-dot-shimmer-r 5.5s linear 2.2s infinite'
@@ -656,11 +671,11 @@ export function InvestupIntro({
         />
 
         {/* 좌·우 상단 도트 패턴 + 발광 하이라이트 */}
-        <div style={dotLayer('left')}>
-          <div style={shimmer('left')} />
+        <div style={dotLayer('left', lifted, charted)}>
+          <div style={shimmer('left', charted)} />
         </div>
-        <div style={dotLayer('right')}>
-          <div style={shimmer('right')} />
+        <div style={dotLayer('right', lifted, charted)}>
+          <div style={shimmer('right', charted)} />
         </div>
 
         {/* 로고 + 태그라인 (등장 후 위로 이동) */}
@@ -1347,6 +1362,21 @@ export function InvestupIntro({
               opacity: 0,
             }}
           />
+
+          {/* 01 Hero의 좌·우 도트 패턴 + 발광 하이라이트와 동일한 디자인·효과를
+              이 화면 하단에도 넣어달라는 요청 — 위 dotLayer/shimmer 함수를
+              그대로 재사용하되 edge='bottom'으로 아래쪽 모서리에 붙이고,
+              히어로의 lifted/charted 대신 이 화면 자체의 등장 신호
+              (ctaLineRevealed로 먼저 보이고, ctaBtnRevealed에서 애니메이션
+              시작 — 히어로의 "먼저 나타나고 뒤이어 움직이기 시작" 순서와
+              같다)를 트리거로 쓴다. 남색 패널(zIndex 3)이 다 채워진 뒤에도
+              보여야 하므로 zIndex만 그 위로 올렸다. */}
+          <div style={{ ...dotLayer('left', ctaLineRevealed, ctaBtnRevealed, 'bottom'), zIndex: 4 }}>
+            <div style={shimmer('left', ctaBtnRevealed)} />
+          </div>
+          <div style={{ ...dotLayer('right', ctaLineRevealed, ctaBtnRevealed, 'bottom'), zIndex: 4 }}>
+            <div style={shimmer('right', ctaBtnRevealed)} />
+          </div>
 
           <div
             ref={ctaRef}
