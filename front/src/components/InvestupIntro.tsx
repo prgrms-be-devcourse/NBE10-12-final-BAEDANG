@@ -28,6 +28,7 @@ import {
   clamp01,
 } from '@/lib/investup-intro-data';
 import { GradientSweepText } from './GradientSweepText';
+import { StarfieldBackground } from './StarfieldBackground';
 import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
 import './investup-intro.css';
@@ -1365,6 +1366,18 @@ export function InvestupIntro({
               opacity: 0,
             }}
           />
+
+          {/* "모의 투자금 5,000만원으로 나만의 투자 연습을 시작해보세요." 문구
+              배경에 별이 등장하는 효과를 넣어달라는 요청 — 참고 화면
+              (toss.im/career/event/frontend-2026)의 별 효과는 실제로는
+              Toss가 자체 제작해 올려둔 배경 비디오 파일이라(개발자 도구로
+              직접 확인했다) 그 파일을 그대로 가져다 쓰지 않고, 같은
+              "중심에서 별이 태어나 방사형으로 퍼져나가는" 시각 효과를
+              캔버스로 새로 구현했다(StarfieldBackground.tsx). 남색
+              패널(zIndex 3) 위, CTA 문구(zIndex 5) 아래에 배경으로
+              깔리도록 zIndex 4를 줬고, ctaLineRevealed(문구가 처음 보이기
+              시작하는 시점)와 같은 타이밍에 함께 켜진다. */}
+          <StarfieldBackground active={ctaLineRevealed} style={{ zIndex: 4 }} />
 
           <div
             ref={ctaRef}
