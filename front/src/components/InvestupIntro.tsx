@@ -1367,21 +1367,21 @@ export function InvestupIntro({
             }}
           />
 
-          {/* 배경 중앙에 현재 배경색(deepInk)보다 더 어두운 남색이 퍼지는
+          {/* 배경 중앙에 현재 배경색(deepInk)보다 더 어두운 색이 퍼지는
               그라데이션을 넣어달라는 요청 — 남색 패널(zIndex 3) 바로 위에
               깔아 중심이 더 짙어 보이게 하고, 별(zIndex 4)이 그 위에서
-              반짝이도록 별보다는 아래에 뒀다. deepInk보다 더 어두운
-              색으로는 이 파일에서 이미 쓰고 있는 sectionHeadInk(#071829)를
-              그대로 재사용했다(새 색을 만들지 않고 기존 팔레트 안에서
-              해결). 중앙(0%)에서 진하다가 60% 지점에서 투명해져 원래
-              deepInk 배경과 자연스럽게 이어진다. */}
+              반짝이도록 별보다는 아래에 뒀다. 처음엔 이 파일에서 이미
+              쓰고 있는 더 짙은 남색(sectionHeadInk, #071829)이었는데,
+              "남색 대신 검정색으로" 바꿔달라는 요청으로 순수 검정(#000)
+              으로 교체했다. 중앙(0%)에서 진하다가 60% 지점에서
+              투명해져 원래 deepInk 배경과 자연스럽게 이어진다. */}
           <div
             aria-hidden="true"
             style={{
               position: 'absolute',
               inset: 0,
               zIndex: 3,
-              background: `radial-gradient(circle at 50% 50%, ${T.sectionHeadInk} 0%, rgba(7, 24, 41, 0) 60%)`,
+              background: 'radial-gradient(circle at 50% 50%, #000000 0%, rgba(0, 0, 0, 0) 60%)',
               pointerEvents: 'none',
               // 남색 패널 자신은 스크롤에 따라 transform: scale()로 커지는
               // 중이라 이 오버레이도 무작정 항상 100% 크기로 보이면 안
@@ -1495,9 +1495,11 @@ export function InvestupIntro({
                 // 별로라는 피드백으로 뺐다. 새로 첨부한 사진(어두운 배경 위
                 // 반투명한 흰색 알약형 버튼, "자세히 보기") 참고 — 흰색의
                 // 불투명도만 낮춘 단색 반투명 배경, 흰 글자로 바꿨다. 무거운
-                // 그림자 대신 아주 옅은 그림자는 그대로 뒀다.
+                // 그림자 대신 아주 옅은 그림자는 그대로 뒀다. 배경을 좀 더
+                // 투명하게 해달라는 후속 요청으로 알파값을 .16 → .1로
+                // 낮췄다.
                 borderRadius: 999,
-                background: 'rgba(255,255,255,.16)',
+                background: 'rgba(255,255,255,.1)',
                 color: '#ffffff',
                 // "시작하기" 글자를 더 키워달라는 요청 — 17 → 19.
                 fontSize: 19,
