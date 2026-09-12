@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -227,6 +228,82 @@ class MarketEventRepositoryIntegrationTest {
                 """, String.class))
                 .contains("ck_market_event_market", "ck_market_event_type",
                         "ck_market_event_time", "ck_market_event_payload");
+    }
+
+    /**
+     * CB 거절 주문은 판정에 사용한 이벤트를 FK로 가리켜야 멱등 재생이 최초 이벤트를 복원할 수 있다.
+     * CHECK가 이 연결을 강제하고, 다른 거절·정상 주문에는 남지 않게 막는다.
+     */
+    @Test
+    void trade_order_requires_market_event_only_for_cb_rejection() {
+        assertThat(jdbc.queryForList("""
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'trade_order'::regclass
+                  AND contype = 'c'
+                """, String.class))
+                .contains("ck_trade_order_market_event_rejection");
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (:accountId, :stockId, :clientOrderId, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), NULL)
+                """, Map.of("accountId", accountId(), "stockId", stockId(),
+                        "clientOrderId", java.util.UUID.randomUUID())))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (:accountId, :stockId, :clientOrderId, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'INSUFFICIENT_CASH', now(), now(), :eventId)
+                """, Map.of("accountId", accountId(), "stockId", stockId(),
+                        "clientOrderId", java.util.UUID.randomUUID(), "eventId", eventId())))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_market_event_fk_rejects_unknown_event() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (:accountId, :stockId, :clientOrderId, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), 999999999)
+                """, Map.of("accountId", accountId(), "stockId", stockId(),
+                        "clientOrderId", java.util.UUID.randomUUID())))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private Long accountId() {
+        Long userId = jdbc.queryForObject("""
+                INSERT INTO users (email, password_hash, nickname, status, created_at)
+                VALUES (:email, 'hash', :nickname, 'ACTIVE', now())
+                RETURNING user_id
+                """, Long.class, Map.of(
+                "email", java.util.UUID.randomUUID() + "@example.com",
+                "nickname", java.util.UUID.randomUUID().toString().substring(0, 8)));
+        return jdbc.queryForObject("""
+                INSERT INTO account (user_id, round_no, initial_cash, cash_balance, locked_cash, status, opened_at)
+                VALUES (:userId, 1, 0, 0, 0, 'ACTIVE', now())
+                RETURNING account_id
+                """, Long.class, Map.of("userId", userId));
+    }
+
+    private Long stockId() {
+        return jdbc.queryForObject("""
+                INSERT INTO stock (symbol, market_country, market, name, currency, security_type,
+                                   status, is_ranked, created_at)
+                VALUES (:symbol, 'KR', 'KOSPI', '테스트 종목', 'KRW', 'STOCK', 'ACTIVE', false, now())
+                RETURNING stock_id
+                """, Long.class, Map.of("symbol", java.util.UUID.randomUUID().toString().substring(0, 6)));
+    }
+
+    private Long eventId() {
+        return repository.saveAndFlush(circuitBreaker("20260713000799", START, END)).getMarketEventId();
     }
 
     @Test

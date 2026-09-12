@@ -2,6 +2,10 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.event.entity.KrMarket;
+import com.baedang.market.event.entity.MarketEvent;
+import com.baedang.market.event.entity.MarketEventSource;
+import com.baedang.market.event.entity.SidecarDirection;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
@@ -71,6 +75,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -92,6 +97,9 @@ import static org.mockito.Mockito.when;
         "logging.level.org.hibernate.SQL=OFF"
 })
 class MarketOrderIntegrationTest {
+
+    private static final java.net.URI SOURCE_URL =
+            java.net.URI.create("https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
     @MockitoBean
     StockTradingStatusService tradingStatuses;
 
@@ -131,6 +139,7 @@ class MarketOrderIntegrationTest {
     @Autowired TradeOrderRepository tradeOrderRepository;
     @Autowired LedgerEntryRepository ledgerEntryRepository;
     @Autowired TradeExecutionRepository tradeExecutionRepository;
+    @Autowired com.baedang.market.event.repository.MarketEventRepository marketEventRepository;
     @Autowired MarketOrderSettlementCalculator amountCalculator;
     @Autowired LedgerService ledgerService;
     @Autowired JdbcTemplate jdbcTemplate;
@@ -1198,5 +1207,145 @@ class MarketOrderIntegrationTest {
                 });
         assertThat(tradeOrderRepository.findByAccountIdAndClientOrderId(
                 fixture.accountId(), UUID.fromString(request.clientOrderId()))).isEmpty();
+    }
+
+    // ==========================================
+    // 서킷브레이커 신규 주문 차단 (#166)
+    // ==========================================
+
+    /** CB 거절은 REJECTED 1건만 남기고 금융 상태를 건드리지 않는다. */
+    @Test
+    void CB가_활성이면_시장가_주문은_REJECTED_1건만_남긴다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        MarketEvent cb = saveActiveCb("20260713000711");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(exception.getData())
+                            .containsEntry("market", "KOSPI")
+                            .containsEntry("eventType", "CIRCUIT_BREAKER")
+                            .containsEntry("stage", 1)
+                            .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
+                });
+
+        TradeOrder rejected = tradeOrderRepository.findByAccountIdAndClientOrderId(
+                fixture.accountId(), UUID.fromString(request.clientOrderId())).orElseThrow();
+        assertThat(rejected.getStatus()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(rejected.getRejectReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED.name());
+        assertThat(rejected.getMarketEventId()).isEqualTo(cb.getMarketEventId());
+        assertThat(rejected.getReferencePrice()).isNull();
+        assertThat(rejected.getQuoteAt()).isNull();
+        assertThat(rejected.getExchangeRate()).isNull();
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+        assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance())
+                .isEqualByComparingTo("50000");
+        assertThat(entryCount(fixture)).isZero();
+        assertThat(executionCount(fixture)).isZero();
+        assertThat(holdingRepository.findByAccountIdAndStockId(fixture.accountId(), fixture.stockId()))
+                .isEmpty();
+    }
+
+    /**
+     * 멱등 재생은 최초 판정 이벤트를 정확히 복원해야 한다. 최초 거절 뒤 같은 orderedAt 시점에 활성인
+     * 더 긴 CB가 늦게 수집되면, orderedAt 재검색은 다른 단계·시각을 돌려준다.
+     */
+    @Test
+    void 같은_clientOrderId_재요청은_최초_판정_이벤트를_재생한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        MarketEvent first = saveActiveCb("20260713000712");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getData()).containsEntry("stage", 1));
+
+        // 같은 주문 시각에 활성인 2단계 CB가 늦게 수집된다. haltUntil이 더 길어 현재 활성 조회로도 잡힌다.
+        TradeOrder stored = tradeOrderRepository.findByAccountIdAndClientOrderId(
+                fixture.accountId(), UUID.fromString(request.clientOrderId())).orElseThrow();
+        OffsetDateTime orderedAt = stored.getOrderedAt();
+        marketEventRepository.saveAndFlush(MarketEvent.circuitBreaker(
+                MarketEventSource.KRX_KIND, "20260713000713", KrMarket.KOSPI, 2,
+                orderedAt.minusSeconds(60), orderedAt.plusSeconds(7200),
+                orderedAt.minusSeconds(30), orderedAt.minusSeconds(20),
+                "유가증권시장 매매거래 일시중단(2단계 CB 발동)", SOURCE_URL));
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(exception.getData())
+                            .containsEntry("stage", 1)
+                            .containsEntry("haltUntil", first.getHaltUntil().withOffsetSameInstant(java.time.ZoneOffset.ofHours(9)));
+                });
+
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+    }
+
+    /** CB가 만료된 뒤에도 저장된 결과를 외부 조회 없이 동일하게 반환한다. */
+    @Test
+    void CB가_만료된_뒤_재요청해도_같은_결과를_반환한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        MarketEvent cb = saveActiveCb("20260713000714");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request));
+
+        // CB를 끝난 것으로 바꾸고 재요청한다. append-only라 halt_until을 직접 당긴다.
+        jdbcTemplate.update("UPDATE market_event SET halt_until = ? WHERE market_event_id = ?",
+                OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1), cb.getMarketEventId());
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(exception.getData()).containsEntry("stage", 1);
+                });
+
+        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+    }
+
+    /** 사이드카는 프로그램 호가만 정지하므로 일반 주문을 막지 않는다. */
+    @Test
+    void 사이드카만_있으면_시장가_주문이_정상_체결된다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        marketEventRepository.saveAndFlush(MarketEvent.sidecar(
+                MarketEventSource.KRX_KIND, "20260713000715", KrMarket.KOSPI, SidecarDirection.BUY,
+                now.minusMinutes(1), now.plusMinutes(5), now.minusMinutes(1), now,
+                "유가증권시장 매수 사이드카(Side car) 발동", SOURCE_URL));
+
+        MarketOrderResponse response = marketOrderService.place(fixture.userId(), request(fixture, "BUY", "2"));
+
+        assertThat(response.status()).isEqualTo("FILLED");
+    }
+
+    /** KOSPI CB가 KOSDAQ 주문을 막지 않는다. */
+    @Test
+    void KOSPI_CB는_KOSDAQ_주문을_막지_않는다() {
+        saveActiveCb("20260713000716");
+        Fixture kosdaq = createFixture(
+                new BigDecimal("50000"), new BigDecimal("10000"), MarketCountry.KR, "KOSDAQ", "KRW");
+
+        MarketOrderResponse response = marketOrderService.place(kosdaq.userId(), request(kosdaq, "BUY", "2"));
+
+        assertThat(response.status()).isEqualTo("FILLED");
+    }
+
+    private MarketEvent saveActiveCb(String acptNo) {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        return marketEventRepository.saveAndFlush(MarketEvent.circuitBreaker(
+                MarketEventSource.KRX_KIND, acptNo, KrMarket.KOSPI, 1,
+                now.minusMinutes(2), now.plusMinutes(18), now.minusMinutes(2), now.minusMinutes(1),
+                "유가증권시장 매매거래 일시중단(1단계 CB 발동)", SOURCE_URL));
+    }
+
+    private long entryCount(Fixture fixture) {
+        return ledgerEntryRepository.countByAccountId(fixture.accountId());
+    }
+
+    private long executionCount(Fixture fixture) {
+        return jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM trade_execution e JOIN trade_order o ON o.order_id = e.order_id "
+                        + "WHERE o.account_id = ?",
+                Long.class, fixture.accountId());
     }
 }
