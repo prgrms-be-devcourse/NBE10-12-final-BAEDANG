@@ -18,8 +18,20 @@ import org.testcontainers.utility.DockerImageName;
 import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -54,6 +66,9 @@ class MarketEventRepositoryIntegrationTest {
     @Autowired
     private EntityManager entityManager;
 
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @Test
     void halt_until_is_exclusive() {
         MarketEvent event = repository.saveAndFlush(circuitBreaker("20260713000658", START, END));
@@ -73,6 +88,62 @@ class MarketEventRepositoryIntegrationTest {
         assertThatThrownBy(() -> repository.saveAndFlush(
                 circuitBreaker("20260713000658", START, END)))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
+     * 수집기는 저장 전에 {@code existsBySourceAndSourceEventId}로 중복을 걸러내지만, 두 인스턴스가
+     * 동시에 조회하면 둘 다 통과할 수 있다. 그때 중복을 실제로 막는 것은 애플리케이션 선확인이 아니라
+     * DB의 UNIQUE 제약이다 — 이 테스트는 서로 다른 커넥션에서 동시에 INSERT해 그 사실을 고정한다.
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrent_duplicate_insertion_is_rejected_by_the_database() throws Exception {
+        String sourceEventId = "20260713000999";
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch startTogether = new CountDownLatch(1);
+        AtomicInteger inserted = new AtomicInteger();
+        AtomicInteger rejected = new AtomicInteger();
+        List<Throwable> unexpected = Collections.synchronizedList(new ArrayList<>());
+
+        try {
+            try (var executor = Executors.newFixedThreadPool(2)) {
+                List<Future<?>> futures = new ArrayList<>();
+                for (int i = 0; i < 2; i++) {
+                    futures.add(executor.submit(() -> {
+                        ready.countDown();
+                        try {
+                            if (!startTogether.await(5, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("동시 시작 대기 시간 초과");
+                            }
+                            transaction.execute(status ->
+                                    repository.saveAndFlush(circuitBreaker(sourceEventId, START, END)));
+                            inserted.incrementAndGet();
+                        } catch (DataIntegrityViolationException expected) {
+                            rejected.incrementAndGet();
+                        } catch (Exception e) {
+                            unexpected.add(e);
+                        }
+                        return null;
+                    }));
+                }
+
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+                startTogether.countDown();
+                for (Future<?> future : futures) {
+                    future.get(10, TimeUnit.SECONDS);
+                }
+            }
+
+            assertThat(unexpected).isEmpty();
+            assertThat(inserted).hasValue(1);
+            assertThat(rejected).hasValue(1);
+            assertThat(jdbc.queryForObject(
+                    "SELECT count(*) FROM market_event WHERE source_event_id = ?",
+                    Integer.class, sourceEventId)).isEqualTo(1);
+        } finally {
+            jdbc.update("DELETE FROM market_event WHERE source_event_id = ?", sourceEventId);
+        }
     }
 
     @Test
@@ -111,6 +182,24 @@ class MarketEventRepositoryIntegrationTest {
 
         assertThat(history).containsExactly(newer);
         assertThat(older.getMarketEventId()).isLessThan(newer.getMarketEventId());
+    }
+
+    /** 같은 발동시각에서는 최신 {@code marketEventId}가 먼저 나와야 응답 순서가 결정적이다. */
+    @Test
+    void history_orders_equal_trigger_times_by_id_descending() {
+        MarketEvent first = repository.saveAndFlush(circuitBreaker("20260713000680", START, END));
+        MarketEvent second = repository.saveAndFlush(circuitBreaker(
+                "20260713000681", START, END.plusSeconds(60)));
+
+        var history = repository.findHistory(
+                KrMarket.KOSPI,
+                START.minusSeconds(1).atOffset(java.time.ZoneOffset.UTC),
+                END.plusSeconds(61).atOffset(java.time.ZoneOffset.UTC),
+                org.springframework.data.domain.PageRequest.of(0, 100));
+
+        assertThat(history).containsExactly(second, first);
+        assertThat(second.getMarketEventId()).isGreaterThan(first.getMarketEventId());
+        assertThat(second.getTriggeredAt()).isEqualTo(first.getTriggeredAt());
     }
 
     @Test
