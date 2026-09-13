@@ -1,5 +1,7 @@
 package com.baedang.trading.scheduler;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.model.LimitExecutionOutcome;
 import com.baedang.trading.model.LimitExecutionPreparation;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository;
@@ -134,8 +136,18 @@ public class LimitOrderExecutionWorker {
             }
         } catch (RuntimeException exception) {
             progress.reset(group);
-            log.error("지정가 체결 실패, 방향 순회 보류: stockId={} side={}", group.stockId(), group.side(), exception);
-            meters.counter("trading.limit.execution.attempt", "reason", "ERROR").increment();
+            // CB는 시장 전체를 멈추므로 그룹 후순위를 계속 시도하지 않습니다. tick이 이미 afterGroup을
+            // 설정했으므로 이 방문만 끝내면 다음 그룹은 같은 틱에서 계속 처리됩니다.
+            if (exception instanceof BusinessException business
+                    && business.getErrorCode() == ErrorCode.MARKET_TRADING_HALTED) {
+                String market = (String) business.getData().get("market");
+                meters.counter("krx.market_event.order_blocked",
+                        "market", market,
+                        "orderType", "LIMIT_EXECUTION").increment();
+            } else {
+                log.error("지정가 체결 실패, 방향 순회 보류: stockId={} side={}", group.stockId(), group.side(), exception);
+                meters.counter("trading.limit.execution.attempt", "reason", "ERROR").increment();
+            }
         }
         return attempts;
     }
