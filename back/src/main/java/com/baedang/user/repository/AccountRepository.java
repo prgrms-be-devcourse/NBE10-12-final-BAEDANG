@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface AccountRepository extends JpaRepository<Account, Long> {
@@ -41,4 +43,22 @@ public interface AccountRepository extends JpaRepository<Account, Long> {
 
     /** 다음 회차 번호를 구할 때 씁니다. */
     Optional<Account> findTopByUserIdOrderByRoundNoDesc(Long userId);
+
+    /**
+     * 리더보드 자격 계좌 = {@code opened_at + 4주}를 채운 ACTIVE 계좌(설계문서 §6.4).
+     * 시드 포함 여부는 <b>코호트(배치) 시점</b>에 정한다 — {@code includeSeed=false}면 실유저만
+     * 랭킹해 순위·퍼센타일이 자기일관하도록 한다(읽기서 숨기면 순위 구멍·모집단 불일치).
+     */
+    @Query("""
+            select a from Account a, com.baedang.user.entity.User u
+            where a.userId = u.userId
+              and a.status = :status
+              and a.openedAt <= :openedAtOrBefore
+              and (:includeSeed = true or u.seed = false)
+            """)
+    List<Account> findLeaderboardEligible(
+            @Param("status") AccountStatus status,
+            @Param("openedAtOrBefore") OffsetDateTime openedAtOrBefore,
+            @Param("includeSeed") boolean includeSeed
+    );
 }

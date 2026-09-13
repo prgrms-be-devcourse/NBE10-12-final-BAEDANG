@@ -16,10 +16,16 @@ import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
  * <p>금액은 원(KRW) 문자열, 비율은 0~1 소수 문자열이다(프론트 배정밀도 오차 회피).
  * 보유 종목이 부족하면 {@code classified=false} 이고 {@code typeCode}·{@code typeLabel} 은
  * null 이다("미분류/신규"). 비중은 분류 여부와 무관하게 계산된 값을 담는다.
+ *
+ * <p><b>4주 회차 게이트(§6.1):</b> 현재 ACTIVE 계좌 개설 후 {@code unlockAt}({@code opened_at + N주})
+ * 이전이면 {@code locked=true} 이고 성향·성과 본문은 담지 않는다(프론트가 잠금·잔여 진행 표시).
+ * 리셋은 새 계좌를 열어 게이트가 자동 재시작한다. 발급(열림) 후에는 열 때마다 재계산한다(freeze 아님).
  */
 public record PersonalityReportResponse(
         Long accountId,
         Integer roundNo,
+        boolean locked,
+        OffsetDateTime unlockAt,
         String initialCash,
         String cashBalance,
         String stockValue,
@@ -60,8 +66,19 @@ public record PersonalityReportResponse(
     ) {
     }
 
+    /** 4주 회차를 채우기 전 잠김 응답. 본문은 비우고 잠금·해제 예정 시각만 담는다(§6.1). */
+    public static PersonalityReportResponse locked(
+            Account account, OffsetDateTime unlockAt, int holdingPeriodWeeks, OffsetDateTime asOf
+    ) {
+        return new PersonalityReportResponse(
+                account.getAccountId(), account.getRoundNo(), true, unlockAt,
+                null, null, null, null, null, null,
+                false, null, null, null, 0, holdingPeriodWeeks, List.of(), asOf);
+    }
+
     public static PersonalityReportResponse of(
             Account account,
+            OffsetDateTime unlockAt,
             BigDecimal stockValue,
             BigDecimal totalAsset,
             BigDecimal totalPnl,
@@ -74,6 +91,8 @@ public record PersonalityReportResponse(
         return new PersonalityReportResponse(
                 account.getAccountId(),
                 account.getRoundNo(),
+                false,
+                unlockAt,
                 krw(account.getInitialCash()),
                 krw(account.getCashBalance()),
                 krw(stockValue),

@@ -410,6 +410,42 @@ Metrics: quote.collection.batch, quote.collection.sweep.submission (submission s
 - `Account.settleReservedBuy`, `Holding.settleReservedSell`: consume already reserved resources, not buying power/sellable free quantity. Caller enforces the individual order's reserve and shares the financial transaction. Unused full-fill BUY reserve is explicitly released.
 - `LimitOrderExecutionWorker`: always scheduled on `limitExecutionTaskScheduler`, not the publication/expiration scheduler. Budget/cursor behavior and preview fields are documented in `api-spec.md`.
 
+## KRX market actions — circuit breaker and sidecar (#165)
+
+**This pipeline decides whether trading is allowed.** Its input is attacker-selectable text from an external site, so the boundary is narrow by contract, not by convention.
+
+### Collection boundary
+
+- `KindUriPolicy`: whitelist only. RSS path with fixed query; viewer path with `method`/14-digit `acptNo`; external body path matching `/external/{y}/{m}/{d}/{6}/{14}/{5}.htm`. Rejects other hosts, `http`, non-standard ports, user-info, fragments, and traversal **before the request is made** — a rejected URI never becomes I/O.
+- `KindHttpClient.getText(uri, maxBytes)`: GET only, `Redirect.NEVER`, 1 MiB cap rejected **whole**, UTF-8 fixed. Never log response bodies or full query strings.
+- Inject the client; do not build a `RestClient` inside a caller. External calls happen with no DB transaction (`Propagation.NEVER`); the default `krx.market-events.enabled=false` means no scheduler, no client bean, and no calls at all.
+
+### Three-hop parsing, and why three
+
+1. `KindRssParser` — JDK XML with DTD, external entities, external DTD/schema all disabled; 100-item cap. Yields candidates: title classification, `acptNo`, `pubDate`.
+2. `KindViewerParser` — exactly **one** `/external/` link from the viewer HTML, and its `acptNo` must match the viewer's query.
+3. `KindMarketEventDetailParser` — jsoup, label-scoped rows (never row numbers), strict timestamp formats, and the trigger time.
+
+**`pubDate` is a publication time, not a trigger time.** It runs 19–28 s behind the real trigger in the fixtures, and `haltUntil` is computed from `triggeredAt`. RSS alone cannot answer "since when has trading been halted", and the detail disclosure is the only place that can. Conversely the RSS is the only way to enumerate `acptNo`. Hence both, plus the viewer hop that KIND's own site structure forces.
+
+The detail stage re-classifies the title and re-checks the stated duration, so a candidate that disagrees with its own disclosure is not persisted. Partial data never blocks trading.
+
+### Persistence and scheduling
+
+- `MarketEventPersistenceService.insert(confirmed, haltUntil)`: short REQUIRED transaction, one event at a time. Returns `false` when already present.
+- `MarketEventCollectionService.collect()`: `Propagation.NEVER` over both markets. Market failure skips that market only; candidate failure skips that candidate only. Calendar failure is tagged `stage=calendar` separately from transport failure `stage=fetch` — the first is a fail-open risk (a stage-3 CB that cannot be dated is not stored), the second is an outage. Never extend an existing `halt_until` on failure.
+- Duplicate prevention is the DB `(source, source_event_id)` UNIQUE, not the pre-check. Two instances can both pass `existsBySourceAndSourceEventId`; only the constraint stops the second insert. Classify a `DataIntegrityViolationException` as a benign duplicate **only** when the row now exists — otherwise rethrow, or invalid data hides as duplication.
+- `MarketEventCollectionScheduler`: `marketEventTaskScheduler` (single thread), `fixedDelay` 15s, plus one startup attempt on `ApplicationReadyEvent`. Polls only when `MarketSessionProvider.isOpen(KR, now)`. Session-lookup and collection failures are both swallowed so a single cycle cannot stop the loop. Scheduled on its own scheduler, never the shared `taskScheduler`.
+- Metrics `krx.market_event.poll/candidate/persisted/parse_error/delivery_delay` use bounded enum tags only (`market`, `type`, `result`, `stage`). Never tag `acptNo`, title, or URL.
+
+### Query and consumption
+
+- `MarketEventQueryService.get(market, date)`: KST day as a half-open `[from, to)` UTC range; 100-item cap; `active` is computed at response time, not stored. Public response timestamps are always `+09:00` while storage stays UTC.
+- `MarketEventController`: `GET /api/market/events?market=&date=` is public. Parse both params as strings so failures produce `INVALID_INPUT` with `data.field` like the rest of the API; do not let enum/date binding emit framework messages.
+- Consumers read `haltUntil` and let it expire; never infer resumption from an RSS "release" disclosure or from RSS health. A collection outage leaves existing windows untouched and they lapse on their own.
+- Sidecar affects program quotes only — it must not gate ordinary orders. Circuit-breaker order gating is a separate concern (Part 4/#166).
+
+
 ## Trading dates and closing-price recovery (#173)
 
 - `MarketTradingDayPolicy`: `calendar(country, date)`, `quoteTradeDate(country, instant)`, `previousTradingDay(country, date)`. Reuses the existing calendar Port and cache.

@@ -4,12 +4,14 @@ import com.baedang.account.service.AccountValuationService;
 import com.baedang.account.support.AccountValuation;
 import com.baedang.account.support.HoldingValuation;
 import com.baedang.report.dto.PersonalityReportResponse;
+import com.baedang.report.support.FourWeekCostProfiler;
 import com.baedang.report.support.InvestmentTypeClassifier;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.model.CostReplayEvent;
 import com.baedang.trading.model.HoldingReplayEvent;
 import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.user.entity.Account;
@@ -28,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
@@ -42,13 +45,23 @@ class PersonalityReportServiceTest {
     @Mock Account account;
 
     private PersonalityReportService service() {
+        InvestmentTypeClassifier classifier = new InvestmentTypeClassifier();
         return new PersonalityReportService(
                 accountValuationService,
                 stockRepository,
                 tradeExecutionRepository,
-                new InvestmentTypeClassifier(),
+                classifier,
+                new FourWeekCostProfiler(classifier),
+                4,
+                4,
                 4,
                 Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    /** 원가 재생 이벤트 한 건(매수/매도, 원화 거래대금). */
+    private static CostReplayEvent costEvent(long stockId, OrderSide side, long qty, long grossKrw, String at) {
+        return new CostReplayEvent(stockId, side, BigDecimal.valueOf(qty),
+                BigDecimal.valueOf(grossKrw), OffsetDateTime.parse(at));
     }
 
     private static HoldingValuation valuation(long stockId, long evalWon) {
@@ -82,6 +95,8 @@ class PersonalityReportServiceTest {
         when(account.getRoundNo()).thenReturn(1);
         when(account.getInitialCash()).thenReturn(BigDecimal.valueOf(initialCash));
         when(account.getCashBalance()).thenReturn(BigDecimal.valueOf(cashBalance));
+        // 6주 전 개설 → MBTI 4주 창 = [NOW−4주, NOW].
+        when(account.getOpenedAt()).thenReturn(OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC).minusWeeks(6));
     }
 
     @Test
@@ -92,7 +107,12 @@ class PersonalityReportServiceTest {
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         Stock s2 = stock(2, StockCategory.ETF, MarketCountry.US, "1.0");
-        when(stockRepository.findByStockIdIn(List.of(1L, 2L))).thenReturn(List.of(s1, s2));
+        when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1, s2));
+        // 원가 구성: 국내 개별주 2,100만 + 미국 ETF 1,200만. 창 이전 매수라 4주 내내 구성 불변
+        // → 4주 평균 = 스냅샷. 국내·개별주·top1 = 21/33 ≈ 0.6364 → CKSB.
+        when(tradeExecutionRepository.findCostReplayEvents(10L)).thenReturn(List.of(
+                costEvent(1, OrderSide.BUY, 10, 21_000_000, "2026-08-01T00:00:00Z"),
+                costEvent(2, OrderSide.BUY, 10, 12_000_000, "2026-08-01T00:00:00Z")));
 
         PersonalityReportResponse r = service().getReport(1L);
 
@@ -105,7 +125,25 @@ class PersonalityReportServiceTest {
         assertThat(r.holdingCount()).isEqualTo(2);
         assertThat(r.shares().domestic()).isEqualTo("0.6364");
         assertThat(r.holdingPeriodWeeks()).isEqualTo(4);
-        assertThat(r.longHeldStocks()).isEmpty(); // 체결 이력 없음(기본 빈 목록)
+        assertThat(r.longHeldStocks()).isEmpty(); // 체결 재생은 원가용이고 성과 섹션은 별도(기본 빈 목록)
+    }
+
+    @Test
+    void 개설_4주_미만이면_리포트가_잠긴다() {
+        when(account.getAccountId()).thenReturn(10L);
+        when(account.getRoundNo()).thenReturn(2);
+        OffsetDateTime openedAt = OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC).minusWeeks(1);
+        when(account.getOpenedAt()).thenReturn(openedAt);
+        when(accountValuationService.valuateActiveAccount(1L))
+                .thenReturn(new AccountValuation(account, List.of(), Map.of(), List.of(), null));
+
+        PersonalityReportResponse r = service().getReport(1L);
+
+        assertThat(r.locked()).isTrue();
+        assertThat(r.unlockAt()).isEqualTo(openedAt.plusWeeks(4));
+        assertThat(r.classified()).isFalse();
+        assertThat(r.typeCode()).isNull();
+        assertThat(r.roundNo()).isEqualTo(2);
     }
 
     @Test
@@ -115,7 +153,7 @@ class PersonalityReportServiceTest {
         when(accountValuationService.valuateActiveAccount(1L))
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
-        when(stockRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(s1));
+        when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1));
 
         PersonalityReportResponse r = service().getReport(1L);
 
@@ -150,7 +188,7 @@ class PersonalityReportServiceTest {
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
         Stock s2 = stock(2, StockCategory.ETF, MarketCountry.US, "1.0");
-        when(stockRepository.findByStockIdIn(List.of(1L, 2L))).thenReturn(List.of(s1, s2));
+        when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1, s2));
         when(tradeExecutionRepository.findHoldingReplayEvents(10L, List.of(1L, 2L)))
                 .thenReturn(List.of(
                         exec(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z"),
@@ -173,7 +211,7 @@ class PersonalityReportServiceTest {
         when(accountValuationService.valuateActiveAccount(1L))
                 .thenReturn(new AccountValuation(account, List.of(), Map.of(), valuations, null));
         Stock s1 = stock(1, StockCategory.INDIVIDUAL, MarketCountry.KR, null);
-        when(stockRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(s1));
+        when(stockRepository.findByStockIdIn(any())).thenReturn(List.of(s1));
         when(tradeExecutionRepository.findHoldingReplayEvents(10L, List.of(1L)))
                 .thenReturn(List.of(
                         exec(1, OrderSide.BUY, 10, "2026-08-01T00:00:00Z"),

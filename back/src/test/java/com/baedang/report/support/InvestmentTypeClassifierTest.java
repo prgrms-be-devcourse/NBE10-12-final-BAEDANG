@@ -14,6 +14,11 @@ class InvestmentTypeClassifierTest {
 
     private final InvestmentTypeClassifier classifier = new InvestmentTypeClassifier();
 
+    /** 라이브 판정 경로: 비중 계산({@code shares}) → 컷오프 판정({@code classifyFromShares}). */
+    private InvestmentProfile classify(List<HoldingSlice> slices) {
+        return classifier.classifyFromShares(classifier.shares(slices), slices.size());
+    }
+
     private static HoldingSlice slice(long evalWon, StockCategory category, MarketCountry market, String leverage) {
         return new HoldingSlice(
                 BigDecimal.valueOf(evalWon),
@@ -24,14 +29,14 @@ class InvestmentTypeClassifierTest {
 
     @Test
     void 보유_종목이_2개_미만이면_미분류() {
-        assertThat(classifier.classify(List.of()).classified()).isFalse();
-        assertThat(classifier.classify(List.of(
+        assertThat(classify(List.of()).classified()).isFalse();
+        assertThat(classify(List.of(
                 slice(1000, StockCategory.INDIVIDUAL, MarketCountry.KR, null))).classified()).isFalse();
     }
 
     @Test
     void 평가금액_합이_0이면_미분류() {
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(0, StockCategory.INDIVIDUAL, MarketCountry.KR, null),
                 slice(0, StockCategory.ETF, MarketCountry.US, "1.0")));
         assertThat(p.classified()).isFalse();
@@ -40,7 +45,7 @@ class InvestmentTypeClassifierTest {
     @Test
     void 미분류여도_비중은_계산해_담는다() {
         // 국내 개별주 1종목 → 유형은 못 정하지만(미분류) 비중은 실제 값을 담아야 한다.
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(100_000, StockCategory.INDIVIDUAL, MarketCountry.KR, null)));
 
         assertThat(p.classified()).isFalse();
@@ -55,7 +60,7 @@ class InvestmentTypeClassifierTest {
     void 반올림_전_원금액으로_경계를_판정한다() {
         // 국내 개별주 49,999 / 해외 ETF 50,001 → 49.999% 는 컷오프 50% 미만.
         // 비중을 4자리 반올림하면 0.5000 이 되지만, 판정은 원금액이라 해외·ETF 쪽이어야 한다.
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(49_999, StockCategory.INDIVIDUAL, MarketCountry.KR, null),
                 slice(50_001, StockCategory.ETF, MarketCountry.US, "1.0")));
 
@@ -66,7 +71,7 @@ class InvestmentTypeClassifierTest {
     @Test
     void 공격형_20퍼센트_경계도_반올림_전으로_판정한다() {
         // 레버리지 19,999 / 총 100,000 → 19.999% 는 20% 미만이라 안정형.
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(19_999, StockCategory.ETF, MarketCountry.US, "2.0"),
                 slice(80_001, StockCategory.INDIVIDUAL, MarketCountry.US, null)));
 
@@ -76,7 +81,7 @@ class InvestmentTypeClassifierTest {
     @Test
     void 집중_국내_개별주_공격형_CKSA() {
         // KR 개별주 700원(지배적) + KR 레버리지ETF 300원 → 집중·국내·개별주·공격
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(700, StockCategory.INDIVIDUAL, MarketCountry.KR, null),
                 slice(300, StockCategory.ETF, MarketCountry.KR, "2.0")));
 
@@ -91,7 +96,7 @@ class InvestmentTypeClassifierTest {
     @Test
     void 분산_해외_ETF_안정형_DGEB() {
         // US ETF/ETN 3종 고르게 → 분산·해외·ETF·안정
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(400, StockCategory.ETF, MarketCountry.US, "1.0"),
                 slice(350, StockCategory.ETF, MarketCountry.US, "1.0"),
                 slice(250, StockCategory.ETN, MarketCountry.US, null)));
@@ -103,7 +108,7 @@ class InvestmentTypeClassifierTest {
 
     @Test
     void 우선주는_개별주쪽_ETN은_펀드쪽으로_집계() {
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(600, StockCategory.PREFERRED, MarketCountry.KR, null),
                 slice(400, StockCategory.ETN, MarketCountry.KR, null)));
         assertThat(p.individualShare()).isEqualByComparingTo("0.60"); // 우선주=개별주쪽
@@ -112,7 +117,7 @@ class InvestmentTypeClassifierTest {
 
     @Test
     void 인버스는_공격으로_집계_일반ETF는_아님() {
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(500, StockCategory.ETF, MarketCountry.US, "-1.0"), // 인버스 → 공격
                 slice(500, StockCategory.ETF, MarketCountry.US, "1.0")));  // 일반 ETF → 아님
         assertThat(p.aggressiveShare()).isEqualByComparingTo("0.50");
@@ -122,7 +127,7 @@ class InvestmentTypeClassifierTest {
     @Test
     void 컷오프_경계_50퍼센트는_국내_개별주_집중쪽() {
         // 정확히 50%면 K·S·집중 쪽으로 붙는다(>= 규약).
-        InvestmentProfile p = classifier.classify(List.of(
+        InvestmentProfile p = classify(List.of(
                 slice(500, StockCategory.INDIVIDUAL, MarketCountry.KR, null),
                 slice(500, StockCategory.ETF, MarketCountry.US, "1.0")));
         assertThat(p.type().market()).isEqualTo(InvestmentType.Market.DOMESTIC);
