@@ -251,9 +251,7 @@ locals {
   ]
 
   s3_dump_keys = [
-    "data.sql",
-    "daily_candle.csv",
-    "minute_candle.csv",
+    "trading.dump",
     "prometheus.tgz"
   ]
 
@@ -339,8 +337,19 @@ locals {
   done
   echo "=================================================="
 
-  echo "=============== 6. Docker Compose ================"
+  echo "=============== 6. Docker Compose & Restore Data ================"
   cd /opt/${var.prefix}
+
+  docker compose up -d --wait postgres
+
+  docker compose create prometheus
+  docker run --rm -v ${var.prefix}_promdata:/data -v "$PWD/dump":/backup alpine sh -c "rm -rf /data/* && tar xzf /backup/prometheus.tgz -C /data"
+
+  docker exec trading-db psql -U trading -d trading -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" -c "SELECT timescaledb_pre_restore();"
+  RESTORE_STATUS=0
+  docker exec -i trading-db pg_restore -U trading -d trading --no-owner < dump/trading.dump 2> restore_errors.log || RESTORE_STATUS=$?
+  docker exec trading-db psql -U trading -d trading -c "SELECT timescaledb_post_restore();" -c "ANALYZE;"
+  if [ "$RESTORE_STATUS" -ne 0 ]; then echo "RESTORE_HAD_ERRORS: /opt/${var.prefix}/restore_errors.log 확인"; cat restore_errors.log; fi
 
   docker compose up -d
   echo "=================================================="

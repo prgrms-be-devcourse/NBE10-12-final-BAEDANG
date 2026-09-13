@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: timescale/timescaledb:latest-pg18
+    image: timescale/timescaledb:2.29.2-pg18
     container_name: trading-db
     # pg_stat_statements 로 부하 테스트 중 상위 쿼리·DB time 을 수집한다(이슈 #70).
     #   shared_preload_libraries 는 재시작이 필요하고, -c 로 넘기면 conf 값을 통째로
@@ -24,7 +24,7 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trading -d trading"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U trading -d trading"]
       interval: 5s
       timeout: 3s
       retries: 10
