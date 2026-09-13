@@ -7,10 +7,13 @@ import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
+import { SignupModal } from "@/components/SignupModal";
+import { MarketEventsBanner } from "@/components/MarketEventsBanner";
+import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
-import { getRankings, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
+import { getRankings, likeStock, unlikeStock, searchStocks, type MarketCountry, type RankingItem, type StockSearchItem } from "@/lib/api";
 import { CATEGORY_BADGE_STYLE, categoryLabel } from "@/lib/category-badge";
 import { pickDefaultMarket } from "@/lib/default-market";
 import { formatAbsolute, formatKoreanAmount, formatNumber, formatPercent, formatSigned, formatUsd, toKrw } from "@/lib/format";
@@ -55,6 +58,7 @@ const POPULAR_STOCKS: { symbol: string; name: string; marketCountry: MarketCount
 const TRENDING_INDUSTRIES = ["AI · 반도체", "2차전지", "바이오", "우주항공", "로봇"];
 
 export default function RankingsPage() {
+  const { isLoggedIn } = useAuth();
   const { rate, changeAmount, changeRate, updatedAt, isLoading: rateLoading, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen, isLoading: marketStatusLoading } = useMarketStatus();
   const { theme } = useTheme();
@@ -107,7 +111,12 @@ export default function RankingsPage() {
   // 분리해서 관리한다 — 닫힐 때도 닫힘 애니메이션이 끝날 때까지는 DOM에 남아 있어야 한다.
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchMounted, setSearchMounted] = useState(false);
-  const [wishlist, setWishlist] = useState<Record<string, boolean>>({});
+  // 찜(관심 종목) 등록/해제 중인 심볼 집합 — 응답이 올 때까지 같은 종목에 대한
+  // 중복 클릭을 막는다. 실제 찜 여부는 로컬 state가 아니라 각 RankingItem의
+  // stockLikeId(랭킹 응답이 로그인 시 함께 내려주는 값)를 그대로 쓴다 — 그래야
+  // 5초 폴링으로 items가 새로 오거나 새로고침해도 서버와 항상 일치한다.
+  const [likeInFlight, setLikeInFlight] = useState<Set<string>>(new Set());
+  const [signupModalOpen, setSignupModalOpen] = useState(false);
   const [rateChartOpen, setRateChartOpen] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -271,8 +280,34 @@ export default function RankingsPage() {
     return () => observer.disconnect();
   }, [loadMore]);
 
-  function toggleWishlist(symbol: string) {
-    setWishlist((w) => ({ ...w, [symbol]: !w[symbol] }));
+  // 관심 종목(찜) 등록/해제 — 백엔드(POST·DELETE /api/stocks/likes)에 실제로 반영한다.
+  // 낙관적으로 먼저 화면을 바꾸지 않고 응답이 온 뒤에 반영한다 — 실패했는데도 하트가
+  // 눌린 것처럼 보이면 다음 새로고침 때 조용히 원상복구돼 혼란스럽기 때문이다. 대신
+  // in-flight 종목은 버튼을 눌러도 무시해 중복 요청·깜빡임을 막는다.
+  function toggleLike(item: RankingItem) {
+    if (!isLoggedIn) {
+      setSignupModalOpen(true);
+      return;
+    }
+    if (likeInFlight.has(item.symbol)) return;
+    setLikeInFlight((prev) => new Set(prev).add(item.symbol));
+
+    const applyResult = (nextLikeId: number | undefined) => {
+      setItems((prev) => prev.map((it) => (it.symbol === item.symbol ? { ...it, stockLikeId: nextLikeId } : it)));
+    };
+    const request = item.stockLikeId != null
+      ? unlikeStock(item.stockLikeId).then(() => applyResult(undefined))
+      : likeStock(item.stockId).then((res) => applyResult(res.stockLikeId));
+
+    request
+      .catch(() => {}) // 실패해도 별도 에러 UI 없이 원래 상태 유지 — 다시 누르면 재시도된다.
+      .finally(() => {
+        setLikeInFlight((prev) => {
+          const next = new Set(prev);
+          next.delete(item.symbol);
+          return next;
+        });
+      });
   }
 
   return (
@@ -316,6 +351,11 @@ export default function RankingsPage() {
           환율 추이 그래프 →
         </button>
       </Reveal>
+
+      {/* 시장조치(서킷브레이커·사이드카) 배너 — 국내(KOSPI·KOSDAQ)만 지원하는
+          공개 API라 국내 주식 탭에서만 보여준다. 오늘 발동 이력이 없는 보통날엔
+          컴포넌트 자체가 아무것도 렌더링하지 않는다(평시 화면을 어지럽히지 않으려고). */}
+      {market === "KR" && <MarketEventsBanner />}
 
       {/* 검색 */}
       {/* Reveal 자체가 등장 애니메이션에 opacity/transform을 쓰기 때문에 각 Reveal은 저마다
@@ -536,7 +576,7 @@ export default function RankingsPage() {
           const isUp = krwChange === null || krwChange >= 0;
           const label = categoryLabel(item.category, item.isDividend);
           const badge = CATEGORY_BADGE_STYLE[label];
-          const liked = wishlist[item.symbol];
+          const liked = item.stockLikeId != null;
 
           return (
             <Link
@@ -558,14 +598,15 @@ export default function RankingsPage() {
                 type="button"
                 onClick={(e) => {
                   e.preventDefault();
-                  toggleWishlist(item.symbol);
+                  toggleLike(item);
                 }}
-                className="cursor-pointer text-[16px] leading-none"
+                disabled={likeInFlight.has(item.symbol)}
+                className="cursor-pointer text-[16px] leading-none disabled:cursor-not-allowed disabled:opacity-50"
                 style={{
                   color: liked ? "var(--heartActive)" : "var(--mut2)",
                   WebkitTextStroke: "1.3px",
                 }}
-                aria-label="찜하기"
+                aria-label={liked ? "찜 해제하기" : "찜하기"}
               >
                 ♥
               </button>
@@ -631,6 +672,18 @@ export default function RankingsPage() {
         <StockHoverPreview item={hover.item} marketCountry={market} krwPrice={hover.krwPrice} krwChange={hover.krwChange} x={hover.x} y={hover.y} />
       )}
       {rateChartOpen && <ExchangeRateTrendModal onClose={() => setRateChartOpen(false)} />}
+      <SignupModal
+        open={signupModalOpen}
+        onClose={() => setSignupModalOpen(false)}
+        title="관심 종목으로 등록하려면 회원가입이 필요해요"
+        description={
+          <>
+            가입하면 <b style={{ color: "var(--ink)" }}>모의 투자금 5,000만원</b>을 바로 드려요.
+            <br />
+            관심 종목으로 등록해두면 나중에 다시 찾기 쉬워요.
+          </>
+        }
+      />
     </div>
   );
 }
