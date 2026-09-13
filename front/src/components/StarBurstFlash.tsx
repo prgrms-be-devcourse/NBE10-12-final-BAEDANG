@@ -66,12 +66,15 @@ function axisDots(
   for (let i = 0; i < count; i++) {
     const t = count === 1 ? startT : startT + (1 - startT) * (i / (count - 1));
     const r = t * length;
-    // ease-in(제곱)으로 줄어들어 중심 근처에서는 굵기가 오래 유지되다가
-    // 끝에서 급격히 가늘어진다 — 균일하게 줄어드는 것보다 사진 속 대시의
-    // 느낌에 더 가깝다.
-    const fall = Math.pow(1 - t, 1.7);
-    const dotSize = Math.max(0.5, maxR * fall);
-    const opacity = 0.22 + 0.78 * Math.pow(1 - t, 1.3);
+    // "좀 더 날카로운 형태로" 다듬어달라는 요청으로 ease-in 지수를
+    // 1.7→2.6(크기)/1.3→1.9(불투명도)로 더 가파르게 올리고, 끝점의
+    // 최소 크기·불투명도 하한도 0.5/0.22 → 0.3/0.08로 낮췄다 — 중심
+    // 근처의 굵기는 비슷하게 유지하면서 끝으로 갈수록 훨씬 빠르게
+    // 가늘어지고 옅어져, 뭉툭하게 남아있던 끝부분이 뾰족한 점으로
+    // 사라지는 느낌을 낸다.
+    const fall = Math.pow(1 - t, 2.6);
+    const dotSize = Math.max(0.3, maxR * fall);
+    const opacity = 0.08 + 0.92 * Math.pow(1 - t, 1.9);
     dots.push({ x: Math.cos(rad) * r, y: Math.sin(rad) * r, r: dotSize, opacity, color: blend(nearRgb, farRgb, t) });
   }
   return dots;
@@ -86,8 +89,11 @@ export function StarBurstFlash({ active, size = 260, color, style }: StarBurstFl
     const longAxes = [90, 270, 0, 180];
     const shortAxes = [45, 135, 225, 315];
     const all: Dot[] = [];
-    for (const a of longAxes) all.push(...axisDots(a, 100, 9, 0.14, 3.4, nearRgb, farRgb));
-    for (const a of shortAxes) all.push(...axisDots(a, 58, 6, 0.2, 2.7, nearRgb, farRgb));
+    // 점 개수는 늘리고 최대 굵기는 살짝 줄여서(더 촘촘하고 얇은 점들이
+    // 이어지도록) 전체적으로 두툼한 느낌 대신 가늘고 곧은 바늘 같은
+    // 인상을 준다 — 위 ease-in 지수와 함께 "날카로운" 느낌을 만든다.
+    for (const a of longAxes) all.push(...axisDots(a, 100, 12, 0.12, 2.9, nearRgb, farRgb));
+    for (const a of shortAxes) all.push(...axisDots(a, 58, 8, 0.18, 2.3, nearRgb, farRgb));
     return all;
   }, [dotColor]);
 
