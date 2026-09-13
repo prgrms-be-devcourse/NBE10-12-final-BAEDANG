@@ -748,7 +748,8 @@ export function InvestupIntro({
           style={{
             position: 'absolute',
             left: '50%',
-            top: '50%',
+            // 별 위치를 좀 더 위로 옮겨달라는 요청 — 50%(정중앙) → 34%.
+            top: '34%',
             transform: 'translate(-50%, -50%)',
             zIndex: 3,
           }}

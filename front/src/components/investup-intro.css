@@ -209,17 +209,21 @@
 }
 
 .iv-starburst-play {
-  animation: iv-starburst-flash 1.7s cubic-bezier(0.2, 0.9, 0.24, 1) 1 both;
+  /* 별이 사라지는(fade-out) 속도를 늦춰달라는 요청 — 나타나는 속도
+     (0%→10%, 약 260ms)와 머무는 시간(10%→44%, 약 884ms)은 이전과
+     거의 같게 유지한 채, 전체 duration을 1.7s→2.6s로 늘려서 사라지는
+     구간(44%→100%)만 544ms→약 1.46s로 훨씬 느려지게 했다. */
+  animation: iv-starburst-flash 2.6s cubic-bezier(0.2, 0.9, 0.24, 1) 1 both;
 }
 
 @keyframes iv-starburst-flash {
   0% {
     opacity: 0;
   }
-  16% {
+  10% {
     opacity: 1;
   }
-  68% {
+  44% {
     opacity: 1;
   }
   100% {
