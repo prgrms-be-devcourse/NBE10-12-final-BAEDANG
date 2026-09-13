@@ -9,14 +9,10 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.global.formatter.FinancialDecimalFormatter;
 import com.baedang.report.dto.PersonalityReportResponse;
 import com.baedang.report.dto.PersonalityReportResponse.LongHeldStock;
-import com.baedang.report.support.AxisShares;
-import com.baedang.report.support.FourWeekCostProfiler;
 import com.baedang.report.support.HoldingLotTracker;
 import com.baedang.report.support.InvestmentProfile;
-import com.baedang.report.support.InvestmentTypeClassifier;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.model.CostReplayEvent;
 import com.baedang.trading.model.HoldingReplayEvent;
 import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.user.entity.Account;
@@ -56,29 +52,23 @@ public class PersonalityReportService {
     private final AccountValuationService accountValuationService;
     private final StockRepository stockRepository;
     private final TradeExecutionRepository tradeExecutionRepository;
-    private final InvestmentTypeClassifier classifier;
-    private final FourWeekCostProfiler costProfiler;
+    private final InvestmentTypeService investmentTypeService;
     private final int holdingPeriodWeeks;
-    private final int mbtiWindowWeeks;
     private final int unlockWeeks;
     private final Clock clock;
 
     public PersonalityReportService(AccountValuationService accountValuationService,
                                     StockRepository stockRepository,
                                     TradeExecutionRepository tradeExecutionRepository,
-                                    InvestmentTypeClassifier classifier,
-                                    FourWeekCostProfiler costProfiler,
+                                    InvestmentTypeService investmentTypeService,
                                     @Value("${report.holding-period-weeks:4}") int holdingPeriodWeeks,
-                                    @Value("${report.mbti-window-weeks:4}") int mbtiWindowWeeks,
                                     @Value("${report.unlock-weeks:4}") int unlockWeeks,
                                     Clock clock) {
         this.accountValuationService = accountValuationService;
         this.stockRepository = stockRepository;
         this.tradeExecutionRepository = tradeExecutionRepository;
-        this.classifier = classifier;
-        this.costProfiler = costProfiler;
+        this.investmentTypeService = investmentTypeService;
         this.holdingPeriodWeeks = holdingPeriodWeeks;
-        this.mbtiWindowWeeks = mbtiWindowWeeks;
         this.unlockWeeks = unlockWeeks;
         this.clock = clock;
     }
@@ -103,14 +93,10 @@ public class PersonalityReportService {
         // 초기자본은 계좌별 저장 컬럼이라 항상 양수 → 라운드 내 고정 분모.
         BigDecimal returnRate = ReturnRateCalculator.calculate(totalPnl, account.getInitialCash());
 
-        // 투자 MBTI 는 4주 창의 원가 구성 시점별 평균으로 판정한다(§6.2, 체결 재생·무가격).
-        List<CostReplayEvent> costEvents =
-                tradeExecutionRepository.findCostReplayEvents(account.getAccountId());
-        Map<Long, Stock> stocks = stocksForReport(valued, costEvents);
-        OffsetDateTime windowStart = laterOf(account.getOpenedAt(), now.minusWeeks(mbtiWindowWeeks));
-        AxisShares avgShares = costProfiler.averageShares(costEvents, stocks, windowStart, now);
-        InvestmentProfile profile = classifier.classifyFromShares(avgShares, valued.valuations().size());
+        // 투자 MBTI 는 원가 4주 평균으로 판정한다(§6.2). 리포트·리더보드가 공유하는 단일 지점.
+        InvestmentProfile profile = investmentTypeService.classify(account, valued.holdings(), now);
 
+        Map<Long, Stock> stocks = stocksForLongHeld(valued);
         List<LongHeldStock> longHeld = longHeldStocks(account.getAccountId(), valued, stocks, now);
 
         return PersonalityReportResponse.of(
@@ -122,19 +108,14 @@ public class PersonalityReportService {
      * 리포트에 필요한 종목 마스터 — 현재 보유 + 4주 창 원가 재생에 등장한 종목(창 안에서 전량
      * 매도돼 지금은 없는 종목 포함)의 합집합. 한 번에 조회한다.
      */
-    private Map<Long, Stock> stocksForReport(AccountValuation valued, List<CostReplayEvent> costEvents) {
-        Set<Long> stockIds = new HashSet<>();
-        valued.valuations().forEach(v -> stockIds.add(v.stockId()));
-        costEvents.forEach(e -> stockIds.add(e.stockId()));
-        if (stockIds.isEmpty()) {
+    /** N주 성과 섹션 표시에 필요한 현재 보유 종목 마스터. 유형 판정용 종목은 별도 서비스가 모은다. */
+    private Map<Long, Stock> stocksForLongHeld(AccountValuation valued) {
+        if (valued.valuations().isEmpty()) {
             return Map.of();
         }
+        List<Long> stockIds = valued.valuations().stream().map(HoldingValuation::stockId).toList();
         return stockRepository.findByStockIdIn(stockIds).stream()
                 .collect(Collectors.toMap(Stock::getStockId, Function.identity()));
-    }
-
-    private static OffsetDateTime laterOf(OffsetDateTime a, OffsetDateTime b) {
-        return a.isAfter(b) ? a : b;
     }
 
     /** N주 이상 보유한 종목의 성과. 체결 이력 재생으로 현재 lot 시작 시각을 구해 임계로 거른다. */
