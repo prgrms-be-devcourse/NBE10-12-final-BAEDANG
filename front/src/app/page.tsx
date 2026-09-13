@@ -34,7 +34,10 @@ export default function MainPage() {
       {/* 히어로 */}
       <Reveal delay={0} duration={1}>
         <div
-          className="my-4 flex items-center gap-10 rounded-[28px] px-12 py-14 max-md:flex-col"
+          // 히어로 카드의 세로 길이를 좀 더 늘려달라는 요청 — 좌우 폭에
+          // 영향을 주는 px-12는 그대로 두고, 세로 길이를 결정하는
+          // 위아래 패딩만 py-14(56px) → py-20(80px)으로 키웠다.
+          className="my-4 flex items-center gap-10 rounded-[28px] px-12 py-20 max-md:flex-col"
           // "실전처럼 경험하고, 나만의 투자 감각을 키워요" 문구가 놓인 이
           // 히어로 사각형 자체의 배경에 토스임팩트(https://toss.im/impact)
           // 사이트의 "impact for all / 모두의 경험" 카드에 쓰인
