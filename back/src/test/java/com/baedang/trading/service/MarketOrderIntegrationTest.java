@@ -73,6 +73,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import java.util.Map;
@@ -81,6 +82,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -1258,12 +1260,14 @@ class MarketOrderIntegrationTest {
     @Test
     void 같은_clientOrderId_재요청은_최초_판정_이벤트를_재생한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
-        MarketEvent first = saveActiveCb("20260713000712");
+        saveActiveCb("20260713000712");
         MarketOrderRequest request = request(fixture, "BUY", "2");
 
-        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
-                .isInstanceOfSatisfying(BusinessException.class, exception ->
-                        assertThat(exception.getData()).containsEntry("stage", 1));
+        BusinessException initial = catchThrowableOfType(
+                BusinessException.class,
+                () -> marketOrderService.place(fixture.userId(), request));
+        assertThat(initial.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+        assertThat(initial.getData()).containsEntry("stage", 1);
 
         // 같은 주문 시각에 활성인 2단계 CB가 늦게 수집된다. haltUntil이 더 길어 현재 활성 조회로도 잡힌다.
         TradeOrder stored = tradeOrderRepository.findByAccountIdAndClientOrderId(
@@ -1275,13 +1279,11 @@ class MarketOrderIntegrationTest {
                 orderedAt.minusSeconds(30).toInstant(), orderedAt.minusSeconds(20).toInstant(),
                 "유가증권시장 매매거래 일시중단(2단계 CB 발동)", SOURCE_URL));
 
-        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
-                .isInstanceOfSatisfying(BusinessException.class, exception -> {
-                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
-                    assertThat(exception.getData())
-                            .containsEntry("stage", 1)
-                            .containsEntry("haltUntil", first.getHaltUntil().withOffsetSameInstant(java.time.ZoneOffset.ofHours(9)));
-                });
+        BusinessException replayed = catchThrowableOfType(
+                BusinessException.class,
+                () -> marketOrderService.place(fixture.userId(), request));
+        assertThat(replayed.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+        assertThat(replayed.getData()).isEqualTo(initial.getData());
 
         assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
     }
@@ -1348,7 +1350,7 @@ class MarketOrderIntegrationTest {
     }
 
     private MarketEvent saveActiveCb(String acptNo) {
-        Instant now = Instant.now();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS).plusNanos(123_456_789);
         return marketEventRepository.saveAndFlush(MarketEvent.circuitBreaker(
                 MarketEventSource.KRX_KIND, acptNo, KrMarket.KOSPI, 1,
                 now.minusSeconds(120), now.plusSeconds(1080), now.minusSeconds(120), now.minusSeconds(60),
