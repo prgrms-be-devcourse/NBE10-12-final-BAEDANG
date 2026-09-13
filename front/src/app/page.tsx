@@ -162,20 +162,31 @@ export default function MainPage() {
               실제 이미지 가장자리에 닿기 전에 이미 완전히 투명해지게
               하고(50% 이상으로 주면 가장자리에 색이 남는 문제가 있었다),
               불투명 구간은 8%로 좁게 둬서 거의 전 구간이 서서히
-              옅어지는 폭넓은 그라데이션이 되게 했다. 크기를 많이 키워
-              달라는 요청을 두 차례 거쳐 max-width를 380px → 640px →
-              900px로 키웠다(실제 렌더링 크기는 flex-1 영역이 실제로
-              확보한 너비 안에서 결정되므로, 화면 폭이 넓을수록 이
-              상한값에 더 가깝게 커진다). */}
-          <div className="flex flex-1 items-center justify-center">
+              옅어지는 폭넓은 그라데이션이 되게 했다.
+              크기를 키워달라는 요청을 여러 차례 거쳤는데(380px →
+              640px → 900px), max-width만 올리는 방식은 한계가 있었다 —
+              이 셀의 실제 너비 자체가 max-width보다 작았기 때문에(카드
+              전체 너비를 문구 영역과 1.2:1로 나눠 쓰는 구조), 상한값을
+              더 키워도 실제로는 커지지 않았다. 게다가 이미지는
+              height: auto라 너비만큼만 커지고, 카드 높이(문구 쪽
+              내용이 좌우하는)는 그대로라서 위아래로 빈 공간이 남아
+              "칸을 거의 다 채우는" 느낌이 나지 않았다.
+              그래서 "이 칸(사각형 영역) 자체를 거의 다 채워달라"는
+              요청에 맞춰 방식을 바꿨다 — 이 div에 self-stretch를 줘서
+              부모의 items-center를 오버라이드하고 문구 쪽과 같은 높이로
+              늘어나게 한 뒤, 이미지 자체를 h-full w-full
+              object-cover로 이 늘어난 칸을 가로·세로 모두 꽉 채우도록
+              했다(원본 이미지 비율과 칸 비율이 달라 약간 잘려 보일 수
+              있지만, 가장자리 그라데이션이 이미 경계를 부드럽게
+              가려준다). */}
+          <div className="flex flex-1 items-center justify-center self-stretch">
             {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
             <img
               src="/investup-hero-bg.png"
               alt=""
-              className="w-full max-w-[900px]"
+              className="h-full w-full object-cover"
               style={{
                 display: "block",
-                height: "auto",
                 WebkitMaskImage: "radial-gradient(ellipse 46% 46% at 50% 50%, #000 8%, transparent 100%)",
                 maskImage: "radial-gradient(ellipse 46% 46% at 50% 50%, #000 8%, transparent 100%)",
               }}
