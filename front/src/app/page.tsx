@@ -156,14 +156,26 @@ export default function MainPage() {
               자리에 첨부받은 배경 이미지(파란 웨이브 그래픽)를 넣어달라는
               요청 — 인트로 화면(investup-hero-bg.png)에 쓴 것과 완전히
               같은 파일이라(md5 동일) 새로 추가하지 않고 그대로
-              재사용했다. */}
+              재사용했다. 이미지 바깥쪽으로 갈수록 옅어지는 그라데이션은
+              인트로 화면에서 여러 차례 시행착오 끝에 정착한 값을 그대로
+              가져왔다 — mask-image의 타원 크기를 50% 밑(46%)으로 둬서
+              실제 이미지 가장자리에 닿기 전에 이미 완전히 투명해지게
+              하고(50% 이상으로 주면 가장자리에 색이 남는 문제가 있었다),
+              불투명 구간은 8%로 좁게 둬서 거의 전 구간이 서서히
+              옅어지는 폭넓은 그라데이션이 되게 했다. 크기를 많이 키워
+              달라는 요청으로 max-width도 380px → 640px로 키웠다. */}
           <div className="flex flex-1 items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
             <img
               src="/investup-hero-bg.png"
               alt=""
-              className="w-full max-w-[380px]"
-              style={{ display: "block", height: "auto" }}
+              className="w-full max-w-[640px]"
+              style={{
+                display: "block",
+                height: "auto",
+                WebkitMaskImage: "radial-gradient(ellipse 46% 46% at 50% 50%, #000 8%, transparent 100%)",
+                maskImage: "radial-gradient(ellipse 46% 46% at 50% 50%, #000 8%, transparent 100%)",
+              }}
             />
           </div>
         </div>
