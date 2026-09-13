@@ -35,7 +35,21 @@ export default function MainPage() {
       <Reveal delay={0} duration={1}>
         <div
           className="my-4 flex items-center gap-10 rounded-[28px] px-12 py-14 max-md:flex-col"
-          style={{ background: "var(--heroBg)" }}
+          // "실전처럼 경험하고, 나만의 투자 감각을 키워요" 문구가 놓인 이
+          // 히어로 사각형 자체의 배경에 토스임팩트(https://toss.im/impact)
+          // 사이트의 "impact for all / 모두의 경험" 카드에 쓰인
+          // radial-gradient(연한 하늘색, rgb(150,196,255))를 적용해달라는
+          // 요청 — 처음엔 이미지를 담는 우측의 작은 박스에 얹어봤지만,
+          // 문구가 놓인 히어로 카드 전체의 배경에 적용해달라는 후속 요청에
+          // 따라 자리를 옮겼다. 기존 배경색(var(--heroBg))을 완전히
+          // 대체하지 않고 gradient를 그 위에 얹는 방식(background에 두
+          // 레이어를 콤마로 나열 — 앞쪽이 위, 뒤쪽이 바탕)을 써서, gradient가
+          // 옅어지는 가장자리에서는 기존 라이트=옅은 하늘색/다크=짙은
+          // 남색 히어로 배경이 그대로 비쳐 보인다.
+          style={{
+            background:
+              "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), var(--heroBg)",
+          }}
         >
           <div className="flex-[1.2]">
             <span
@@ -106,30 +120,16 @@ export default function MainPage() {
               </div>
             )}
           </div>
-          {/* 히어로 문구 우측 사각형 컴포넌트의 배경에 토스임팩트
-              (https://toss.im/impact) 사이트의 "impact for all / 모두의
-              경험" 카드에 쓰인 radial-gradient(연한 하늘색,
-              rgb(150,196,255)) 배경을 그대로 적용해달라는 요청 — 처음엔
-              이 자리를 텍스트 카드로 통째로 바꿔봤지만, "그 디자인(배경)만
-              가져오고 기존에 첨부했던 main_object 이미지(파도 그래픽,
-              investup-hero-bg.png)는 그대로 복구해달라"는 후속 요청에
-              따라 이미지는 원래 구현으로 되돌리고 이 radial-gradient는
-              이미지를 담는 바깥 박스의 배경으로만 얹었다. 이미지 자체의
-              가장자리 mask-fade(50% 미만 46%로 완전히 투명해지는 구간
-              확보) 덕분에, 이미지가 옅어지는 가장자리 쪽에서 이 gradient
-              배경이 은은하게 비쳐 보이는 효과가 난다. 라이트/다크 모드
-              모두 적용했다(테마 적용 범위 기본값) — 라이트 모드는 히어로
-              배경(--heroBg, 옅은 하늘색) 위에 살짝 더 짙은 파란
-              빛무리로, 다크 모드는 히어로 배경(--heroBg, 짙은 남색)
-              위에 은은한 하늘색 스포트라이트로 보인다. 바깥 박스에도
-              카드 느낌을 살리려고 참고 사이트와 비슷한 rounded-[28px]를
-              줬다. */}
-          <div
-            className="flex flex-1 items-center justify-center self-stretch overflow-hidden rounded-[28px]"
-            style={{
-              background: "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%)",
-            }}
-          >
+          {/* 히어로 문구 우측의 픽셀 도트 패턴(HeroDots)을 제거하고, 그
+              자리에 첨부받은 배경 이미지(파란 웨이브 그래픽,
+              investup-hero-bg.png — 인트로 화면과 공유하는 자산)를 넣고,
+              가장자리로 갈수록 옅어지는 mask-fade와 self-stretch +
+              object-cover로 이 칸을 가득 채우던 기존 구현이다. 이
+              박스 자체에는 별도 배경을 얹지 않는다 — 토스임팩트 카드
+              스타일 radial-gradient는 이 작은 박스가 아니라, 문구가
+              놓인 히어로 카드 전체의 배경(위쪽 div의 style 참고)에
+              적용했다. */}
+          <div className="flex flex-1 items-center justify-center self-stretch">
             {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
             <img
               src="/investup-hero-bg.png"
