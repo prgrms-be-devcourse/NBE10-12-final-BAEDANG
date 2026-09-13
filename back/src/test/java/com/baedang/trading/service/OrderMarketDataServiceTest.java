@@ -4,22 +4,27 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.service.PriceLimitLoadService;
 import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.service.StockTradingStatusService;
 import com.baedang.trading.model.OrderQuoteQueryContext;
+
 import org.junit.jupiter.api.Test;
+
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Optional;
-import static org.mockito.Mockito.*;
+
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class OrderMarketDataServiceTest {
     private final StockTradingStatusService statuses = mock(StockTradingStatusService.class);
     private final QuoteRefreshCoordinator quotes = mock(QuoteRefreshCoordinator.class);
     private final QuoteSnapshotRepository repository = mock(QuoteSnapshotRepository.class);
-    private final OrderMarketDataService service = new OrderMarketDataService(statuses, quotes, repository, 15);
+    private final PriceLimitLoadService priceLimits = mock(PriceLimitLoadService.class);
+    private final OrderMarketDataService service = new OrderMarketDataService(statuses, quotes, repository, 15, priceLimits);
 
     @Test
     void 시세가_없는_견적도_상태와_현재가를_확보한다() {
@@ -30,7 +35,8 @@ class OrderMarketDataServiceTest {
         OrderQuoteQueryContext result = service.prepareEstimate(
                 new OrderQuoteQueryContext(null, stock, null, BigDecimal.ZERO));
         assertThat(result.quote()).isSameAs(quote);
-        verifyNoInteractions(repository);
+        verify(priceLimits).ensureForTrading(stock);
+        verify(repository).findById(stock.getStockId());
     }
 
     @Test

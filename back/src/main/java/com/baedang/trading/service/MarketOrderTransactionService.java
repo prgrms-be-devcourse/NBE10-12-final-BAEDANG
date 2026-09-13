@@ -7,28 +7,29 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
-import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.EntryType;
+import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.LedgerEntry;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
-import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.entity.TradeExecution;
-import com.baedang.trading.repository.TradeExecutionRepository;
-import com.baedang.trading.model.MarketOrderCommand;
-import com.baedang.trading.model.OrderMarketContext;
-import com.baedang.trading.model.MarketOrderReceipt;
-import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.MarketOrderAmount;
+import com.baedang.trading.model.MarketOrderCommand;
+import com.baedang.trading.model.MarketOrderReceipt;
+import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -122,7 +123,6 @@ public class MarketOrderTransactionService {
         Account account = accountRepository.findByAccountIdAndUserIdForUpdate(command.accountId(), userId)
                 .orElseThrow(() -> new BusinessException(
                         ErrorCode.ACCOUNT_NOT_FOUND, "accountId=" + command.accountId()));
-        Instant now = clock.instant();
 
         OrderTerms terms = command.terms();
         TradeOrder existing = tradeOrderRepository
@@ -139,7 +139,7 @@ public class MarketOrderTransactionService {
 
         rejectChangedRound(account);
         // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
-        orderPolicy.validateExecutionContextFresh(executionContext, now);
+        orderPolicy.validateExecutionContextFresh(executionContext, clock.instant());
 
         Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(terms.symbol(), terms.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
@@ -175,6 +175,9 @@ public class MarketOrderTransactionService {
                 ? holdingRepository.findByAccountIdAndStockIdForUpdate(account.getAccountId(), stock.getStockId())
                     .orElse(null)
                 : null;
+        // 매도 보유 행 잠금까지 기다린 뒤 세션·시세 검증 시각을 확정합니다.
+        Instant now = clock.instant();
+        orderPolicy.validateExecutionContextFresh(executionContext, now);
         BigDecimal availableQuantity = holding == null ? BigDecimal.ZERO : holding.availableQuantity();
         // PostgreSQL TIMESTAMPTZ는 마이크로초까지만 보존합니다. 최초 응답의 나노초와
         // DB 재조회 기반 멱등 응답이 달라지지 않도록 저장 전에 같은 정밀도로 맞춥니다.
@@ -192,6 +195,9 @@ public class MarketOrderTransactionService {
                 () -> executionContext.isMarketOpenAt(now),
                 now
         );
+        if (rejection == ErrorCode.PRICE_LIMIT_UNAVAILABLE || rejection == ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT) {
+            throw new BusinessException(rejection, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
         if (rejection != null) {
             TradeOrder rejectedOrder = tradeOrderRepository.save(TradeOrder.rejectedMarketOrder(
                     account.getAccountId(), stock.getStockId(), command.clientOrderId(), terms.side(),

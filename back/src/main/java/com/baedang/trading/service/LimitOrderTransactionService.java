@@ -9,12 +9,11 @@ import com.baedang.stock.repository.StockRepository;
 import com.baedang.trading.dto.OrderDetailResponse;
 import com.baedang.trading.entity.Holding;
 import com.baedang.trading.entity.OrderSide;
-import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
-import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.LimitOrderAcceptedEvent;
+import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.OrderClosureResult;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
@@ -23,10 +22,12 @@ import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import org.springframework.stereotype.Service;
+
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -114,8 +115,7 @@ public class LimitOrderTransactionService {
             return replay(existing.get(), c);
         }
         requireActive(account);
-        Instant now = clock.instant();
-        policy.validateExecutionContextFresh(context, now);
+        policy.validateExecutionContextFresh(context, clock.instant());
         OrderTerms t = c.terms();
         Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(t.symbol(), t.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
@@ -127,12 +127,21 @@ public class LimitOrderTransactionService {
         Holding holding = t.side() == OrderSide.SELL
                 ? holdings.findByAccountIdAndStockIdForUpdate(account.getAccountId(), stock.getStockId()).orElse(null)
                 : null;
+        // 매도 보유 행 잠금까지 기다린 뒤 세션·시세 검증 시각을 확정합니다.
+        Instant now = clock.instant();
+        policy.validateExecutionContextFresh(context, now);
         ErrorCode reason = policy.determineStaticRejection(stock);
         if (reason == null && !context.isMarketOpenAt(now)) {
             reason = ErrorCode.MARKET_CLOSED;
         }
         if (reason == null) {
             reason = policy.validateQuoteTime(quote, now);
+        }
+        if (reason == null) {
+            reason = policy.validateTradingPrice(stock, quote, price.limitPrice(), now, true);
+            if (reason == ErrorCode.PRICE_LIMIT_UNAVAILABLE || reason == ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT) {
+                throw new BusinessException(reason, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+            }
         }
         if (reason == null && t.side() == OrderSide.BUY && account.availableCash().compareTo(price.reserve()) < 0) {
             reason = ErrorCode.INSUFFICIENT_CASH;

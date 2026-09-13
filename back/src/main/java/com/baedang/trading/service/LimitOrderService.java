@@ -23,6 +23,7 @@ import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderQuoteQueryContext;
 import com.baedang.trading.model.OrderTerms;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,7 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
@@ -152,8 +152,12 @@ public class LimitOrderService {
 
     private OrderDetailResponse unwrap(OrderDetailResponse result) {
         if (result.status() == OrderStatus.REJECTED) {
-            throw new BusinessException(ErrorCode.valueOf(result.rejectReason()),
-                    ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+            ErrorCode reason = ErrorCode.valueOf(result.rejectReason());
+            if (reason == ErrorCode.PRICE_OUT_OF_RANGE || reason == ErrorCode.INVALID_TICK_SIZE) {
+                throw new BusinessException(reason, Map.of("field", "limitPrice",
+                        "retryPolicy", ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.name()));
+            }
+            throw new BusinessException(reason, ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
         }
         return result;
     }
@@ -197,6 +201,9 @@ public class LimitOrderService {
         }
         if (reason == null) {
             reason = policy.validateQuoteTime(db.quote(), now);
+        }
+        if (reason == null) {
+            reason = policy.validateTradingPrice(db.stock(), db.quote(), p.limitPrice(), now, true);
         }
         if (reason == null && terms.side() == OrderSide.BUY && db.account().availableCash().compareTo(p.reserve()) < 0) {
             reason = ErrorCode.INSUFFICIENT_CASH;

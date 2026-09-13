@@ -12,10 +12,12 @@ import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.service.PriceLimitLoadService;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.service.StockTradingStatusService;
+import com.baedang.support.PriceLimitFixtures;
 import com.baedang.trading.dto.MarketOrderQuoteResponse;
 import com.baedang.trading.dto.MarketOrderRequest;
 import com.baedang.trading.dto.MarketOrderResponse;
@@ -39,6 +41,7 @@ import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.entity.User;
 import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -113,6 +116,7 @@ class MarketOrderIntegrationTest {
             DockerImageName.parse("timescale/timescaledb:latest-pg18")
                     .asCompatibleSubstituteFor("postgres"));
 
+    @MockitoBean PriceLimitLoadService priceLimits;
     @MockitoBean MarketSessionProvider marketSessionProvider;
     @MockitoBean ExecutionExchangeRateProvider exchangeRateProvider;
     // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort
@@ -146,6 +150,20 @@ class MarketOrderIntegrationTest {
     }
 
     @Test
+    void 국내_현재가가_상한가를_넘으면_시장가도_체결하지_않는다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        jdbcTemplate.update("UPDATE quote_snapshot SET upper_limit=9900,lower_limit=9000 WHERE stock_id=?", fixture.stockId());
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request(fixture, "BUY", "1")))
+                .isInstanceOfSatisfying(BusinessException.class, error -> {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT);
+                    assertThat(error.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
+                });
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isZero();
+        assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isZero();
+        assertThat(activeAccount(fixture.userId()).getCashBalance()).isEqualByComparingTo("50000");
+    }
+
+    @Test
     void 비랭킹_시세없는_종목은_외부조회후_체결하고_멱등재요청은_외부조회를_생략한다() {
         // 실제 테스트 실행 시각과 무관하게 정규장이 열린 상황을 구성한다.
         when(marketCalendarPort.fetchKrMarketCalendar(any())).thenAnswer(invocation -> {
@@ -163,6 +181,11 @@ class MarketOrderIntegrationTest {
                     fixture.symbol(), new BigDecimal("10000"),
                     Instant.now().atOffset(ZoneOffset.UTC), "KRW"));
         });
+        Mockito.doAnswer(invocation -> {
+            assertThat(TransactionSynchronizationManager.isActualTransactionActive()).isFalse();
+            jdbcTemplate.update("UPDATE quote_snapshot SET lower_limit=1, upper_limit=1000000, price_limit_date=(quote_at AT TIME ZONE 'Asia/Seoul')::date WHERE stock_id=?", fixture.stockId());
+            return null;
+        }).when(priceLimits).ensureForTrading(any());
         MarketOrderRequest request = request(fixture, "BUY", "1");
         MarketOrderResponse first = marketOrderService.place(fixture.userId(), request);
         assertThat(first.status()).isEqualTo("FILLED");
@@ -218,7 +241,7 @@ class MarketOrderIntegrationTest {
                     assertThat(exception.getData()).containsEntry("retryPolicy", "NOT_RETRYABLE");
                 });
 
-        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isZero();
         assertThat(tradeOrderRepository.countByAccountId(nextAccount.getAccountId())).isZero();
         assertThat(accountRepository.findById(nextAccount.getAccountId()).orElseThrow().getCashBalance())
                 .isEqualByComparingTo("50000");
@@ -264,7 +287,7 @@ class MarketOrderIntegrationTest {
 
         assertThat(retried.orderId()).isEqualTo(first.orderId());
         assertThat(retried.status()).isEqualTo(first.status());
-        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isEqualTo(1);
     }
 
     @Test
@@ -526,8 +549,8 @@ class MarketOrderIntegrationTest {
     void 종목과_시세의_통화가_다르면_주문을_저장하지_않고_같은_ID_재시도를_허용한다() {
         Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
         OffsetDateTime collectedAt = OffsetDateTime.now(ZoneOffset.UTC);
-        quoteSnapshotRepository.save(new QuoteSnapshot(
-                fixture.stockId(), new BigDecimal("10000"), "USD", collectedAt, collectedAt));
+        quoteSnapshotRepository.save(PriceLimitFixtures.verified(new QuoteSnapshot(
+                fixture.stockId(), new BigDecimal("10000"), "USD", collectedAt, collectedAt)));
         MarketOrderRequest request = request(fixture, "BUY", "1");
 
         assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
@@ -853,7 +876,7 @@ class MarketOrderIntegrationTest {
             assertThat(retry.get().orderId()).isEqualTo(firstOrderId.get());
         }
 
-        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isEqualTo(1);
         assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
     }
 
@@ -875,7 +898,7 @@ class MarketOrderIntegrationTest {
                     assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
                     assertThat(exception.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
                 });
-        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isZero();
         assertThat(ledgerEntryRepository.countByAccountId(fixture.accountId())).isZero();
         assertThat(holdingRepository.findByAccountIdAndStockId(fixture.accountId(), fixture.stockId())).isEmpty();
         assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance()).isEqualByComparingTo("500000");
@@ -883,7 +906,7 @@ class MarketOrderIntegrationTest {
 
         var response = marketOrderService.place(fixture.userId(), request);
         assertThat(tradeExecutionRepository.countByOrderId(response.orderId())).isEqualTo(1);
-        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isEqualTo(1);
         clearInvocations(exchangeRateProvider, marketSessionProvider);
         // 동시 멱등 경로도 저장 결과를 환율 재검증보다 먼저 반환합니다.
         var replay = marketOrderTransactionService.execute(fixture.userId(), command, context);
@@ -916,7 +939,7 @@ class MarketOrderIntegrationTest {
                         assertThat(error.getData()).containsEntry("retryPolicy", "SAME_CLIENT_ORDER_ID");
                     });
         }
-        assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isEqualTo(recovered ? 1 : 0);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isEqualTo(recovered ? 1 : 0);
         org.mockito.Mockito.verify(exchangeRateProvider).refreshUnavailableForMarketOrder();
         org.mockito.Mockito.verify(exchangeRateProvider, org.mockito.Mockito.times(2)).currentUsdKrwSnapshot();
     }
@@ -1013,8 +1036,8 @@ class MarketOrderIntegrationTest {
         stock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(stock);
         OffsetDateTime collectedAt = OffsetDateTime.now(ZoneOffset.UTC);
-        quoteSnapshotRepository.save(new QuoteSnapshot(
-                stock.getStockId(), price, currency, collectedAt, collectedAt));
+        quoteSnapshotRepository.save(PriceLimitFixtures.verified(new QuoteSnapshot(
+                stock.getStockId(), price, currency, collectedAt, collectedAt)));
         return new Fixture(
                 user.getUserId(), account.getAccountId(), stock.getStockId(), symbol, marketCountry);
     }
@@ -1028,7 +1051,7 @@ class MarketOrderIntegrationTest {
             assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request(fixture, "BUY", "2")))
                     .isInstanceOf(DataIntegrityViolationException.class);
             assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance()).isEqualByComparingTo("50000");
-            assertThat(tradeOrderRepository.countByAccountId(fixture.accountId())).isZero();
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, fixture.accountId())).isZero();
             assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM trade_execution e JOIN trade_order o ON o.order_id = e.order_id WHERE o.account_id = ?",
                     Long.class, fixture.accountId())).isZero();
             assertThat(holdingRepository.findByAccountIdAndStockId(fixture.accountId(), fixture.stockId())).isEmpty();

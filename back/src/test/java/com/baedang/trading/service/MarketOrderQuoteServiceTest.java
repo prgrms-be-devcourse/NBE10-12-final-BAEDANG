@@ -6,15 +6,18 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.orderbook.service.TickSizePolicy;
 import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.support.PriceLimitFixtures;
 import com.baedang.trading.dto.MarketOrderQuoteResponse;
 import com.baedang.trading.repository.HoldingRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -62,7 +65,7 @@ class MarketOrderQuoteServiceTest {
                 new BigDecimal("0.0000206"),
                 new BigDecimal("0.01")
         );
-        OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"));
+        OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"), new TickSizePolicy());
         service = new MarketOrderQuoteService(
                 new OrderQuoteQueryService(
                         accountRepository,
@@ -127,12 +130,12 @@ class MarketOrderQuoteServiceTest {
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
         when(stock.getCurrency()).thenReturn("USD");
-        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(new QuoteSnapshot(
+        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(PriceLimitFixtures.verified(new QuoteSnapshot(
                 101L,
                 new BigDecimal("241500"),
                 "KRW",
                 NOW.atOffset(ZoneOffset.UTC),
-                NOW.atOffset(ZoneOffset.UTC))));
+                NOW.atOffset(ZoneOffset.UTC)))));
 
         assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -223,7 +226,7 @@ class MarketOrderQuoteServiceTest {
         when(stock.getIsLiquidation()).thenReturn(false);
 
         OffsetDateTime quoteAt = NOW.minusSeconds(quoteAgeSeconds).atOffset(ZoneOffset.UTC);
-        QuoteSnapshot quote = new QuoteSnapshot(101L, price, "KRW", quoteAt, quoteAt);
+        QuoteSnapshot quote = PriceLimitFixtures.verified(new QuoteSnapshot(101L, price, "KRW", quoteAt, quoteAt));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
         when(marketSessionProvider.isOpen(MarketCountry.KR, NOW)).thenReturn(true);
     }
@@ -236,12 +239,12 @@ class MarketOrderQuoteServiceTest {
         when(stock.getStockId()).thenReturn(101L);
         when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
         when(stock.getCurrency()).thenReturn("USD");
-        QuoteSnapshot quote = new QuoteSnapshot(
+        QuoteSnapshot quote = PriceLimitFixtures.verified(new QuoteSnapshot(
                 101L,
                 price,
                 "USD",
                 NOW.minusSeconds(5).atOffset(ZoneOffset.UTC),
-                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC));
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC)));
         when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
     }
 

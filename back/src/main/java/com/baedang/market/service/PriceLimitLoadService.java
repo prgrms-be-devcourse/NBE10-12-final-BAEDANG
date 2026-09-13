@@ -9,10 +9,11 @@ import com.baedang.market.repository.PriceLimitRepository;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -67,6 +68,11 @@ public class PriceLimitLoadService {
 
     /** 상세 조회는 상하한가 전용 게이트에서 대기하지 않습니다. */
     public void ensureForDisplay(Stock stock) {
+        ensure(stock, false);
+    }
+
+    /** 주문 준비도 게이트 대기 없이 동일한 중복 억제·실패 대기를 사용합니다. */
+    public void ensureForTrading(Stock stock) {
         ensure(stock, false);
     }
 

@@ -50,6 +50,10 @@ public enum ErrorCode {
     INVALID_CURSOR(HttpStatus.BAD_REQUEST, "잘못된 페이지 정보예요. 처음부터 다시 불러와주세요"),
 
     // ── 시세 ────────────────────────────────────────────────────────────────
+    PRICE_LIMIT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "당일 상하한가를 확인할 수 없어요. 잠시 후 다시 시도해주세요"),
+    PRICE_OUT_OF_RANGE(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가격은 당일 하한가와 상한가 사이여야 해요"),
+    INVALID_TICK_SIZE(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가격이 호가 단위에 맞지 않아요"),
+    QUOTE_OUT_OF_PRICE_LIMIT(HttpStatus.BAD_GATEWAY, "현재가가 당일 상하한가 범위를 벗어났어요. 잠시 후 다시 시도해주세요"),
     QUOTE_NOT_FOUND(HttpStatus.NOT_FOUND, "시세 정보를 가져올 수 없어요"),
     QUOTE_CURRENCY_MISMATCH(HttpStatus.BAD_GATEWAY, "시세 통화 정보가 올바르지 않아요"),
     EXCHANGE_RATE_NOT_FOUND(HttpStatus.NOT_FOUND, "환율 정보를 가져올 수 없어요"),
