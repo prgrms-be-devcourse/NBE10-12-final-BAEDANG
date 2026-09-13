@@ -1314,7 +1314,13 @@ export function InvestupIntro({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    background: '#3d7bfa',
+                    // 체크 아이콘 배경색을 화면 속 다른 요소와 어울리는 세련된
+                    // 블루로 바꿔달라는 요청 — 눈에 띄지만 다소 붕 뜬 느낌의
+                    // 원색 파랑(#3d7bfa) 대신, 이 카드에서 이미 두 번(위
+                    // "차이점 분석 중"/"기존 증권사 서비스" 라벨) 쓰고 있는
+                    // T.taglineInk(#1b6da3)를 그대로 재사용했다 — 새 색을
+                    // 만들지 않아 화면 전체 톤과 자연스럽게 맞는다.
+                    background: T.taglineInk,
                     opacity: cmpOpen ? 1 : 0,
                     transform: `scale(${cmpOpen ? 1 : 0.4})`,
                     transition: 'opacity .5s ease, transform .6s cubic-bezier(.2,1.4,.35,1)',
