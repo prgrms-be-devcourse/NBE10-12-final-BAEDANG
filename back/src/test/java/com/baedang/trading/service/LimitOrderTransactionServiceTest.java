@@ -68,7 +68,6 @@ class LimitOrderTransactionServiceTest {
     @Mock private OrderPolicy policy;
     @Mock private EntityManager entityManager;
     @Mock private com.baedang.market.event.service.MarketTradingHaltPolicy marketTradingHaltPolicy;
-    @Mock private com.baedang.market.event.repository.MarketEventRepository marketEventRepository;
 
     private static final Long USER_ID = 1L;
     private static final Long ACCOUNT_ID = 10L;
@@ -89,7 +88,7 @@ class LimitOrderTransactionServiceTest {
     @BeforeEach
     void setUp() {
         service = new LimitOrderTransactionService(accounts, orders, holdings, stocks, quotes, policy, clock,
-                marketTradingHaltPolicy, marketEventRepository, mock(ApplicationEventPublisher.class));
+                marketTradingHaltPolicy, mock(ApplicationEventPublisher.class));
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
         krStock = Stock.create("005930", MarketCountry.KR, "KOSPI", "삼성전자", null, "KRW", "STOCK", true);
@@ -582,20 +581,17 @@ class LimitOrderTransactionServiceTest {
                             assertThat(e.getErrorCode()).isEqualTo(ErrorCode.ORDER_NOT_FOUND));
         }
 
-        /**
-         * 멱등 재생은 저장된 이벤트 시장이 주문 종목 시장과 같을 때만 데이터를 복원한다. 다르면
-         * 다른 시장의 CB 데이터를 안내하게 되므로 INTERNAL_ERROR로 끊는다.
-         */
+        /** 정책이 저장 이벤트를 복원할 수 없으면 멱등 재생도 같은 내부 오류로 실패한다. */
         @Test
-        void 재생시_이벤트_시장이_주문_시장과_다르면_INTERNAL_ERROR() {
+        void 재생시_halt_복원_실패를_INTERNAL_ERROR로_전파한다() {
             LimitOrderCommand command = buyCommand(BigDecimal.TEN, new BigDecimal("50000"));
             TradeOrder halted = haltedOrder(88L);
 
             when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
             when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(halted));
             when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-            when(marketEventRepository.findById(88L)).thenReturn(Optional.of(cbEvent(
-                    com.baedang.market.event.entity.KrMarket.KOSDAQ, 88L)));
+            when(marketTradingHaltPolicy.restoreRecordedHalt(88L, krStock))
+                    .thenThrow(new BusinessException(ErrorCode.INTERNAL_ERROR));
 
             assertThatThrownBy(() -> service.existing(USER_ID, command))
                     .isInstanceOfSatisfying(BusinessException.class,
@@ -610,8 +606,11 @@ class LimitOrderTransactionServiceTest {
             when(accounts.findByAccountIdAndUserId(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(activeAccount));
             when(orders.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.of(halted));
             when(stocks.findById(STOCK_ID)).thenReturn(Optional.of(krStock));
-            when(marketEventRepository.findById(88L)).thenReturn(Optional.of(cbEvent(
-                    com.baedang.market.event.entity.KrMarket.KOSPI, 88L)));
+            when(marketTradingHaltPolicy.restoreRecordedHalt(88L, krStock))
+                    .thenReturn(new com.baedang.market.event.model.ActiveMarketHalt(
+                            88L, com.baedang.market.event.entity.KrMarket.KOSPI, 1,
+                            OffsetDateTime.parse("2026-07-13T13:28:32+09:00"),
+                            OffsetDateTime.parse("2026-07-13T13:48:32+09:00")));
 
             var result = service.existing(USER_ID, command).orElseThrow();
 
@@ -626,20 +625,6 @@ class LimitOrderTransactionServiceTest {
                     marketEventId, AT);
             ReflectionTestUtils.setField(order, "orderId", 1L);
             return order;
-        }
-
-        private com.baedang.market.event.entity.MarketEvent cbEvent(
-                com.baedang.market.event.entity.KrMarket market, Long marketEventId) {
-            com.baedang.market.event.entity.MarketEvent event =
-                    com.baedang.market.event.entity.MarketEvent.circuitBreaker(
-                            com.baedang.market.event.entity.MarketEventSource.KRX_KIND,
-                            "20260713000658", market, 1,
-                            Instant.parse("2026-07-13T04:28:32Z"), Instant.parse("2026-07-13T04:48:32Z"),
-                            Instant.parse("2026-07-13T04:29:00Z"), Instant.parse("2026-07-13T04:29:07Z"),
-                            "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
-                            java.net.URI.create("https://kind.krx.co.kr/event"));
-            ReflectionTestUtils.setField(event, "marketEventId", marketEventId);
-            return event;
         }
 
         /** CB 중에도 취소는 허용된다. 종료 경로는 halt 정책을 전혀 조회하지 않는다. */
