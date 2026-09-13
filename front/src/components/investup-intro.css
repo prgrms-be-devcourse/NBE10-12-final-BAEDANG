@@ -1,0 +1,192 @@
+/* Investup 인트로 — 전역 스타일 / 키프레임.
+   Pretendard는 이 프로젝트의 루트 레이아웃(app/layout.tsx)이 이미 전역으로 로드하므로
+   여기서 다시 @import하지 않는다(원본 디자인 패키지의 styles/investup-intro.css에는
+   있었지만, 중복 로드를 피하려고 이 한 줄만 뺐다 — 나머지는 그대로다). */
+
+:root {
+  --iv-bg: #eff6fc;
+  --iv-ink: #071829;
+  --iv-deep: #0f3868;
+  --iv-accent: #1b6da3;
+  --iv-dot: #7fb6e3;
+  /* 그라데이션은 별로라는 피드백으로 뺐다 — 반투명 흰색 단색 배경(호버 시
+     알파값만 살짝 올려 밝아지는, 토스 버튼들의 흔한 호버 방식). */
+  --iv-cta-hover: rgba(255, 255, 255, 0.24);
+}
+
+.iv-root a {
+  color: var(--iv-deep);
+  text-decoration: none;
+}
+
+.iv-root a:hover {
+  color: var(--iv-accent);
+}
+
+/* 히어로 배경 메시가 천천히 흐르는 움직임 */
+@keyframes iv-drift {
+  0% {
+    transform: translate3d(-2%, -1%, 0) rotate(0deg);
+  }
+  50% {
+    transform: translate3d(3%, 2%, 0) rotate(6deg);
+  }
+  100% {
+    transform: translate3d(-2%, -1%, 0) rotate(0deg);
+  }
+}
+
+/* 하단 스크롤 화살표 */
+@keyframes iv-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(9px);
+  }
+}
+
+/* 좌·우 상단 도트 패턴: 전체 밝기 호흡 */
+@keyframes iv-dot-breathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* 좌·우 상단 도트 패턴: 발광 하이라이트가 대각선으로 훑고 지나감 */
+@keyframes iv-dot-shimmer-l {
+  0% {
+    background-position: -20% -20%;
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.55;
+  }
+  100% {
+    background-position: 150% 150%;
+    opacity: 0;
+  }
+}
+
+@keyframes iv-dot-shimmer-r {
+  0% {
+    background-position: 120% -20%;
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.55;
+  }
+  75% {
+    opacity: 0.55;
+  }
+  100% {
+    background-position: -50% 150%;
+    opacity: 0;
+  }
+}
+
+/* "N가지 확인 중..."의 점 3개가 파도처럼 순서대로 넘실거리는 애니메이션 —
+   흔한 "입력 중..." 인디케이터와 같은 방식. 점마다 animation-delay를 다르게 줘서
+   순서대로 살짝 떠올랐다 가라앉는다. */
+@keyframes iv-dot-wave {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.35;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+.iv-dot {
+  display: inline-block;
+  animation: iv-dot-wave 1.1s ease-in-out infinite;
+}
+
+/* prefers-reduced-motion이면 무한 반복 애니메이션을 끄고 점을 가만히 둔다. */
+@media (prefers-reduced-motion: reduce) {
+  .iv-dot {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 시작하기 버튼 호버 */
+.iv-cta-btn {
+  transition: background-color 0.28s ease;
+}
+
+.iv-cta-btn:hover {
+  background: var(--iv-cta-hover);
+}
+
+/* 버튼 텍스트가 호버 시 아래→위로 교체되는 효과 — toss.im/#ads 참고.
+   SwapText.tsx가 같은 텍스트를 두 벌(iv-swap-original/iv-swap-hover) 겹쳐
+   렌더링하면, 부모에 이 iv-hover-swap 클래스가 있을 때만 반응한다 — 특정
+   버튼(iv-cta-btn)에 종속되지 않은 별도 트리거 클래스라 다른 버튼에도 그대로
+   재사용할 수 있다. opacity가 아니라 transform: translateY()만 움직여서
+   "실제로 이동하는" 느낌을 낸다. */
+.iv-swap {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: middle;
+}
+
+.iv-swap-original,
+.iv-swap-hover {
+  display: block;
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.24, 1);
+  will-change: transform;
+}
+
+.iv-swap-hover {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  transform: translateY(100%);
+}
+
+.iv-hover-swap:hover .iv-swap-original,
+.iv-hover-swap:focus-visible .iv-swap-original {
+  transform: translateY(-100%);
+}
+
+.iv-hover-swap:hover .iv-swap-hover,
+.iv-hover-swap:focus-visible .iv-swap-hover {
+  transform: translateY(0);
+}
+
+/* prefers-reduced-motion이면 텍스트가 이동하지 않고 바로 바뀐다(내용이
+   똑같은 텍스트라 사용자는 차이를 못 느낀다 — 애니메이션만 없어진다). */
+@media (prefers-reduced-motion: reduce) {
+  .iv-swap-original,
+  .iv-swap-hover {
+    transition: none;
+  }
+}
+
+/* "5,000만원"에 걸려 있던 GradientSweepText(파란 그라데이션이 훑고
+   지나가는 애니메이션)는 그 애니메이션 자체를 없애고 정적인 세로
+   그라데이션으로 바꿔달라는 요청으로 제거했다 — 이 단어에만 쓰이던
+   전용 스타일이라 InvestupIntro.tsx의 새 인라인 스타일로 옮기고
+   GradientSweepText.tsx 파일 및 여기 있던 .iv-sweep-gradient 관련
+   CSS(그라데이션 폭·색상·sweep keyframe·reduced-motion 처리)는 모두
+   지웠다. */
+
+/* 화면 중앙에 별 픽셀 도트 패턴이 잠깐 나타났다 사라지는 효과
+   (StarBurstFlash.tsx + .iv-starburst 관련 CSS)는 제거해달라는 요청으로
+   컴포넌트 파일과 함께 지웠다. */
