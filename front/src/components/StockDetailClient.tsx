@@ -41,6 +41,10 @@ const TRADABLE_REASON_LABEL: Record<string, string> = {
   SUSPENDED: "거래정지 종목이에요",
   LIQUIDATION: "정리매매 종목이에요",
   QUOTE_NOT_FOUND: "시세 정보가 아직 없어요",
+  PRICE_LIMIT_UNAVAILABLE: "당일 상하한가를 확인 중이에요. 잠시 후 다시 시도해주세요",
+  PRICE_OUT_OF_RANGE: "주문 가격은 당일 하한가와 상한가 사이여야 해요",
+  INVALID_TICK_SIZE: "주문 가격이 호가 단위에 맞지 않아요",
+  QUOTE_OUT_OF_PRICE_LIMIT: "현재가를 다시 확인 중이에요. 잠시 후 다시 시도해주세요",
 };
 
 // 이 화면을 처음 보는 사용자를 위한 안내 투어. localStorage에 한 번 완료/건너뛰기
@@ -430,7 +434,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [orderType, isLoggedIn, detail.tradable, detail.symbol, detail.marketCountry, side, quantity, quantityInput, limitPriceInput, limitCurrency, limitPriceValid]);
+  }, [orderType, isLoggedIn, detail.tradable, detail.symbol, detail.marketCountry, side, quantity, quantityInput, limitPriceInput, limitCurrency, limitPriceValid, detail.price.upperLimit, detail.price.lowerLimit]);
 
   let limitBlockReason: string | null = null;
   if (!detail.tradable) {
@@ -907,6 +911,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   setLimitFieldError(null);
                 }}
               />
+              <p className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                {isUsdStock ? "가격 제한 없음" : detail.price.lowerLimit != null && detail.price.upperLimit != null
+                  ? `주문 가능 범위: ${formatNumber(detail.price.lowerLimit)}원 ~ ${formatNumber(detail.price.upperLimit)}원 (호가 단위 적용)`
+                  : "당일 상하한가 확인 후 주문할 수 있어요"}
+              </p>
               {isUsdStock && limitCurrency === "KRW" && limitPriceValid && (
                 <div className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
                   약 {limitPriceInStockCurrency != null ? limitPriceInStockCurrency.toFixed(2) : "-"}$로 환산돼요(접수 시점 환율로 최종 확정)
