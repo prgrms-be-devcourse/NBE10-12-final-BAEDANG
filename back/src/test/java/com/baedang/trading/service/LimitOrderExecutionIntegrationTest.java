@@ -133,6 +133,10 @@ class LimitOrderExecutionIntegrationTest {
     @BeforeEach
     void setup() {
         clock.setCurrent(NOW);
+        // CB 이벤트는 시장 전체를 막으므로 남아 있으면 뒤따르는 KOSPI 체결이 모두 거절된다.
+        // CB 거절 주문이 FK로 참조하므로 주문을 먼저 지운다.
+        jdbc.execute("DELETE FROM trade_order WHERE market_event_id IS NOT NULL");
+        jdbc.execute("DELETE FROM market_event");
         when(sessions.currentSession(any(),any())).thenReturn(new MarketSessionStatus(true,NOW.plusSeconds(3600)));
         when(statuses.requireCurrent(any())).thenAnswer(inv -> inv.getArgument(0));
         rate("1400");
