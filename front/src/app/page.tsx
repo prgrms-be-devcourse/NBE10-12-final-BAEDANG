@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 // 서비스 소개 화면의 "시작하기" 버튼과 같은 텍스트 스왑 호버 효과를 메인
 // 화면 버튼에도 재사용해달라는 요청 — SwapText와 이 CSS(.iv-hover-swap,
 // .iv-swap 등)는 특정 버튼에 종속되지 않은 범용 컴포넌트/클래스로 만들어져
@@ -77,19 +78,28 @@ export default function MainPage() {
         >
           <div className="flex-[1.2]">
             {/* "투자 연습장" 배지 문구를 제거해달라는 요청. */}
-            <h1
+            {/* 토스인슈어런스(pd-recruit.tossinsu.com)의 "아래에서 위로
+                빠르게 올라와 제자리에 안착하는" Line Reveal 애니메이션을
+                참고해달라는 요청 — 기존 <br/>로 나뉘어 있던 두 줄을 그대로
+                RevealText의 lines 배열로 옮겼다. font-size 등 기존 스타일은
+                className/style로 그대로 넘겨 변경하지 않았다. */}
+            <RevealText
+              as="h1"
               className="mt-4.5 mb-3.5 text-[38px] leading-[1.35] font-extrabold tracking-[-0.02em]"
               style={{ color: "var(--heroText)" }}
-            >
-              실전처럼 경험하고,
-              <br />
-              나만의 투자 감각을 키워요
-            </h1>
-            <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
-              실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.
-              <br />
-              <b className="font-bold">모의 투자금 5,000만원</b>이 가입 즉시 지급돼요.
-            </p>
+              lines={["실전처럼 경험하고,", "나만의 투자 감각을 키워요"]}
+            />
+            <RevealText
+              as="p"
+              className="my-3 max-w-[440px] text-[16px] leading-[1.6]"
+              style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}
+              lines={[
+                "실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.",
+                <>
+                  <b className="font-bold">모의 투자금 5,000만원</b>이 가입 즉시 지급돼요.
+                </>,
+              ]}
+            />
             {/* 두 버튼 모두 서비스 소개 화면의 "시작하기" 버튼과 같은
                 스타일·애니메이션을 적용해달라는 요청 — 알약형(rounded-full)
                 반투명 배경, 호버 시 배경이 밝아지는 트랜지션, 그리고
@@ -105,7 +115,12 @@ export default function MainPage() {
                 onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
-                <SwapText>모의 투자금 받고 시작하기</SwapText>
+                {/* 버튼 라벨에도 Line Reveal을 적용해달라는 요청 — SwapText(호버
+                    시 텍스트가 위로 스치듯 바뀌는 효과)는 그대로 두고, 그
+                    바깥을 RevealText로 한 번 더 감쌌다. 두 마스크는 서로
+                    독립적으로 동작한다(스크롤 진입 시 1회 등장은 RevealText,
+                    마우스 호버 때마다 반복되는 텍스트 교체는 SwapText). */}
+                <RevealText as="span" display="inline-block" lines={[<SwapText key="label">모의 투자금 받고 시작하기</SwapText>]} />
               </Link>
               <Link
                 href="/guide"
@@ -114,15 +129,18 @@ export default function MainPage() {
                 onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
-                <SwapText>가이드 보기</SwapText>
+                <RevealText as="span" display="inline-block" baseDelayMs={45} lines={[<SwapText key="label">가이드 보기</SwapText>]} />
               </Link>
             </div>
-            <div className="mt-3.5 text-[14px]" style={{ color: "var(--heroSub)" }}>
-              실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요
-            </div>
+            <RevealText
+              as="div"
+              className="mt-3.5 text-[14px]"
+              style={{ color: "var(--heroSub)" }}
+              lines={["실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요"]}
+            />
             {marketStatus && (
               <div className="mt-3 flex flex-wrap gap-2">
-                {marketStatus.markets.map((m) => (
+                {marketStatus.markets.map((m, i) => (
                   <span
                     key={m.marketCountry}
                     // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다. 라이트 모드는
@@ -137,8 +155,20 @@ export default function MainPage() {
                         background: m.open ? "var(--up)" : theme === "dark" ? "rgba(0,0,0,.45)" : "rgba(255,255,255,.55)",
                       }}
                     />
-                    {MARKET_LABEL[m.marketCountry] ?? m.marketCountry}{" "}
-                    {m.open ? "개장중" : m.nextOpensAt ? `마감 · ${formatMarketTime(m.nextOpensAt)} 개장` : "마감"}
+                    {/* 배지 두 개(국내장/해외장)가 나란히 있으므로 배열 인덱스만큼
+                        살짝 지연을 줘서(baseDelayMs) 왼쪽 배지가 먼저, 오른쪽
+                        배지가 아주 조금 뒤에 올라오게 했다. */}
+                    <RevealText
+                      as="span"
+                      display="inline-block"
+                      baseDelayMs={i * 45}
+                      lines={[
+                        <>
+                          {MARKET_LABEL[m.marketCountry] ?? m.marketCountry}{" "}
+                          {m.open ? "개장중" : m.nextOpensAt ? `마감 · ${formatMarketTime(m.nextOpensAt)} 개장` : "마감"}
+                        </>,
+                      ]}
+                    />
                   </span>
                 ))}
               </div>
