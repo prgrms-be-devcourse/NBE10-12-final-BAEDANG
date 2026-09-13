@@ -279,6 +279,22 @@ body {
     background: var(--line);
   }
 
+  /* 투자 성향 리포트의 판정 기준(?)·모달 닫기 버튼 호버 효과. */
+  .report-help-btn {
+    border: 1px solid var(--line);
+    color: var(--mut2);
+  }
+  .report-help-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .report-modal-close-btn {
+    background: var(--fill);
+  }
+  .report-modal-close-btn:hover {
+    background: var(--line);
+  }
+
   /* 종목 상세 첫 사용자 안내 투어(TourGuide) 버튼들. */
   .tour-skip-btn {
     color: var(--mut2);
