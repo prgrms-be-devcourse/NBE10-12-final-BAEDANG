@@ -77,7 +77,11 @@ export function Nav() {
         inactiveTextStyle={{ color: "var(--headerNavInactive)" }}
       />
 
-      <div className="ml-auto flex items-center gap-2.5">
+      {/* 라이트/다크 모드 버튼과 닉네임 문구, 닉네임과 로그아웃 버튼 사이의
+          간격을 조금씩 띄워달라는 요청 — 이 셋이 같은 flex 컨테이너의
+          gap 하나를 공유해서, gap 값을 2.5(10px) → 4(16px)로 올리면
+          두 간격 모두 똑같이 넓어진다. */}
+      <div className="ml-auto flex items-center gap-4">
         <PillTabs
           options={[
             { value: "light", label: "라이트" },
