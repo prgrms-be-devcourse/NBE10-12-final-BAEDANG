@@ -69,6 +69,24 @@ services:
     networks:
       - common
 
+  npm:
+    image: zoeyvid/npmplus:latest
+    container_name: trading-npm
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+      - "81:81"
+    environment:
+      TZ: Asia/Seoul
+      INITIAL_ADMIN_EMAIL: admin@npm.com
+      INITIAL_ADMIN_PASSWORD: 12345678
+    volumes:
+      - ./trading-npm/volumes/data:/data
+    restart: unless-stopped
+    networks:
+      - common
+
 volumes:
   pgdata:
   promdata:
