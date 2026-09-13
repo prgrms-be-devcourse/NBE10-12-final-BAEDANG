@@ -679,6 +679,30 @@ export function InvestupIntro({
           }}
         />
 
+        {/* 배경에 첨부한 사진(파란 웨이브 그래픽)을 반영해달라는 요청 —
+            위,아래,왼쪽,오른쪽이 모두 옅어지도록 radial-gradient 마스크로
+            가장자리를 투명하게 깎아냈다(mask-image). 사각형 이미지가
+            뚜렷한 경계 없이 기존 히어로 배경(mesh, veil) 위로 자연스럽게
+            녹아들게 하기 위함이다. mesh/veil 바로 위, 그 위의 파랑
+            그라데이션들 아래에 둬서 이 사진이 배경 "재질"처럼 깔리고, 그
+            위의 그라데이션들은 그 위에 얹히는 빛처럼 겹친다. 다른
+            히어로 전용 장식들과 같은 lifted 타이밍에 맞춰 사라진다. */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            backgroundImage: 'url(/investup-hero-bg.png)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            WebkitMaskImage: 'radial-gradient(ellipse 68% 66% at 50% 50%, #000 55%, transparent 100%)',
+            maskImage: 'radial-gradient(ellipse 68% 66% at 50% 50%, #000 55%, transparent 100%)',
+            pointerEvents: 'none',
+            opacity: lifted ? 0 : 1,
+            transition: 'opacity 1.6s cubic-bezier(.16,1,.3,1)',
+          }}
+        />
+
         {/* 히어로 화면(로고 + "실수는 가볍게, 투자 감각은 제대로") 상단에
             그라데이션을 넣어달라는 요청 — 색상은 처음엔 02 Steps의 STEP
             1~3 카드가 쓰는 배경 그라데이션 색(연한 하늘색
