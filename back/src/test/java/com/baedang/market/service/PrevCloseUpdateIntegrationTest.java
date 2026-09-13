@@ -3,8 +3,10 @@ package com.baedang.market.service;
 import com.baedang.market.entity.*;
 import com.baedang.market.port.*;
 import com.baedang.market.repository.*;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.stock.entity.*;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.trading.scheduler.LimitOrderExpirationScheduler;
 import org.junit.jupiter.api.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -39,6 +41,9 @@ class PrevCloseUpdateIntegrationTest {
     @MockitoBean MarketCalendarPort calendars;
     @MockitoBean MarketDataPort data;
     @MockitoBean Clock clock;
+    // 이 테스트가 검증하지 않는 예약 작업이 Mockito reset 구간의 Clock/Calendar mock을 호출하지 않게 격리한다.
+    @MockitoBean OrderBookRefreshScheduler orderBookRefreshScheduler;
+    @MockitoBean LimitOrderExpirationScheduler limitOrderExpirationScheduler;
     @Autowired PrevCloseUpdateService recovery;
     @Autowired DailyCandleSeedService seeder;
     @Autowired QuoteSnapshotPersistenceService prices;
