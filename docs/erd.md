@@ -688,6 +688,10 @@ Rejected LIMIT requests retain input and conversion evidence but have no reserva
 
 A circuit-breaker rejection keeps the same LIMIT evidence shape: the requested price/currency and the acceptance rate are stored (they are the idempotency comparison basis and CHECK-required for every LIMIT row), while quote-time evidence and any reservation remain absent — the order is not priced against a quote and no cash or quantity is frozen. `market_event_id` is set only here and only on the stored `REJECTED` row.
 
+### Circuit-breaker execution deferral for existing orders (#167)
+
+Deferring an already accepted LIMIT order during an active KOSPI/KOSDAQ circuit breaker adds **no schema**. The accepted order keeps `status` PENDING/PARTIALLY_FILLED, its original `expires_at`, `reserved_cash` and the matching `locked_cash`/`locked_quantity`. It does **not** receive `market_event_id` — it is not rejected. No `trade_execution` or `ledger_entry` row is written and order-book `remaining_quantity`/`revision` are unchanged, because the attempt transaction rolls back entirely. Normal cancel/expire transitions still clear the remaining reservation during the halt.
+
 ### LIMIT execution indexes (#122)
 
 No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
@@ -696,7 +700,7 @@ V4 is already reserved by develop and V5 by the financial-information PR. Coordi
 
 ---
 
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V13__stock_like.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V14__trade_order_market_event_rejection.sql`
 
 ## Regular-session trading dates and references (#173)
 
