@@ -745,8 +745,9 @@ export function InvestupIntro({
         <StarBurstFlash
           active={heroIn}
           // 별 크기가 너무 작다는 피드백으로 많이 키웠다가(280 → 520),
-          // 다시 좀 더 줄여달라는 요청으로 520 → 400으로 낮췄다.
-          size={400}
+          // 다시 좀 더 줄여달라는 요청을 두 차례 거쳐 520 → 400 →
+          // 350으로 낮췄다.
+          size={350}
           style={{
             position: 'absolute',
             left: '50%',
