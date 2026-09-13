@@ -41,8 +41,11 @@ export function Nav() {
           하나로는 그대로 재현할 수 없다. 대신 다크 모드일 때만
           filter: brightness(0) invert(1)을 걸어 같은 PNG를 흰색 실루엣으로
           렌더링한다 — 별도의 다크 모드 로고 파일 없이도 텍스트였을 때와 동일하게
-          라이트=남색/다크=흰색으로 보인다. */}
-      <Link href="/" className="mr-1.5 inline-flex items-center whitespace-nowrap" aria-label="InvestUP">
+          라이트=남색/다크=흰색으로 보인다.
+          로고를 클릭하면 서비스 소개 화면("/intro")으로 이동하게 해달라는
+          요청 — 홈("/")은 첫 방문자만 자동으로 리다이렉트되므로(proxy.ts),
+          로고 클릭은 그 소개 화면을 언제든 다시 보고 싶을 때 쓰는 통로다. */}
+      <Link href="/intro" className="mr-1.5 inline-flex items-center whitespace-nowrap" aria-label="InvestUP">
         {/* eslint-disable-next-line @next/next/no-img-element -- 헤더 로고 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
         <img
           src="/investup-logo-symbol-light.png"
