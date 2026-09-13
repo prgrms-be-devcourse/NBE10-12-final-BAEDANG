@@ -719,8 +719,14 @@ export function InvestupIntro({
               display: 'block',
               width: '100%',
               height: 'auto',
-              WebkitMaskImage: 'radial-gradient(ellipse 62% 62% at 50% 50%, #000 50%, transparent 100%)',
-              maskImage: 'radial-gradient(ellipse 62% 62% at 50% 50%, #000 50%, transparent 100%)',
+              // 테두리가 좀 더 넓게, 자연스럽게 옅어지게 해달라는 요청 —
+              // 불투명하게 남는 중심 구간을 50%→20%로 크게 줄여서, 옅어
+              // 지는 그라데이션 구간 자체를(50%~100%였던 폭 50%p를
+              // 20%~100%인 폭 80%p로) 훨씬 넓혔다. 중심에서 좀 더 이른
+              // 지점부터 서서히 옅어지기 시작해 가장자리까지 완만하게
+              // 이어진다.
+              WebkitMaskImage: 'radial-gradient(ellipse 62% 62% at 50% 50%, #000 20%, transparent 100%)',
+              maskImage: 'radial-gradient(ellipse 62% 62% at 50% 50%, #000 20%, transparent 100%)',
             }}
           />
         </div>
