@@ -1,11 +1,12 @@
 package com.baedang.orderbook.config;
 
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-
-import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import org.springframework.scheduling.annotation.Scheduled;
+
 import java.math.BigDecimal;
 import java.time.Duration;
 
@@ -19,12 +20,12 @@ class OrderBookPropertiesTest {
             .withUserConfiguration(OrderBookConfiguration.class);
 
     @Test
-    void application_yaml의_V1_기본정책을_바인딩한다() {
+    void application_yaml의_V2_기본정책을_바인딩한다() {
         contextRunner.run(context -> {
             assertThat(context).hasNotFailed();
             OrderBookProperties properties = context.getBean(OrderBookProperties.class);
 
-            assertThat(properties.policyVersion()).isEqualTo("V1");
+            assertThat(properties.policyVersion()).isEqualTo("V2");
             assertThat(properties.refreshInterval()).isEqualTo(Duration.ofSeconds(3));
             assertThat(properties.refreshInitialDelay()).isEqualTo(Duration.ZERO);
             assertThat(properties.maxQuoteAge()).isEqualTo(Duration.ofSeconds(15));
@@ -91,39 +92,39 @@ class OrderBookPropertiesTest {
         )).isInstanceOf(IllegalArgumentException.class);
 
         assertThatThrownBy(() -> new OrderBookProperties(
-                "V1", Duration.ZERO, Duration.ofSeconds(15),
+                "V2", Duration.ZERO, Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 BigDecimal.ONE, new BigDecimal("1000000"), 8000, 12000, Duration.ofMinutes(1)
         )).isInstanceOf(IllegalArgumentException.class);
 
 
         assertThatThrownBy(() -> new OrderBookProperties(
-                "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
+                "V2", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 BigDecimal.ONE, new BigDecimal("1000000"), 12000, 8000, Duration.ofMinutes(1)
         )).isInstanceOf(IllegalArgumentException.class);
 
         assertThatThrownBy(() -> new OrderBookProperties(
-                "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
+                "V2", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 new BigDecimal("0.5"), new BigDecimal("1000000"), 8000, 12000, Duration.ofMinutes(1)
         )).isInstanceOf(IllegalArgumentException.class);
 
         assertThatThrownBy(() -> new OrderBookProperties(
-                "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
+                "V2", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 new BigDecimal("1.5"), new BigDecimal("1.5"), 8000, 12000, Duration.ofMinutes(1)
         )).isInstanceOf(IllegalArgumentException.class);
 
         assertThatThrownBy(() -> new OrderBookProperties(
-                "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
+                "V2", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 BigDecimal.ONE, new BigDecimal("10000000000000"), 8000, 12000, Duration.ofMinutes(1)
         )).isInstanceOf(IllegalArgumentException.class);
 
         // 1.000000처럼 정수지만 소수점 0이 붙은 형태는 정상 허용된다
         assertThat(new OrderBookProperties(
-                "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
+                "V2", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 new BigDecimal("1.000000"), new BigDecimal("1000000.00"), 8000, 12000, Duration.ofMinutes(1)
         )).isNotNull();

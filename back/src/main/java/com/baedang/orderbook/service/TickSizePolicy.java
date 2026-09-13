@@ -3,10 +3,10 @@ package com.baedang.orderbook.service;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.StockCategory;
+
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -52,12 +52,16 @@ public class TickSizePolicy {
     );
 
     public BigDecimal nextValidPriceAbove(StockDescriptor stock, BigDecimal price) {
+        return findNextValidPriceAbove(stock, price)
+                .orElseThrow(() -> new IllegalArgumentException("다음 유효 호가를 계산할 수 없습니다"));
+    }
+
+    Optional<BigDecimal> findNextValidPriceAbove(StockDescriptor stock, BigDecimal price) {
         requirePositive(price);
         return gridsFor(stock).stream()
                 .map(grid -> grid.firstValidStrictlyAbove(price))
                 .filter(Objects::nonNull)
-                .min(BigDecimal::compareTo)
-                .orElseThrow(() -> new IllegalArgumentException("다음 유효 호가를 계산할 수 없습니다"));
+                .min(BigDecimal::compareTo);
     }
 
     public BigDecimal previousValidPriceBelow(StockDescriptor stock, BigDecimal price) {

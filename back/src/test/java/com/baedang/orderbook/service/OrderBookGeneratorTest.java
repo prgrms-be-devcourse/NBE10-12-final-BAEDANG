@@ -7,6 +7,8 @@ import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.StockCategory;
+import com.baedang.support.PriceLimitFixtures;
+
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
@@ -19,11 +21,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrderBookGeneratorTest {
 
-    private final OrderBookGenerator generator = new OrderBookGenerator(new TickSizePolicy());
+    private final OrderBookGenerator generator = new OrderBookGenerator(new TickSizePolicy(), new OrderBookPricePolicy(new TickSizePolicy()));
 
-    private static OrderBookProperties v1() {
+    private static OrderBookProperties v2() {
         return new OrderBookProperties(
-                "V1", Duration.ofSeconds(3), Duration.ofSeconds(15),
+                "V2", Duration.ofSeconds(3), Duration.ofSeconds(15),
                 new BigDecimal("20000000"), new BigDecimal("15000"),
                 BigDecimal.ONE, new BigDecimal("1000000"), 8000, 12000, Duration.ofMinutes(1)
         );
@@ -39,13 +41,13 @@ class OrderBookGeneratorTest {
 
     private GeneratedOrderBook generateWithSeed(long seed) {
         return generator.generate(
-                v1(),
+                v2(),
                 krIndividual(),
                 new BigDecimal("70000"),
                 Instant.parse("2026-09-03T01:00:00Z"),
                 Instant.parse("2026-09-03T01:00:03Z"),
                 seed
-        );
+        , PriceLimitFixtures.at(Instant.parse("2026-09-03T01:00:03Z")));
     }
 
     @Test
@@ -55,7 +57,7 @@ class OrderBookGeneratorTest {
         assertThat(book.levels()).hasSize(20);
         assertThat(book.levelsBySide(OrderBookSide.ASK)).hasSize(10);
         assertThat(book.levelsBySide(OrderBookSide.BID)).hasSize(10);
-        assertThat(book.bestBid().price()).isLessThan(book.bestAsk().price());
+        assertThat(book.bestBid().orElseThrow().price()).isLessThan(book.bestAsk().orElseThrow().price());
     }
 
     @Test
@@ -105,10 +107,9 @@ class OrderBookGeneratorTest {
     @Test
     void 가격_구간을_넘어_가도_새_구간_단위를_적용한다() {
         GeneratedOrderBook book = generator.generate(
-                v1(), krIndividual(), new BigDecimal("1995"),
+                v2(), krIndividual(), new BigDecimal("1995"),
                 Instant.parse("2026-09-03T01:00:00Z"),
-                Instant.parse("2026-09-03T01:00:03Z"), 42L
-        );
+                Instant.parse("2026-09-03T01:00:03Z"), 42L, PriceLimitFixtures.at(Instant.parse("2026-09-03T01:00:03Z")));
 
         List<String> askPrices = book.levelsBySide(OrderBookSide.ASK).stream()
                 .map(level -> level.price().stripTrailingZeros().toPlainString())
@@ -120,40 +121,36 @@ class OrderBookGeneratorTest {
     }
 
     @Test
-    void BID를_양수_유효_가격으로_10개_만들_수_없으면_거절한다() {
-        // 1원 미만 구간이 없으므로 BID 10개를 만들 수 없다 — 같은 가격 반복이나
-        // 1원 강제 치환이 아니라 예외로 실패해야 한다(설계서 §4.3).
-        assertThatThrownBy(() -> generator.generate(
-                v1(), krIndividual(), new BigDecimal("5"),
-                Instant.parse("2026-09-03T01:00:00Z"),
-                Instant.parse("2026-09-03T01:00:03Z"), 42L))
-                .isInstanceOf(IllegalArgumentException.class);
+    void 국내_양수_가격_경계에서는_가능한_BID만_생성한다() {
+        Instant now = Instant.parse("2026-09-03T01:00:03Z");
+        GeneratedOrderBook book = generator.generate(v2(), krIndividual(), new BigDecimal("5"),
+                now, now, 42L, PriceLimitFixtures.at(now));
+        assertThat(book.levelsBySide(OrderBookSide.BID)).extracting(GeneratedOrderBookLevel::price)
+                .containsExactly(new BigDecimal("4"), new BigDecimal("3"), new BigDecimal("2"), BigDecimal.ONE);
     }
 
     @Test
     void 미국_종목은_USD_기준_물량과_0_01_단위를_쓴다() {
         GeneratedOrderBook book = generator.generate(
-                v1(), usIndividual(), new BigDecimal("100.00"),
+                v2(), usIndividual(), new BigDecimal("100.00"),
                 Instant.parse("2026-09-03T01:00:00Z"),
-                Instant.parse("2026-09-03T01:00:03Z"), 42L
-        );
+                Instant.parse("2026-09-03T01:00:03Z"), 42L, PriceLimitFixtures.at(Instant.parse("2026-09-03T01:00:03Z")));
 
         assertThat(book.currency()).isEqualTo("USD");
-        assertThat(book.bestAsk().price()).isEqualByComparingTo("100.01");
-        assertThat(book.bestBid().price()).isEqualByComparingTo("99.99");
+        assertThat(book.bestAsk().orElseThrow().price()).isEqualByComparingTo("100.01");
+        assertThat(book.bestBid().orElseThrow().price()).isEqualByComparingTo("99.99");
         // baseNotional 15,000 / 100.01 ≈ 150주 × 깊이 1.00 × 노이즈(0.8~1.2) —
         // ASK 1 = 100.01은 10001 steps(tick 0.01)로 어떤 10 배수에도 안 걸려 부스트 없음.
         // 최우선 매수 BID 1 = 99.99(9999 steps)도 부스트 없음.
-        assertThat(book.bestAsk().quantity()).isBetween(new BigDecimal("120"), new BigDecimal("180"));
+        assertThat(book.bestAsk().orElseThrow().quantity()).isBetween(new BigDecimal("120"), new BigDecimal("180"));
     }
 
     @Test
     void 미국_저가_종목은_가능한_양수_BID만_생성한다() {
         GeneratedOrderBook book = generator.generate(
-                v1(), usIndividual(), new BigDecimal("0.10"),
+                v2(), usIndividual(), new BigDecimal("0.10"),
                 Instant.parse("2026-09-03T01:00:00Z"),
-                Instant.parse("2026-09-03T01:00:03Z"), 42L
-        );
+                Instant.parse("2026-09-03T01:00:03Z"), 42L, PriceLimitFixtures.at(Instant.parse("2026-09-03T01:00:03Z")));
 
         assertThat(book.levelsBySide(OrderBookSide.ASK)).hasSize(10);
         assertThat(book.levelsBySide(OrderBookSide.BID)).hasSize(9);
@@ -165,12 +162,12 @@ class OrderBookGeneratorTest {
     }
 
     @Test
-    void 미국_센트_최저가에서는_BID가_없어_생성을_거절한다() {
-        assertThatThrownBy(() -> generator.generate(
-                v1(), usIndividual(), new BigDecimal("0.01"),
-                Instant.parse("2026-09-03T01:00:00Z"),
-                Instant.parse("2026-09-03T01:00:03Z"), 42L))
-                .isInstanceOf(IllegalArgumentException.class);
+    void 미국_센트_최저가에서는_BID가_비어_있다() {
+        Instant now = Instant.parse("2026-09-03T01:00:03Z");
+        GeneratedOrderBook book = generator.generate(v2(), usIndividual(), new BigDecimal("0.01"),
+                now, now, 42L, PriceLimitFixtures.at(now));
+        assertThat(book.bestBid()).isEmpty();
+        assertThat(book.levelsBySide(OrderBookSide.ASK)).hasSize(10);
     }
 
     @Test
@@ -179,10 +176,9 @@ class OrderBookGeneratorTest {
         // ASK 2 = 70,100(701 steps → 부스트 없음). 깊이 배수 1.00/0.96을 합쳐도
         // 노이즈 최악 경계에서 역전하지 않는다: 286×0.8×1.6=366 > 285×0.96×1.2=328.
         GeneratedOrderBook book = generator.generate(
-                v1(), krIndividual(), new BigDecimal("69900"),
+                v2(), krIndividual(), new BigDecimal("69900"),
                 Instant.parse("2026-09-03T01:00:00Z"),
-                Instant.parse("2026-09-03T01:00:03Z"), 42L
-        );
+                Instant.parse("2026-09-03T01:00:03Z"), 42L, PriceLimitFixtures.at(Instant.parse("2026-09-03T01:00:03Z")));
 
         List<GeneratedOrderBookLevel> asks = book.levelsBySide(OrderBookSide.ASK);
         assertThat(asks.get(0).price()).isEqualByComparingTo("70000");
@@ -218,7 +214,7 @@ class OrderBookGeneratorTest {
         GeneratedOrderBook book = generateWithSeed(42L);
 
         assertThat(book.stockId()).isEqualTo(1L);
-        assertThat(book.policyVersion()).isEqualTo("V1");
+        assertThat(book.policyVersion()).isEqualTo("V2");
         assertThat(book.seed()).isEqualTo(42L);
         assertThat(book.quoteAt()).isEqualTo(Instant.parse("2026-09-03T01:00:00Z"));
         assertThat(book.generatedAt()).isEqualTo(Instant.parse("2026-09-03T01:00:03Z"));

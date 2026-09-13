@@ -1,16 +1,24 @@
 package com.baedang.orderbook.repository;
 
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.model.TradingPriceLimits;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.orderbook.entity.OrderBookLevel;
 import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.LockedOrderBook;
-import com.baedang.orderbook.model.OrderBookPriceOrderValidator;
+import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.port.OrderBookExecutionStore;
+import com.baedang.orderbook.service.OrderBookPricePolicy;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.repository.StockRepository;
+
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -18,16 +26,24 @@ import java.util.Optional;
 @Repository
 public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
 
-    private static final BigDecimal MIN_US_ORDER_BOOK_PRICE = new BigDecimal("0.01");
+    private final OrderBookPricePolicy prices;
+    private final StockRepository stocks;
+    private final QuoteSnapshotRepository quotes;
+    private final Clock clock;
 
     private final OrderBookVersionRepository versionRepository;
     private final OrderBookLevelRepository levelRepository;
 
     public JpaOrderBookExecutionStore(
             OrderBookVersionRepository versionRepository,
-            OrderBookLevelRepository levelRepository
+            OrderBookLevelRepository levelRepository, OrderBookPricePolicy prices,
+            StockRepository stocks, QuoteSnapshotRepository quotes, Clock clock
     ) {
         this.versionRepository = versionRepository;
+        this.prices = prices;
+        this.stocks = stocks;
+        this.quotes = quotes;
+        this.clock = clock;
         this.levelRepository = levelRepository;
     }
 
@@ -55,23 +71,22 @@ public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
                 ? levelRepository.findAskLevelsForUpdate(expectedBookVersion)
                 : levelRepository.findBidLevelsForUpdate(expectedBookVersion);
 
-        boolean validDepth = levels.size() == 10
-                || (side == OrderBookSide.BID && "USD".equals(activeVersion.getCurrency())
-                    && !levels.isEmpty() && levels.size() < 10
-                    && levels.getLast().getPrice().compareTo(MIN_US_ORDER_BOOK_PRICE) == 0);
-        if (!validDepth || !hasSequentialDepths(levels)
-                || !OrderBookPriceOrderValidator.isStrict(levels, OrderBookLevel::getPrice, side)) {
-            throw new IllegalStateException("활성 호가 버전의 레벨 깊이 또는 가격 순서가 올바르지 않습니다");
+        Instant now = clock.instant();
+        Stock stock = stocks.findById(stockId).orElseThrow();
+        QuoteSnapshot quote = quotes.findById(stockId).orElse(null);
+        TradingPriceLimits limits = TradingPriceLimits.from(quote);
+        if (quote == null || !stock.getCurrency().equals(quote.getCurrency())
+                || !OrderBookPricePolicy.VERSION.equals(activeVersion.getPolicyVersion())
+                || !limits.usable(stock.getMarketCountry(), now)
+                || !limits.contains(stock.getMarketCountry(), activeVersion.getBasePrice())
+                || !activeVersion.getQuoteAt().toInstant().atZone(stock.getMarketCountry().zoneId()).toLocalDate()
+                    .equals(now.atZone(stock.getMarketCountry().zoneId()).toLocalDate())) return Optional.empty();
+        if (!prices.matches(StockDescriptor.from(stock), activeVersion.getBasePrice(), activeVersion.getPolicyVersion(),
+                side, limits, now, levels, OrderBookLevel::getPrice, OrderBookLevel::getLevelDepth)) {
+            throw new IllegalStateException("활성 호가의 가격 배열이 생성 규칙과 다릅니다");
         }
 
         return Optional.of(new LockedOrderBook(activeVersion, levels));
-    }
-
-    private boolean hasSequentialDepths(List<OrderBookLevel> levels) {
-        for (int i = 0; i < levels.size(); i++) {
-            if (levels.get(i).getLevelDepth() != i + 1) return false;
-        }
-        return true;
     }
 
 }

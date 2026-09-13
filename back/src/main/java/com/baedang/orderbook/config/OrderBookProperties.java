@@ -1,8 +1,9 @@
 package com.baedang.orderbook.config;
 
+import com.baedang.orderbook.service.OrderBookPricePolicy;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
-import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -40,7 +41,7 @@ public record OrderBookProperties(
     }
     @ConstructorBinding
     public OrderBookProperties {
-        if (!StringUtils.hasText(policyVersion)) throw new IllegalArgumentException("orderbook policy-version은 필수입니다");
+        if (!OrderBookPricePolicy.VERSION.equals(policyVersion)) throw new IllegalArgumentException("orderbook policy-version은 V2여야 합니다");
         if (refreshInitialDelay == null || refreshInitialDelay.isNegative()) throw new IllegalArgumentException("orderbook refresh-initial-delay는 0 이상이어야 합니다");
         if (retentionInitialDelay == null || retentionInitialDelay.isNegative()) throw new IllegalArgumentException("orderbook retention-initial-delay는 0 이상이어야 합니다");
         if (refreshInterval == null || refreshInterval.isZero() || refreshInterval.isNegative()) throw new IllegalArgumentException("orderbook refresh-interval은 양수여야 합니다");

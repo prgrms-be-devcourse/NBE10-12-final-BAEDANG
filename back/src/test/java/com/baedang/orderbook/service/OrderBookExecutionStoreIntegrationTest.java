@@ -10,29 +10,31 @@ import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.LockedOrderBook;
-import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.port.OrderBookExecutionStore;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.support.PriceLimitFixtures;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import org.springframework.dao.InvalidDataAccessApiUsageException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.dao.InvalidDataAccessApiUsageException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -50,8 +52,8 @@ import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -121,8 +123,10 @@ class OrderBookExecutionStoreIntegrationTest {
 
         krStock = stockRepository.save(tradableStock());
         descriptor = StockDescriptor.from(krStock);
+        PriceLimitFixtures.persist(jdbcTemplate, krStock, BASE);
         usStock = stockRepository.save(tradableUsStock());
         usDescriptor = StockDescriptor.from(usStock);
+        PriceLimitFixtures.persist(jdbcTemplate, usStock, BASE);
         transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
@@ -144,12 +148,12 @@ class OrderBookExecutionStoreIntegrationTest {
 
     private GeneratedOrderBook generatedBook(long seed) {
         Instant now = clock.instant();
-        return generator.generate(properties, descriptor, new BigDecimal("70000"), now.minusSeconds(2), now, seed);
+        return generator.generate(properties, descriptor, new BigDecimal("70000"), now.minusSeconds(2), now, seed, PriceLimitFixtures.at(now));
     }
 
     private GeneratedOrderBook generatedUsLowBook(long seed) {
         Instant now = clock.instant();
-        return generator.generate(properties, usDescriptor, new BigDecimal("0.10"), now.minusSeconds(2), now, seed);
+        return generator.generate(properties, usDescriptor, new BigDecimal("0.10"), now.minusSeconds(2), now, seed, PriceLimitFixtures.at(now));
     }
 
     private void awaitDatabaseLockWait() {
@@ -231,7 +235,7 @@ class OrderBookExecutionStoreIntegrationTest {
     void 미국_일반가격_호가에서_BID_레벨이_누락되면_잠금을_거절한다() {
         Instant now = clock.instant();
         GeneratedOrderBook generated = generator.generate(
-                properties, usDescriptor, new BigDecimal("100.00"), now.minusSeconds(2), now, 42L);
+                properties, usDescriptor, new BigDecimal("100.00"), now.minusSeconds(2), now, 42L, PriceLimitFixtures.at(now));
         Long bookVersion = publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
         jdbcTemplate.update(
                 "delete from order_book_level where book_version_id = ? and side = 'BID' and level_depth = 10",

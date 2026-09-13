@@ -1,11 +1,12 @@
 package com.baedang.orderbook.service;
 
+import com.baedang.market.model.TradingPriceLimits;
 import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.GeneratedOrderBookLevel;
 import com.baedang.orderbook.model.StockDescriptor;
-import com.baedang.stock.entity.MarketCountry;
+
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -13,7 +14,6 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import java.util.Random;
 
 /**
@@ -23,16 +23,15 @@ import java.util.Random;
  * generatedAt·seed)이 같으면 가격과 수량이 반드시 같게 나온다. seed는 publisher가
  * 버전마다 생성해 이 매개변수로 넘긴다.
  *
- * <p>V1 가격 배열: ASK 1은 basePrice보다 큰 첫 유효 가격, BID 1은 basePrice보다
+ * <p>V2 가격 배열: ASK 1은 basePrice보다 큰 첫 유효 가격, BID 1은 basePrice보다
  * 작은 첫 유효 가격이고, 이후 각 레벨은 직전 레벨의 다음/이전 유효 가격이다.
  * 구간 경계를 지날 때 새 구간의 규칙이 다시 적용되므로 {@link TickSizePolicy}에
- * 위임한다. V1 깊이는 {@link #DEPTH_MULTIPLIERS}의 10단계로 고정한다. ASK는 항상
- * 10개를 만들고, 미국 BID는 양수 유효 가격이 남아 있는 깊이(1~10개)까지만 만든다.
+ * 위임한다. 각 방향 최대 10개이며 상하한가 또는 양수 가격 경계에서 종료한다.
  */
 @Component
 public class OrderBookGenerator {
 
-    /** V1 깊이 배수 (설계서 §4.4). */
+    /** V2 깊이 배수 (설계서 §4.4). */
     private static final List<BigDecimal> DEPTH_MULTIPLIERS = List.of(
             new BigDecimal("1.00"),
             new BigDecimal("0.96"),
@@ -48,8 +47,11 @@ public class OrderBookGenerator {
 
     private final TickSizePolicy tickSizePolicy;
 
-    public OrderBookGenerator(TickSizePolicy tickSizePolicy) {
+    private final OrderBookPricePolicy prices;
+
+    public OrderBookGenerator(TickSizePolicy tickSizePolicy, OrderBookPricePolicy prices) {
         this.tickSizePolicy = tickSizePolicy;
+        this.prices = prices;
     }
 
     public GeneratedOrderBook generate(
@@ -58,14 +60,15 @@ public class OrderBookGenerator {
             BigDecimal basePrice,
             Instant quoteAt,
             Instant generatedAt,
-            long seed
+            long seed,
+            TradingPriceLimits limits
     ) {
         Random random = new Random(seed);
         BigDecimal baseNotional = baseNotionalFor(policy, stock);
 
         List<GeneratedOrderBookLevel> levels = new ArrayList<>(DEPTH_MULTIPLIERS.size() * 2);
-        levels.addAll(generateSide(policy, stock, OrderBookSide.ASK, basePrice, baseNotional, random));
-        levels.addAll(generateSide(policy, stock, OrderBookSide.BID, basePrice, baseNotional, random));
+        levels.addAll(generateSide(policy, stock, OrderBookSide.ASK, basePrice, baseNotional, random, limits, generatedAt));
+        levels.addAll(generateSide(policy, stock, OrderBookSide.BID, basePrice, baseNotional, random, limits, generatedAt));
 
         return new GeneratedOrderBook(
                 stock.stockId(),
@@ -85,23 +88,15 @@ public class OrderBookGenerator {
             OrderBookSide side,
             BigDecimal basePrice,
             BigDecimal baseNotional,
-            Random random
+            Random random,
+            TradingPriceLimits limits,
+            Instant now
     ) {
         List<GeneratedOrderBookLevel> levels = new ArrayList<>(DEPTH_MULTIPLIERS.size());
-        BigDecimal price = basePrice;
-        for (int depth = 1; depth <= DEPTH_MULTIPLIERS.size(); depth++) {
-            Optional<BigDecimal> nextPrice = side == OrderBookSide.ASK
-                    ? Optional.of(tickSizePolicy.nextValidPriceAbove(stock, price))
-                    : tickSizePolicy.findPreviousValidPriceBelow(stock, price);
-            if (nextPrice.isEmpty()) {
-                if (side == OrderBookSide.BID
-                        && stock.marketCountry() == MarketCountry.US
-                        && !levels.isEmpty()) {
-                    break;
-                }
-                throw new IllegalArgumentException("이전 유효 호가를 계산할 수 없습니다");
-            }
-            price = nextPrice.orElseThrow();
+        List<BigDecimal> candidates = prices.prices(stock, basePrice, side, limits, now);
+        for (int index = 0; index < candidates.size(); index++) {
+            BigDecimal price = candidates.get(index);
+            int depth = index + 1;
             levels.add(new GeneratedOrderBookLevel(
                     side, depth, price, quantity(stock, price, baseNotional, depth, policy, random)));
         }

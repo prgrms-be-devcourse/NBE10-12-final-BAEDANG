@@ -23,6 +23,8 @@ import com.baedang.stock.port.StockInfo;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.service.StockTradingStatusPersistenceService;
 import com.baedang.stock.service.StockTradingStatusService;
+import com.baedang.support.PriceLimitFixtures;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -32,7 +34,6 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -143,7 +144,7 @@ class OrderBookLifecycleIntegrationTest {
 
     private void saveQuote(Long stockId, BigDecimal price, String currency, Instant quoteAt) {
         var at = quoteAt.atOffset(ZoneOffset.UTC);
-        quoteSnapshotRepository.save(new QuoteSnapshot(stockId, price, currency, at, at));
+        quoteSnapshotRepository.save(PriceLimitFixtures.verified(new QuoteSnapshot(stockId, price, currency, at, at)));
     }
 
     private Optional<OrderBookVersion> activeVersion() {
@@ -265,16 +266,16 @@ class OrderBookLifecycleIntegrationTest {
     }
 
     @Test
-    void 저가_종목처럼_BID_10개를_양수로_만들_수_없으면_활성버전을_종료한다() {
+    void 양수_가격_경계에서는_짧은_호가를_게시한다() {
         scheduler.refreshOrderBooks();
         assertThat(activeVersion()).isPresent();
 
-        // 5원 가격은 1원 단위에서 10개 양수 BID(1~4까지 4개만 가능)를 만들 수 없음
+        // 5원 가격에서는 1~4원의 네 BID만 가능합니다.
         saveQuote(krStock.getStockId(), new BigDecimal("5"), "KRW", clock.instant().minusSeconds(2));
 
         scheduler.refreshOrderBooks();
 
-        assertThat(activeVersion()).isEmpty();
+        assertThat(activeVersion()).isPresent();
     }
 
     @Test
@@ -326,11 +327,11 @@ class OrderBookLifecycleIntegrationTest {
             Stock stock = stocks.saveAndFlush(tradableStock());
             symbol = stock.getSymbol();
             var at = BASE.minusSeconds(2).atOffset(ZoneOffset.UTC);
-            quotes.saveAndFlush(new QuoteSnapshot(stock.getStockId(), new BigDecimal("70000"), "KRW", at, at));
+            quotes.saveAndFlush(PriceLimitFixtures.verified(new QuoteSnapshot(stock.getStockId(), new BigDecimal("70000"), "KRW", at, at)));
 
             StockDescriptor descriptor = StockDescriptor.from(stock);
             GeneratedOrderBook generated = generator.generate(
-                    properties, descriptor, new BigDecimal("70000"), BASE.minusSeconds(2), BASE, 41L);
+                    properties, descriptor, new BigDecimal("70000"), BASE.minusSeconds(2), BASE, 41L, PriceLimitFixtures.at(BASE));
             firstVersion = publisher.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
 
             AtomicReference<BigDecimal> remaining = new AtomicReference<>();
