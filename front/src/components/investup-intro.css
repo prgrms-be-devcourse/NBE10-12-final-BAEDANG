@@ -190,10 +190,19 @@
 /* StarBurstFlash — 화면 중앙에 별 픽셀 도트 패턴이 잠깐 나타났다
    사라지는 효과(StarBurstFlash.tsx). 기본 상태는 완전히 안 보이다가,
    active가 true가 되는 순간(iv-starburst-play 클래스가 붙는 순간) 딱
-   한 번만 이 keyframe이 재생된다 — opacity가 0→1로 빠르게 올라와
-   잠깐 머물다 다시 0으로 옅어진다. 살짝의 scale도 함께 줘서 "톡 하고
-   나타났다 사라지는" 가벼운 느낌을 낸다(과한 bounce 없이 한 방향으로만
-   커진다). */
+   한 번만 이 keyframe이 재생된다 — opacity만 0→1로 빠르게 올라와
+   잠깐 머물다 다시 0으로 옅어진다.
+   처음엔 scale(0.82→1.02→1)도 같이 줬었는데, 이 엘리먼트 자신에 화면
+   중앙 정렬용 translate(-50%,-50%)가 인라인 style로 걸려 있어서
+   문제가 생겼다 — CSS 애니메이션이 도는 동안에는 그 transform 값이
+   (특이성과 무관하게) 인라인 transform을 통째로 덮어써 버려서, 애니메이션
+   중엔 translate 없이 scale만 적용된 상태가 되어 별이 중앙이 아니라
+   중앙에서 우측 아래로 반 박스만큼(가로/세로 각각 박스 크기의 절반)
+   밀려난 자리에 나타났다("처음부터 화면 중앙에 바로 나타나야 한다"는
+   요청과 어긋났다). transform을 아예 애니메이션 대상에서 빼서(opacity만
+   움직이도록) 인라인 translate가 계속 그대로 유지되게 고쳤다 — 이제
+   별은 오직 "제자리에서 옅어졌다 진해지는" 것만 하고, 위치는 처음부터
+   끝까지 정확히 화면 중앙에 고정된다. */
 .iv-starburst {
   opacity: 0;
   pointer-events: none;
@@ -206,14 +215,9 @@
 @keyframes iv-starburst-flash {
   0% {
     opacity: 0;
-    transform: scale(0.82);
   }
   16% {
     opacity: 1;
-    transform: scale(1.02);
-  }
-  24% {
-    transform: scale(1);
   }
   68% {
     opacity: 1;
