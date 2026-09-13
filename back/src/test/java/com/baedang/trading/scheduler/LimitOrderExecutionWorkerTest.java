@@ -1,5 +1,7 @@
 package com.baedang.trading.scheduler;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.ExecutionRateEvidence;
@@ -24,8 +26,10 @@ import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -40,6 +44,7 @@ class LimitOrderExecutionWorkerTest {
     private final LimitExecutionCandidateRepository repository = mock(LimitExecutionCandidateRepository.class);
     private final LimitOrderExecutionService service = mock(LimitOrderExecutionService.class);
     private final LimitExecutionProgress progress = new LimitExecutionProgress();
+    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
     private final Group group = new Group(1L, OrderSide.BUY);
     private final Candidate first = new Candidate(1L, BigDecimal.TEN, NOW.atOffset(ZoneOffset.UTC));
@@ -57,8 +62,15 @@ class LimitOrderExecutionWorkerTest {
     }
 
     private LimitOrderExecutionWorker worker(int max, int perGroup) {
-        return new LimitOrderExecutionWorker(repository, service, progress, new SimpleMeterRegistry(), clock,
+        return new LimitOrderExecutionWorker(repository, service, progress, meters, clock,
                 50, max, perGroup, Duration.ofSeconds(5));
+    }
+
+    private double counter(String name, String... tags) {
+        var search = meters.find(name);
+        for (int index = 0; index < tags.length; index += 2) search = search.tag(tags[index], tags[index + 1]);
+        var found = search.counter();
+        return found == null ? 0.0 : found.count();
     }
 
     private LimitExecutionPreparation market(long version, long revision, String rate) {
@@ -237,5 +249,44 @@ class LimitOrderExecutionWorkerTest {
         worker.tick();
         verify(service, times(1)).execute(eq(1L), any());
         verify(service).execute(eq(2L), any());
+    }
+
+    /**
+     * CB 보류는 그룹 단위로 멈추되 다음 그룹은 같은 틱에서 계속 처리해야 한다. 시장 전체가 멈춘
+     * 상황에서 그룹마다 후순위를 다시 시도하면 주문 수만큼 헛된 DB 조회가 발생한다.
+     */
+    @Test
+    void CB보류는_같은그룹_후순위를_막고_다음그룹은_같은틱에_처리한다() {
+        Group other = new Group(2L, OrderSide.BUY);
+        Candidate third = new Candidate(3L, BigDecimal.TEN, NOW.atOffset(ZoneOffset.UTC));
+        when(repository.nextGroup(eq(group), any())).thenReturn(Optional.of(other));
+        when(service.prepare(2L, OrderSide.BUY)).thenReturn(market(other, 4L, 0L, "1400"));
+        when(repository.page(eq(other), isNull(), any(), anyInt())).thenReturn(List.of(third));
+        when(service.execute(eq(1L), any())).thenThrow(new BusinessException(ErrorCode.MARKET_TRADING_HALTED, Map.of(
+                "market", "KOSPI",
+                "eventType", "CIRCUIT_BREAKER",
+                "stage", 1,
+                "triggeredAt", OffsetDateTime.parse("2026-07-13T13:28:32+09:00"),
+                "haltUntil", OffsetDateTime.parse("2026-07-13T13:48:32+09:00"))));
+
+        worker(100, 10).tick();
+
+        verify(service, times(1)).execute(eq(1L), any());
+        verify(service, never()).execute(eq(2L), any());
+        verify(service).execute(eq(3L), any());
+        assertThat(counter("krx.market_event.order_blocked", "market", "KOSPI", "orderType", "LIMIT_EXECUTION"))
+                .isEqualTo(1.0);
+        assertThat(counter("trading.limit.execution.attempt", "reason", "ERROR")).isZero();
+    }
+
+    /** CB가 아닌 실패는 기존 ERROR 계약을 유지해야 하므로 예상 보류로 분류하지 않는다. */
+    @Test
+    void CB가_아닌_금융예외는_기존_ERROR_지표를_기록한다() {
+        when(service.execute(eq(1L), any())).thenThrow(new IllegalStateException("broken financial state"));
+
+        worker(100, 10).tick();
+
+        assertThat(counter("trading.limit.execution.attempt", "reason", "ERROR")).isEqualTo(1.0);
+        assertThat(counter("krx.market_event.order_blocked", "market", "KOSPI", "orderType", "LIMIT_EXECUTION")).isZero();
     }
 }
