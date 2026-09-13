@@ -186,3 +186,50 @@
    GradientSweepText.tsx 파일 및 여기 있던 .iv-sweep-gradient 관련
    CSS(그라데이션 폭·색상·sweep keyframe·reduced-motion 처리)는 모두
    지웠다. */
+
+/* StarBurstFlash — 화면 중앙에 별 픽셀 도트 패턴이 잠깐 나타났다
+   사라지는 효과(StarBurstFlash.tsx). 기본 상태는 완전히 안 보이다가,
+   active가 true가 되는 순간(iv-starburst-play 클래스가 붙는 순간) 딱
+   한 번만 이 keyframe이 재생된다 — opacity가 0→1로 빠르게 올라와
+   잠깐 머물다 다시 0으로 옅어진다. 살짝의 scale도 함께 줘서 "톡 하고
+   나타났다 사라지는" 가벼운 느낌을 낸다(과한 bounce 없이 한 방향으로만
+   커진다). */
+.iv-starburst {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.iv-starburst-play {
+  animation: iv-starburst-flash 1.7s cubic-bezier(0.2, 0.9, 0.24, 1) 1 both;
+}
+
+@keyframes iv-starburst-flash {
+  0% {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  24% {
+    transform: scale(1);
+  }
+  68% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* prefers-reduced-motion이면 애니메이션 없이 아예 보이지 않게 둔다 —
+   "잠깐 나타났다 사라지는" 움직임 자체가 핵심 연출이라, 절제된
+   대안(정지된 별을 계속 띄워두는 것)보다는 안 보이는 쪽이 낫다고
+   판단했다. */
+@media (prefers-reduced-motion: reduce) {
+  .iv-starburst-play {
+    animation: none;
+    opacity: 0;
+  }
+}

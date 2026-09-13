@@ -28,6 +28,7 @@ import {
   clamp01,
 } from '@/lib/investup-intro-data';
 import { RevealLines } from './RevealLines';
+import { StarBurstFlash } from './StarBurstFlash';
 import { StarfieldBackground } from './StarfieldBackground';
 import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
@@ -733,6 +734,25 @@ export function InvestupIntro({
         <div style={dotLayer('right', lifted, charted)}>
           <div style={shimmer('right', charted)} />
         </div>
+
+        {/* 화면 중앙에 별 픽셀 도트 패턴이 잠깐 나타났다 사라지는 효과 —
+            첨부한 사진(중앙 발광 코어에서 길게 뻗은 세로·가로 선 + 짧은
+            대각선 4개로 이뤄진 8방향 별, 주변에 흩어진 작은 반짝임)
+            참고. 로고보다 z-index를 낮춰(3 vs 4) 로고/태그라인 뒤에서
+            살짝 비치듯 나타나게 했고, heroIn(첫 화면이 뜨는 순간 한 번만
+            켜지는 기존 latch)을 그대로 트리거로 재사용했다 — 로고·
+            태그라인의 Line Reveal과 같은 순간에 함께 등장한다. */}
+        <StarBurstFlash
+          active={heroIn}
+          size={280}
+          style={{
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 3,
+          }}
+        />
 
         {/* 로고 + 태그라인 (등장 후 위로 이동) */}
         <div
