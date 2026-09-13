@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import {
   getLeaderboard,
+  getLeaderboardTypes,
   getPersonalityReport,
   type Leaderboard,
   type LeaderboardEntry,
+  type LeaderboardTypeEntry,
+  type LeaderboardTypes,
   type PersonalityReport,
 } from "@/lib/api";
 import { formatNumber, formatPercent, formatUsd, toDecimal } from "@/lib/format";
@@ -47,6 +50,7 @@ export function PersonalityReportSection() {
   const [loadError, setLoadError] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
+  const [typeBoardOpen, setTypeBoardOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,11 +89,19 @@ export function PersonalityReportSection() {
       {report.locked ? (
         <LockedCard report={report} onHelp={() => setHelpOpen(true)} />
       ) : (
-        <OpenCard report={report} onHelp={() => setHelpOpen(true)} onOpenBoard={() => setBoardOpen(true)} />
+        <OpenCard
+          report={report}
+          onHelp={() => setHelpOpen(true)}
+          onOpenBoard={() => setBoardOpen(true)}
+          onOpenTypeBoard={() => setTypeBoardOpen(true)}
+        />
       )}
 
       {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
+      {typeBoardOpen && (
+        <TypeComparisonModal myTypeCode={report.typeCode} onClose={() => setTypeBoardOpen(false)} />
+      )}
     </div>
   );
 }
@@ -223,10 +235,12 @@ function OpenCard({
   report,
   onHelp,
   onOpenBoard,
+  onOpenTypeBoard,
 }: {
   report: PersonalityReport;
   onHelp: () => void;
   onOpenBoard: () => void;
+  onOpenTypeBoard: () => void;
 }) {
   const shares = report.shares;
   const returnUp = (toDecimal(report.returnRate)?.greaterThanOrEqualTo(0)) ?? true;
@@ -405,14 +419,24 @@ function OpenCard({
             내 순위와 상위 백분율을 함께 보여드려요 · 절대 금액·닉네임 전체는 공개되지 않아요
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onOpenBoard}
-          className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[13.5px] font-bold text-white"
-          style={{ background: "var(--accent)" }}
-        >
-          전체 랭킹 보기
-        </button>
+        <div className="ml-auto flex gap-2.5">
+          <button
+            type="button"
+            onClick={onOpenTypeBoard}
+            className="cursor-pointer rounded-xl px-5 py-3 text-[13.5px] font-bold"
+            style={{ background: "var(--fill)", color: "var(--ink)" }}
+          >
+            유형별 비교 보기
+          </button>
+          <button
+            type="button"
+            onClick={onOpenBoard}
+            className="cursor-pointer rounded-xl px-5 py-3 text-[13.5px] font-bold text-white"
+            style={{ background: "var(--accent)" }}
+          >
+            전체 랭킹 보기
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -588,11 +612,21 @@ function LeaderboardModal({ onClose }: { onClose: () => void }) {
 
         {board?.me && (
           <div
-            className="flex items-center gap-2 px-7 py-3.5 text-[12.5px]"
+            className="flex flex-wrap items-center gap-2 px-7 py-3.5 text-[12.5px]"
             style={{ borderTop: "1px solid var(--line2)", color: "var(--mut2)" }}
           >
-            내 순위 {board.me.rank}위
-            {board.me.topPercent != null && ` · 상위 ${board.me.topPercent}%`}
+            <span>
+              내 순위 {board.me.rank}위
+              {board.me.topPercent != null && ` · 상위 ${board.me.topPercent}%`}
+            </span>
+            {/* 유형별 순위(#153 Phase 3) — 미분류면 다섯 필드가 전부 null이라 그때는 보여줄 게 없다. */}
+            {board.me.typeRank != null && (
+              <span>
+                · <b style={{ color: "var(--accent)" }}>{board.me.typeLabel}</b>({board.me.typeCode}) 유형 안에서{" "}
+                {board.me.typeRank}위/{formatNumber(board.me.typeParticipants)}명
+                {board.me.typePercent != null && ` · 상위 ${board.me.typePercent}%`}
+              </span>
+            )}
             <span className="ml-auto">닉네임은 가운데 글자가 가려진 채로 공개돼요</span>
           </div>
         )}
@@ -624,6 +658,137 @@ function LeaderboardRow({ row, isMe }: { row: LeaderboardEntry; isMe?: boolean }
       </span>
       <span className="text-right tabular-nums text-[15px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
         {formatPercent(row.returnRate)}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * 유형별 성과 비교 모달(#153 Phase 3, `GET /api/reports/leaderboard/types`) — 16개 투자
+ * 유형의 평균 수익률을 한눈에 비교한다. 절대 금액이 아니라 수익률%만 노출하는 리더보드와
+ * 같은 사행성 배제 원칙을 그대로 따른다(백엔드 주석 참고). 미분류(유형 없음)는 백엔드가
+ * 애초에 집계에서 뺀다.
+ */
+function TypeComparisonModal({ myTypeCode, onClose }: { myTypeCode: string | null; onClose: () => void }) {
+  const [data, setData] = useState<LeaderboardTypes | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getLeaderboardTypes()
+      .then((res) => {
+        if (!cancelled) setData(res);
+      })
+      .catch(() => {
+        if (!cancelled) setError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // 평균 수익률 높은 순으로 보여준다 — 응답 자체는 정렬을 보장하지 않는다.
+  const sorted = [...(data?.types ?? [])].sort(
+    (a, b) => Number(b.avgReturnRate) - Number(a.avgReturnRate)
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+      style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[86vh] w-full max-w-[560px] flex-col overflow-hidden rounded-[24px]"
+        style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4 px-7 pt-6.5 pb-4.5">
+          <div>
+            <h3 className="text-[22px] font-extrabold tracking-[-0.02em]" style={{ color: "var(--ink)" }}>유형별 비교</h3>
+            <p className="mt-1.5 text-[13px]" style={{ color: "var(--mut2)" }}>
+              {data?.asOf ? `${formatDate(data.asOf)} 기준 · 유형별 평균 수익률` : "유형별 평균 수익률"}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="report-modal-close-btn cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            style={{ color: "var(--mut)" }}
+          >
+            닫기
+          </button>
+        </div>
+
+        <div
+          className="grid gap-3 px-7 py-2.5 text-[12px] font-bold"
+          style={{ gridTemplateColumns: "36px minmax(0,1fr) 70px 96px", background: "var(--bg)", color: "var(--mut2)" }}
+        >
+          <span>순위</span>
+          <span>유형</span>
+          <span className="text-right">인원</span>
+          <span className="text-right">평균 수익률</span>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="py-14 text-center text-[13px]" style={{ color: "var(--mut2)" }}>불러오는 중…</div>
+          ) : error ? (
+            <div className="py-14 text-center text-[13px]" style={{ color: "var(--mut2)" }}>
+              유형별 비교를 불러오지 못했어요.
+            </div>
+          ) : sorted.length === 0 ? (
+            <div className="py-14 text-center text-[13px]" style={{ color: "var(--mut2)" }}>
+              아직 집계된 유형이 없어요. 다음 배치를 기다려주세요.
+            </div>
+          ) : (
+            sorted.map((row, i) => (
+              <TypeComparisonRow key={row.typeCode} rank={i + 1} row={row} isMyType={row.typeCode === myTypeCode} />
+            ))
+          )}
+        </div>
+
+        <div
+          className="px-7 py-3.5 text-[12.5px]"
+          style={{ borderTop: "1px solid var(--line2)", color: "var(--mut2)" }}
+        >
+          미분류(보유 종목 2개 미만) 계좌는 유형 자체가 없어 비교에서 빠져요
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TypeComparisonRow({ rank, row, isMyType }: { rank: number; row: LeaderboardTypeEntry; isMyType: boolean }) {
+  const personaType = PERSONALITY_TYPES[row.typeCode];
+  const rate = toDecimal(row.avgReturnRate);
+  const up = !rate || rate.greaterThanOrEqualTo(0);
+  return (
+    <div
+      className="grid items-center gap-3 px-7 py-3"
+      style={{ gridTemplateColumns: "36px minmax(0,1fr) 70px 96px", background: isMyType ? "var(--bg)" : "transparent", borderTop: "1px solid var(--line2)" }}
+    >
+      <span className="tabular-nums text-[15px] font-extrabold" style={{ color: rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
+        {rank}
+      </span>
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="overflow-hidden text-[14.5px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
+          {personaType?.nickname ?? row.typeLabel}
+        </span>
+        <span className="font-mono text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
+        {isMyType && (
+          <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
+            내 유형
+          </span>
+        )}
+      </span>
+      <span className="text-right tabular-nums text-[13px]" style={{ color: "var(--mut2)" }}>{formatNumber(row.count)}명</span>
+      <span className="text-right tabular-nums text-[15px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
+        {formatPercent(row.avgReturnRate)}
       </span>
     </div>
   );
