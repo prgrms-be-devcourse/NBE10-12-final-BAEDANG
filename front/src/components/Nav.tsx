@@ -49,8 +49,9 @@ export function Nav() {
           alt="InvestUP"
           style={{
             display: "block",
-            // 로고 이미지 크기를 키워달라는 요청 — 22 → 30.
-            height: 30,
+            // 로고 이미지 크기를 키워달라는 요청을 두 차례 거쳐
+            // 22 → 30 → 40으로 키웠다.
+            height: 40,
             width: "auto",
             filter: theme === "dark" ? "brightness(0) invert(1)" : "none",
           }}
