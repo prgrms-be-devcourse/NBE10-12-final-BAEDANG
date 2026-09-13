@@ -1,4 +1,4 @@
--- V12__leaderboard_type.sql
+-- V13__leaderboard_type.sql
 -- 리더보드 스냅샷에 투자 성향(MBTI) 유형 차원 추가 (#153 Phase 3).
 --
 -- 유형별 평균 수익 비교·유형 내 순위를 같은 as_of 코호트 위에서 계산하려면, 배치가 계좌별
