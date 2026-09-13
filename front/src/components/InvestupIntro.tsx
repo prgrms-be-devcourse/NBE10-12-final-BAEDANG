@@ -724,6 +724,25 @@ export function InvestupIntro({
           }}
         />
 
+        {/* 화면 중앙에 진한 블루 계열 원형 그라데이션을 더해달라는 요청 —
+            위 두 그라데이션(연한 하늘색 배경 + 상단 파랑 글로우)이 화면
+            상단에 몰려 있어서, 화면 정중앙에는 이 화면의 태그라인 글자색
+            (T.taglineInk, #1b6da3)과 같은 좀 더 진한 블루로 은은한 원형
+            글로우를 하나 더 겹쳤다 — 새 색을 만들지 않고 이미 화면에 쓰는
+            색이라 자연스럽게 어울린다. 다른 두 그라데이션과 같은 lifted
+            타이밍에 함께 사라진다. */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: 'absolute',
+            inset: 0,
+            pointerEvents: 'none',
+            background: `radial-gradient(42% 42% at 50% 50%, ${T.taglineInk}40 0%, ${T.taglineInk}00 72%)`,
+            opacity: lifted ? 0 : 1,
+            transition: 'opacity 1.6s cubic-bezier(.16,1,.3,1)',
+          }}
+        />
+
         {/* 좌·우 상단 도트 패턴 + 발광 하이라이트 */}
         <div style={dotLayer('left', lifted, charted)}>
           <div style={shimmer('left', charted)} />
