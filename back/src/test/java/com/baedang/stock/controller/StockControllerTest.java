@@ -15,6 +15,7 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.StockCategory;
 import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.CandleQueryService;
+import com.baedang.stock.service.StockLikeService;
 import com.baedang.stock.service.StockSearchService;
 import com.baedang.stock.service.StockDetailService;
 import com.baedang.stock.service.StockFinancialQueryService;
@@ -24,6 +25,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -33,7 +35,10 @@ import java.time.LocalDate;
 
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -61,7 +66,23 @@ public class StockControllerTest {
     @MockitoBean
     private StockFinancialQueryService stockFinancialQueryService;
     @MockitoBean
+    private StockLikeService stockLikeService;
+    @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    @DisplayName("관심 종목 API는 인증 없이 호출하면 401을 반환한다")
+    void likesRequireAuthentication() throws Exception {
+        mockMvc.perform(get("/api/stocks/likes"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        mockMvc.perform(post("/api/stocks/likes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"stockId\":5}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/stocks/likes/5"))
+                .andExpect(status().isUnauthorized());
+    }
 
     @Test
     @DisplayName("종목 검색 API가 검색 결과 반환")
@@ -134,6 +155,7 @@ public class StockControllerTest {
         RankingResponse response = new RankingResponse(
                 List.of(new RankingResponse.Item(
                         1,
+                        1L,
                         "005930",
                         "삼성전자",
                         "KOSPI",
@@ -147,11 +169,12 @@ public class StockControllerTest {
                         "0.023069",
                         "1240000000000",
                         null,
-                        true
+                        true,
+                        null
                 )), "next-cursor", true
         );
 
-        when(rankingService.getRankings("KR", 20, null)).thenReturn(response);
+        when(rankingService.getRankings("KR", 20, null, null)).thenReturn(response);
 
         mockMvc.perform(
                         get("/api/stocks/rankings")
@@ -165,13 +188,13 @@ public class StockControllerTest {
                 .andExpect(jsonPath("$.nextCursor").value("next-cursor"))
                 .andExpect(jsonPath("$.hasNext").value(true));
 
-        verify(rankingService).getRankings("KR", 20, null);
+        verify(rankingService).getRankings("KR", 20, null, null);
     }
 
     @Test
     @DisplayName("cursor를 다음 페이지 조회에 전달한다")
     void t5() throws Exception {
-        when(rankingService.getRankings("US", 20, "cursor-value"))
+        when(rankingService.getRankings("US", 20, "cursor-value", null))
                 .thenReturn(new RankingResponse(List.of(),null,false));
 
         mockMvc.perform(
@@ -181,7 +204,7 @@ public class StockControllerTest {
                         .param("cursor", "cursor-value")
         ).andExpect(status().isOk());
 
-        verify(rankingService).getRankings("US", 20, "cursor-value");
+        verify(rankingService).getRankings("US", 20, "cursor-value", null);
     }
 
     @Test
@@ -327,5 +350,22 @@ public class StockControllerTest {
         mockMvc.perform(get("/api/stocks/AAPL/financials").param("marketCountry", "US"))
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.code").value("FINANCIALS_NOT_SUPPORTED"));
+    }
+
+    @Test
+    @DisplayName("랭킹은 비로그인도 조회할 수 있고, 로그인하면 userId를 서비스에 전달한다")
+    void rankingsArePublicAndPassUserId() throws Exception {
+        RankingResponse empty = new RankingResponse(List.of(), null, false);
+        when(rankingService.getRankings("KR", 20, null, null)).thenReturn(empty);
+        when(rankingService.getRankings("KR", 20, null, 7L)).thenReturn(empty);
+
+        mockMvc.perform(get("/api/stocks/rankings").param("market", "KR"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/stocks/rankings").param("market", "KR")
+                        .with(authentication(new UsernamePasswordAuthenticationToken(7L, null, List.of()))))
+                .andExpect(status().isOk());
+
+        verify(rankingService).getRankings("KR", 20, null, null);
+        verify(rankingService).getRankings("KR", 20, null, 7L);
     }
 }

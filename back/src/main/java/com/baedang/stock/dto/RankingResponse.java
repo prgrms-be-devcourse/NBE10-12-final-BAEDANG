@@ -12,6 +12,7 @@ public record RankingResponse(
 ) {
     public record Item(
             int rank,
+            Long stockId,
             String symbol,
             String name,
             String market,
@@ -25,7 +26,8 @@ public record RankingResponse(
             String changeRate,
             String tradingAmount,
             OffsetDateTime quoteAt,
-            boolean realtime
+            boolean realtime,
+            Long stockLikeId
     ) {
     }
 }

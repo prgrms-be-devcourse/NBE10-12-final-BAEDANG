@@ -71,14 +71,14 @@ class DomainNormalizationContractTest {
     @ValueSource(strings = {"", " ", "JP"})
     void 상세와_랭킹의_시장코드_오류문구는_각각_유지한다(String market) {
         StockDetailService detailService = new StockDetailService(null, null, null, null, null);
-        RankingService rankingService = new RankingService(null, null, null);
+        RankingService rankingService = new RankingService(null, null, null, null);
 
         assertThatThrownBy(() -> detailService.getDetail("005930", market))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
                     assertThat(e.getDetail()).isEqualTo("marketCountry는 KR 또는 US여야 합니다");
                 });
-        assertThatThrownBy(() -> rankingService.getRankings(market, 20, null))
+        assertThatThrownBy(() -> rankingService.getRankings(market, 20, null, null))
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
                     assertThat(e.getDetail()).isEqualTo("market는 KR 또는 US여야 합니다");
