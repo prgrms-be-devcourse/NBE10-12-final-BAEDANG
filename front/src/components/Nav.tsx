@@ -54,11 +54,12 @@ export function Nav() {
             height: 40,
             width: "auto",
             filter: theme === "dark" ? "brightness(0) invert(1)" : "none",
-            // 로고 위치를 좀 더 아래로 옮겨달라는 요청 — 헤더의 다른
-            // 요소들(PillTabs 등)과의 정렬(items-center)에는 영향을 주지
-            // 않도록 레이아웃에 관여하는 margin 대신 순수 시각적 이동인
-            // transform으로 내렸다.
-            transform: "translateY(5px)",
+            // 로고 위치를 좀 더 아래로 옮겨달라는 요청(5px)에 이어,
+            // "메인" 탭 문구와 나란히 놓이도록 다시 살짝만 위로 올려달라는
+            // 요청으로 5px → 2px로 줄였다. 헤더의 다른 요소들(PillTabs
+            // 등)과의 정렬(items-center)에는 영향을 주지 않도록 레이아웃에
+            // 관여하는 margin 대신 순수 시각적 이동인 transform을 쓴다.
+            transform: "translateY(2px)",
           }}
         />
       </Link>
