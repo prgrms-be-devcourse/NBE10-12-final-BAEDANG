@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { TiltCard } from "@/components/TiltCard";
 import { Reveal } from "@/components/Reveal";
 import { useTheme } from "@/components/ThemeProvider";
 import { getMarketStatus, type MarketStatus } from "@/lib/api";
@@ -12,51 +11,6 @@ const MARKET_LABEL: Record<string, string> = { KR: "국내장", US: "해외장" 
 function formatMarketTime(iso: string): string {
   return new Date(iso).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
-
-const STEPS = [
-  {
-    step: "STEP 1",
-    title: "모의 투자금 5,000만원 받기",
-    desc: (
-      <>
-        가입하면 자동 지급돼요.
-        <br />
-        다 쓰면 포트폴리오를 초기화해
-        <br />
-        다시 시작할 수 있어요.
-      </>
-    ),
-  },
-  {
-    step: "STEP 2",
-    title: "랭킹에서 종목 고르기",
-    desc: (
-      <>
-        거래대금 상위 100개 종목을
-        <br />
-        국내·해외로 나눠 보여드려요.
-      </>
-    ),
-  },
-  {
-    step: "STEP 3",
-    title: "실제 시세로 매수·매도",
-    desc: (
-      <>
-        장 운영 시간에 시장가로 즉시 체결돼요.
-        <br />
-        수수료와 세금도 그대로 반영돼요.
-      </>
-    ),
-  },
-];
-
-const COMPARE_ROWS = [
-  { label: "목적", other: "거래 체결", ours: "학습과 훈련" },
-  { label: "실수했을 때", other: "실제 손실, 되돌릴 수 없음", ours: "손실 없음, 초기화하고 다시" },
-  { label: "수수료·세금", other: "거래 후 결과에만 반영", ours: "주문 전 미리 보여줌" },
-  { label: "사용법 안내", other: "없음", ours: "이용가이드 · 용어 위키 제공" },
-];
 
 export default function MainPage() {
   const { theme } = useTheme();
@@ -195,125 +149,11 @@ export default function MainPage() {
         </div>
       </Reveal>
 
-      {/* 3단계 */}
-      <Reveal delay={0.16} duration={1} className="mt-12 mb-10">
-        <h2 className="text-center text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
-          이렇게 사용해요
-        </h2>
-        <p className="mt-2 mb-6 text-center text-[15px]" style={{ color: "var(--mut)" }}>
-          가입부터 첫 거래까지 3단계
-        </p>
-        <div className="flex gap-4 max-md:flex-col">
-          {STEPS.map((s) => (
-            <TiltCard
-              key={s.step}
-              className="flex-1 rounded-[20px] p-6.5 text-center"
-              // 그림자는 넣지 않습니다 (design_handoff README). 배경은 카드 정중앙이
-              // 가장 진하고 바깥으로 갈수록 옅어지는 radial gradient. 테두리는
-              // 요청대로 흰색으로 마무리하되, 다크 모드에서 그대로 흰색을 쓰면
-              // 카드가 어두운 배경 위에 하얗게 떠 보이므로 다크 모드의 "흰색 역할"인
-              // 카드 배경색(var(--card), #1a1a1a)으로 마무리했다 — 라이트 모드는
-              // var(--card)가 정확히 #ffffff라 요청한 흰색 그대로다.
-              style={{
-                // 다크 모드만 좀 더 어둡게 해달라는 요청 — 베이스 블루 자체를 한
-                // 단계 낮췄다(라이트 모드 값은 그대로 유지). 이후 "더 진하게"
-                // 요청을 두 차례 받아 불투명도를 올려봤는데, 결국 마음에 들지
-                // 않는다는 피드백을 받아 이 원래 값으로 되돌렸다.
-                background:
-                  theme === "dark"
-                    ? "radial-gradient(120% 120% at 50% 50%, rgba(45,95,155,0.65) 0%, rgba(45,95,155,0.28) 45%, var(--card) 100%)"
-                    : "radial-gradient(120% 120% at 50% 50%, rgba(196,222,248,0.85) 0%, rgba(196,222,248,0.4) 45%, #ffffff 100%)",
-              }}
-            >
-              <span
-                className="inline-block text-[12px] font-extrabold"
-                // 사각형 배지가 카드 위에서 어색해 보인다는 피드백을 받아 배경·
-                // 패딩·라운드를 없애고 글자만 남겼다. 색은 그대로 accentSoft
-                // 텍스트 톤을 써서 카드의 블루 그라데이션과 계속 어울리게 했다.
-                style={{ color: "var(--onAccentSoftText)" }}
-              >
-                {s.step}
-              </span>
-              <h4 className="my-2 text-[16px] font-bold" style={{ color: "var(--ink)" }}>
-                {s.title}
-              </h4>
-              <p className="text-[14px] leading-[1.6]" style={{ color: "var(--mut)" }}>
-                {s.desc}
-              </p>
-            </TiltCard>
-          ))}
-        </div>
-      </Reveal>
-
-      {/* 비교표 */}
-      <Reveal delay={0.32} duration={1} className="mb-10">
-        <h2 className="text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>
-          증권사 앱과 무엇이 다른가요?
-        </h2>
-        <p className="mt-3 mb-4.5 text-[14px]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
-          증권사 앱은 거래를 <b className="font-bold">체결</b>시키는 도구고, 저희는 거래를{" "}
-          <b className="font-bold">이해</b>시키는 도구예요.
-        </p>
-        <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
-          <div
-            className="grid text-[13.5px] opacity-0"
-            style={{
-              gridTemplateColumns: "1fr 1.2fr 1.2fr",
-              animation: "riseIn .9s cubic-bezier(.22,1,.36,1) .5s forwards",
-            }}
-          >
-            <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)" }} />
-            <div className="px-6 py-4 font-bold" style={{ borderBottom: "1px solid var(--line2)", color: "var(--mut)" }}>
-              일반 증권사 앱
-            </div>
-            <div
-              className="px-6 py-4 font-extrabold"
-              style={{ borderBottom: "1px solid var(--line2)", color: "var(--accentText)" }}
-            >
-              모의주식 트레이딩
-            </div>
-          </div>
-          {COMPARE_ROWS.map((row, i) => (
-            <div
-              key={row.label}
-              className="grid text-[13.5px] opacity-0"
-              style={{
-                gridTemplateColumns: "1fr 1.2fr 1.2fr",
-                animation: `riseIn .9s cubic-bezier(.22,1,.36,1) ${0.5 + (i + 1) * 0.17}s forwards`,
-              }}
-            >
-              <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)", color: "var(--mut)" }}>
-                {row.label}
-              </div>
-              <div className="px-6 py-4" style={{ borderBottom: "1px solid var(--line2)", color: "var(--body)" }}>
-                {row.other}
-              </div>
-              <div className="px-6 py-4 font-bold" style={{ borderBottom: "1px solid var(--line2)", color: "var(--ink)" }}>
-                {row.ours}
-              </div>
-            </div>
-          ))}
-        </div>
-      </Reveal>
-
-      {/* CTA 배너 */}
-      <Reveal delay={0.48} duration={1} className="mb-10">
-        <div className="rounded-[24px] px-11 py-11 text-center" style={{ background: "var(--ctaBanner)" }}>
-          <h2 className="text-[24px] font-extrabold text-white">첫 거래는 오늘, 첫 손실은 0원</h2>
-          <p className="mx-auto my-2.5 max-w-[420px] text-[14px] text-white/80">
-            모의 투자금 5,000만원으로 지금 시작해보세요
-          </p>
-          <Link
-            href="/rankings"
-            className="mt-2 inline-block rounded-[12px] px-8 py-3 text-[14px] font-extrabold transition-[background] duration-[180ms]"
-            style={{ background: "#fff", color: "var(--ctaBannerBtnText)" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--ctaBannerBtnHover)")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}
-          >
-            시작하기
-          </Link>
-        </div>
-      </Reveal>
+      {/* "이렇게 사용해요"(3단계 STEP 카드), "증권사 앱과 무엇이
+          다른가요?"(비교표), "첫 거래는 오늘, 첫 손실은 0원"(CTA 배너)
+          세 섹션을 제거해달라는 요청으로 통째로 지웠다 — 이 섹션들에만
+          쓰이던 TiltCard/STEPS/COMPARE_ROWS도 다른 곳에서 쓰이지 않는
+          것을 확인(grep)하고 함께 정리했다. */}
 
       {/* 푸터 고지 */}
       <Reveal delay={0.64} duration={1}>
