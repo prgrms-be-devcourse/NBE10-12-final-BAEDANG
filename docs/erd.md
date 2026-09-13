@@ -696,7 +696,7 @@ Deferring an already accepted LIMIT order during an active KOSPI/KOSDAQ circuit 
 
 No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
 
-V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
+Later migrations V8–V14 add the market-event history and the circuit-breaker rejection FK. This execution deferral adds no migration, so `V14__trade_order_market_event_rejection.sql` remains the highest version.
 
 ---
 
