@@ -707,7 +707,13 @@ export function InvestupIntro({
             transform: 'translate(-50%, -50%)',
             pointerEvents: 'none',
             opacity: lifted ? 0 : 1,
-            transition: 'opacity 1.6s cubic-bezier(.16,1,.3,1)',
+            // 나타난 뒤 사라지는 속도를 조금만 더 빠르게 해달라는 요청 —
+            // 이 트랜지션은 opacity가 1(등장 직후 상태)→0(lifted 시점)
+            // 으로 바뀔 때만 실제로 재생되므로(마운트 시점엔 이전 값이
+            // 없어 바로 opacity 1로 그려질 뿐 트랜지션이 안 걸린다),
+            // duration 하나만 낮추면 "사라지는" 속도만 빨라진다 —
+            // 1.6s → 1.0s.
+            transition: 'opacity 1s cubic-bezier(.16,1,.3,1)',
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 배경 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
