@@ -64,6 +64,12 @@ resource "aws_security_group" "ec2_sg_1" {
   name = "${var.prefix}-ec2-sg-1"
 
   ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
     from_port   = 80
     to_port     = 80
     protocol    = "tcp"
@@ -125,10 +131,10 @@ resource "aws_iam_role" "ec2_role_1" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "ec2_ssm" {
-  role       = aws_iam_role.ec2_role_1.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
+# resource "aws_iam_role_policy_attachment" "ec2_ssm" {
+#   role       = aws_iam_role.ec2_role_1.name
+#   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+# }
 
 resource "aws_iam_role_policy" "s3_read" {
   name = "${var.prefix}-ec2-role-1-policy-s3_read"
