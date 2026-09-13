@@ -76,7 +76,7 @@ export default function MainPage() {
                   color: theme === "dark" ? "#ffffff" : "#000000",
                 }}
               >
-                이용가이드 보기
+                가이드 보기
               </Link>
             </div>
             <div className="mt-3.5 text-[14px]" style={{ color: "var(--heroSub)" }}>
