@@ -27,6 +27,7 @@ import {
   DEG,
   clamp01,
 } from '@/lib/investup-intro-data';
+import { RevealLines } from './RevealLines';
 import { StarfieldBackground } from './StarfieldBackground';
 import { SwapText } from './SwapText';
 import { TiltCard } from './TiltCard';
@@ -749,20 +750,30 @@ export function InvestupIntro({
             transition: 'transform 1.5s cubic-bezier(.2,.9,.24,1)',
           }}
         >
+          {/* 로고 + 태그라인 등장 애니메이션 — toss인슈어런스
+              (pd-recruit.tossinsu.com) 참고 요청으로 기존의 느린
+              opacity/blur/scale 페이드인(2.2~2.6s) 대신 "아래에서 빠르게
+              올라와 제자리에 정확히 멈추는" Line/Masked Text Reveal로
+              바꿨다(RevealLines.tsx). font-size/weight/letter-spacing/
+              color/margin/width 등 기존 타이포그래피·레이아웃은 h1/p에
+              그대로 두고, 그 안의 콘텐츠만 RevealLines로 감쌌다 — 트리거는
+              이 화면이 처음 뜰 때 한 번만 켜지는 기존 heroIn을 그대로
+              재사용한다(항상 스크롤 없이 바로 보이는 첫 화면 콘텐츠라
+              별도 IntersectionObserver 없이 heroIn 하나로 충분하다). */}
           <h1
             style={{
               margin: '-0.3em 0 0',
               display: 'block',
               width: 'min(62vw, 760px)',
-              opacity: heroIn ? 1 : 0,
-              filter: `blur(${heroIn ? 0 : 14}px)`,
-              transform: `scale(${heroIn ? 1 : 0.9})`,
-              transition:
-                'opacity 2.2s cubic-bezier(.32,0,.3,1), filter 2.4s cubic-bezier(.32,0,.3,1), transform 2.6s cubic-bezier(.16,1,.3,1)',
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- 워드마크는 고정비 PNG 하나뿐이라 next/image 최적화 이점이 없다 */}
-            <img src={logoSrc} alt="Investup" style={{ display: 'block', width: '100%', height: 'auto' }} />
+            <RevealLines
+              active={heroIn}
+              lines={[
+                // eslint-disable-next-line @next/next/no-img-element -- 워드마크는 고정비 PNG 하나뿐이라 next/image 최적화 이점이 없다
+                <img key="logo" src={logoSrc} alt="Investup" style={{ display: 'block', width: '100%', height: 'auto' }} />,
+              ]}
+            />
           </h1>
           <p
             style={{
@@ -771,17 +782,19 @@ export function InvestupIntro({
               fontWeight: 500,
               letterSpacing: '-.02em',
               color: T.taglineInk,
-              opacity: heroIn ? 1 : 0,
-              filter: `blur(${heroIn ? 0 : 14}px)`,
-              transform: `translateY(${heroIn ? 0 : 22}px) scale(${lifted ? 1.85 : 1})`,
+              // lifted(도트 지구본으로 전환되는 시점)에 태그라인만 더 크게
+              // 키우는 확대 연출 — RevealLines의 등장 애니메이션과는 별개
+              // 라 여기 p 자체의 transform으로 남겨뒀다(등장 이후, 화면이
+              // 전환될 때 쓰이는 전혀 다른 타이밍의 효과라 같은 transform
+              // 안에 있으면 RevealLines의 translateY와 섞여버린다).
+              transform: `scale(${lifted ? 1.85 : 1})`,
               transformOrigin: '50% 0%',
-              transition:
-                'opacity 2.2s cubic-bezier(.32,0,.3,1) .18s, filter 2.4s cubic-bezier(.32,0,.3,1) .18s, transform 2.6s cubic-bezier(.16,1,.3,1) .18s',
+              transition: 'transform 1.5s cubic-bezier(.2,.9,.24,1)',
               textAlign: 'center',
               wordBreak: 'keep-all',
             }}
           >
-            실수는 가볍게, 투자 감각은 제대로
+            <RevealLines active={heroIn} lines={['실수는 가볍게, 투자 감각은 제대로']} delayMs={110} />
           </p>
         </div>
 
