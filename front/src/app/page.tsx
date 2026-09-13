@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Reveal } from "@/components/Reveal";
+// 서비스 소개 화면의 "시작하기" 버튼과 같은 텍스트 스왑 호버 효과를 메인
+// 화면 버튼에도 재사용해달라는 요청 — SwapText와 이 CSS(.iv-hover-swap,
+// .iv-swap 등)는 특정 버튼에 종속되지 않은 범용 컴포넌트/클래스로 만들어져
+// 있어(주석 참고) 그대로 가져다 썼다. 색상은 이 파일에서 테마별로 직접
+// 지정한다.
+import { SwapText } from "@/components/SwapText";
+import "@/components/investup-intro.css";
 import { useTheme } from "@/components/ThemeProvider";
 import { getMarketStatus, type MarketStatus } from "@/lib/api";
 
@@ -15,6 +22,16 @@ function formatMarketTime(iso: string): string {
 export default function MainPage() {
   const { theme } = useTheme();
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+
+  // 인트로 화면 "시작하기" 버튼의 반투명 알약형 배경 값(흰색, 불투명도
+  // .06 → 호버 시 .24)을 그대로 가져오되, 다크 모드가 아닌 라이트
+  // 모드에서는 흰 배경 위에 흰색 반투명 배경이 거의 안 보이므로 Nav.tsx의
+  // 라이트 모드 반투명 배경과 같은 톤(rgba(15,56,104, ...) — 이 앱의
+  // "라이트 모드 잉크색 반투명 오버레이" 관례)으로 바꿔 같은 알파값
+  // 비율(.06 → .24)을 유지했다.
+  const pillBtnBg = theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.06)";
+  const pillBtnBgHover = theme === "dark" ? "rgba(255,255,255,.24)" : "rgba(15,56,104,.24)";
+  const pillBtnText = theme === "dark" ? "#ffffff" : "var(--ink)";
 
   // 장식용 배지라 실패해도 조용히 숨긴다 — 메인 화면이 이 정보 없이도 완전하기 때문이다.
   useEffect(() => {
@@ -69,26 +86,31 @@ export default function MainPage() {
               <br />
               <b className="font-bold">모의 투자금 5,000만원</b>이 가입 즉시 지급돼요.
             </p>
+            {/* 두 버튼 모두 서비스 소개 화면의 "시작하기" 버튼과 같은
+                스타일·애니메이션을 적용해달라는 요청 — 알약형(rounded-full)
+                반투명 배경, 호버 시 배경이 밝아지는 트랜지션, 그리고
+                텍스트가 아래→위로 스치듯 바뀌는 SwapText 효과까지 그대로
+                가져왔다. 원래 두 버튼이 갖고 있던 강조(accent 색 채움)/
+                보조(흰색·어두운 배경) 구분은 이 요청에 따라 사라지고,
+                이제 둘 다 똑같은 알약형 버튼이 된다. */}
             <div className="mt-5 flex gap-2.5">
               <Link
                 href="/rankings"
-                className="rounded-[12px] px-6 py-3 text-[14px] font-bold"
-                style={{
-                  background: theme === "dark" ? "var(--accent)" : "var(--ctaBtn)",
-                  color: theme === "dark" ? "#ffffff" : "var(--ctaBtnText)",
-                }}
+                className="iv-hover-swap inline-flex min-h-[54px] items-center gap-2.5 whitespace-nowrap rounded-full px-11 text-[19px] font-bold tracking-[-0.01em] transition-[background-color] duration-[280ms] ease-out"
+                style={{ background: pillBtnBg, color: pillBtnText, boxShadow: "0 2px 8px rgba(15,23,32,.08)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
-                모의 투자금 받고 시작하기
+                <SwapText>모의 투자금 받고 시작하기</SwapText>
               </Link>
               <Link
                 href="/guide"
-                className="rounded-[12px] px-5 py-3 text-[14px] font-semibold"
-                style={{
-                  background: theme === "dark" ? "#1a1c1f" : "#ffffff",
-                  color: theme === "dark" ? "#ffffff" : "#000000",
-                }}
+                className="iv-hover-swap inline-flex min-h-[54px] items-center gap-2.5 whitespace-nowrap rounded-full px-11 text-[19px] font-bold tracking-[-0.01em] transition-[background-color] duration-[280ms] ease-out"
+                style={{ background: pillBtnBg, color: pillBtnText, boxShadow: "0 2px 8px rgba(15,23,32,.08)" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
-                가이드 보기
+                <SwapText>가이드 보기</SwapText>
               </Link>
             </div>
             <div className="mt-3.5 text-[14px]" style={{ color: "var(--heroSub)" }}>
