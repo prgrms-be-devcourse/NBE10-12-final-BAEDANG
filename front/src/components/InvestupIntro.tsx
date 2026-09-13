@@ -694,12 +694,13 @@ export function InvestupIntro({
             inset: 0,
             // 배경 이미지 크기를 줄여달라는 요청 — 화면을 꽉 채우던
             // cover 대신 65%로 줄이고 반복되지 않게 no-repeat를 줬다.
-            // 이미지를 좀 더 위쪽으로 옮겨달라는 후속 요청으로
-            // backgroundPosition의 세로값을 50%(정중앙) → 28%로 낮췄다.
+            // 이미지를 좀 더 위쪽으로 옮겨달라는 요청을 두 차례 거쳐
+            // backgroundPosition의 세로값을 50%(정중앙) → 28% → 16%로
+            // 낮췄다.
             backgroundImage: 'url(/investup-hero-bg.png)',
             backgroundSize: '65%',
             backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center 28%',
+            backgroundPosition: 'center 16%',
             WebkitMaskImage: 'radial-gradient(ellipse 68% 66% at 50% 50%, #000 55%, transparent 100%)',
             maskImage: 'radial-gradient(ellipse 68% 66% at 50% 50%, #000 55%, transparent 100%)',
             pointerEvents: 'none',
