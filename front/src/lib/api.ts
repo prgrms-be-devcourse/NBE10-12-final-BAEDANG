@@ -743,6 +743,97 @@ export function resetAccount(accountId: number): Promise<AccountReset> {
   return request<AccountReset>("/api/accounts/me/reset", { method: "POST", auth: true, body: { accountId } });
 }
 
+// ── 투자 성향 리포트 ──────────────────────────────────────────────────────────
+
+export type PersonalityReportShares = {
+  concentration: string;
+  domestic: string;
+  individual: string;
+  aggressive: string;
+};
+
+export type LongHeldStock = {
+  symbol: string;
+  name: string;
+  currency: string;
+  avgBuyPrice: string;
+  lastPrice: string;
+  /** 시세가 없으면 null(마이페이지 보유 종목과 같은 사정). */
+  returnRate: string | null;
+  heldSince: string;
+};
+
+/**
+ * `GET /api/reports/me` 응답 — 투자 성향 리포트(현재 활성 계좌=라운드 기준).
+ *
+ * <p>`locked`가 true면 계좌 개설 후 아직 `unlockAt`(개설 + N주)에 못 미친 상태라
+ * `initialCash`~`longHeldStocks`가 전부 null/빈 값이다. 잠금이 풀린 뒤에도
+ * "고정된 스냅샷"이 아니라 열 때마다 다시 계산된다 — `asOf`가 매번 최신 계산
+ * 시각이다(백엔드 주석: "발급(열림) 후에는 열 때마다 재계산한다").
+ *
+ * <p>`classified`는 보유 종목이 2개 이상이어야 true다 — 미만이면 유형을 정하지
+ * 않는 "미분류/신규" 상태로, `typeCode`/`typeLabel`이 null이어도 `shares`는
+ * 계산된 값(평가액이 아예 없으면 전부 "0")을 그대로 담는다.
+ */
+export type PersonalityReport = {
+  accountId: number;
+  roundNo: number;
+  locked: boolean;
+  unlockAt: string;
+  initialCash: string | null;
+  cashBalance: string | null;
+  stockValue: string | null;
+  totalAsset: string | null;
+  totalPnl: string | null;
+  /** 초기자본 대비 총손익 — 0~1 소수 문자열(마이페이지의 unrealizedPnlRate와는 다른 지표). */
+  returnRate: string | null;
+  classified: boolean;
+  /** 4글자 유형 코드(예: "CKSB") — 분산·시장·유형·공격성 순. 미분류/잠김이면 null. */
+  typeCode: string | null;
+  typeLabel: string | null;
+  shares: PersonalityReportShares | null;
+  holdingCount: number;
+  holdingPeriodWeeks: number;
+  longHeldStocks: LongHeldStock[];
+  asOf: string;
+};
+
+/** `GET /api/reports/me` — 내 투자 성향 리포트. */
+export function getPersonalityReport(): Promise<PersonalityReport> {
+  return request<PersonalityReport>("/api/reports/me", { method: "GET", auth: true });
+}
+
+export type LeaderboardEntry = {
+  rank: number;
+  /** 백엔드가 이미 가운데 글자를 마스킹해서 내려준다 — 프론트에서 다시 가릴 필요 없음. */
+  nickname: string;
+  returnRate: string;
+};
+
+export type LeaderboardMe = {
+  rank: number;
+  returnRate: string;
+  /** 1/5/10/25/50/75 중 하나, 하위권이면 null. */
+  topPercent: number | null;
+  neighbors: LeaderboardEntry[];
+};
+
+/**
+ * `GET /api/reports/leaderboard` 응답 — 아침 배치 스냅샷 기준(라이브 리포트와 값이 다를 수 있어
+ * `asOf`를 함께 내려준다). 스냅샷이 아직 없거나 참가자가 0명이면 `asOf: null · top: [] · me: null`.
+ */
+export type Leaderboard = {
+  asOf: string | null;
+  participants: number;
+  top: LeaderboardEntry[];
+  me: LeaderboardMe | null;
+};
+
+/** `GET /api/reports/leaderboard` — 수익률 리더보드. */
+export function getLeaderboard(): Promise<Leaderboard> {
+  return request<Leaderboard>("/api/reports/leaderboard", { method: "GET", auth: true });
+}
+
 // ── 시장 운영 상태 ───────────────────────────────────────────────────────────
 
 export type MarketStatusItem = {
