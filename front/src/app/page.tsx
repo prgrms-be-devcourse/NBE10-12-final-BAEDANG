@@ -158,9 +158,9 @@ export default function MainPage() {
           /비교표/CTA 배너 섹션이 사라진 뒤로 히어로의 my-4(16px) 여백만
           남아 있어 간격이 좁았던 것을, mt-28(112px)로 크게 벌렸다.
           이후 좀 더 좁혀달라는 요청으로 mt-20(80px)으로 줄였고,
-          조금만 더 좁혀달라는 요청으로 mt-16(64px)으로 한 번 더
-          줄였다. */}
-      <Reveal delay={0.64} duration={1} className="mt-16">
+          조금만 더 좁혀달라는 요청으로 mt-16(64px)으로, 다시 한 번
+          조금만 더 좁혀달라는 요청으로 mt-12(48px)로 줄였다. */}
+      <Reveal delay={0.64} duration={1} className="mt-12">
         <p className="text-center text-[12.5px] leading-[1.8]" style={{ color: "var(--mut2)" }}>
           본 서비스는 투자 교육을 목적으로 하는 모의 투자 서비스예요. 실제 매매가 이루어지지 않으며, 특정
           종목에 대한 투자 조언이나 매매 권유를 제공하지 않아요.
