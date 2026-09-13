@@ -163,13 +163,16 @@ export default function MainPage() {
               하고(50% 이상으로 주면 가장자리에 색이 남는 문제가 있었다),
               불투명 구간은 8%로 좁게 둬서 거의 전 구간이 서서히
               옅어지는 폭넓은 그라데이션이 되게 했다. 크기를 많이 키워
-              달라는 요청으로 max-width도 380px → 640px로 키웠다. */}
+              달라는 요청을 두 차례 거쳐 max-width를 380px → 640px →
+              900px로 키웠다(실제 렌더링 크기는 flex-1 영역이 실제로
+              확보한 너비 안에서 결정되므로, 화면 폭이 넓을수록 이
+              상한값에 더 가깝게 커진다). */}
           <div className="flex flex-1 items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
             <img
               src="/investup-hero-bg.png"
               alt=""
-              className="w-full max-w-[640px]"
+              className="w-full max-w-[900px]"
               style={{
                 display: "block",
                 height: "auto",
