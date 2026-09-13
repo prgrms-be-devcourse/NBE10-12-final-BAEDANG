@@ -822,8 +822,10 @@ export function InvestupIntro({
                 width: 252,
                 padding: '20px 22px 18px',
                 borderRadius: 20,
+                // 지구본 핀 호버 팝업을 좀 더 투명하게 해달라는 요청 —
+                // 두 stop의 알파값을 낮췄다(0.58→0.4, 0.4→0.26).
                 background:
-                  'linear-gradient(155deg, rgba(255,255,255,0.58) 0%, rgba(239,246,252,0.4) 100%)',
+                  'linear-gradient(155deg, rgba(255,255,255,0.4) 0%, rgba(239,246,252,0.26) 100%)',
                 border: '1px solid rgba(255,255,255,0.72)',
                 boxShadow:
                   '0 24px 60px rgba(15,56,104,0.18), inset 0 1px 0 rgba(255,255,255,0.7)',
