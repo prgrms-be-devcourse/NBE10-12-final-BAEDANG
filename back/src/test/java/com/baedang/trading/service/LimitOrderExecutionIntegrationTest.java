@@ -940,4 +940,32 @@ class LimitOrderExecutionIntegrationTest {
                 ExecutionRateEvidence.krw(NOW.atOffset(ZoneOffset.UTC)),NOW));
     }
 
+    /**
+     * CB 판정은 컨텍스트 신선도 검증보다 앞이어야 한다. 뒤에 두면 락 대기 중 context가 만료된 CB
+     * 주문이 중단 사유 대신 CONTEXT_EXPIRED로 분류돼 지표와 사유가 함께 틀어진다.
+     */
+    @Test
+    void 컨텍스트가_만료돼도_활성CB가_중단사유로_우선한다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        LimitExecutionAttempt attempt = krAttempt(order);
+        Map<String,Object> before = executionState(order);
+        // 컨텍스트는 만료시키되 호가는 신선하게 유지한다. 순서가 뒤집히면 CONTEXT_EXPIRED가 먼저 나간다.
+        Instant stale = NOW.plusSeconds(120);
+        clock.setCurrent(stale);
+        jdbc.update("UPDATE order_book_version SET quote_at=?,generated_at=? WHERE book_version_id=?",
+                stale.atOffset(ZoneOffset.UTC),stale.atOffset(ZoneOffset.UTC),version);
+        activeCb("20260713000812",KrMarket.KOSPI,1,stale.plusSeconds(1080));
+
+        assertThatThrownBy(() -> transactions.execute(attempt))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(e.getData()).containsEntry("market","KOSPI").containsEntry("stage",1);
+                });
+
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(executionState(order)).isEqualTo(before);
+        assertCashConservation();
+    }
 }
