@@ -830,5 +830,68 @@ class LimitOrderLifecycleIntegrationTest {
         assertThat(response.status()).isEqualTo(OrderStatus.PENDING);
     }
 
+    /** CB는 체결만 멈춘다. 사용자 취소는 접수 후 CB가 저장돼도 동결을 해제해야 한다. */
+    @Test
+    void 활성CB중에도_지정가_취소가_동결을_해제한다() {
+        prepareKrKospi();
+        var accepted = service.place(user, new LimitOrderRequest(
+                account, UUID.randomUUID().toString(), krSymbol, "KR", "BUY", "1", "1000", "KRW"));
+        assertThat(accepted.status()).isEqualTo(OrderStatus.PENDING);
+        BigDecimal reservedBefore = orders.findById(accepted.orderId()).orElseThrow().getReservedCash();
+        assertThat(reservedBefore).isPositive();
+        // 접수 뒤에 CB가 시작돼도 종료 경로는 halt 판정 없이 그대로 동작한다.
+        saveActiveCb("20260713000901", 1, NOW.minusSeconds(10), NOW.plusSeconds(1080));
 
+        var closed = service.cancel(user, accepted.orderId());
+
+        assertThat(closed.status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(orders.findById(accepted.orderId()).orElseThrow().getReservedCash()).isZero();
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM trade_order WHERE account_id=?", Long.class, account)).isEqualTo(1L);
+    }
+
+    /** 매도 취소도 CB와 무관하게 동결 수량만 해제하고 보유 수량은 보존해야 한다. */
+    @Test
+    void 활성CB중에도_매도지정가_취소가_동결수량을_해제한다() {
+        prepareKrKospi();
+        jdbc.update("INSERT INTO holding(account_id,stock_id,quantity,locked_quantity,avg_buy_price,avg_exchange_rate,"
+                + "usd_purchase_amount,krw_purchase_amount,updated_at) VALUES (?,?,3,0,1000,1,3,3000,?)",
+                account, krStockId, NOW.atOffset(ZoneOffset.UTC));
+        var accepted = service.place(user, new LimitOrderRequest(
+                account, UUID.randomUUID().toString(), krSymbol, "KR", "SELL", "2", "1000", "KRW"));
+        assertThat(lockedQuantity()).isEqualByComparingTo("2");
+        saveActiveCb("20260713000902", 1, NOW.minusSeconds(10), NOW.plusSeconds(1080));
+
+        var closed = service.cancel(user, accepted.orderId());
+
+        assertThat(closed.status()).isEqualTo(OrderStatus.CANCELED);
+        assertThat(lockedQuantity()).isZero();
+        assertThat(jdbc.queryForObject("SELECT quantity FROM holding WHERE account_id=? AND stock_id=?",
+                BigDecimal.class, account, krStockId)).isEqualByComparingTo("3");
+    }
+
+    /** CB가 주문 만료보다 오래 지속돼도 만료 스캔은 저장된 만료시각으로 종료와 해제를 커밋한다. */
+    @Test
+    void 활성CB중에도_지정가_만료가_동결을_해제한다() {
+        prepareKrKospi();
+        var accepted = service.place(user, new LimitOrderRequest(
+                account, UUID.randomUUID().toString(), krSymbol, "KR", "BUY", "1", "1000", "KRW"));
+        assertThat(accepted.status()).isEqualTo(OrderStatus.PENDING);
+        saveActiveCb("20260713000903", 1, NOW.minusSeconds(10), NOW.plusSeconds(7200));
+
+        // 주문 만료시각은 접수 시 세션 종료시각이다. CB는 그 뒤에도 활성으로 남는다.
+        time.set(NOW.plusSeconds(3601));
+        expiration.expireDue();
+
+        assertThat(orders.findById(accepted.orderId()).orElseThrow().getStatus()).isEqualTo(OrderStatus.EXPIRED);
+        assertThat(orders.findById(accepted.orderId()).orElseThrow().getReservedCash()).isZero();
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject("SELECT cash_balance FROM account WHERE account_id=?", BigDecimal.class, account))
+                .isEqualByComparingTo("50000000");
+    }
+
+    private BigDecimal lockedQuantity() {
+        return jdbc.queryForObject("SELECT coalesce(locked_quantity,0) FROM holding WHERE account_id=? AND stock_id=?",
+                BigDecimal.class, account, krStockId);
+    }
 }
