@@ -55,12 +55,7 @@ export default function MainPage() {
           }}
         >
           <div className="flex-[1.2]">
-            <span
-              className="inline-block rounded-full px-3.5 py-1.5 text-[13px] font-bold"
-              style={{ background: "var(--highlight)", color: "var(--highlightText)" }}
-            >
-              투자 연습장
-            </span>
+            {/* "투자 연습장" 배지 문구를 제거해달라는 요청. */}
             <h1
               className="mt-4.5 mb-3.5 text-[38px] leading-[1.35] font-extrabold tracking-[-0.02em]"
               style={{ color: "var(--heroText)" }}
