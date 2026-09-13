@@ -71,7 +71,9 @@ export function Nav() {
         trackClassName="w-[340px] gap-0.5 p-[3px]"
         pillRadius="8px"
         squashAnimation="liquid"
-        buttonClassName="rounded-lg px-1 py-[7px] text-[12.5px] font-bold"
+        // "메인/랭킹/가이드/마이페이지" 글자 크기를 키워달라는 요청 —
+        // 12.5px → 14px.
+        buttonClassName="rounded-lg px-1 py-[7px] text-[14px] font-bold"
         activeTextClassName="text-white"
         inactiveTextClassName="hover:brightness-95"
         inactiveTextStyle={{ color: "var(--headerNavInactive)" }}
@@ -95,21 +97,24 @@ export function Nav() {
             borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
           }}
           pillColor={theme === "dark" ? "rgba(42,46,51,.5)" : "rgba(15,56,104,.68)"}
-          buttonClassName="rounded-full px-0 py-1.5 text-[12px] font-bold"
+          // "라이트/다크" 글자 크기를 키워달라는 요청 — 12px → 13.5px.
+          buttonClassName="rounded-full px-0 py-1.5 text-[13.5px] font-bold"
           inactiveTextStyle={{ color: theme === "dark" ? "oklch(75% 0.02 258)" : "rgba(15,56,104,.75)" }}
           activeTextClassName="text-white"
         />
 
         {isLoggedIn && user ? (
           <>
-            <span className="text-[13px]" style={{ color: "var(--mut)" }}>
+            {/* 닉네임 글자 크기를 키워달라는 요청 — 13px → 14.5px. */}
+            <span className="text-[14.5px]" style={{ color: "var(--mut)" }}>
               {user.nickname}님
             </span>
             {/* 회원가입 버튼(비로그인 상태의 PillTabs 활성 필박스)과 같은 디자인 —
-                rounded-lg, var(--accent) 배경, 흰색 굵은 13px 글자로 맞췄다. */}
+                rounded-lg, var(--accent) 배경, 흰색 굵은 글자로 맞췄다. 글자 크기를
+                키워달라는 요청으로 13px → 14.5px(닉네임과 같은 크기)로 올렸다. */}
             <button
               onClick={logout}
-              className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[13px] font-bold text-white"
+              className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[14.5px] font-bold text-white"
               style={{ background: "var(--accent)" }}
             >
               로그아웃
@@ -128,7 +133,9 @@ export function Nav() {
             onChange={(v) => router.push(`/${v}?next=${encodeURIComponent(pathname)}`)}
             trackClassName="w-[176px] gap-0.5 rounded-lg p-[3px]"
             pillRadius="8px"
-            buttonClassName="rounded-lg px-1 py-[7px] text-[13px] font-bold"
+            // "로그인" 글자 크기를 키워달라는 요청 — 같은 필박스를 쓰는
+            // "회원가입"도 함께 13px → 14.5px로 커진다.
+            buttonClassName="rounded-lg px-1 py-[7px] text-[14.5px] font-bold"
             activeTextClassName="text-white"
             inactiveTextStyle={{ color: "var(--headerNavInactive)" }}
           />
