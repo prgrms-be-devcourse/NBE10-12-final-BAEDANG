@@ -9,6 +9,7 @@
 - [인증 · 회원](#인증--회원)
 - [시장](#시장)
 - [종목](#종목)
+- [관심 종목](#관심-종목)
 - [거래](#거래)
 - [계좌](#계좌)
 - [화면 ↔ API 매핑](#화면--api-매핑)
@@ -41,7 +42,7 @@ Authorization: Bearer <accessToken>
 | 구분 | 대상 |
 |---|---|
 | 비로그인 허용 | 회원가입 · 로그인 · 토큰 갱신 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
-| 🔒 로그인 필수 | 로그아웃 · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 |
+| 🔒 로그인 필수 | 로그아웃 · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 · `/stocks/likes` (POST/GET/DELETE) |
 ### 응답 형식
 
 성공 시 데이터를 **그대로** 반환하고, 목록은 커서를 함께 내려줍니다.
@@ -431,6 +432,7 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
   "items": [
     {
       "rank": 1,
+      "stockId": 5,
       "symbol": "005930",
       "name": "삼성전자",
       "market": "KOSPI",
@@ -444,7 +446,8 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
       "changeRate": "0.0231",
       "tradingAmount": "1240000000000",
       "quoteAt": "2026-08-11T12:36:59+09:00",
-      "realtime": true
+      "realtime": true,
+      "stockLikeId": 42
     }
   ],
   "nextCursor": "eyJ0YSI6IjEyNDAwMDAwMDAwMDAiLCJpZCI6MTAyNH0",
@@ -452,6 +455,10 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
 }
 ```
 - **`realtime`** — `quoteAt` 이 현재 정규장 시간 내이면 `true`. 프론트가 **"12:36:59 기준 · 실시간"** 과 **"8월 11일 종가"** 를 구분하는 근거입니다.
+- **관심 종목 여부 (#169)** — 랭킹은 계속 비로그인으로 조회할 수 있습니다. 유효한 `Authorization` 헤더를 보내면 그 사용자의 관심 종목에 `stockLikeId`가 채워집니다. 페이지당 `(user_id, stock_id) IN (...)` 조회가 1번 추가됩니다.
+  - 관심 종목이 아니거나 비로그인이면 `stockLikeId` 필드가 응답에서 빠집니다. 필드가 없으면 관심 종목이 아닌 것으로 처리하면 됩니다.
+  - 등록(`POST /stocks/likes`)에는 `stockId`를, 해제(`DELETE /stocks/likes/{id}`)에는 `stockLikeId`를 씁니다.
+  - 만료된 토큰을 보내면 다른 API와 마찬가지로 401 `TOKEN_EXPIRED`입니다.
 - **화면 컬럼 매핑** — 종목명(`name`) · 티커(`symbol`) · 종류(`category`) · 현재가(`lastPrice`) · 전일대비(`changeAmount`, `changeRate`) · 거래대금(`tradingAmount`).
 - `tradingAmount` 는 **최근 1주 누적**(`duration=1w`). **선정 기준이 곧 표시 값**이라 사용자가 "왜 이 순서인지"를 이해할 수 있습니다. 화면에 **"최근 1주 거래대금"** 이라고 밝혀주세요.
 
@@ -770,6 +777,78 @@ minute_candle 에 60초 이내 데이터가 있나?
 | `ORDER_BOOK_UNAVAILABLE` | 503 | 거래 불가 종목(정지·정리매매·유니버스 이탈), 장 마감/세션 만료, 15초 초과 지연 시세, 미래 시세, 통화 불일치, 활성 버전 없음/불완전 |
 
 GET 에러 응답은 주문 접수용 `retryPolicy`를 반환하지 않으며, 클라이언트는 일반 폴링 주기에 따라 재조회합니다.
+---
+
+## 관심 종목
+
+관심 종목 API입니다 (#169). 회원×종목 한 쌍당 최대 한 행이며, `stock_like`의 유니크 제약 `(user_id, stock_id)`로 보장합니다. **등록과 삭제는 중복 때문에 오류가 나지 않습니다.** 이미 등록된 종목을 다시 등록하거나 없는 id를 삭제해도 행을 바꾸지 않고 200을 돌려줍니다. 동시에 같은 요청이 들어와도 500이 나지 않습니다.
+
+### `POST /stocks/likes` 🔒
+관심 종목 등록
+
+**Request**
+```json
+{ "stockId": 5 }
+```
+
+**Response · 200**
+```json
+{ "stockLikeId": 42 }
+```
+새로 등록했든 이미 있었든 같은 `stockLikeId`를 돌려줍니다. 그래서 랭킹 폴링이 멈추는 장 마감 중에도 등록 직후 바로 해제할 수 있습니다.
+- 서버 처리: `INSERT ... ON CONFLICT (user_id, stock_id) DO NOTHING` 후 `(user_id, stock_id)`로 행을 조회합니다.
+- READ COMMITTED에서는 두 번째 조회가 새 시점으로 실행되므로, 동시 요청이 먼저 커밋한 행도 보입니다.
+
+| 에러 | 조건 |
+|---|---|
+| 400 `INVALID_INPUT` | `stockId` 누락 |
+| 404 `STOCK_NOT_FOUND` | 해당 `stockId`의 종목이 없음 |
+
+### `GET /stocks/likes` 🔒
+관심 종목 목록 · 최신 등록순 · 커서 페이지네이션
+
+| 파라미터 | 필수 | 설명 |
+|---|---|---|
+| `cursor` | — | 이전 응답의 `nextCursor` |
+| `size` | — | 기본 20, 최대 50 |
+
+**Response**
+```json
+{
+  "items": [
+    {
+      "stockLikeId": 42,
+      "stockId": 5,
+      "symbol": "005930",
+      "name": "삼성전자",
+      "marketCountry": "KR",
+      "prevClose": "236050",
+      "lastPrice": "241500",
+      "changeRate": "0.023089"
+    }
+  ],
+  "nextCursor": "NDI",
+  "hasNext": false
+}
+```
+- **커서**: 원장 조회와 같은 방식으로, 불투명한 `stock_like_id`입니다.
+  - 쿼리는 `WHERE user_id = ? AND stock_like_id < :cursor ORDER BY stock_like_id DESC LIMIT :size + 1`입니다.
+  - `nextCursor`는 마지막 페이지에도 채워지니, 계속 조회할지는 `hasNext`로 판단합니다.
+  - 잘못된 커서는 400 `INVALID_CURSOR`입니다.
+- **가격**: 랭킹과 같은 방식으로 종목 통화 기준 문자열이며, `quote_snapshot`에서 읽습니다.
+  - 시세가 한 번도 수집되지 않은 종목은 종목 상세와 같은 경로(`StockOnDemandQuoteService.ensureQuote`)로 온디맨드 조회합니다. 종목당 최대 1번입니다.
+  - 토스 호출이 실패하면 가격 세 필드만 빠지고 목록은 200으로 응답합니다.
+  - 이미 있지만 오래된 시세는 여기서 갱신하지 않습니다. 그래서 랭킹 밖 종목은 다른 경로로 수집되기 전까지 가격이 멈춰 있을 수 있습니다.
+- **폴링**: 관심 종목 화면은 종목마다 `GET /stocks/{symbol}`을 부르지 말고 이 API 하나만 폴링합니다. 종목별 상세 폴링은 요청이 종목 수만큼 늘고 토스 온디맨드 호출로 이어질 수 있습니다.
+- **트랜잭션**: 서비스는 바깥 트랜잭션 없이 실행됩니다(`propagation = NEVER`). 리포지토리 조회와 온디맨드 시세 저장이 각자 짧은 트랜잭션을 쓰므로, 토스 호출 동안 DB 연결을 붙잡지 않습니다.
+
+### `DELETE /stocks/likes/{id}` 🔒
+관심 종목 해제
+
+`{id}`는 등록 응답, 랭킹 항목, 관심 종목 목록 항목의 `stockLikeId`입니다. 서버는 `WHERE user_id = :현재사용자 AND stock_like_id = :id`로 삭제하므로, 다른 사용자의 id로는 아무것도 지워지지 않습니다.
+
+**Response · 200**: 빈 본문입니다. id가 없거나 다른 사용자의 것이어도 200이며, 다른 사용자의 행이 있는지는 응답으로 드러나지 않습니다. 숫자가 아닌 `id`는 400 `INVALID_INPUT`입니다.
+
 ---
 
 ## 거래
@@ -1152,6 +1231,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | `before` 경계 | 토스 `/candles` 의 `before` 가 inclusive 인지, 마감 동시호가(15:30) 봉이 존재하는지 실측 필요 |
 | `STALE_QUOTE` 임계값 | 15초 기준이 적절한지 |
 | 소수점 자릿수 (2주차) | 미국 주식 최소 주문 단위 (0.1? 0.001?) |
+| 상세·검색의 관심 종목 여부 (#169) | 랭킹에는 이미 `stockLikeId`가 있습니다. 종목 상세·검색 응답에도 넣을지, 클라이언트가 따로 조회할지 결정 필요 |
 
 ---
 

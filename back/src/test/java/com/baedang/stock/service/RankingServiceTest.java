@@ -8,6 +8,8 @@ import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.entity.StockCategory;
+import com.baedang.stock.entity.StockLike;
+import com.baedang.stock.repository.StockLikeRepository;
 import com.baedang.stock.repository.StockRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -47,6 +49,9 @@ public class RankingServiceTest {
     @Mock
     private QuoteRealtimePolicy quoteRealtimePolicy;
 
+    @Mock
+    private StockLikeRepository stockLikeRepository;
+
     @InjectMocks
     private RankingService rankingService;
 
@@ -81,7 +86,7 @@ public class RankingServiceTest {
 
         when(quoteRealtimePolicy.isRealtime(MarketCountry.KR, quoteSnapshot)).thenReturn(true);
 
-        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        RankingResponse response = rankingService.getRankings("KR", 20, null, null);
 
         assertThat(response.items()).hasSize(1);
 
@@ -112,7 +117,7 @@ public class RankingServiceTest {
                 PageRequest.of(0, 3)
         )).thenReturn(List.of(first, second, extra));
 
-        RankingResponse response = rankingService.getRankings("KR", 2, null);
+        RankingResponse response = rankingService.getRankings("KR", 2, null, null);
         assertThat(response.items()).hasSize(2);
         assertThat(response.hasNext()).isTrue();
         assertThat(response.nextCursor()).isNotBlank();
@@ -134,7 +139,7 @@ public class RankingServiceTest {
                 PageRequest.of(0, 21)
         )).thenReturn(List.of());
 
-        RankingResponse response = rankingService.getRankings("KR", 20, cursor);
+        RankingResponse response = rankingService.getRankings("KR", 20, cursor, null);
 
         assertThat(response.items()).isEmpty();
         assertThat(response.hasNext()).isFalse();
@@ -153,7 +158,7 @@ public class RankingServiceTest {
     @Test
     @DisplayName("지원하지 않는 market이면 예외 발생")
     void t4() {
-        assertThatThrownBy(() -> rankingService.getRankings("JP", 20, null))
+        assertThatThrownBy(() -> rankingService.getRankings("JP", 20, null, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
@@ -162,7 +167,7 @@ public class RankingServiceTest {
     @Test
     @DisplayName("size가 허용 범위를 벗어나면 예외 발생")
     void t5() {
-        assertThatThrownBy(() -> rankingService.getRankings("KR", 101, null))
+        assertThatThrownBy(() -> rankingService.getRankings("KR", 101, null, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_INPUT);
@@ -172,7 +177,7 @@ public class RankingServiceTest {
     @MethodSource("invalidCursors")
     @DisplayName("잘못된 cursor면 예외 발생")
     void t6(String caseName, String cursor) {
-        assertThatThrownBy(() -> rankingService.getRankings("KR", 20, cursor))
+        assertThatThrownBy(() -> rankingService.getRankings("KR", 20, cursor, null))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_CURSOR);
@@ -202,7 +207,7 @@ public class RankingServiceTest {
 
         when(quoteRealtimePolicy.isRealtime(MarketCountry.KR, quote)).thenReturn(true);
 
-        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        RankingResponse response = rankingService.getRankings("KR", 20, null, null);
         assertThat(response.items().get(0).realtime()).isTrue();
     }
 
@@ -229,7 +234,7 @@ public class RankingServiceTest {
         when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
 
 
-        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        RankingResponse response = rankingService.getRankings("KR", 20, null, null);
         assertThat(response.items().get(0).realtime()).isFalse();
 
     }
@@ -256,7 +261,7 @@ public class RankingServiceTest {
         when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of(quote));
 
 
-        RankingResponse response = rankingService.getRankings("KR", 20, null);
+        RankingResponse response = rankingService.getRankings("KR", 20, null, null);
         assertThat(response.items().get(0).realtime()).isFalse();
 
     }
@@ -301,5 +306,24 @@ public class RankingServiceTest {
         when(stock.getTradingAmount()).thenReturn(tradingAmount);
 
         return stock;
+    }
+
+    @Test
+    @DisplayName("로그인 사용자면 관심 종목에 stockLikeId를 담는다")
+    void likedStocksCarryStockLikeId() {
+        Stock stock = mock(Stock.class);
+        StockLike like = mock(StockLike.class);
+        when(stockRepository.findRankedByMarketCountry(MarketCountry.KR, PageRequest.of(0, 21)))
+                .thenReturn(List.of(stock));
+        when(stock.getStockId()).thenReturn(1L);
+        when(quoteSnapshotRepository.findByStockIdIn(List.of(1L))).thenReturn(List.of());
+        when(stockLikeRepository.findByUserIdAndStockIdIn(7L, List.of(1L))).thenReturn(List.of(like));
+        when(like.getStockId()).thenReturn(1L);
+        when(like.getStockLikeId()).thenReturn(42L);
+
+        RankingResponse response = rankingService.getRankings("KR", 20, null, 7L);
+
+        assertThat(response.items().get(0).stockId()).isEqualTo(1L);
+        assertThat(response.items().get(0).stockLikeId()).isEqualTo(42L);
     }
 }

@@ -55,6 +55,8 @@ public class SecurityConfig {
                                 "/api/accounts/**",
                                 "/api/users/**",
                                 "/api/reports/**",
+                                "/api/stocks/likes",
+                                "/api/stocks/likes/**",
                                 "/api/auth/logout").authenticated().anyRequest().permitAll()
                 ).addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
