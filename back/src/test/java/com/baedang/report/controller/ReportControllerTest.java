@@ -8,6 +8,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.report.dto.PersonalityReportResponse;
 import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardTypesResponse;
 import com.baedang.report.leaderboard.service.LeaderboardQueryService;
 import com.baedang.report.service.PersonalityReportService;
 import org.junit.jupiter.api.Test;
@@ -78,19 +79,35 @@ class ReportControllerTest {
                 OffsetDateTime.parse("2026-09-11T07:30:00Z"), 100,
                 List.of(new LeaderboardResponse.Entry(1, "홍*동", "0.3")),
                 new LeaderboardResponse.MeSection(2, "0.2", 5,
-                        List.of(new LeaderboardResponse.Entry(2, "김*수", "0.2")))));
+                        List.of(new LeaderboardResponse.Entry(2, "김*수", "0.2")),
+                        "DKSB", "분산·국내·개별주·안정형", 1, 20, 5)));
 
         mockMvc.perform(get("/api/reports/leaderboard").with(authenticatedUser(7L)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.participants").value(100))
                 .andExpect(jsonPath("$.top[0].nickname").value("홍*동"))
-                .andExpect(jsonPath("$.me.topPercent").value(5));
+                .andExpect(jsonPath("$.me.topPercent").value(5))
+                .andExpect(jsonPath("$.me.typeCode").value("DKSB"))
+                .andExpect(jsonPath("$.me.typeRank").value(1));
     }
 
     @Test
     void 리더보드도_인증_없이_조회하면_401을_응답한다() throws Exception {
         mockMvc.perform(get("/api/reports/leaderboard"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 유형_비교를_조회하면_유형별_평균수익률을_응답한다() throws Exception {
+        when(leaderboardQueryService.getTypeComparison()).thenReturn(new LeaderboardTypesResponse(
+                OffsetDateTime.parse("2026-09-11T07:30:00Z"),
+                List.of(new LeaderboardTypesResponse.TypeEntry("DKSB", "분산·국내·개별주·안정형", 12, "0.05"))));
+
+        mockMvc.perform(get("/api/reports/leaderboard/types").with(authenticatedUser(7L)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.types[0].typeCode").value("DKSB"))
+                .andExpect(jsonPath("$.types[0].typeLabel").value("분산·국내·개별주·안정형"))
+                .andExpect(jsonPath("$.types[0].avgReturnRate").value("0.05"));
     }
 
     private static RequestPostProcessor authenticatedUser(long userId) {

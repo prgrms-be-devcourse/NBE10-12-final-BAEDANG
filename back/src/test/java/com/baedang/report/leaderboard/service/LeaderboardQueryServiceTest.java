@@ -1,6 +1,8 @@
 package com.baedang.report.leaderboard.service;
 
 import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardTypesResponse;
+import com.baedang.report.leaderboard.dto.TypeAggregate;
 import com.baedang.report.leaderboard.entity.LeaderboardRun;
 import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
 import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
@@ -12,6 +14,8 @@ import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -43,7 +47,12 @@ class LeaderboardQueryServiceTest {
 
     private static LeaderboardSnapshot snap(long accountId, long userId, int rank, String returnRate) {
         return LeaderboardSnapshot.of(AS_OF, accountId, userId, 1,
-                BigDecimal.valueOf(50_000_000), new BigDecimal(returnRate), rank, 100);
+                BigDecimal.valueOf(50_000_000), new BigDecimal(returnRate), rank, 100, null);
+    }
+
+    private static LeaderboardSnapshot snapTyped(long accountId, long userId, int rank, String returnRate, String type) {
+        return LeaderboardSnapshot.of(AS_OF, accountId, userId, 1,
+                BigDecimal.valueOf(50_000_000), new BigDecimal(returnRate), rank, 100, type);
     }
 
     private static User user(long userId, String nickname) {
@@ -99,6 +108,69 @@ class LeaderboardQueryServiceTest {
         assertThat(res.me().neighbors()).extracting(LeaderboardResponse.Entry::rank).containsExactly(1, 2, 3);
         assertThat(res.me().neighbors()).extracting(LeaderboardResponse.Entry::nickname)
                 .containsExactly("홍*동", "김*수", "이*희");
+    }
+
+    @Test
+    void 유형_비교는_유형별_평균수익률을_라벨과_함께_내린다() {
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 100)));
+        when(snapshotRepository.aggregateByType(AS_OF)).thenReturn(List.of(
+                new TypeAggregate("DKSB", 12, new BigDecimal("0.05")),
+                new TypeAggregate("CGEB", 5, new BigDecimal("-0.02"))));
+
+        LeaderboardTypesResponse res = service().getTypeComparison();
+
+        assertThat(res.asOf()).isEqualTo(AS_OF);
+        assertThat(res.types()).hasSize(2);
+        assertThat(res.types().get(0).typeCode()).isEqualTo("DKSB");
+        assertThat(res.types().get(0).typeLabel()).isEqualTo("분산·국내·개별주·안정형");
+        assertThat(res.types().get(0).count()).isEqualTo(12);
+        assertThat(res.types().get(0).avgReturnRate()).isEqualTo("0.05");
+        assertThat(res.types().get(1).avgReturnRate()).isEqualTo("-0.02");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "0.10004999999999999999, 0.1",
+            "0.10005, 0.1001",
+            "-0.10004999999999999999, -0.1",
+            "-0.10005, -0.1001",
+            "0.000000, 0"
+    })
+    void 유형_평균은_십진수_정밀도를_유지하다_응답에서만_HALF_UP_반올림한다(String average, String expected) {
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 3)));
+        when(snapshotRepository.aggregateByType(AS_OF)).thenReturn(List.of(
+                new TypeAggregate("DKSB", 3, new BigDecimal(average))));
+
+        assertThat(service().getTypeComparison().types().get(0).avgReturnRate()).isEqualTo(expected);
+    }
+
+    @Test
+    void 최신_실행이_0이면_유형_비교는_빈_목록() {
+        when(runRepository.findTopByOrderByAsOfDesc()).thenReturn(Optional.of(LeaderboardRun.of(AS_OF, 0)));
+        assertThat(service().getTypeComparison().types()).isEmpty();
+    }
+
+    @Test
+    void 내_유형_내_순위와_퍼센타일을_계산한다() {
+        givenTop();
+        Account myAccount = org.mockito.Mockito.mock(Account.class);
+        when(myAccount.getAccountId()).thenReturn(102L);
+        when(accountRepository.findByUserIdAndStatus(502L, AccountStatus.ACTIVE)).thenReturn(Optional.of(myAccount));
+        when(snapshotRepository.findByAsOfAndAccountId(AS_OF, 102L))
+                .thenReturn(Optional.of(snapTyped(102, 502, 2, "0.2", "DKSB")));
+        when(snapshotRepository.findByAsOfAndRankBetweenOrderByRankAsc(AS_OF, 0, 4))
+                .thenReturn(List.of(snap(101, 501, 1, "0.3"), snap(102, 502, 2, "0.2"), snap(103, 503, 3, "0.1")));
+        when(snapshotRepository.countByAsOfAndTypeCode(AS_OF, "DKSB")).thenReturn(10L);
+        when(snapshotRepository.countBetterInType(AS_OF, "DKSB", new BigDecimal("0.2"), 102L)).thenReturn(2L);
+
+        LeaderboardResponse res = service().getLeaderboard(502L);
+
+        assertThat(res.me()).isNotNull();
+        assertThat(res.me().typeCode()).isEqualTo("DKSB");
+        assertThat(res.me().typeLabel()).isEqualTo("분산·국내·개별주·안정형");
+        assertThat(res.me().typeRank()).isEqualTo(3);              // 나보다 나은 2명 + 1
+        assertThat(res.me().typeParticipants()).isEqualTo(10);
+        assertThat(res.me().typePercent()).isEqualTo(50);          // 3/10 = 30% → 50% 브래킷
     }
 
     @Test

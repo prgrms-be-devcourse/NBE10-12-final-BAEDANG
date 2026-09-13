@@ -50,11 +50,16 @@ public class LeaderboardSnapshot {
     @Column(name = "participants", nullable = false)
     private Integer participants;
 
+    /** 투자 MBTI 유형코드(4자). 미분류(보유<2 등)는 null. */
+    @Column(name = "type_code", length = 4)
+    private String typeCode;
+
     protected LeaderboardSnapshot() {
     }
 
     private LeaderboardSnapshot(OffsetDateTime asOf, Long accountId, Long userId, Integer roundNo,
-                                BigDecimal equity, BigDecimal returnRate, int rank, int participants) {
+                                BigDecimal equity, BigDecimal returnRate, int rank, int participants,
+                                String typeCode) {
         this.asOf = asOf;
         this.accountId = accountId;
         this.userId = userId;
@@ -63,11 +68,13 @@ public class LeaderboardSnapshot {
         this.returnRate = returnRate;
         this.rank = rank;
         this.participants = participants;
+        this.typeCode = typeCode;
     }
 
     public static LeaderboardSnapshot of(OffsetDateTime asOf, Long accountId, Long userId, Integer roundNo,
-                                         BigDecimal equity, BigDecimal returnRate, int rank, int participants) {
-        return new LeaderboardSnapshot(asOf, accountId, userId, roundNo, equity, returnRate, rank, participants);
+                                         BigDecimal equity, BigDecimal returnRate, int rank, int participants,
+                                         String typeCode) {
+        return new LeaderboardSnapshot(asOf, accountId, userId, roundNo, equity, returnRate, rank, participants, typeCode);
     }
 
     public Long getSnapshotId() { return snapshotId; }
@@ -79,4 +86,5 @@ public class LeaderboardSnapshot {
     public BigDecimal getReturnRate() { return returnRate; }
     public Integer getRank() { return rank; }
     public Integer getParticipants() { return participants; }
+    public String getTypeCode() { return typeCode; }
 }
