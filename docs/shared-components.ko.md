@@ -476,4 +476,7 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - `ActiveMarketHalt`: 판정 이벤트. 주문 감사 FK용 eventId를 담는다. `asErrorData()`는 `market`/`eventType`/`stage`/`triggeredAt`/`haltUntil`만 `+09:00`으로 노출하며 `eventId`는 노출하지 않는다.
 - `MarketOrderTransactionService` / `LimitOrderTransactionService`: account 잠금·동시 멱등·account 수명 검증·종목 조회 뒤, execution-context 신선도와 시세 검증 앞에서 정책을 호출한다. 중단이면 `market_event_id`를 담은 `REJECTED` 1건을 저장하고, MARKET은 quote/reference/rate 증거를 남기지 않으며 LIMIT은 동결하지 않는다.
 - 재생: 저장된 `market_event_id`로 최초 거절 데이터를 복원한다. 이벤트가 존재하고 `CIRCUIT_BREAKER`이며 주문 시장과 일치해야 하고, 아니면 다른 이벤트로 대체하지 않고 `INTERNAL_ERROR`를 던진다.
-- Part·이슈 이력은 `docs/superpowers/` 계획 노트에 두고, 이 가이드와 `api-spec`에는 로드맵 좌표를 남기지 않는다.
+- `LimitOrderExecutionTransactionService`: 권위 있는 `requireTradingAllowed(stock, now)` 호출을 기존 account → 주문 → 호가 버전 → 레벨 → 보유 잠금과 두 번째 만료 판정 뒤, `validateExecutionContextFresh`·계획·변경 앞에서 한 번만 수행한다. 이 위치는 해당 잠금을 기다리는 동안 시작된 CB도 잡는다. 여기서 예외를 잡거나 주문을 REJECTED로 바꾸거나 `expiresAt`을 연장하거나 `LimitExecutionOutcome.Reason`을 추가하지 않는다 — 롤백이 접수된 주문을 재시도 가능하게 남긴다.
+- `LimitOrderExecutionWorker.visit(group)`: 기존 그룹 실패 경계에서 `MARKET_TRADING_HALTED`만 예상 보류로 분류한다. 보류된 그룹을 reset해 이번 방문에서 그 `(stockId, side)`의 나머지를 건너뛰고, `tick`은 다음 그룹을 계속 처리한다. 이 경로는 닫힌 `market` enum 값으로 `krx.market_event.order_blocked{market,orderType=LIMIT_EXECUTION}`만 증가시키고 `trading.limit.execution.attempt{reason=ERROR}`나 WARN/ERROR 스택을 남기지 않는다. 나머지 예외는 기존 ERROR 지표와 로그를 유지한다.
+- `LimitOrderExecutionService.prepare`·취소·만료는 halt 상태를 미리 조회하거나 캐시하지 않는다. 보류는 새 컴포넌트·마이그레이션·스키마를 추가하지 않고, 트랜잭션 판정과 워커의 예상 보류 분류로만 존재한다.
+- `docs/superpowers/` 계획 노트가 Part/이슈 이력을 보관한다. 이 가이드와 `api-spec`에는 로드맵 좌표를 두지 않는다.
