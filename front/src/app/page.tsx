@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { HeroDots } from "@/components/HeroDots";
 import { TiltCard } from "@/components/TiltCard";
 import { Reveal } from "@/components/Reveal";
 import { useTheme } from "@/components/ThemeProvider";
@@ -153,8 +152,19 @@ export default function MainPage() {
               </div>
             )}
           </div>
+          {/* 히어로 문구 우측의 픽셀 도트 패턴(HeroDots)을 제거하고, 그
+              자리에 첨부받은 배경 이미지(파란 웨이브 그래픽)를 넣어달라는
+              요청 — 인트로 화면(investup-hero-bg.png)에 쓴 것과 완전히
+              같은 파일이라(md5 동일) 새로 추가하지 않고 그대로
+              재사용했다. */}
           <div className="flex flex-1 items-center justify-center">
-            <HeroDots />
+            {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
+            <img
+              src="/investup-hero-bg.png"
+              alt=""
+              className="w-full max-w-[380px]"
+              style={{ display: "block", height: "auto" }}
+            />
           </div>
         </div>
       </Reveal>
