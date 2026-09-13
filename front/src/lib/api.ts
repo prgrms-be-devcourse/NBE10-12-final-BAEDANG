@@ -816,6 +816,13 @@ export type LeaderboardMe = {
   /** 1/5/10/25/50/75 중 하나, 하위권이면 null. */
   topPercent: number | null;
   neighbors: LeaderboardEntry[];
+  // 유형(#153 Phase 3) — 내 투자 유형 안에서의 순위다. 미분류(유형 없음)면 다섯 필드 모두 null.
+  typeCode: string | null;
+  typeLabel: string | null;
+  typeRank: number | null;
+  typeParticipants: number | null;
+  /** 1/5/10/25/50/75 중 하나, 하위권이면 null(topPercent와 같은 브래킷 규칙, 유형 코호트 기준). */
+  typePercent: number | null;
 };
 
 /**
@@ -832,6 +839,29 @@ export type Leaderboard = {
 /** `GET /api/reports/leaderboard` — 수익률 리더보드. */
 export function getLeaderboard(): Promise<Leaderboard> {
   return request<Leaderboard>("/api/reports/leaderboard", { method: "GET", auth: true });
+}
+
+export type LeaderboardTypeEntry = {
+  typeCode: string;
+  typeLabel: string;
+  count: number;
+  /** 0~1 소수 문자열 — 같은 코호트(같은 라운드·최신 배치)의 유형별 평균 수익률. */
+  avgReturnRate: string;
+};
+
+/**
+ * `GET /api/reports/leaderboard/types` 응답 — 유형별 성과 비교(#153 Phase 3). 아침 배치의
+ * 같은 라운드 코호트에서 유형별 평균 수익률을 비교한다. 미분류(유형 없음)는 애초에 집계에서
+ * 빠진다. 스냅샷이 없으면 `asOf: null · types: []`.
+ */
+export type LeaderboardTypes = {
+  asOf: string | null;
+  types: LeaderboardTypeEntry[];
+};
+
+/** `GET /api/reports/leaderboard/types` — 유형별(16종) 평균 수익률 비교. */
+export function getLeaderboardTypes(): Promise<LeaderboardTypes> {
+  return request<LeaderboardTypes>("/api/reports/leaderboard/types", { method: "GET", auth: true });
 }
 
 // ── 시장 운영 상태 ───────────────────────────────────────────────────────────
