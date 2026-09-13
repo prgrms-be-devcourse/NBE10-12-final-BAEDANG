@@ -822,16 +822,20 @@ export function InvestupIntro({
                 width: 252,
                 padding: '20px 22px 18px',
                 borderRadius: 20,
-                // 지구본 핀 호버 팝업을 좀 더 투명하게 해달라는 요청을 두
-                // 차례 거쳤다 — 두 stop의 알파값을 0.58→0.4→0.28,
-                // 0.4→0.26→0.16으로 계속 낮췄다.
+                // 지구본 핀 호버 팝업을 좀 더 투명하게 해달라는 요청을 세
+                // 차례 거쳤다 — 두 stop의 알파값을 0.58→0.4→0.28→0.15,
+                // 0.4→0.26→0.16→0.08로 계속 낮췄다. "뒤의 지구본이 약간
+                // 비칠 정도로" 해달라는 요청이라, 알파뿐 아니라
+                // backdrop-filter의 blur도 18px→10px로 줄였다 — 블러가
+                // 강하면 알파를 아무리 낮춰도 뒤 배경이 뭉개진 안개처럼만
+                // 보이고 지구본의 도트 패턴은 알아볼 수 없기 때문이다.
                 background:
-                  'linear-gradient(155deg, rgba(255,255,255,0.28) 0%, rgba(239,246,252,0.16) 100%)',
+                  'linear-gradient(155deg, rgba(255,255,255,0.15) 0%, rgba(239,246,252,0.08) 100%)',
                 border: '1px solid rgba(255,255,255,0.72)',
                 boxShadow:
                   '0 24px 60px rgba(15,56,104,0.18), inset 0 1px 0 rgba(255,255,255,0.7)',
-                backdropFilter: 'blur(18px) saturate(1.3)',
-                WebkitBackdropFilter: 'blur(18px) saturate(1.3)',
+                backdropFilter: 'blur(10px) saturate(1.3)',
+                WebkitBackdropFilter: 'blur(10px) saturate(1.3)',
                 pointerEvents: 'none',
                 zIndex: 4,
               }}
