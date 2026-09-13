@@ -686,28 +686,42 @@ export function InvestupIntro({
             녹아들게 하기 위함이다. mesh/veil 바로 위, 그 위의 파랑
             그라데이션들 아래에 둬서 이 사진이 배경 "재질"처럼 깔리고, 그
             위의 그라데이션들은 그 위에 얹히는 빛처럼 겹친다. 다른
-            히어로 전용 장식들과 같은 lifted 타이밍에 맞춰 사라진다. */}
+            히어로 전용 장식들과 같은 lifted 타이밍에 맞춰 사라진다.
+            처음엔 히어로 전체(inset: 0)를 덮는 배경 이미지 위에
+            마스크를 씌웠는데, 그 뒤 이미지 크기를 줄이고(cover→65%)
+            위치를 위로 옮기면서(backgroundPosition) 마스크의 중심
+            (화면 정중앙 고정)과 실제 이미지 위치가 서로 어긋나버려
+            가장자리 옅어짐 효과가 이미지 경계와 맞지 않게 됐다. 그래서
+            배경 이미지를 별도의 <img>로 바꾸고, 그 이미지 자신의 박스
+            (width/height)에 직접 마스크를 씌우는 구조로 바꿨다 — 이제
+            이미지를 옮기거나 크기를 바꿔도 마스크가 항상 이미지 자신의
+            네 가장자리에 정확히 맞춰진다. */}
         <div
           aria-hidden="true"
           style={{
             position: 'absolute',
-            inset: 0,
-            // 배경 이미지 크기를 줄여달라는 요청 — 화면을 꽉 채우던
-            // cover 대신 65%로 줄이고 반복되지 않게 no-repeat를 줬다.
-            // 이미지를 좀 더 위쪽으로 옮겨달라는 요청을 두 차례 거쳐
-            // backgroundPosition의 세로값을 50%(정중앙) → 28% → 16%로
-            // 낮췄다.
-            backgroundImage: 'url(/investup-hero-bg.png)',
-            backgroundSize: '65%',
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'center 16%',
-            WebkitMaskImage: 'radial-gradient(ellipse 68% 66% at 50% 50%, #000 55%, transparent 100%)',
-            maskImage: 'radial-gradient(ellipse 68% 66% at 50% 50%, #000 55%, transparent 100%)',
+            left: '50%',
+            top: '16%',
+            width: '65%',
+            transform: 'translate(-50%, -50%)',
             pointerEvents: 'none',
             opacity: lifted ? 0 : 1,
             transition: 'opacity 1.6s cubic-bezier(.16,1,.3,1)',
           }}
-        />
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element -- 장식용 배경 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
+          <img
+            src="/investup-hero-bg.png"
+            alt=""
+            style={{
+              display: 'block',
+              width: '100%',
+              height: 'auto',
+              WebkitMaskImage: 'radial-gradient(ellipse 62% 62% at 50% 50%, #000 50%, transparent 100%)',
+              maskImage: 'radial-gradient(ellipse 62% 62% at 50% 50%, #000 50%, transparent 100%)',
+            }}
+          />
+        </div>
 
         {/* 히어로 화면(로고 + "실수는 가볍게, 투자 감각은 제대로") 상단에
             그라데이션을 넣어달라는 요청 — 색상은 처음엔 02 Steps의 STEP
