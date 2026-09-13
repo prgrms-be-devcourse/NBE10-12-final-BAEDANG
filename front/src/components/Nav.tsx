@@ -35,12 +35,25 @@ export function Nav() {
       className="relative z-[2] mb-6 flex w-full items-center gap-1.5 px-8 py-3"
       style={{ background: transparentHeader ? "transparent" : "var(--headerBg)" }}
     >
-      <Link
-        href="/"
-        className="mr-1.5 whitespace-nowrap text-[16px] font-extrabold"
-        style={{ color: "var(--headerLogo)" }}
-      >
-        InvestUP
+      {/* "InvestUP" 텍스트를 로고 이미지로 바꿔달라는 요청 — 첨부받은 이미지는
+          짙은 남색(라이트 모드 텍스트 색 #0f3868과 같은 톤) 한 가지 색으로만
+          되어 있어서, 다크 모드에서 쓰던 색 전환(--headerLogo: #ffffff)을 이미지
+          하나로는 그대로 재현할 수 없다. 대신 다크 모드일 때만
+          filter: brightness(0) invert(1)을 걸어 같은 PNG를 흰색 실루엣으로
+          렌더링한다 — 별도의 다크 모드 로고 파일 없이도 텍스트였을 때와 동일하게
+          라이트=남색/다크=흰색으로 보인다. */}
+      <Link href="/" className="mr-1.5 inline-flex items-center whitespace-nowrap" aria-label="InvestUP">
+        {/* eslint-disable-next-line @next/next/no-img-element -- 헤더 로고 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
+        <img
+          src="/investup-logo-symbol-light.png"
+          alt="InvestUP"
+          style={{
+            display: "block",
+            height: 22,
+            width: "auto",
+            filter: theme === "dark" ? "brightness(0) invert(1)" : "none",
+          }}
+        />
       </Link>
 
       <PillTabs
