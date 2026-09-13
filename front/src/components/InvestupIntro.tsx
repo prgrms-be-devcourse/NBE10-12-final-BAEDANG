@@ -820,10 +820,14 @@ export function InvestupIntro({
                 left: pinLeft,
                 top: pinTop,
                 width: 252,
-                padding: '20px 22px 18px',
-                borderRadius: 20,
-                // 지구본 핀 호버 팝업을 좀 더 투명하게 해달라는 요청 —
-                // 두 stop의 알파값을 낮췄다(0.58→0.4, 0.4→0.26).
+                // 첨부 사진(토스뱅크 채용 카드) 스타일 참고 — 사진 속 카드는
+                // 배경이 어둡지만, 지금 흰 배경(글래스모피즘)은 그대로 두고
+                // 그 위에 사진의 "특징" 스타일만 입혔다: 더 큰 모서리
+                // 반경(20→28), 더 넉넉한 여백, 제목을 사진의 "토스뱅크"
+                // 처럼 색이 있는 알약형 배지로 바꾸고, 가격 두 줄은 사진의
+                // 두 특징 카드처럼 옅은 배경의 작은 박스로 감쌌다.
+                padding: '22px 22px 20px',
+                borderRadius: 28,
                 background:
                   'linear-gradient(155deg, rgba(255,255,255,0.4) 0%, rgba(239,246,252,0.26) 100%)',
                 border: '1px solid rgba(255,255,255,0.72)',
@@ -840,49 +844,77 @@ export function InvestupIntro({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 12,
+                  gap: 10,
+                  marginBottom: 14,
                 }}
               >
-                <span style={{ fontSize: 15, fontWeight: 500, color: '#5f7f99', letterSpacing: '-.01em' }}>
+                {/* 사진 속 "토스뱅크" 알약형 배지 참고 — 종목명을 색이 있는
+                    작은 배지로 바꿨다(상승/하락에 따라 배지 색만 다르다). */}
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '5px 11px',
+                    borderRadius: 999,
+                    fontSize: 13,
+                    fontWeight: 700,
+                    letterSpacing: '-.01em',
+                    color: activePin.up ? '#c64a4a' : '#3a6ea8',
+                    background: activePin.up ? 'rgba(198,74,74,0.12)' : 'rgba(58,110,168,0.12)',
+                  }}
+                >
                   {activePin.title}
                 </span>
                 <span
                   style={{
                     fontSize: 14,
-                    fontWeight: 500,
+                    fontWeight: 700,
                     color: activePin.up ? '#c64a4a' : '#3a6ea8',
                   }}
                 >
                   {activePin.delta}
                 </span>
               </div>
-              <div style={{ height: 1, margin: '15px -22px 14px', background: 'rgba(255,255,255,0.72)' }} />
+              {/* 사진 속 "특징" 섹션의 옅은 배경 하위 카드 참고 — Price/주당가
+                  각 줄을 살짝 옅은 배경의 작은 박스로 감쌌다. */}
               <div
                 style={{
                   display: 'flex',
-                  alignItems: 'baseline',
-                  justifyContent: 'space-between',
-                  gap: 16,
-                  marginBottom: 7,
+                  flexDirection: 'column',
+                  gap: 8,
                 }}
               >
-                <span style={{ fontSize: 15, color: '#5f7f99' }}>Price</span>
-                <span style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-.01em', color: '#071829' }}>
-                  {activePin.price}
-                </span>
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  justifyContent: 'space-between',
-                  gap: 16,
-                }}
-              >
-                <span style={{ fontSize: 15, color: '#5f7f99' }}>주당가</span>
-                <span style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-.01em', color: '#071829' }}>
-                  {activePin.sub}
-                </span>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 16,
+                    padding: '9px 12px',
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.5)',
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#5f7f99' }}>Price</span>
+                  <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-.01em', color: '#071829' }}>
+                    {activePin.price}
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'baseline',
+                    justifyContent: 'space-between',
+                    gap: 16,
+                    padding: '9px 12px',
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.5)',
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 500, color: '#5f7f99' }}>주당가</span>
+                  <span style={{ fontSize: 16, fontWeight: 700, letterSpacing: '-.01em', color: '#071829' }}>
+                    {activePin.sub}
+                  </span>
+                </div>
               </div>
             </div>
           )}
