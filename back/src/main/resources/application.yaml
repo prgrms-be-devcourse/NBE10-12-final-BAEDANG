@@ -192,6 +192,34 @@ trading:
     closed-version-retention: 1m
     retention-initial-delay: ${ORDERBOOK_RETENTION_INITIAL_DELAY:0s}
 
+# ── 투자 성향 리포트 / 리더보드 ──────────────────────────────────────────────
+report:
+  # 4주 이상 보유 성과 섹션의 임계(표시용). 투자 MBTI 판정엔 영향 없음.
+  holding-period-weeks: ${REPORT_HOLDING_PERIOD_WEEKS:4}
+  # 투자 MBTI 축 비중을 평균낼 원가 구성 창(주). 체결 재생으로 이 창을 시점별 복원해 평균한다(§6.2).
+  mbti-window-weeks: ${REPORT_MBTI_WINDOW_WEEKS:4}
+  # 리포트 4주 회차 게이트(§6.1). 현재 ACTIVE 계좌 개설 후 이 주수를 채워야 리포트가 열린다.
+  unlock-weeks: ${REPORT_UNLOCK_WEEKS:4}
+  seed:
+    # 개발/데모용 합성 포트폴리오 시딩 관리자 트리거 활성 플래그(기본 false, #152 검증 게이트).
+    #   true 일 때만 POST /internal/admin/seed/portfolios 가 등록됩니다.
+    #   프로덕션에는 켜지 마세요 — 시드는 개발/데모 전용이며 실 리더보드엔 노출되지 않습니다.
+    enabled: ${REPORT_SEED_ENABLED:false}
+    account-count: ${REPORT_SEED_ACCOUNT_COUNT:50}
+    max-holdings: ${REPORT_SEED_MAX_HOLDINGS:8}
+
+  # 리더보드 배치 스냅샷(설계문서 §6.4).
+  leaderboard:
+    # 자격 = opened_at + N주를 채운 ACTIVE 계좌. 리포트 4주 게이트와 같은 창.
+    eligibility-weeks: ${REPORT_LEADERBOARD_ELIGIBILITY_WEEKS:4}
+    # 시드 포함 여부는 코호트(배치) 시점에 정한다. 기본 false = 프로덕션 안전(실유저만 랭킹).
+    #   dev/데모에서만 true 로 켜 시드 모집단을 리더보드에 노출한다.
+    include-seed: ${REPORT_LEADERBOARD_INCLUDE_SEED:false}
+    top-size: ${REPORT_LEADERBOARD_TOP_SIZE:10}
+    neighbor-radius: ${REPORT_LEADERBOARD_NEIGHBOR_RADIUS:2}
+    # 개발용 수동 배치 트리거. true 일 때만 POST /internal/admin/leaderboard/refresh 가 등록된다.
+    admin-trigger-enabled: ${REPORT_LEADERBOARD_ADMIN_TRIGGER_ENABLED:false}
+
 auth:
   jwt:
     issuer: baedang

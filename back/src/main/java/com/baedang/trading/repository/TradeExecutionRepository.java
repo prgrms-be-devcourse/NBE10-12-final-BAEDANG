@@ -1,6 +1,7 @@
 package com.baedang.trading.repository;
 
 import com.baedang.trading.entity.TradeExecution;
+import com.baedang.trading.model.CostReplayEvent;
 import com.baedang.trading.model.CumulativeSettlementState;
 import com.baedang.trading.model.HoldingReplayEvent;
 import org.springframework.data.jpa.repository.Query;
@@ -52,4 +53,16 @@ public interface TradeExecutionRepository extends Repository<TradeExecution, Lon
             + " order by e.executedAt asc, e.executionId asc")
     List<HoldingReplayEvent> findHoldingReplayEvents(
             @Param("accountId") Long accountId, @Param("stockIds") Collection<Long> stockIds);
+
+    /**
+     * 계좌의 모든 개별 체결을 원가 재생용으로 조회합니다(체결 시각 오름차순). 창 시작 시점의 원가
+     * 구성을 복원하려면 창 이전 체결까지 필요하므로 시각으로 자르지 않습니다. 창 안에서 전량
+     * 매도된 종목도 포함하려고 종목 필터도 두지 않습니다(투자 MBTI 원가 4주 평균, 설계문서 §6.2).
+     */
+    @Query("select new com.baedang.trading.model.CostReplayEvent("
+            + "o.stockId, o.side, e.quantity, e.grossAmountKrw, e.executedAt)"
+            + " from TradeExecution e join TradeOrder o on e.orderId = o.orderId"
+            + " where o.accountId = :accountId"
+            + " order by e.executedAt asc, e.executionId asc")
+    List<CostReplayEvent> findCostReplayEvents(@Param("accountId") Long accountId);
 }

@@ -1,6 +1,7 @@
 package com.baedang.global.config;
 
 import com.baedang.market.config.QuoteCollectionProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -109,6 +110,24 @@ public class SchedulingConfig {
     }
 
     /**
+     * KIND 시장조치 수집을 다른 배치와 분리합니다.
+     *
+     * <p>단일 스레드라 같은 인스턴스에서 수집이 겹치지 않고, fixedDelay 실행이 KIND 응답 지연으로
+     * 다음 주기를 앞당기지 않습니다. 다중 인스턴스 중복은 DB의 {@code (source, source_event_id)}
+     * UNIQUE 제약이 막습니다. 기능이 꺼져 있으면 빈 자체가 없습니다.
+     */
+    @Bean(name = "marketEventTaskScheduler")
+    @ConditionalOnProperty(prefix = "krx.market-events", name = "enabled", havingValue = "true")
+    public ThreadPoolTaskScheduler marketEventTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("market-event-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
+    }
+
+    /**
      * 일봉 수집의 외부 API 호출과 DB I/O를 스케줄러 스레드에서 분리한다.
      *
      * <p>단일 실행 스레드로 KR·US 수집 작업을 직렬화해 동일 인스턴스에서 수집이 겹치지 않게
@@ -125,6 +144,22 @@ public class SchedulingConfig {
         executor.setWaitForTasksToCompleteOnShutdown(true);
         executor.setAwaitTerminationSeconds(30);
         return executor;
+    }
+
+    /**
+     * 리더보드 배치를 공용 스케줄러와 분리한 단일 스레드에서 실행한다(설계문서 §6.4·#145).
+     *
+     * <p>전 자격 계좌를 순회 평가하는 DB-heavy 작업이라 공유 풀에 얹지 않고 전용 스레드에
+     * 직렬화한다. 하루 1회 저트래픽 창(US 폐장~KR 개장)에만 커넥션 1개를 점유한다.
+     */
+    @Bean(name = "leaderboardTaskScheduler")
+    public ThreadPoolTaskScheduler leaderboardTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("leaderboard-");
+        scheduler.setWaitForTasksToCompleteOnShutdown(true);
+        scheduler.setAwaitTerminationSeconds(30);
+        return scheduler;
     }
 
     /** KIS 재무 수집을 공용 스케줄러와 분리하고 중복 트리거 대기열을 제한합니다. */

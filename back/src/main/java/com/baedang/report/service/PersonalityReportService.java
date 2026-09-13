@@ -9,12 +9,14 @@ import com.baedang.global.error.ErrorCode;
 import com.baedang.global.formatter.FinancialDecimalFormatter;
 import com.baedang.report.dto.PersonalityReportResponse;
 import com.baedang.report.dto.PersonalityReportResponse.LongHeldStock;
+import com.baedang.report.support.AxisShares;
+import com.baedang.report.support.FourWeekCostProfiler;
 import com.baedang.report.support.HoldingLotTracker;
 import com.baedang.report.support.InvestmentProfile;
 import com.baedang.report.support.InvestmentTypeClassifier;
-import com.baedang.report.support.InvestmentTypeClassifier.HoldingSlice;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.trading.model.CostReplayEvent;
 import com.baedang.trading.model.HoldingReplayEvent;
 import com.baedang.trading.repository.TradeExecutionRepository;
 import com.baedang.user.entity.Account;
@@ -28,8 +30,10 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -53,20 +57,29 @@ public class PersonalityReportService {
     private final StockRepository stockRepository;
     private final TradeExecutionRepository tradeExecutionRepository;
     private final InvestmentTypeClassifier classifier;
+    private final FourWeekCostProfiler costProfiler;
     private final int holdingPeriodWeeks;
+    private final int mbtiWindowWeeks;
+    private final int unlockWeeks;
     private final Clock clock;
 
     public PersonalityReportService(AccountValuationService accountValuationService,
                                     StockRepository stockRepository,
                                     TradeExecutionRepository tradeExecutionRepository,
                                     InvestmentTypeClassifier classifier,
+                                    FourWeekCostProfiler costProfiler,
                                     @Value("${report.holding-period-weeks:4}") int holdingPeriodWeeks,
+                                    @Value("${report.mbti-window-weeks:4}") int mbtiWindowWeeks,
+                                    @Value("${report.unlock-weeks:4}") int unlockWeeks,
                                     Clock clock) {
         this.accountValuationService = accountValuationService;
         this.stockRepository = stockRepository;
         this.tradeExecutionRepository = tradeExecutionRepository;
         this.classifier = classifier;
+        this.costProfiler = costProfiler;
         this.holdingPeriodWeeks = holdingPeriodWeeks;
+        this.mbtiWindowWeeks = mbtiWindowWeeks;
+        this.unlockWeeks = unlockWeeks;
         this.clock = clock;
     }
 
@@ -74,6 +87,13 @@ public class PersonalityReportService {
         AccountValuation valued = accountValuationService.valuateActiveAccount(userId);
         Account account = valued.account();
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+
+        // 4주 회차 게이트(§6.1): 개설 후 N주를 채워야 리포트가 열린다. 앵커=현재 ACTIVE 계좌
+        // opened_at 이라 리셋(새 계좌) 시 자동 재시작한다. 발급 후에는 열 때마다 재계산한다(freeze 아님).
+        OffsetDateTime unlockAt = account.getOpenedAt().plusWeeks(unlockWeeks);
+        if (now.isBefore(unlockAt)) {
+            return PersonalityReportResponse.locked(account, unlockAt, holdingPeriodWeeks, now);
+        }
 
         BigDecimal stockValue = valued.valuations().stream()
                 .map(HoldingValuation::evalWon)
@@ -83,36 +103,38 @@ public class PersonalityReportService {
         // 초기자본은 계좌별 저장 컬럼이라 항상 양수 → 라운드 내 고정 분모.
         BigDecimal returnRate = ReturnRateCalculator.calculate(totalPnl, account.getInitialCash());
 
-        Map<Long, Stock> stocks = stocksByStockId(valued);
-        InvestmentProfile profile = classifier.classify(toSlices(valued, stocks));
+        // 투자 MBTI 는 4주 창의 원가 구성 시점별 평균으로 판정한다(§6.2, 체결 재생·무가격).
+        List<CostReplayEvent> costEvents =
+                tradeExecutionRepository.findCostReplayEvents(account.getAccountId());
+        Map<Long, Stock> stocks = stocksForReport(valued, costEvents);
+        OffsetDateTime windowStart = laterOf(account.getOpenedAt(), now.minusWeeks(mbtiWindowWeeks));
+        AxisShares avgShares = costProfiler.averageShares(costEvents, stocks, windowStart, now);
+        InvestmentProfile profile = classifier.classifyFromShares(avgShares, valued.valuations().size());
+
         List<LongHeldStock> longHeld = longHeldStocks(account.getAccountId(), valued, stocks, now);
 
         return PersonalityReportResponse.of(
-                account, stockValue, totalAsset, totalPnl, returnRate,
+                account, unlockAt, stockValue, totalAsset, totalPnl, returnRate,
                 profile, holdingPeriodWeeks, longHeld, now);
     }
 
-    private Map<Long, Stock> stocksByStockId(AccountValuation valued) {
-        if (valued.valuations().isEmpty()) {
+    /**
+     * 리포트에 필요한 종목 마스터 — 현재 보유 + 4주 창 원가 재생에 등장한 종목(창 안에서 전량
+     * 매도돼 지금은 없는 종목 포함)의 합집합. 한 번에 조회한다.
+     */
+    private Map<Long, Stock> stocksForReport(AccountValuation valued, List<CostReplayEvent> costEvents) {
+        Set<Long> stockIds = new HashSet<>();
+        valued.valuations().forEach(v -> stockIds.add(v.stockId()));
+        costEvents.forEach(e -> stockIds.add(e.stockId()));
+        if (stockIds.isEmpty()) {
             return Map.of();
         }
-        List<Long> stockIds = valued.valuations().stream().map(HoldingValuation::stockId).toList();
         return stockRepository.findByStockIdIn(stockIds).stream()
                 .collect(Collectors.toMap(Stock::getStockId, Function.identity()));
     }
 
-    /** 평가 결과 + 종목 마스터를 합쳐 분류기 입력으로 변환한다. */
-    private List<HoldingSlice> toSlices(AccountValuation valued, Map<Long, Stock> stocks) {
-        return valued.valuations().stream()
-                .map(v -> {
-                    Stock stock = requireStock(stocks, v.stockId());
-                    return new HoldingSlice(
-                            v.evalWon(),
-                            stock.getStockCategory(),
-                            stock.getMarketCountry(),
-                            stock.getLeverageFactor());
-                })
-                .toList();
+    private static OffsetDateTime laterOf(OffsetDateTime a, OffsetDateTime b) {
+        return a.isAfter(b) ? a : b;
     }
 
     /** N주 이상 보유한 종목의 성과. 체결 이력 재생으로 현재 lot 시작 시각을 구해 임계로 거른다. */

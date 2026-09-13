@@ -1,6 +1,8 @@
 package com.baedang.report.controller;
 
 import com.baedang.report.dto.PersonalityReportResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.service.LeaderboardQueryService;
 import com.baedang.report.service.PersonalityReportService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -14,9 +16,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class ReportController {
 
     private final PersonalityReportService personalityReportService;
+    private final LeaderboardQueryService leaderboardQueryService;
 
-    public ReportController(PersonalityReportService personalityReportService) {
+    public ReportController(PersonalityReportService personalityReportService,
+                            LeaderboardQueryService leaderboardQueryService) {
         this.personalityReportService = personalityReportService;
+        this.leaderboardQueryService = leaderboardQueryService;
     }
 
     /** 내 투자 성향 리포트(현재 활성 계좌=라운드 기준). */
@@ -25,5 +30,13 @@ public class ReportController {
             @AuthenticationPrincipal Long userId
     ) {
         return ResponseEntity.ok(personalityReportService.getReport(userId));
+    }
+
+    /** 리더보드(아침 배치 스냅샷 기준·as-of 노출). 자격 미달/스냅샷 없으면 me=null. */
+    @GetMapping("/leaderboard")
+    public ResponseEntity<LeaderboardResponse> getLeaderboard(
+            @AuthenticationPrincipal Long userId
+    ) {
+        return ResponseEntity.ok(leaderboardQueryService.getLeaderboard(userId));
     }
 }
