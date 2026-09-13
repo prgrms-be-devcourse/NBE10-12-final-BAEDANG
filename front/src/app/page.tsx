@@ -48,9 +48,9 @@ export default function MainPage() {
               className="mt-4.5 mb-3.5 text-[38px] leading-[1.35] font-extrabold tracking-[-0.02em]"
               style={{ color: "var(--heroText)" }}
             >
-              잃어도 괜찮은 돈으로,
+              실전처럼 경험하고,
               <br />
-              잃지 않는 법을 배워요
+              나만의 투자 감각을 키워요
             </h1>
             <p className="my-3 max-w-[440px] text-[16px] leading-[1.6]" style={{ color: theme === "dark" ? "#ffffff" : "#000000" }}>
               실제 시장 시세로 국내·해외 주식을 사고팔며 투자 감각을 길러보세요.
