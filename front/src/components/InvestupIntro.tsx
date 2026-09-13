@@ -701,7 +701,9 @@ export function InvestupIntro({
           style={{
             position: 'absolute',
             left: '50%',
-            top: '16%',
+            // 배경 이미지가 너무 위에 있다는 피드백으로 아래로 내렸다 —
+            // 16% → 38%.
+            top: '38%',
             width: '65%',
             transform: 'translate(-50%, -50%)',
             pointerEvents: 'none',
