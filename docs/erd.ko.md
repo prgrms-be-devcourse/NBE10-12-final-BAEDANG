@@ -140,7 +140,7 @@ quote_snapshot.prev_close
 | `GET /api/v1/stocks`                   | STOCK · 5 TPS                  | 매주 월요일 07:00                                                               | `stock` 상세 — 종목명·통화·ISIN·`security_type`·`is_common_share`·`leverage_factor`·상장주식수·상장일, `koreanMarketDetail` 의 거래정지·정리매매 플래그. `/stocks/all` 심볼을 **200개씩 배치**로 — 8,500종목이면 43콜, 약 9초.                                                                                                    |
 | `GET /api/v1/rankings`                 | RANKING · 5 TPS                | 유니버스: 월요일 KR 08:00 · US 21:00 / 화면 랭킹: 30초 TTL                      | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, 멤버십만 갱신하며 랭킹 가격으로 시세를 초기화하지 않음. **시장별 100개씩이라 KR·US 각 1콜로 완결**. `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. 주말엔 집계가 없을 수 있으니 **빈 배열이면 지난주 유니버스 유지**.                  |
 | `GET /api/v1/prices`                   | MARKET_DATA · **15 TPS 공유**  | 정규장 중 **5초 목표**                                                          | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집. 그 외는 온디맨드. 배경 기본 8 TPS, 최종 공유 제한 유지. 전일 종가·상하한가는 보존.                                                                                                                                                                                                |
-| `GET /api/v1/price-limits`             | MARKET_DATA · 15 TPS           | 장 시작 전 1회                                                                  | `quote_snapshot.upper_limit`, `lower_limit`. **전일 종가 기준으로 정해져 하루 동안 안 바뀌므로** 실시간 폴링 불필요. 단건 조회라 국내 100종목이면 100콜, 약 7초. **미국 종목은 가격제한이 없어 NULL**.                                                                                                                            |
+| `GET /api/v1/price-limits`             | MARKET_DATA (공유 제한)        | 시작 시 + 국내 정규장 5분 누락 복구, 상세 온디맨드                              | `upper_limit`, `lower_limit`, `price_limit_date`; 미국 NULL은 정상이며 수집 제외                                                                                                                                                                                                                                                    |
 | `GET /api/v1/candles` (interval=1d)    | MARKET_DATA_CHART · **20 TPS** | KR 15:40~17:10 / America/New_York 16:10~17:10; 30m retries + startup recovery   | 거래소 현지 거래일로 저장. 요청 시작 시각 기준 정규장 마감 + 10분을 지난 확정 일봉만 차트·기준가에 사용한다.                                                                                                                                                                                                                      |
 | `GET /api/v1/candles` (interval=1m)    | MARKET_DATA_CHART · **20 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 5m·10m 봉은 이 테이블에서 파생한 연속 집계 뷰(`candle_5m` · `candle_10m`)로 제공합니다. 2주차에는 지정가 체결 판정을 추가합니다.                                                      |
 | `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS                  | **1주차 미사용** · 필요 시 08:00 배치                                           | `stock.is_warned`. 정리매매·단기과열·투자경고/위험·VI 발동. **단건 조회라 100종목이면 100콜, 약 20초.** **확정 스케줄에는 넣지 않았습니다** — 랭킹 API 의 `excludeInvestmentCaution=true` 로 이미 대부분 걸러지기 때문.                                                                                                           |
@@ -409,16 +409,17 @@ KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시�
 
 > **이렇게 하면 화면 로직이 하나로 통일됩니다.** 상세 페이지는 종목이 상위 100 이든 아니든 항상 이 테이블만 조회하고, `quote_at` 을 보고 문구만 바꿉니다. **"이 종목이 상위 100 인가?"를 화면이 알 필요가 없어집니다.** 거래 가능 판정은 별도 — ACTIVE 상장 상태 AND 해당 시장 정규장 중 AND 거래정지·정리매매 아님 및 원본 시세 신선도.
 
-| 컬럼                        | 타입          | 설명                                                                                                                                                                                                     |
-| --------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `stock_id`                  | BIGINT PK/FK  | 종목당 한 행이라 PK=fk (1:1).                                                                                                                                                                            |
-| `last_price`                | NUMERIC(19,4) | 현재가(종목 통화). 토스가 **문자열로 주므로 반드시 BigDecimal 파싱**. double 로 받으면 잔고 어긋남.                                                                                                      |
-| `prev_close`                | NUMERIC(19,4) | `quote_at`에서 파생한 거래소 현지 시세 거래일의 정확한 직전 거래일 `prev_close_date`에 해당하는 확정 일봉 종가. 검증 실패 시 등락률은 null. `last_price` 또는 날짜 미확인 랭킹 기준가로 대체하지 않는다. |
-| `prev_close_date`           | DATE          | 기준가의 거래일. 시세 거래일은 quote_at과 MarketCountry.zoneId()로 계산한다. 기존 행의 날짜는 NULL로 두고 재조회한다.                                                                                    |
-| `upper_limit` `lower_limit` | NUMERIC(19,4) | 상한가/하한가. **전일 종가 기준으로 하루 동안 안 바뀌므로 장 시작 전 1회만 조회.** 주문 가격 검증.                                                                                                       |
-| `currency`                  | VARCHAR(3)    | 가격의 통화. `stock` 과 중복이지만 조인 없이 시세만 조회할 때 편함.                                                                                                                                      |
-| `quote_at`                  | TIMESTAMPTZ   | **토스가 알려준 시세 기준 시각.** 두 곳에 사용 — 화면의 "12:36:59 기준" 표시, 주문 시 유효시간 검증(15초 넘게 오래됐으면 `STALE_QUOTE` 로 거절).                                                         |
-| `collected_at`              | TIMESTAMPTZ   | 우리가 수집한 시각. `quote_at` 과의 차이로 수집 파이프라인 지연 모니터링.                                                                                                                                |
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `stock_id` | BIGINT PK/FK | 종목당 한 행이라 PK=fk (1:1). |
+| `last_price` | NUMERIC(19,4) | 현재가(종목 통화). 토스가 **문자열로 주므로 반드시 BigDecimal 파싱**. double 로 받으면 잔고 어긋남. |
+| `prev_close` | NUMERIC(19,4) | `quote_at`에서 파생한 거래소 현지 시세 거래일의 정확한 직전 거래일 `prev_close_date`에 해당하는 확정 일봉 종가. 검증 실패 시 등락률은 null. `last_price` 또는 날짜 미확인 랭킹 기준가로 대체하지 않는다. |
+| `prev_close_date` | DATE | 기준가의 거래일. 시세 거래일은 quote_at과 MarketCountry.zoneId()로 계산한다. 기존 행의 날짜는 NULL로 두고 재조회한다. |
+| `upper_limit` `lower_limit` | NUMERIC(19,4) | 검증된 날짜와 일치할 때만 표시하는 외부 상하한가. 주문 및 가상 호가 적용은 후속 작업 |
+| `price_limit_date` | DATE | 한국 데이터 시각을 Asia/Seoul로 변환하고 요청 거래일과 검증한 날짜. 기존 미검증 값과 미국은 NULL. V13 추가. |
+| `currency` | VARCHAR(3) | 가격의 통화. `stock` 과 중복이지만 조인 없이 시세만 조회할 때 편함. |
+| `quote_at` | TIMESTAMPTZ | **토스가 알려준 시세 기준 시각.** 두 곳에 사용 — 화면의 "12:36:59 기준" 표시, 주문 시 유효시간 검증(15초 넘게 오래됐으면 `STALE_QUOTE` 로 거절). |
+| `collected_at` | TIMESTAMPTZ | 우리가 수집한 시각. `quote_at` 과의 차이로 수집 파이프라인 지연 모니터링. |
 
 #### `daily_candle` — 일봉
 

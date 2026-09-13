@@ -3,6 +3,7 @@ package com.baedang.stock.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.service.PriceLimitLoadService;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.StockDetailResponse;
 import com.baedang.stock.entity.ListingStatus;
@@ -23,6 +24,7 @@ public class StockDetailService {
     private static final StockDetailResponse.Warning INVESTMENT_WARNING =
             new StockDetailResponse.Warning("INVESTMENT_WARNING", "투자경고");
 
+    private final PriceLimitLoadService priceLimits;
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final QuoteRealtimePolicy quoteRealtimePolicy;
@@ -32,8 +34,10 @@ public class StockDetailService {
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
             QuoteRealtimePolicy quoteRealtimePolicy,
-            StockOnDemandQuoteService stockOnDemandQuoteService
+            StockOnDemandQuoteService stockOnDemandQuoteService,
+            PriceLimitLoadService priceLimits
     ) {
+        this.priceLimits = priceLimits;
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.quoteRealtimePolicy = quoteRealtimePolicy;
@@ -51,6 +55,9 @@ public class StockDetailService {
         // 종목만 갱신하고, 상위 100은 스케줄러가 채운 기존 값을 그대로 사용한다.
         quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
 
+        priceLimits.ensureForDisplay(stock);
+        quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(quote);
+        boolean showLimits = priceLimits.canDisplay(stock, quote);
         boolean realtime = quoteRealtimePolicy.isRealtime(marketCountry, quote);
         Tradability tradability = tradability(stock, quote);
 
@@ -65,7 +72,7 @@ public class StockDetailService {
                 stock.getStockCategory(),
                 plain(stock.getLeverageFactor()),
                 stock.getIsDividend(),
-                price(quote, realtime, stock.getCurrency()),
+                price(quote, realtime, stock.getCurrency(), showLimits),
                 info(stock, quote),
                 Boolean.TRUE.equals(stock.getIsWarned()) ? List.of(INVESTMENT_WARNING) : List.of(),
                 tradability.tradable(),
@@ -86,7 +93,7 @@ public class StockDetailService {
         return new Tradability(true, null);
     }
 
-    private StockDetailResponse.Price price(QuoteSnapshot quote, boolean realtime, String currencyCode) {
+    private StockDetailResponse.Price price(QuoteSnapshot quote, boolean realtime, String currencyCode, boolean showLimits) {
         if (quote == null) {
             return new StockDetailResponse.Price(null, null, null, null, null, null, null, false);
         }
@@ -98,8 +105,8 @@ public class StockDetailService {
                 currency(quote.getPrevClose(), currencyCode),
                 currency(changeAmount, currencyCode),
                 plain(quote.changeRate()),
-                currency(quote.getUpperLimit(), currencyCode),
-                currency(quote.getLowerLimit(), currencyCode),
+                currency(showLimits ? quote.getUpperLimit() : null, currencyCode),
+                currency(showLimits ? quote.getLowerLimit() : null, currencyCode),
                 quote.getQuoteAt(),
                 realtime
         );
