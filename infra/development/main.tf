@@ -240,7 +240,7 @@ resource "aws_ssm_parameter" "github_access_token" {
 }
 
 data "aws_ssm_parameter" "ubuntu_ami" {
-  name = "/aws/service/canonical/ubuntu/server/26.04/stable/current/arm64/hvm/ebs-gp3/ami-id"
+  name = "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
 locals {
@@ -360,7 +360,7 @@ locals {
 
 resource "aws_instance" "ec2_1" {
   ami                         = data.aws_ssm_parameter.ubuntu_ami.value
-  instance_type               = "t4g.micro"
+  instance_type               = "t3a.small"
   subnet_id                   = aws_subnet.subnet_1.id
   vpc_security_group_ids      = [aws_security_group.ec2_sg_1.id]
   associate_public_ip_address = true
@@ -368,7 +368,7 @@ resource "aws_instance" "ec2_1" {
   user_data_replace_on_change = true
   root_block_device {
     volume_type = "gp3"
-    volume_size = 16
+    volume_size = 20
   }
   user_data = <<-EOF
   ${local.ec2_bootstrap}
