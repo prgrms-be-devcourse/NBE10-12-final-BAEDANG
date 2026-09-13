@@ -247,14 +247,14 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` / `resolve(country, requestedAt)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
 
 | [TickSizePolicy](../back/src/main/java/com/baedang/orderbook/service/TickSizePolicy.java) | `nextValidPriceAbove`, `previousValidPriceBelow`, `isValidPrice`, `tickSizeAt` | 시장·종목 유형별 호가 단위 및 경계를 넘는 유효 가격 계산. NUMERIC(19,4) 최대 범위(999999999999999.9999) 내에서 계산 |
-| [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed)` | 고정 seed와 설정 기반 순수 가상 호가 생성기. V1 깊이 배수·정수 노이즈·tick 상대 라운드 넘버 부스트 적용. ASK 10개와 시장별 BID 깊이(국내 10개, 미국 1~10개)를 생성 |
-| [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 지정가 부분 체결 엔진(#122)이 동일 트랜잭션에서 활성 버전과 방향별 실제 레벨을 비관적 락으로 잠금. ASK는 10개, KRW BID는 10개, USD BID는 1~10개이며 10개 미만이면 마지막 가격은 `$0.01`. BUY→ASK, SELL→BID |
-| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V1 기본값: 3s 주기, 15s maxQuoteAge, 1m retention |
+| [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed, limits)` | 단일 V2 생성기. `OrderBookPricePolicy`와 검증된 당일 범위로 각 방향 0~10개 생성; 수량 노이즈 정책 유지 |
+| [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 버전·요청 방향 레벨을 잠근 뒤 DB 당일 범위와 V2 가격 배열 검증. BUY→ASK, SELL→BID; 정상 빈 방향 허용 |
+| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V2 기본값: 3s 주기, 15s maxQuoteAge, 1m retention |
 
 | [StockFinancialInfoPort](../back/src/main/java/com/baedang/stock/port/StockFinancialInfoPort.java), [KisStockFinancialInfoAdapter](../back/src/main/java/com/baedang/stock/client/kis/KisStockFinancialInfoAdapter.java) | 산업분류 및 결산연월별 재무제표용 도메인 포트 및 KIS 어댑터 | 포트는 순수 도메인 레코드(`IndustryData`, `PeriodData`) 반환. 어댑터 빈은 `kis.enabled=true` 조건부 등록 |
 | [StockFinancialSyncService](../back/src/main/java/com/baedang/stock/service/StockFinancialSyncService.java) | `ensureFresh(stock, trigger)`, `refresh(stock, trigger)`, `refreshRankedTargets(trigger)` | TTL 판정(재무 7일 / 7d, 산업 30일 / 30d), 종목별 `CompletableFuture` single-flight, 주간 배치 실행. `Optional<StockFinancialInfoPort>` 주입으로 KIS 비활성 시에도 정상 부팅 유지 |
 | [StockFinancialQueryService](../back/src/main/java/com/baedang/stock/service/StockFinancialQueryService.java) | `getFinancials(symbol, marketCountry)` | 캐시 우선 재무 조회 서비스. 국내 비ETF/ETN 종목 검증, 조회 시점 영업이익률 계산, FRESH/STALE 판정 및 폴백 처리 |
-현재 구현의 설정 가능한 가상 호가 V1 기본값은 다음과 같습니다: `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V1 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 10레벨이고 인접 레벨은 유효 호가 1틱 간격이며, 미국 BID는 `$0.01`에서 조기 종료할 수 있습니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
+현재 구현의 설정 가능한 가상 호가 V2 기본값은 다음과 같습니다: `policyVersion=V2`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V2 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 0~10레벨이고 인접 레벨은 유효 호가 1틱 간격이며 국내 당일 상하한가 또는 양수 저장 가능 가격 경계에서 종료합니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
 
 가상 호가 생성·조회는 상시 활성입니다. 호가는 정규장 중 유효한 시세가 있을 때만 생성합니다. 지정가 접수·취소·만료·체결은 별도 유스케이스입니다. 사용 가능한 호가가 없으면 워커는 물량을 만들지 않고 보류합니다.
 
@@ -283,8 +283,8 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - **상태 전이 primitive**: 한 트랜잭션에서 여러 레벨을 소비하더라도 `OrderBookVersion.advanceRevision()`은 트랜잭션당 1회만 호출합니다.
 
 #### 3. 수량 및 정밀도 정책
-- **정수 수량 정책**: DB 컬럼은 후속 소수점 호환성을 위해 `NUMERIC(19,6)`을 유지하지만, V1 가상 호가 생성과 체결 소비는 **정수 주 단위** 정책입니다 (`minQuantity=1`, `maxQuantity=1000000`).
-- **수량 분포의 성격**: 깊이 배수와 라운드 넘버 부스트는 모의 시장 V1 공급 정책일 뿐이며, 실제 시장의 호가 잔량 분포를 실증 재현한 것이 아니므로 상단 수량이 항상 크다는 절대 불변식을 가정하지 않습니다.
+- **정수 수량 정책**: DB 컬럼은 후속 소수점 호환성을 위해 `NUMERIC(19,6)`을 유지하지만, V2 가상 호가 생성과 체결 소비는 **정수 주 단위** 정책입니다 (`minQuantity=1`, `maxQuantity=1000000`).
+- **수량 분포의 성격**: 깊이 배수와 라운드 넘버 부스트는 모의 시장 V2 공급 정책일 뿐이며, 실제 시장의 호가 잔량 분포를 실증 재현한 것이 아니므로 상단 수량이 항상 크다는 절대 불변식을 가정하지 않습니다.
 
 
 ### 한국투자증권(KIS) 재무정보 연동 계약
@@ -443,3 +443,11 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - V13은 `price_limit_date`만 추가하고 기존 행을 보존합니다. 배포 전 선행 마이그레이션 순서를 확인하며 이 브랜치에서 V9/V11/V12를 임의 생성하거나 복사하지 않습니다.
 
 상세 수집은 `ensureForDisplay`를 사용하며 상하한가 게이트를 즉시 통과하지 못하면 대기 또는 실패 기록 없이 저장된 데이터로 응답합니다. 배경 `ensure`는 기존 2 TPS 게이트에서 순서를 기다립니다. 허용된 요청에는 기존 브로커 그룹 제한과 HTTP 타임아웃이 적용되며 상세 API 전체를 비동기로 바꾸는 것은 아닙니다.
+
+## 거래 범위와 V2 가격 배열 (#178)
+
+`TradingPriceLimits`는 기존 시세 컬럼으로 만든 불변 값이며 별도 저장하지 않습니다. 국내 거래소 현지 당일을 검증하고 미국 NULL은 제한 없음으로 처리합니다. `OrderPolicy.validateTradingPrice`를 예상 조회·접수·체결이 공유하고 지정가 단위는 기존 `TickSizePolicy`를 사용합니다. 장외 상세 표시 정책을 거래 폴백으로 사용하지 않습니다.
+
+`OrderBookPricePolicy`가 예상 배열과 완전성 검증을 담당하며 조회·미리보기·게시·잠금 저장소가 공유합니다. 예상 배열이 비는 경우만 빈 레벨을 정상으로 처리합니다. V1은 소비하지 않으며 별도 구현도 남기지 않습니다. 게시자는 stock→version, 소비자는 account→order→version→level→holding 순서를 유지합니다. 소비자에 역방향 stock 잠금을 추가하지 않으며 잠금 대기 후 세션·시각을 재검증합니다.
+
+주문 준비는 `PriceLimitLoadService.ensureForTrading`으로 기존 게이트·대기를 공유합니다. 워커·호가 게시에 주문별 외부 조회를 추가하지 않습니다. 기준값 미확보 시 예약·원장 변경 없이 보류합니다. 당일 최초 기준값 불변 정책을 유지하며 스키마 및 과거 이력을 변경하지 않습니다.
