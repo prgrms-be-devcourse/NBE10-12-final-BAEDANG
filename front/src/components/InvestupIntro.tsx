@@ -1314,12 +1314,14 @@ export function InvestupIntro({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    // 체크 아이콘 배경색을 화면 속 다른 요소와 어울리는 세련된
-                    // 블루로 바꿔달라는 요청 — 처음엔 T.taglineInk(#1b6da3)를
-                    // 썼는데 안 어울린다는 피드백으로, "학습과 훈련"
-                    // 문구(CMP의 "목적" 행 r.ours, 아래쪽 비교 표에 있음)에
-                    // 쓰는 색(#1f3a68)을 그대로 가져왔다.
-                    background: '#1f3a68',
+                    // 체크 아이콘 배경색 — "학습과 훈련"(#1f3a68, 너무
+                    // 진하고 튐)과 "기존 증권사 서비스"(#1b6da3, 채도가
+                    // 안 맞아 이질적)를 둘 다 시도했지만 둘 다 별로라는
+                    // 피드백으로, 두 색의 정확한 중간값(RGB 성분별 평균 —
+                    // (31+27)/2, (58+109)/2, (104+163)/2)인 #1d5486을
+                    // 새로 계산해 적용했다. 두 색 사이의 톤이라 진하기·
+                    // 채도 모두 어느 한쪽으로 치우치지 않는다.
+                    background: '#1d5486',
                     opacity: cmpOpen ? 1 : 0,
                     transform: `scale(${cmpOpen ? 1 : 0.4})`,
                     transition: 'opacity .5s ease, transform .6s cubic-bezier(.2,1.4,.35,1)',
