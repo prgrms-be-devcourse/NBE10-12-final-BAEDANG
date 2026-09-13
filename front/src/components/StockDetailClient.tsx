@@ -29,11 +29,11 @@ import {
   type AccountSummary,
   type Candle,
   type HoldingItem,
-  type LimitOrderQuoteResponse,
   type StockDetail,
 } from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
+import { canRetryLimitQuote, createLimitQuoteRefresh, EMPTY_LIMIT_QUOTE } from "@/lib/limit-quote-refresh";
 
 const TRADABLE_REASON_LABEL: Record<string, string> = {
   MARKET_CLOSED: "장 마감 · 거래 시간이 아니에요",
@@ -112,6 +112,7 @@ const CATEGORY_GUIDE: Record<string, string> = {
 // 받을 데이터가 없다 — 그래서 이 둘은 폴링하지 않고, 세그먼트/기간이 바뀔
 // 때만 다시 조회하는 기존 동작을 그대로 둔다.
 const MINUTE_CANDLE_POLL_INTERVAL_MS = 60 * 1000;
+const LIMIT_QUOTE_RETRY_INTERVAL_MS = 5_000;
 const INTRADAY_CANDLE_UNITS: readonly CandleUnit[] = ["1분봉", "5분봉", "10분봉"];
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
@@ -146,9 +147,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   );
   // 국내 종목은 원화만 허용한다(백엔드 규칙). 미국 종목만 원화/달러 입력을 토글할 수 있다.
   const [limitCurrency, setLimitCurrency] = useState<"KRW" | "USD">("KRW");
-  const [limitQuote, setLimitQuote] = useState<LimitOrderQuoteResponse | null>(null);
-  const [limitQuoteLoading, setLimitQuoteLoading] = useState(false);
-  const [limitQuoteError, setLimitQuoteError] = useState<string | null>(null);
+  const [limitQuoteState, setLimitQuoteState] = useState(EMPTY_LIMIT_QUOTE);
+  const { quote: limitQuote, loading: limitQuoteLoading, error: limitQuoteError } = limitQuoteState;
+  const limitQuoteRequestRef = useRef<ReturnType<typeof createLimitQuoteRefresh> | null>(null);
   // 지정가 접수(POST /orders/limit) 실패가 INVALID_INPUT이고 서버가 어떤 필드가
   // 문제인지(`data.field`) 알려주면, 하단 공용 배너 대신 해당 입력 옆에 표시한다.
   // 회원가입 검증 실패(ApiError.fieldErrors, {필드: 메시지} 맵)와는 계약이 다르다 —
@@ -400,41 +401,35 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   useEffect(() => {
     if (orderType !== "지정가" || !isLoggedIn || !detail.tradable || quantity <= 0 || !limitPriceValid) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLimitQuote(null);
-      setLimitQuoteError(null);
-      setLimitQuoteLoading(false);
+      setLimitQuoteState(EMPTY_LIMIT_QUOTE);
       return;
     }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      setLimitQuoteLoading(true);
-      getLimitOrderQuote({
-        symbol: detail.symbol,
-        marketCountry: detail.marketCountry,
-        side: side === "매수" ? "BUY" : "SELL",
-        quantity: quantityInput,
-        limitPrice: limitPriceInput,
-        limitCurrency,
-      })
-        .then((quote) => {
-          if (cancelled) return;
-          setLimitQuote(quote);
-          setLimitQuoteError(null);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setLimitQuote(null);
-          setLimitQuoteError(err instanceof ApiError ? err.message : "미리보기를 불러오지 못했어요.");
-        })
-        .finally(() => {
-          if (!cancelled) setLimitQuoteLoading(false);
-        });
-    }, 500);
+    // 입력 변경 직후에도 이전 미리보기로 주문 가능 여부를 판단하지 않습니다.
+    setLimitQuoteState({ ...EMPTY_LIMIT_QUOTE, loading: true });
+    const request = createLimitQuoteRefresh(() => getLimitOrderQuote({
+      symbol: detail.symbol,
+      marketCountry: detail.marketCountry,
+      side: side === "매수" ? "BUY" : "SELL",
+      quantity: quantityInput,
+      limitPrice: limitPriceInput,
+      limitCurrency,
+    }), setLimitQuoteState);
+    limitQuoteRequestRef.current = request;
+    const timer = setTimeout(() => { void request.refresh(); }, 500);
     return () => {
-      cancelled = true;
+      request.dispose();
+      limitQuoteRequestRef.current = null;
       clearTimeout(timer);
     };
   }, [orderType, isLoggedIn, detail.tradable, detail.symbol, detail.marketCountry, side, quantity, quantityInput, limitPriceInput, limitCurrency, limitPriceValid, detail.price.upperLimit, detail.price.lowerLimit]);
+
+  // 정상 응답·입력 오류에서는 중단하고, 일시적인 시세 오류만 보이는 탭에서 복구합니다.
+  useVisiblePolling(
+    () => { void limitQuoteRequestRef.current?.retry(); },
+    LIMIT_QUOTE_RETRY_INTERVAL_MS,
+    orderType === "지정가" && isLoggedIn && detail.tradable && quantity > 0 && limitPriceValid
+      && canRetryLimitQuote(limitQuoteState),
+  );
 
   let limitBlockReason: string | null = null;
   if (!detail.tradable) {
@@ -450,7 +445,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   } else if (limitQuote && !limitQuote.acceptable) {
     limitBlockReason = limitQuote.reason ? TRADABLE_REASON_LABEL[limitQuote.reason] ?? "지금은 지정가 주문을 접수할 수 없어요" : "지금은 지정가 주문을 접수할 수 없어요";
   } else if (!limitQuote && limitQuoteError) {
-    limitBlockReason = limitQuoteError;
+    limitBlockReason = limitQuoteError.message;
   }
 
   // 매수/매도 필박스 색 — 예전에는 --up/--down 토큰을 그대로 썼는데, 그 토큰을
