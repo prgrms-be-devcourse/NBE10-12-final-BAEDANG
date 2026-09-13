@@ -7,6 +7,8 @@ import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.RankingResponse;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import com.baedang.stock.entity.StockLike;
+import com.baedang.stock.repository.StockLikeRepository;
 import com.baedang.stock.repository.StockRepository;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -32,21 +34,25 @@ public class RankingService {
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final QuoteRealtimePolicy quoteRealtimePolicy;
+    private final StockLikeRepository stockLikeRepository;
 
     public RankingService(
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
-            QuoteRealtimePolicy quoteRealtimePolicy
+            QuoteRealtimePolicy quoteRealtimePolicy,
+            StockLikeRepository stockLikeRepository
     ) {
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.quoteRealtimePolicy = quoteRealtimePolicy;
+        this.stockLikeRepository = stockLikeRepository;
     }
 
     public RankingResponse getRankings(
             String market,
             int size,
-            String cursor
+            String cursor,
+            Long userId
     ) {
         MarketCountry marketCountry = parseMarket(market);
         validateSize(size);
@@ -62,11 +68,13 @@ public class RankingService {
         if (hasNext) stocks = stocks.subList(0, size);
 
         Map<Long, QuoteSnapshot> quotes = quotesByStockId(stocks);
+        Map<Long, Long> likeIds = likeIdsByStockId(userId, stocks);
 
         List<RankingResponse.Item> items = stocks.stream()
                 .map(stock -> toItem(
                         stock,
-                        quotes.get(stock.getStockId())
+                        quotes.get(stock.getStockId()),
+                        likeIds.get(stock.getStockId())
                 )).toList();
 
         String nextCursor = null;
@@ -120,7 +128,18 @@ public class RankingService {
                 );
     }
 
-    private RankingResponse.Item toItem(Stock stock, QuoteSnapshot quote) {
+    private Map<Long, Long> likeIdsByStockId(Long userId, List<Stock> stocks) {
+        if (userId == null || stocks.isEmpty()) return Map.of();
+
+        List<Long> stockIds = stocks.stream()
+                .map(Stock::getStockId).toList();
+
+        return stockLikeRepository.findByUserIdAndStockIdIn(userId, stockIds)
+                .stream()
+                .collect(Collectors.toMap(StockLike::getStockId, StockLike::getStockLikeId));
+    }
+
+    private RankingResponse.Item toItem(Stock stock, QuoteSnapshot quote, Long stockLikeId) {
         BigDecimal lastPrice = quote == null ? null : quote.getLastPrice();
         BigDecimal prevClose = quote == null ? null : quote.getPrevClose();
         BigDecimal changeAmount = calculateChangeAmount(lastPrice, prevClose);
@@ -130,6 +149,7 @@ public class RankingService {
 
         return new RankingResponse.Item(
                 stock.getRankNo() == null ? 0 : stock.getRankNo(),
+                stock.getStockId(),
                 stock.getSymbol(),
                 stock.getName(),
                 stock.getMarket(),
@@ -143,7 +163,8 @@ public class RankingService {
                 plain(changeRate),
                 krw(stock.getTradingAmount()),
                 quote == null ? null : quote.getQuoteAt(),
-                realtime
+                realtime,
+                stockLikeId
         );
     }
 
