@@ -882,4 +882,62 @@ class LimitOrderExecutionIntegrationTest {
         assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
         assertCashConservation();
     }
+
+    /**
+     * CB 판정은 호가/holding 잠금을 확보한 뒤에 해야 한다. 그래야 이 두 잠금을 기다리는 동안 시작된
+     * CB가 체결로 새어나가지 않는다. 잠금 대기 중 CB를 저장해 그 보장을 고정한다.
+     */
+    @Test
+    void 호가잠금을_기다리는동안_시작된_CB는_체결을_막는다() throws Exception {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        LimitExecutionAttempt attempt = krAttempt(order);
+        Map<String,Object> before = executionState(order);
+        Long levelId = jdbc.queryForObject("SELECT min(level_id) FROM order_book_level WHERE book_version_id=?",Long.class,version);
+
+        CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<?> blocker = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
+                jdbc.queryForObject("SELECT level_id FROM order_book_level WHERE level_id=? FOR UPDATE",Long.class,levelId);
+                locked.countDown();
+                try { if (!release.await(10,TimeUnit.SECONDS)) throw new IllegalStateException("timeout"); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            }));
+            assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
+            Future<Throwable> fill = pool.submit(() -> {
+                try { transactions.execute(attempt); return null; }
+                catch (Throwable thrown) { return thrown; }
+            });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            boolean waiting = false;
+            while (System.nanoTime() < deadline) {
+                waiting = jdbc.queryForObject("SELECT count(*) > 0 FROM pg_stat_activity WHERE wait_event_type='Lock'"
+                        + " AND query ILIKE '%order_book_level%'",Boolean.class);
+                if (waiting) break;
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+            }
+            assertThat(waiting).as("체결 트랜잭션이 호가 레벨 잠금을 기다림").isTrue();
+            // 바로 이 창에서 CB가 시작된다. 판정이 잠금 앞이면 이 주문은 이미 체결됐을 것이다.
+            activeCb("20260713000811",KrMarket.KOSPI,1,NOW.plusSeconds(1080));
+            release.countDown();
+            blocker.get(5,TimeUnit.SECONDS);
+            assertThat(fill.get(5,TimeUnit.SECONDS)).isInstanceOfSatisfying(BusinessException.class,
+                    e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED));
+        } finally { release.countDown(); }
+
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(executionState(order)).isEqualTo(before);
+        assertCashConservation();
+    }
+
+    /** 국내 지정가 실행 시도의 준비 근거. 컨텍스트 신선도 경계를 테스트가 직접 통제할 수 있게 한다. */
+    private LimitExecutionAttempt krAttempt(long orderId) {
+        TradeOrder order = orders.findById(orderId).orElseThrow();
+        LimitExecutionBook book = books.read(stocks.findById(krStock).orElseThrow(),order.getSide(),NOW).orElseThrow();
+        return new LimitExecutionAttempt(order.getAccountId(),orderId,krStock,order.getExecutionCount(),
+                book.version(),book.revision(),new OrderMarketContext(MarketCountry.KR,true,NOW.plusSeconds(3600),
+                ExecutionRateEvidence.krw(NOW.atOffset(ZoneOffset.UTC)),NOW));
+    }
+
 }
