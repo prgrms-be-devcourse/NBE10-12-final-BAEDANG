@@ -29,7 +29,7 @@ test('정규장 종료 후 지정가가 만료된다', async ({ page, request, u
 test('CB는 기존 지정가를 보류하지만 취소는 허용한다', async ({ page, request, user, control }) => {
   await authenticate(page, user); await openStock(page);
   const order = await submit(page, 'limit', '매수', '1', '11000');
-  await control('publish'); await control('halt'); await control('tick');
+  await control('publish'); await control('halt'); await control('halt'); await control('tick');
   const pending = await get(request, user, `/api/orders/${order.orderId}`);
   expect(pending.status).toBe('PENDING'); expect(pending.reservedCash).toBe(order.reservedCash);
   expect((await cancel(request, user, order.orderId)).status).toBe('CANCELED');
@@ -86,4 +86,17 @@ test('주문 버튼 연속 클릭은 요청과 체결을 한 번만 만든다', 
   await expect(button).toBeEnabled();
   expect(sent).toBe(1);
   expect(Number((await get(request, user, '/api/accounts/me')).cashBalance)).toBe(49_989_999);
+});
+
+test('헬퍼가 갱신한 토큰은 다음 조회와 취소에도 사용한다', async ({ page, request, user, control }) => {
+  await authenticate(page, user); await openStock(page);
+  const order = await submit(page, 'limit');
+  const expiredToken = user.accessToken;
+  await control('advance?seconds=901');
+  expect((await get(request, user, `/api/orders/${order.orderId}`)).status).toBe('PENDING');
+  expect(user.accessToken).not.toBe(expiredToken);
+  const renewedToken = user.accessToken;
+  await get(request, user, '/api/accounts/me');
+  expect(user.accessToken).toBe(renewedToken);
+  expect((await cancel(request, user, order.orderId)).status).toBe('CANCELED');
 });

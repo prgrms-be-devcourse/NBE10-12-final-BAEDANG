@@ -28,12 +28,14 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Base64;
 import java.util.Map;
+import java.util.Locale;
 import java.util.concurrent.Executors;
 
 /** 단일 테스트 제어 서버. 운영 클래스패스에는 존재하지 않으며 루프백/실행별 키만 허용합니다. */
 public final class E2eLauncher {
     private static final Logger log = LoggerFactory.getLogger(E2eLauncher.class);
     private ConfigurableApplicationContext app;
+    private int haltSequence;
     private final String token = required("E2E_CONTROL_TOKEN");
     private final String jdbcUrl = required("E2E_DB_URL");
     private final String password = required("E2E_DB_PASSWORD");
@@ -76,6 +78,7 @@ public final class E2eLauncher {
                 "--logging.level.org.hibernate.SQL=OFF", "--logging.level.root=WARN",
                 "--spring.main.banner-mode=off");
         clearData();
+        haltSequence = 0;
         E2eClock clock = app.getBean(E2eClock.class);
         clock.reset("US".equals(market) ? MarketCountry.US : MarketCountry.KR);
         JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
@@ -155,7 +158,7 @@ public final class E2eLauncher {
                     case "/upper" -> jdbc.update("UPDATE quote_snapshot SET last_price=upper_limit WHERE currency='KRW'");
                     case "/liquidity" -> jdbc.update("UPDATE order_book_level SET remaining_quantity=1");
                     case "/halt" -> app.getBean(MarketEventRepository.class).saveAndFlush(MarketEvent.circuitBreaker(
-                            MarketEventSource.KRX_KIND, "20260914000001", KrMarket.KOSPI, 1,
+                            MarketEventSource.KRX_KIND, String.format(Locale.ROOT, "%014d", ++haltSequence), KrMarket.KOSPI, 1,
                             clock.instant(), clock.instant().plusSeconds(1200), clock.instant(), clock.instant(),
                             "테스트 서킷브레이커", URI.create("https://kind.krx.co.kr/external/e2e")));
                     default -> { reply(request, 404, "unknown"); return; }

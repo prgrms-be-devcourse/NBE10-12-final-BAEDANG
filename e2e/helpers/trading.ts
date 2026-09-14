@@ -31,8 +31,8 @@ export async function get(request: APIRequestContext, user: { accessToken: strin
   if (response.status() === 401 && user.refreshToken) {
     const refresh = await request.post(`${API}/api/auth/refresh`, { data: { refreshToken: user.refreshToken } });
     expect(refresh.ok()).toBeTruthy();
-    const token = (await refresh.json()).accessToken;
-    response = await request.get(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    user.accessToken = (await refresh.json()).accessToken;
+    response = await request.get(`${API}${path}`, { headers: { Authorization: `Bearer ${user.accessToken}` } });
   }
   expect(response.ok(), await response.text()).toBeTruthy();
   return response.json();
