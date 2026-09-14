@@ -25,6 +25,15 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
+
+# 웹 파비콘(front/src/app/icon.png)으로 생성한다. iOS는 알파를 떼야 해서
+# remove_alpha_ios로 둥근 모서리를 네이비 배경에 평탄화한다.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  remove_alpha_ios: true
