@@ -13,7 +13,6 @@ import com.baedang.stock.repository.StockRepository;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.util.List;
 
 import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
 import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
@@ -21,27 +20,27 @@ import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
 @Service
 public class StockDetailService {
 
-    private static final StockDetailResponse.Warning INVESTMENT_WARNING =
-            new StockDetailResponse.Warning("INVESTMENT_WARNING", "투자경고");
-
     private final PriceLimitLoadService priceLimits;
     private final StockRepository stockRepository;
     private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final QuoteRealtimePolicy quoteRealtimePolicy;
     private final StockOnDemandQuoteService stockOnDemandQuoteService;
+    private final StockWarningQueryService stockWarningQueryService;
 
     public StockDetailService(
             StockRepository stockRepository,
             QuoteSnapshotRepository quoteSnapshotRepository,
             QuoteRealtimePolicy quoteRealtimePolicy,
             StockOnDemandQuoteService stockOnDemandQuoteService,
-            PriceLimitLoadService priceLimits
+            PriceLimitLoadService priceLimits,
+            StockWarningQueryService stockWarningQueryService
     ) {
         this.priceLimits = priceLimits;
         this.stockRepository = stockRepository;
         this.quoteSnapshotRepository = quoteSnapshotRepository;
         this.quoteRealtimePolicy = quoteRealtimePolicy;
         this.stockOnDemandQuoteService = stockOnDemandQuoteService;
+        this.stockWarningQueryService = stockWarningQueryService;
     }
 
     public StockDetailResponse getDetail(String symbol, String marketCountryValue) {
@@ -59,6 +58,7 @@ public class StockDetailService {
         boolean showLimits = priceLimits.canDisplay(stock, quote);
         boolean realtime = quoteRealtimePolicy.isRealtime(marketCountry, quote);
         Tradability tradability = tradability(stock, quote);
+        StockWarningQueryService.WarningSnapshot warnings = stockWarningQueryService.currentWarnings(stock);
 
         return new StockDetailResponse(
                 stock.getSymbol(),
@@ -73,7 +73,8 @@ public class StockDetailService {
                 stock.getIsDividend(),
                 price(quote, realtime, stock.getCurrency(), showLimits),
                 info(stock, quote),
-                Boolean.TRUE.equals(stock.getIsWarned()) ? List.of(INVESTMENT_WARNING) : List.of(),
+                warnings.warnings(),
+                warnings.status(),
                 tradability.tradable(),
                 tradability.reason()
         );

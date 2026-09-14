@@ -21,9 +21,19 @@ public record StockDetailResponse(
         Price price,
         Info info,
         List<Warning> warnings,
+        WarningStatus warningsStatus,
         boolean tradable,
         String tradableReason
 ) {
+
+    /**
+     * 유의사항 조회 성공 여부. {@code UNAVAILABLE}은 "유의사항 없음"이 아니라
+     * "확인하지 못했다"는 뜻이다 — 화면이 배지를 조용히 감추지 않도록 구분한다.
+     */
+    public enum WarningStatus {
+        AVAILABLE,
+        UNAVAILABLE
+    }
 
     public record Price(
             String lastPrice,
