@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTheme } from "./ThemeProvider";
 
 export type TourStep = {
   /** 안내할 요소를 찾는 CSS 선택자. `data-tour="..."` 속성을 붙인 요소를 가리킨다. */
@@ -40,6 +41,7 @@ export function TourGuide({
   active: boolean;
   onFinish: () => void;
 }) {
+  const { theme } = useTheme();
   const [stepIndex, setStepIndex] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const scrolledStepRef = useRef(-1);
@@ -182,7 +184,11 @@ export function TourGuide({
           width: rect.width + PAD * 2,
           height: rect.height + PAD * 2,
           borderRadius: 14,
-          boxShadow: "0 0 0 9999px rgba(4,10,20,.6)",
+          // 다크 모드에서는 이 스포트라이트 바깥쪽이 카드(#1a1a1a) 등 어두운 회색
+          // 배경과 겹치며 남색으로 보인다는 피드백 — rgba(4,10,20)의 R<G<B가
+          // 만들어내는 미세한 파란기 때문이다(라이트 모드는 밝은 배경 위라 거의
+          // 안 보인다). 다크 모드에서만 R=G=B인 순수 검정으로 바꾼다.
+          boxShadow: theme === "dark" ? "0 0 0 9999px rgba(0,0,0,.6)" : "0 0 0 9999px rgba(4,10,20,.6)",
           pointerEvents: "none",
           zIndex: 140,
           transition: "top .25s ease, left .25s ease, width .25s ease, height .25s ease",
