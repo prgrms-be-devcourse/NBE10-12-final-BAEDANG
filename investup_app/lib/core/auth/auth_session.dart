@@ -163,6 +163,35 @@ class AuthSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 닉네임 변경 — 성공하면 Nav·마이페이지가 참조하는 프로필을 같이 갱신한다.
+  Future<UserProfile> updateNickname(String nickname) async {
+    final profile = await _authApi.updateNickname(nickname: nickname);
+    _profile = profile;
+    notifyListeners();
+    return profile;
+  }
+
+  /// 비밀번호 변경 — 반환된 프로필로 캐시를 맞춘다.
+  Future<UserProfile> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final profile = await _authApi.changePassword(
+      currentPassword: currentPassword,
+      newPassword: newPassword,
+    );
+    _profile = profile;
+    notifyListeners();
+    return profile;
+  }
+
+  /// 회원 탈퇴. 서버가 토큰을 무효화하지 않으므로(stateless JWT) 성공 후
+  /// 로컬 세션을 반드시 지운다 — 안 지우면 없는 계정으로 요청을 계속 보낸다.
+  Future<void> withdraw(String currentPassword) async {
+    await _authApi.withdraw(currentPassword: currentPassword);
+    await _invalidateSession();
+  }
+
   /// 로그아웃. 화면 상태를 먼저 비우고, 서버 호출 실패는 무시한다.
   /// 저장된 토큰 삭제 실패는 [StorageException]으로 알린다(로컬 로그아웃은 유지).
   Future<void> logOut() async {

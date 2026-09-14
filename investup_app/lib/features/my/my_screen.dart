@@ -15,6 +15,7 @@ import '../../core/models/order_detail.dart';
 import '../../core/models/stock_like.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
+import 'account_settings.dart';
 import 'order_detail_sheet.dart';
 
 /// 마이 탭. 프로필·계좌 요약·관심 종목·주문 내역·로그아웃을 보여준다.
@@ -329,6 +330,8 @@ class _MyScreenState extends State<MyScreen> {
               onTapOrder: _openOrderDetail,
               onRetry: _loadLists,
             ),
+            const SizedBox(height: 24),
+            AccountSettings(session: widget.session),
             const SizedBox(height: 24),
             _ResetCard(
               onReset: _resetAccount,

@@ -317,6 +317,17 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
     if (path == '/api/auth/refresh') {
       return FakeResponse.ok(accessTokenJson('access-token'));
     }
+    if (path == '/api/users/me' && options.method == 'PATCH') {
+      return FakeResponse.ok(
+        profileJson(nickname: '${options.data?['nickname'] ?? '사용자'}'),
+      );
+    }
+    if (path == '/api/users/me/password' && options.method == 'PUT') {
+      return FakeResponse.ok(profileJson());
+    }
+    if (path == '/api/users/me' && options.method == 'DELETE') {
+      return FakeResponse(204, null);
+    }
     if (path == '/api/users/me') return FakeResponse.ok(profileJson());
     if (path == '/api/auth/password/forgot') return FakeResponse(200, null);
     if (path == '/api/auth/password/reset') return FakeResponse(200, null);
@@ -466,7 +477,7 @@ void main() {
       await _settle(tester);
 
       // 보유 종목: 수량·평균단가·현재가·평가금액·평가손익이 나온다.
-      await tester.scrollUntilVisible(find.text('보유 종목'), 300);
+      await tester.scrollUntilVisible(find.text('보유 종목'),  300, scrollable: find.byType(Scrollable).first);
       await _settle(tester);
       expect(find.text('보유 종목'), findsOneWidget);
       expect(find.text('삼성전자 005930'), findsOneWidget);
@@ -475,11 +486,11 @@ void main() {
       expect(find.textContaining('+5,000'), findsOneWidget);
 
       // 관심 종목은 보유 종목 아래에 있다 — 스크롤해서 찾는다.
-      await tester.scrollUntilVisible(find.text('관심 종목'), 300);
+      await tester.scrollUntilVisible(find.text('관심 종목'),  300, scrollable: find.byType(Scrollable).first);
       await _settle(tester);
       expect(find.text('관심 종목'), findsOneWidget);
       // 주문 내역 섹션은 스크롤 아래에 있다.
-      await tester.scrollUntilVisible(find.text('주문 내역'), 300);
+      await tester.scrollUntilVisible(find.text('주문 내역'),  300, scrollable: find.byType(Scrollable).first);
       await _settle(tester);
       expect(find.text('매수 삼성전자'), findsOneWidget);
       expect(find.text('미체결'), findsOneWidget);
@@ -501,7 +512,7 @@ void main() {
       expect(cancels.single.data, <String, dynamic>{'status': 'CANCELED'});
 
       // 찜 해제 → DELETE /stocks/likes/9 (위로 스크롤해서 찾는다)
-      await tester.scrollUntilVisible(find.byTooltip('찜 해제'), -300);
+      await tester.scrollUntilVisible(find.byTooltip('찜 해제'),  -300, scrollable: find.byType(Scrollable).first);
       await _settle(tester);
       await tester.tap(find.byTooltip('찜 해제'));
       await _settle(tester);
@@ -537,7 +548,7 @@ void main() {
       await _settle(tester);
 
       // 체결 내역: 초기지급·매수 배지와 증감액이 나온다.
-      await tester.scrollUntilVisible(find.text('체결 내역'), 300);
+      await tester.scrollUntilVisible(find.text('체결 내역'),  300, scrollable: find.byType(Scrollable).first);
       await _settle(tester);
       expect(find.text('초기지급'), findsOneWidget);
       expect(find.text('모의 투자금 지급'), findsOneWidget);
@@ -546,9 +557,7 @@ void main() {
 
       // 포트폴리오 초기화: 확인 대화상자를 거쳐 POST가 나간다.
       await tester.scrollUntilVisible(
-        find.widgetWithText(OutlinedButton, '포트폴리오 초기화'),
-        300,
-      );
+        find.widgetWithText(OutlinedButton, '포트폴리오 초기화'),  300, scrollable: find.byType(Scrollable).first);
       await _settle(tester);
       await tester.tap(
         find.widgetWithText(OutlinedButton, '포트폴리오 초기화'),
@@ -561,6 +570,95 @@ void main() {
       final resets = harness.requestsTo('/api/accounts/me/reset');
       expect(resets, hasLength(1));
       expect(resets.single.data, <String, dynamic>{'accountId': 3});
+    });
+
+    testWidgets('닉네임·비밀번호 변경과 회원 탈퇴가 계정 설정에서 된다', (tester) async {
+      final harness = _harness(signedIn: true);
+      unawaited(harness.session.restore());
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: GoRouter(
+            initialLocation: '/my',
+            routes: [
+              GoRoute(
+                path: '/my',
+                builder: (context, state) => Scaffold(
+                  body: MyScreen(
+                    session: harness.session,
+                    stocks: harness.stocks,
+                    account: harness.account,
+                    orders: harness.orders,
+                    exchangeRates: harness.exchangeRates,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      await _settle(tester);
+
+      // 닉네임 변경 → PATCH users/me + 세션 프로필 갱신.
+      await tester.scrollUntilVisible(find.text('계정 설정'),  300, scrollable: find.byType(Scrollable).first);
+      await _settle(tester);
+      await tester.enterText(
+        find.widgetWithText(TextField, '새 닉네임'),
+        '새닉네임',
+      );
+      await tester.tap(find.text('변경').first);
+      await _settle(tester);
+      final nick = harness.requestsTo('/api/users/me');
+      expect(
+        nick.any((r) => r.method == 'PATCH' && r.data['nickname'] == '새닉네임'),
+        isTrue,
+      );
+      expect(find.text('닉네임을 변경했어요.'), findsOneWidget);
+      expect(harness.session.profile?.nickname, '새닉네임');
+
+      // 비밀번호 변경 → PUT users/me/password.
+      await tester.enterText(
+        find.widgetWithText(TextField, '현재 비밀번호'),
+        'oldpassword1',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, '새 비밀번호 (8자 이상)'),
+        'newpassword1',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, '새 비밀번호 확인'),
+        'newpassword1',
+      );
+      await tester.tap(
+        find.widgetWithText(FilledButton, '비밀번호 변경'),
+      );
+      await _settle(tester);
+      expect(harness.countTo('/api/users/me/password'), 1);
+      expect(find.text('비밀번호를 변경했어요.'), findsOneWidget);
+
+      // 회원 탈퇴: 비밀번호 대화상자 → DELETE → 로컬 세션 종료.
+      await tester.scrollUntilVisible(
+        find.widgetWithText(OutlinedButton, '회원 탈퇴'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      await tester.tap(
+        find.widgetWithText(OutlinedButton, '회원 탈퇴'),
+      );
+      await _settle(tester);
+      expect(find.text('정말 탈퇴할까요?'), findsOneWidget);
+
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.widgetWithText(TextField, '현재 비밀번호'),
+        ),
+        'oldpassword1',
+      );
+      await tester.tap(find.text('탈퇴할게요'));
+      await _settle(tester);
+      expect(harness.countTo('/api/users/me'), greaterThanOrEqualTo(1));
+      expect(harness.session.isAuthenticated, isFalse);
     });
   });
 

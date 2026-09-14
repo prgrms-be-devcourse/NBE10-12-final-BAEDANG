@@ -79,4 +79,36 @@ class AuthApi {
     body: {'token': token, 'newPassword': newPassword},
     auth: AuthRequirement.public,
   );
+
+  /// 닉네임 변경. 중복이면 NICKNAME_DUPLICATED.
+  Future<UserProfile> updateNickname({required String nickname}) async {
+    final json = await _client.patchObject(
+      _me,
+      body: {'nickname': nickname},
+      auth: AuthRequirement.required,
+    );
+    return _client.decode(() => UserProfile.fromJson(json));
+  }
+
+  /// 비밀번호 변경. 현재 비밀번호가 틀리면 INVALID_PASSWORD.
+  Future<UserProfile> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final json = await _client.putObject(
+      'users/me/password',
+      body: {'currentPassword': currentPassword, 'newPassword': newPassword},
+      auth: AuthRequirement.required,
+    );
+    return _client.decode(() => UserProfile.fromJson(json));
+  }
+
+  /// 회원 탈퇴. 상태만 WITHDRAWN·CLOSED로 바뀌고 stateless 토큰은 살아있으니
+  /// 호출부가 로컬 로그인 상태를 반드시 지워야 한다.
+  Future<void> withdraw({required String currentPassword}) =>
+      _client.deleteVoid(
+        _me,
+        body: {'currentPassword': currentPassword},
+        auth: AuthRequirement.required,
+      );
 }
