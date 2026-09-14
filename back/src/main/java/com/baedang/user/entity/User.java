@@ -42,6 +42,16 @@ public class User extends BaseEntity {
     private boolean seed;
 
     /**
+     * 비밀번호 재설정 등으로 기존 refresh token을 무효화할 때 올라갑니다.
+     *
+     * <p>refresh token은 이 값을 발급 시점 그대로 담아두고(JwtTokenProvider), 재발급
+     * 요청 때마다 이 필드의 현재 값과 비교합니다 — 값이 다르면 그 refresh token은
+     * 이미 무효화된 이전 세션의 것입니다({@link #invalidateSessions()} 참고).
+     */
+    @Column(name = "token_version", nullable = false)
+    private int tokenVersion;
+
+    /**
      * JPA 전용 기본 생성자.
      *
      * <p>Hibernate 가 리플렉션으로 객체를 만들 때 필요합니다. {@code protected} 인
@@ -57,6 +67,7 @@ public class User extends BaseEntity {
         this.nickname = nickname;
         this.status = UserStatus.ACTIVE;
         this.seed = seed;
+        this.tokenVersion = 0;
     }
 
     /**
@@ -91,6 +102,19 @@ public class User extends BaseEntity {
         this.status = UserStatus.WITHDRAWN;
     }
 
+    /**
+     * 지금까지 발급된 모든 refresh token을 무효화합니다.
+     *
+     * <p>비밀번호 재설정(이메일 링크)처럼 "계정이 털렸을 가능성"을 전제하는 복구
+     * 행위 뒤에 호출합니다 — 공격자가 훔친 refresh token을 들고 있어도 다음 재발급
+     * 요청부터는 거부됩니다. 로그인 상태에서의 일반 비밀번호 변경(마이페이지)에는
+     * 쓰지 않습니다 — 그 흐름은 새 토큰을 다시 내려주지 않아, 지금 로그인한 기기
+     * 자신도 즉시 튕겨나가기 때문입니다.
+     */
+    public void invalidateSessions() {
+        this.tokenVersion++;
+    }
+
     public Long getUserId() {
         return userId;
     }
@@ -113,5 +137,9 @@ public class User extends BaseEntity {
 
     public boolean isSeed() {
         return seed;
+    }
+
+    public int getTokenVersion() {
+        return tokenVersion;
     }
 }

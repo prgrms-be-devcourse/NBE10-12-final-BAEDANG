@@ -55,6 +55,23 @@ class JwtTokenProviderTest {
     }
 
     @Test
+    @DisplayName("버전을 지정한 refresh_token은 그 버전을 그대로 담아 돌려준다")
+    void refresh_token은_지정한_token_version을_담는다() {
+        String token = provider.createRefreshToken(7L, 3);
+
+        assertThat(provider.parseRefreshToken(token)).isEqualTo(7L);
+        assertThat(provider.parseRefreshTokenVersion(token)).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("버전 없이 만든 refresh_token(레거시)의 token_version은 0이다")
+    void 버전_없이_만든_refresh_token은_기본값_0이다() {
+        String token = provider.createRefreshToken(7L);
+
+        assertThat(provider.parseRefreshTokenVersion(token)).isZero();
+    }
+
+    @Test
     @DisplayName("만료된 access_token을 거절한다")
     void t3() {
         String token = provider.createAccessToken(7L);

@@ -4,7 +4,7 @@ import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.PasswordResetConfirmRequest;
-import com.baedang.auth.dto.PasswordResetRequestRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.mail.PasswordResetMailSender;
@@ -63,6 +63,7 @@ public class AuthService {
     private final BigDecimal initialCash;
     private final String frontendBaseUrl;
     private final Duration passwordResetTokenTtl;
+    private final Duration passwordResetRequestCooldown;
     private final Clock clock;
     private final SecureRandom secureRandom = new SecureRandom();
 
@@ -85,6 +86,7 @@ public class AuthService {
                        @Value("${trading.initial-cash}") BigDecimal initialCash,
                        @Value("${app.frontend-base-url}") String frontendBaseUrl,
                        @Value("${auth.password-reset.token-ttl:30m}") Duration passwordResetTokenTtl,
+                       @Value("${auth.password-reset.request-cooldown:1m}") Duration passwordResetRequestCooldown,
                        Clock clock) {
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
@@ -96,6 +98,7 @@ public class AuthService {
         this.initialCash = initialCash;
         this.frontendBaseUrl = frontendBaseUrl;
         this.passwordResetTokenTtl = passwordResetTokenTtl;
+        this.passwordResetRequestCooldown = passwordResetRequestCooldown;
         this.clock = clock;
     }
 
@@ -145,7 +148,7 @@ public class AuthService {
                 account.getOpenedAt());
 
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
+        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId(), user.getTokenVersion());
 
         log.info("회원가입 완료 userId={} normalizedEmail={}", user.getUserId(), normalizedEmail);
         return AuthResponse.from(user, account, accessToken, refreshToken);
@@ -182,26 +185,39 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + user.getUserId()));
 
         String accessToken = jwtTokenProvider.createAccessToken(user.getUserId());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
+        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId(), user.getTokenVersion());
 
         log.info("로그인 성공 userId={}", user.getUserId());
         return AuthResponse.from(user, account, accessToken, refreshToken);
     }
 
+    /**
+     * <p>비밀번호 재설정으로 무효화된 refresh token은 여기서 걸러집니다 — 토큰에 실린
+     * {@code token_version}이 회원의 현재 값과 다르면 재발급을 거부합니다
+     * (User.invalidateSessions 참고). access token(15분)까지는 이 검사를 적용하지
+     * 않으므로, 재설정 직후 최대 그 시간만큼은 이전 access token이 계속 동작할 수
+     * 있습니다 — JwtAuthenticationFilter를 완전한 stateless로 유지하기 위한
+     * 절충입니다.
+     */
     @Transactional(readOnly = true)
     public AccessTokenResponse refresh(RefreshTokenRequest request) {
         Long userId;
+        int tokenVersion;
         try {
             userId = jwtTokenProvider.parseRefreshToken(request.refreshToken());
+            tokenVersion = jwtTokenProvider.parseRefreshTokenVersion(request.refreshToken());
         } catch (ExpiredJwtException exception) {
             throw new BusinessException(ErrorCode.TOKEN_EXPIRED);
         } catch (JwtException | IllegalArgumentException exception) {
             throw new BusinessException(ErrorCode.INVALID_TOKEN);
         }
 
-
-        userRepository.findByUserIdAndStatus(userId, UserStatus.ACTIVE)
+        User user = userRepository.findByUserIdAndStatus(userId, UserStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_TOKEN));
+
+        if (tokenVersion != user.getTokenVersion()) {
+            throw new BusinessException(ErrorCode.INVALID_TOKEN, "무효화된 세션 userId=" + userId);
+        }
 
         return new AccessTokenResponse(jwtTokenProvider.createAccessToken(userId));
     }
@@ -217,9 +233,16 @@ public class AuthService {
      *
      * <p>새 토큰을 발급하기 전에 그 회원의 이전 미사용 토큰을 전부 무효화합니다 —
      * 재설정 메일을 여러 번 요청했을 때 가장 최근 메일의 링크만 유효하게 합니다.
+     *
+     * <p><b>쿨다운(리뷰 지적, PR #207)</b> — 이 엔드포인트엔 별도의 rate limit이 없어,
+     * 가입된 이메일 주소를 알면 무한정 재설정 메일을 보낼 수 있었습니다(메일 폭탄).
+     * 게다가 요청마다 이전 토큰을 무효화하므로, 짧은 간격으로 반복 요청하면 정당한
+     * 사용자에게 온 메일의 링크까지 계속 죽어버립니다. 그 회원의 가장 최근 토큰
+     * 발급 시각이 쿨다운 이내면 아무것도 하지 않고 조용히 반환합니다 — 이 경우도
+     * 호출자에게는 똑같이 성공으로 보입니다(계정 열거 방지 원칙과 동일).
      */
     @Transactional
-    public void requestPasswordReset(PasswordResetRequestRequest request) {
+    public void requestPasswordReset(PasswordForgotRequest request) {
         String normalizedEmail = DomainNormalizer.email(request.email());
         User user = userRepository.findByEmail(normalizedEmail).orElse(null);
 
@@ -229,6 +252,16 @@ public class AuthService {
         }
 
         OffsetDateTime now = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+
+        OffsetDateTime lastIssuedAt = passwordResetTokenRepository
+                .findFirstByUserIdOrderByCreatedAtDesc(user.getUserId())
+                .map(PasswordResetToken::getCreatedAt)
+                .orElse(null);
+        if (lastIssuedAt != null && now.isBefore(lastIssuedAt.plus(passwordResetRequestCooldown))) {
+            log.info("[password-reset] 쿨다운 이내 재요청이라 메일을 보내지 않습니다(응답은 동일) userId={}", user.getUserId());
+            return;
+        }
+
         passwordResetTokenRepository.invalidateUnusedByUserId(user.getUserId(), now);
 
         String rawToken = generateRawToken();
@@ -248,6 +281,11 @@ public class AuthService {
      * 만료됐으면 {@code PASSWORD_RESET_TOKEN_EXPIRED}를 던집니다. 두 실패를 구분해
      * 알려줘도 "그런 이메일이 있는지"는 새어나가지 않습니다 — 토큰은 이미 발급된
      * 뒤라 이 시점엔 이메일 존재 여부가 노출 대상이 아닙니다.
+     *
+     * <p><b>세션 무효화(리뷰 지적, PR #207)</b> — 재설정은 "계정이 털렸을 때의 복구
+     * 행위"이므로, 공격자가 들고 있을지 모르는 기존 refresh token(7일)을 여기서
+     * 무효화합니다({@link User#invalidateSessions()}). access token은 최대 15분
+     * 뒤 자연 만료로 정리됩니다 — refresh() 문서 참고.
      */
     @Transactional
     public void resetPassword(PasswordResetConfirmRequest request) {
@@ -268,6 +306,7 @@ public class AuthService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.PASSWORD_RESET_TOKEN_INVALID, "회원을 찾을 수 없음"));
 
         user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
+        user.invalidateSessions();
         // 방금 쓴 토큰 자신을 포함해, 이 회원의 다른 미사용 토큰(메일을 여러 번
         // 요청했던 경우)까지 한 번에 소비 처리한다.
         passwordResetTokenRepository.invalidateUnusedByUserId(user.getUserId(), now);

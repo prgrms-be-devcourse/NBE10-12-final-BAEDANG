@@ -257,6 +257,10 @@ auth:
   # 비밀번호 찾기 이메일 링크의 유효 시간. 지나면 PASSWORD_RESET_TOKEN_EXPIRED.
   password-reset:
     token-ttl: ${PASSWORD_RESET_TOKEN_TTL:30m}
+    # 같은 회원에게 재설정 메일을 다시 보내기까지 최소 대기 시간(리뷰 지적, PR #207) —
+    # 이 안에 재요청이 오면 메일도 새 토큰 발급도 없이 조용히 무시한다(응답은 동일하게 200).
+    # 없으면 등록된 이메일을 아는 누구나 그 사람 받은편지함에 무한정 메일을 보낼 수 있다.
+    request-cooldown: ${PASSWORD_RESET_REQUEST_COOLDOWN:1m}
 
 logging:
   level:
