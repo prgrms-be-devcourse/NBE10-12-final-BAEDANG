@@ -1280,6 +1280,8 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | `POST /orders/market` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
+
+장기 보유 종목의 보유 시작 시각은 주문 접수 순서가 아닌 개별 `trade_execution`을 executedAt/executionId 순서로 재생하여 계산합니다. 부분 체결도 포함하며 전량 매도 시 보유 구간이 끝나고 재매수 시 새 구간이 시작됩니다.
 | WebSocket | 실시간 시세 push (폴링 대체) |
 
 **지금 만들지는 않지만 URL 설계가 충돌하지 않게 미리 자리를 잡아둔 것입니다.**
