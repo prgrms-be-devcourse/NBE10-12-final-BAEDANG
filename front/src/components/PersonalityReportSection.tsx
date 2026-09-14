@@ -179,7 +179,17 @@ function LockedCard({ report, onHelp }: { report: PersonalityReport; onHelp: () 
           </span>
         }
       />
-      <div className="grid gap-7 px-6 py-7 max-md:grid-cols-1" style={{ gridTemplateColumns: "260px minmax(0,1fr)" }}>
+      {/* 반응형 웹 적용 — 인라인 style로 준 gridTemplateColumns는 셀렉터
+          우선순위와 무관하게 항상 클래스 기반 스타일보다 이긴다(위키
+          패널 호버 그라데이션에서 겪은 것과 같은 원인). 그래서
+          "max-md:grid-cols-1" 클래스가 있어도 모바일에서 전혀 적용되지
+          않고 260px 고정 칸이 그대로 남아, 남은 폭(minmax(0,1fr))이
+          0으로 짓눌려 오른쪽 절반(설명 문구·진행률·버튼)이 카드의
+          overflow-hidden에 가려 통째로 안 보이는 문제가 있었다(제보
+          없이 반응형 전수 점검 중 발견). 열 너비 자체를 Tailwind
+          임의값(grid-cols-[...])으로 옮겨 md: 접두사가 실제로 먹히게
+          고쳤다 — md 미만은 1칸(세로로 쌓임), md 이상만 260px+나머지. */}
+      <div className="grid grid-cols-1 gap-7 px-6 py-7 md:grid-cols-[260px_minmax(0,1fr)]">
         <div
           className="flex aspect-square flex-col items-center justify-center gap-3 rounded-[20px]"
           style={{ background: "var(--fill)", border: "1px dashed var(--line)" }}
@@ -263,7 +273,9 @@ function OpenCard({
       />
 
       {report.classified && report.typeCode && shares ? (
-        <div className="grid gap-7.5 px-6 py-7 max-md:grid-cols-1" style={{ gridTemplateColumns: "300px minmax(0,1fr)" }}>
+        // 반응형 웹 적용 — LockedCard와 같은 원인(인라인 gridTemplateColumns가
+        // max-md:grid-cols-1을 항상 이김)이라 같은 방식으로 고쳤다.
+        <div className="grid grid-cols-1 gap-7.5 px-6 py-7 md:grid-cols-[300px_minmax(0,1fr)]">
           <div className="flex flex-col gap-3.5">
             {/* 시안은 유형별 AI 생성 이미지를 넣었었는데, 실제 이미지를 등록해달라는
                 요청으로 유형별 실제 이미지(public/personality-types/, personaType.image)를
@@ -381,8 +393,12 @@ function OpenCard({
             <span className="text-[12px]" style={{ color: "var(--mut2)" }}>가장 오래 보유한 순</span>
           </div>
           <div className="overflow-hidden rounded-2xl" style={{ border: "1px solid var(--line2)" }}>
+            {/* 반응형 웹 적용 — 랭킹/마이페이지 테이블과 같은 문제(5칸 그리드가
+                모바일 폭에서는 남는 공간이 없어 뒤쪽 칸들이 읽기 힘들 만큼
+                짓눌림)라 같은 방식으로 고쳤다. md 미만에서는 헤더를 숨기고
+                행을 카드형으로 쌓는다. */}
             <div
-              className="grid gap-3 px-4.5 py-2.5 text-[12px] font-bold"
+              className="hidden px-4.5 py-2.5 text-[12px] font-bold md:grid"
               style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.1fr", background: "var(--fill)", color: "var(--mut2)" }}
             >
               <span>종목</span>
@@ -395,26 +411,42 @@ function OpenCard({
               const isUsd = h.currency === "USD";
               const rate = toDecimal(h.returnRate);
               const up = !rate || rate.greaterThanOrEqualTo(0);
+              const avgBuyText = isUsd ? formatUsd(h.avgBuyPrice) : `${formatNumber(h.avgBuyPrice)}원`;
+              const lastPriceText = isUsd ? formatUsd(h.lastPrice) : `${formatNumber(h.lastPrice)}원`;
+              const returnNode = (
+                <span className="tabular-nums font-semibold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
+                  {formatPercent(h.returnRate)}
+                </span>
+              );
               return (
-                <div
-                  key={h.symbol}
-                  className="grid items-center gap-3 px-4.5 py-3 text-[14.5px]"
-                  style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.1fr", borderTop: "1px solid var(--line2)" }}
-                >
-                  <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="overflow-hidden font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>{h.name}</span>
-                    <Tag>{h.symbol}</Tag>
-                  </span>
-                  <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                    {isUsd ? formatUsd(h.avgBuyPrice) : `${formatNumber(h.avgBuyPrice)}원`}
-                  </span>
-                  <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                    {isUsd ? formatUsd(h.lastPrice) : `${formatNumber(h.lastPrice)}원`}
-                  </span>
-                  <span className="text-right tabular-nums font-semibold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
-                    {formatPercent(h.returnRate)}
-                  </span>
-                  <span className="text-right text-[12.5px]" style={{ color: "var(--mut2)" }}>{formatDate(h.heldSince)}</span>
+                <div key={h.symbol} style={{ borderTop: "1px solid var(--line2)" }}>
+                  {/* 데스크톱(md 이상) — 기존 5칸 그리드 그대로. */}
+                  <div className="hidden items-center gap-3 px-4.5 py-3 text-[14.5px] md:grid" style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.1fr" }}>
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="overflow-hidden font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>{h.name}</span>
+                      <Tag>{h.symbol}</Tag>
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{avgBuyText}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{lastPriceText}</span>
+                    <span className="text-right">{returnNode}</span>
+                    <span className="text-right text-[12.5px]" style={{ color: "var(--mut2)" }}>{formatDate(h.heldSince)}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 px-4.5 py-3 text-[14.5px] md:hidden">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="overflow-hidden font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>{h.name}</span>
+                        <Tag>{h.symbol}</Tag>
+                      </span>
+                      {returnNode}
+                    </div>
+                    <div className="flex items-center justify-between text-[12.5px]" style={{ color: "var(--mut2)" }}>
+                      <span>평균단가 {avgBuyText}</span>
+                      <span>현재가 {lastPriceText}</span>
+                    </div>
+                    <div className="text-right text-[12.5px]" style={{ color: "var(--mut2)" }}>{formatDate(h.heldSince)} 보유 시작</div>
+                  </div>
                 </div>
               );
             })}
@@ -601,8 +633,12 @@ function LeaderboardModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
+        {/* 반응형 웹 적용 — 이 3칸 그리드는 고정폭 칸이 60px+96px로 크지
+            않아 완전히 짓눌리진 않지만, 모바일 폭에서는 여전히 빠듯하다
+            — md 미만에서는 헤더를 숨기고(LeaderboardRow도 같은 폭에서
+            카드형 한 줄로 바뀐다) md 이상에서만 보여준다. */}
         <div
-          className="grid gap-3 px-7 py-2.5 text-[12px] font-bold"
+          className="hidden px-7 py-2.5 text-[12px] font-bold md:grid"
           style={{ gridTemplateColumns: "60px minmax(0,1fr) 96px", background: "var(--bg)", color: "var(--mut2)" }}
         >
           <span>등수</span>
@@ -664,28 +700,57 @@ function LeaderboardModal({ onClose }: { onClose: () => void }) {
 function LeaderboardRow({ row, isMe }: { row: LeaderboardEntry; isMe?: boolean }) {
   const rate = toDecimal(row.returnRate);
   const up = !rate || rate.greaterThanOrEqualTo(0);
+  const rowBg = isMe ? "var(--bg)" : "transparent";
   return (
-    <div
-      className="grid items-center gap-3 px-7 py-3"
-      style={{ gridTemplateColumns: "60px minmax(0,1fr) 96px", background: isMe ? "var(--bg)" : "transparent", borderTop: "1px solid var(--line2)" }}
-    >
-      <span className="tabular-nums text-[15px] font-extrabold" style={{ color: row.rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
-        {row.rank}위
-      </span>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="overflow-hidden text-[15px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
-          {row.nickname}
+    <>
+      {/* 데스크톱(md 이상) — 기존 3칸 그리드 그대로. */}
+      <div
+        className="hidden items-center gap-3 px-7 py-3 md:grid"
+        style={{ gridTemplateColumns: "60px minmax(0,1fr) 96px", background: rowBg, borderTop: "1px solid var(--line2)" }}
+      >
+        <span className="tabular-nums text-[15px] font-extrabold" style={{ color: row.rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
+          {row.rank}위
         </span>
-        {isMe && (
-          <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
-            나
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="overflow-hidden text-[15px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
+            {row.nickname}
           </span>
-        )}
-      </span>
-      <span className="text-right tabular-nums text-[15px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
-        {formatPercent(row.returnRate)}
-      </span>
-    </div>
+          {isMe && (
+            <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
+              나
+            </span>
+          )}
+        </span>
+        <span className="text-right tabular-nums text-[15px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
+          {formatPercent(row.returnRate)}
+        </span>
+      </div>
+
+      {/* 모바일(md 미만) — 3칸 그리드 대신 한 줄짜리 flex(순위·닉네임을
+          왼쪽에서 줄이고, 수익률은 오른쪽에 고정폭 없이 배치)로 바꿔
+          좁은 화면에서도 닉네임이 억지로 짓눌리지 않게 한다. */}
+      <div
+        className="flex items-center gap-2.5 px-7 py-3 md:hidden"
+        style={{ background: rowBg, borderTop: "1px solid var(--line2)" }}
+      >
+        <span className="shrink-0 tabular-nums text-[14px] font-extrabold" style={{ color: row.rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
+          {row.rank}위
+        </span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="overflow-hidden text-[14px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
+            {row.nickname}
+          </span>
+          {isMe && (
+            <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
+              나
+            </span>
+          )}
+        </span>
+        <span className="shrink-0 tabular-nums text-[14px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
+          {formatPercent(row.returnRate)}
+        </span>
+      </div>
+    </>
   );
 }
 
@@ -750,8 +815,10 @@ function TypeComparisonModal({ myTypeCode, onClose }: { myTypeCode: string | nul
           </button>
         </div>
 
+        {/* 반응형 웹 적용 — 위 리더보드와 같은 이유로 md 미만에서는 헤더를
+            숨긴다(TypeComparisonRow도 같은 폭에서 카드형으로 바뀐다). */}
         <div
-          className="grid gap-3 px-7 py-2.5 text-[12px] font-bold"
+          className="hidden px-7 py-2.5 text-[12px] font-bold md:grid"
           style={{ gridTemplateColumns: "36px minmax(0,1fr) 70px 96px", background: "var(--bg)", color: "var(--mut2)" }}
         >
           <span>순위</span>
@@ -793,29 +860,53 @@ function TypeComparisonRow({ rank, row, isMyType }: { rank: number; row: Leaderb
   const personaType = PERSONALITY_TYPES[row.typeCode];
   const rate = toDecimal(row.avgReturnRate);
   const up = !rate || rate.greaterThanOrEqualTo(0);
-  return (
-    <div
-      className="grid items-center gap-3 px-7 py-3"
-      style={{ gridTemplateColumns: "36px minmax(0,1fr) 70px 96px", background: isMyType ? "var(--bg)" : "transparent", borderTop: "1px solid var(--line2)" }}
-    >
-      <span className="tabular-nums text-[15px] font-extrabold" style={{ color: rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
-        {rank}
+  const rowBg = isMyType ? "var(--bg)" : "transparent";
+  const nameNode = (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="overflow-hidden text-[14.5px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
+        {personaType?.nickname ?? row.typeLabel}
       </span>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="overflow-hidden text-[14.5px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
-          {personaType?.nickname ?? row.typeLabel}
+      <span className="font-mono text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
+      {isMyType && (
+        <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
+          내 유형
         </span>
-        <span className="font-mono text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
-        {isMyType && (
-          <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
-            내 유형
+      )}
+    </span>
+  );
+  const returnNode = (
+    <span className="tabular-nums text-[15px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
+      {formatPercent(row.avgReturnRate)}
+    </span>
+  );
+  return (
+    <>
+      {/* 데스크톱(md 이상) — 기존 4칸 그리드 그대로. */}
+      <div
+        className="hidden items-center gap-3 px-7 py-3 md:grid"
+        style={{ gridTemplateColumns: "36px minmax(0,1fr) 70px 96px", background: rowBg, borderTop: "1px solid var(--line2)" }}
+      >
+        <span className="tabular-nums text-[15px] font-extrabold" style={{ color: rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
+          {rank}
+        </span>
+        {nameNode}
+        <span className="text-right tabular-nums text-[13px]" style={{ color: "var(--mut2)" }}>{formatNumber(row.count)}명</span>
+        <span className="text-right">{returnNode}</span>
+      </div>
+
+      {/* 모바일(md 미만) — 4칸 그리드 대신 2줄 카드형. */}
+      <div className="flex flex-col gap-1 px-7 py-3 md:hidden" style={{ background: rowBg, borderTop: "1px solid var(--line2)" }}>
+        <div className="flex items-center gap-2.5">
+          <span className="shrink-0 tabular-nums text-[14px] font-extrabold" style={{ color: rank <= 3 ? "var(--accent)" : "var(--mut2)" }}>
+            {rank}
           </span>
-        )}
-      </span>
-      <span className="text-right tabular-nums text-[13px]" style={{ color: "var(--mut2)" }}>{formatNumber(row.count)}명</span>
-      <span className="text-right tabular-nums text-[15px] font-bold" style={{ color: up ? "var(--up)" : "var(--down)" }}>
-        {formatPercent(row.avgReturnRate)}
-      </span>
-    </div>
+          {nameNode}
+        </div>
+        <div className="flex items-center justify-between pl-[26px] text-[13px]" style={{ color: "var(--mut2)" }}>
+          <span>{formatNumber(row.count)}명</span>
+          {returnNode}
+        </div>
+      </div>
+    </>
   );
 }
