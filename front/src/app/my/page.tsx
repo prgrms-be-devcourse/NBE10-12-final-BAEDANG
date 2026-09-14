@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
@@ -414,12 +415,23 @@ export default function MyPage() {
   if (!isLoggedIn || !user) {
     return (
       <Reveal delay={0} className="rounded-[20px] py-20 text-center" style={{ background: "var(--card)" }}>
-        <div className="mb-2 text-[17px] font-bold" style={{ color: "var(--ink)" }}>
-          로그인하고 내 계좌를 확인해보세요
-        </div>
-        <div className="mb-5 text-[14px]" style={{ color: "var(--mut2)" }}>
-          보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요.
-        </div>
+        {/* 랭킹·가이드 화면 문구에 이미 적용한 토스인슈어런스(pd-recruit.tossinsu.com)
+            스타일 Line Reveal을 마이페이지 접속 시 등장하는 문구·컴포넌트에도
+            적용해달라는 요청 — 감싸는 Reveal(카드 전체가 살짝 떠오르는 기존
+            애니메이션)은 그대로 두고, 안쪽 텍스트만 RevealText로 바꿨다. */}
+        <RevealText
+          as="div"
+          className="mb-2 text-[17px] font-bold"
+          style={{ color: "var(--ink)" }}
+          lines={["로그인하고 내 계좌를 확인해보세요"]}
+        />
+        <RevealText
+          as="div"
+          className="mb-5 text-[14px]"
+          style={{ color: "var(--mut2)" }}
+          baseDelayMs={45}
+          lines={["보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요."]}
+        />
         <div className="flex justify-center gap-2.5">
           <Link href="/login" className="rounded-xl px-5 py-2.5 text-[14px] font-bold" style={{ background: "var(--fill)", color: "var(--ink)" }}>
             로그인
@@ -450,10 +462,19 @@ export default function MyPage() {
 
   return (
     <div>
+      {/* 랭킹·가이드 화면 문구에 이미 적용한 Line Reveal을 마이페이지 접속 시
+          맨 처음 보이는 "내 계좌" 제목·회차 배지에도 적용했다. */}
       <Reveal delay={0}>
         <div className="mb-4.5 flex items-baseline gap-3">
-          <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
-          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>{account.roundNo}회차</span>
+          <RevealText as="h2" className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }} lines={["내 계좌"]} />
+          <RevealText
+            as="span"
+            display="inline-block"
+            baseDelayMs={45}
+            className="text-[13px]"
+            style={{ color: "var(--mut2)" }}
+            lines={[`${account.roundNo}회차`]}
+          />
         </div>
       </Reveal>
 
@@ -750,7 +771,7 @@ export default function MyPage() {
       </Reveal>
 
       <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
-        <div className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }}>계정 설정</div>
+        <RevealText as="div" className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["계정 설정"]} />
 
         <form onSubmit={handleChangeNickname} className="mb-6">
           <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
@@ -853,11 +874,19 @@ export default function MyPage() {
       <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
-            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
-              <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
-            </div>
+            <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["포트폴리오 초기화"]} />
+            <RevealText
+              as="div"
+              className="text-[15px] leading-relaxed"
+              style={{ color: "var(--dangerTextSoft)" }}
+              baseDelayMs={45}
+              lines={[
+                <>
+                  보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
+                  <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
+                </>,
+              ]}
+            />
           </div>
           <button
             onClick={() => setResetModalOpen(true)}
@@ -872,10 +901,14 @@ export default function MyPage() {
       <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>회원 탈퇴</div>
-            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요.
-            </div>
+            <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["회원 탈퇴"]} />
+            <RevealText
+              as="div"
+              className="text-[15px] leading-relaxed"
+              style={{ color: "var(--dangerTextSoft)" }}
+              baseDelayMs={45}
+              lines={["계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요."]}
+            />
           </div>
           <button
             onClick={() => setWithdrawModalOpen(true)}
@@ -994,7 +1027,10 @@ export default function MyPage() {
 function SummaryCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "up" | "down" }) {
   return (
     <div className="flex-1 rounded-[20px] px-6 py-5.5" style={{ background: "var(--card)" }}>
-      <div className="text-[13px]" style={{ color: "var(--mut)" }}>{label}</div>
+      {/* 라벨(총 자산·예수금 등)에는 Line Reveal을 적용했다. 값(value)은 5초마다
+          폴링으로 계속 갱신되는 숫자라 매번 다시 올라오면 눈에 거슬리므로
+          Reveal/RevealText 없이 그대로 둔다. */}
+      <RevealText as="div" className="text-[13px]" style={{ color: "var(--mut)" }} lines={[label]} />
       <div
         className="mt-1.5 text-[24px] font-extrabold"
         style={{ color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)" }}
