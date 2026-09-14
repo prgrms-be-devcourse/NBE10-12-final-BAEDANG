@@ -8,12 +8,14 @@ import { root, runtime, windows, output, run, launch, waitFor, stopCommands } fr
 const id = `baedang-e2e-${randomUUID()}`;
 const statePath = path.join(runtime, 'state.json');
 await mkdir(runtime, { recursive: true });
-try { await writeFile(statePath, JSON.stringify({ id }), { flag: 'wx' }); }
+const state = { id, runnerPid: process.pid };
+try { await writeFile(statePath, JSON.stringify(state), { flag: 'wx' }); }
 catch { throw new Error('E2E already owns resources; finish the run or use npm run clean'); }
-const state = { id };
 const save = () => writeFile(statePath, JSON.stringify(state));
-let ending = false;
-async function finish() { if (!ending) { ending = true; stopCommands(); await clean(); } }
+let finishing;
+function finish() {
+  return finishing ??= (async () => { await stopCommands(); await clean(id); })();
+}
 process.on('SIGINT', () => finish().finally(() => process.exit(130)));
 process.on('SIGTERM', () => finish().finally(() => process.exit(143)));
 try {

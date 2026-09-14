@@ -19,6 +19,7 @@ npm run test:smoke
 npm test
 npm run test:ui
 npm run typecheck
+npm run test:scripts
 npm run report
 npm run clean
 ```
@@ -45,6 +46,10 @@ by Docker. Do not invoke Playwright directly: the runner supplies a fresh contro
 - `clean` handles leftovers after interrupted runs. It checks the run identifier against
   Windows process command lines (Linux process environment) and the Docker label before removing resources. It never deletes
   project files or the normal development database. Logs/reports remain for diagnosis.
+  Stop an active runner with Ctrl+C before using `clean`: manual cleanup refuses a live
+  recorded runner. Automatic cleanup checks its own run ID so an older runner cannot
+  clean a replacement run. Lookup/termination failures keep the state file for retry;
+  successful cleanup verifies server processes have exited before removing that file.
 
 The E2E Java code lives in `back/src/e2e`, outside `main` and `test`. `bootJar` must not
 contain `com/baedang/e2e`. Scheduling registration and startup runners are excluded in this

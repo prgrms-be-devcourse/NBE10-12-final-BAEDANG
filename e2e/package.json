@@ -9,6 +9,7 @@
     "test:ui": "node scripts/run.mjs --ui",
     "report": "playwright show-report",
     "clean": "node scripts/clean.mjs",
+    "test:scripts": "node --test scripts/cleanup.test.mjs",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

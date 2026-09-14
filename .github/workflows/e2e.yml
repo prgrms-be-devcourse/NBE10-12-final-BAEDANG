@@ -69,6 +69,7 @@ jobs:
           cd e2e
           npx playwright install --with-deps chromium
           npm run typecheck
+          npm run test:scripts
       - name: Run single-worker E2E
         if: steps.changes.outputs.run == 'true'
         working-directory: e2e
