@@ -21,6 +21,6 @@ ALTER TABLE trade_order
         (reject_reason IS DISTINCT FROM 'MARKET_TRADING_HALTED' AND market_event_id IS NULL)
         OR
         (status = 'REJECTED'
-         AND reject_reason = 'MARKET_TRADING_HALTED'
+         AND reject_reason IS NOT DISTINCT FROM 'MARKET_TRADING_HALTED'
          AND market_event_id IS NOT NULL)
     );

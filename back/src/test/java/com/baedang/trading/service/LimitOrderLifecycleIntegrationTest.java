@@ -758,6 +758,36 @@ class LimitOrderLifecycleIntegrationTest {
         assertThat(jdbc.queryForObject("SELECT count(*) FROM ledger_entry WHERE account_id=?", Long.class, account)).isZero();
     }
 
+    @Test
+    void 활성_CB는_오래된_시세_준비실패보다_우선한다() {
+        prepareKrKospi();
+        jdbc.update("UPDATE quote_snapshot SET quote_at=?, collected_at=? WHERE stock_id=?",
+                NOW.minusSeconds(120).atOffset(ZoneOffset.UTC),
+                NOW.minusSeconds(120).atOffset(ZoneOffset.UTC),
+                krStockId);
+        var cb = saveActiveCb("20260713000727", 1, NOW.minusSeconds(120), NOW.plusSeconds(1080));
+        var request = new LimitOrderRequest(
+                account, UUID.randomUUID().toString(), krSymbol, "KR", "BUY", "1", "1000", "KRW");
+
+        assertThatThrownBy(() -> service.place(user, request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(exception.getData())
+                            .containsEntry("stage", 1)
+                            .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
+                });
+
+        var rejected = orders.findByAccountIdAndClientOrderId(
+                account, UUID.fromString(request.clientOrderId())).orElseThrow();
+        assertThat(rejected.getStatus()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(rejected.getMarketEventId()).isEqualTo(cb.getMarketEventId());
+        assertThat(rejected.getLimitPrice()).isEqualByComparingTo("1000");
+        assertThat(rejected.getAcceptanceExchangeRate()).isEqualByComparingTo("1");
+        assertThat(locked()).isZero();
+        assertThat(jdbc.queryForObject(
+                "SELECT count(*) FROM ledger_entry WHERE account_id=?", Long.class, account)).isZero();
+    }
+
     /**
      * 멱등 재생은 최초 판정 이벤트를 저장된 FK로 정확히 복원한다. 최초 거절 뒤 같은 orderedAt 시점에
      * 활성인 더 긴 CB가 늦게 수집돼도 응답의 stage·haltUntil이 바뀌지 않는다.
