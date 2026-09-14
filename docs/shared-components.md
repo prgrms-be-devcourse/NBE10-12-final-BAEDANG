@@ -505,6 +505,12 @@ The attempts map and mutable attempt fields are guarded by the same `synchronize
 - Frontend: `front/src/lib/stock-market-events.ts` classifies the day's events for one market. Only KOSPI/KOSDAQ are queried — US and `KR_ETC` have no KIND events. If the lookup fails or has not landed yet, the screen must **not** block on it; the server-side trading transaction stays the authority and the existing `MARKET_TRADING_HALTED` response is the final defense.
 - `MarketEventsBanner` (rankings, KR tab) keeps its history semantics; only the heading distinguishes an active circuit breaker (`지금 매매거래 일시중단 중이에요`) from an active sidecar (`현재 시장조치가 발동 중이에요`) because a sidecar suspends program quotes only.
 
+## Browser integration test package
+
+The root `e2e/` package runs Playwright Chromium with one worker against the real production frontend build and an isolated Spring application. `back/src/e2e` is a separate Gradle source set, excluded from `bootJar`; its launcher replaces external market ports, supplies the existing Clock abstraction, and exposes only loopback, run-key-protected scenario commands. Production controllers, authentication, trading services and migrations remain in use.
+
+Each run creates its own TimescaleDB container. Each test clears mutable data and recreates the Spring context to reset caches and worker state, then seeds a regular-session scenario. Teardown closes the context; the runner removes its owned servers, container and volume. Never point this package at a development database. See [E2E README](../e2e/README.md) for commands, scenario controls, coverage boundaries, CI triggers and diagnostic artifacts.
+
 ## Trading bounds and V2 price arrays (#178)
 
 `TradingPriceLimits` is an immutable, non-persisted value read from existing quote columns. It checks current exchange-local dates for KR and treats US null as unrestricted. `OrderPolicy.validateTradingPrice` is shared by estimates/admission/execution, using existing `TickSizePolicy` for LIMIT ticks. Display's historical-date policy is not a trading fallback.
