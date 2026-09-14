@@ -75,6 +75,9 @@
      전용 토큰에 라이트/다크 토글의 trackStyle과 동일한 값(Nav.tsx)을 쓴다. */
   --chartExpandBtnBg: rgba(15, 56, 104, 0.03);
   --chartExpandBtnBorder: rgba(15, 56, 104, 0.06);
+  /* 종목 상세 "화면 가이드" 버튼 호버 색 전용 토큰. 라이트 모드는 원래 쓰던
+     --accentText 그대로(라이트에서 둘은 이미 같은 값). */
+  --tourReplayHoverText: var(--accentText);
 }
 
 :root[data-theme="dark"] {
@@ -147,6 +150,10 @@
   --pillTrackBgHover: rgba(255, 255, 255, 0.07);
   --chartExpandBtnBg: rgba(255, 255, 255, 0.015);
   --chartExpandBtnBorder: rgba(255, 255, 255, 0.03);
+  /* "화면 가이드" 버튼에 마우스를 올렸을 때 색이 --accentText(연한 하늘색)로
+     바뀌던 걸, "회원가입" 버튼 배경(var(--accent), 남색)과 같은 색으로
+     바꿔달라는 요청(다크 모드 한정). */
+  --tourReplayHoverText: var(--accent);
 }
 
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
@@ -211,6 +218,7 @@
     --pillTrackBgHover: rgba(255, 255, 255, 0.07);
     --chartExpandBtnBg: rgba(255, 255, 255, 0.015);
     --chartExpandBtnBorder: rgba(255, 255, 255, 0.03);
+    --tourReplayHoverText: var(--accent);
   }
 }
 
@@ -364,7 +372,7 @@ input:-webkit-autofill:active {
     color: var(--mut2);
   }
   .tour-replay-btn:hover {
-    color: var(--accentText);
+    color: var(--tourReplayHoverText);
   }
 }
 
