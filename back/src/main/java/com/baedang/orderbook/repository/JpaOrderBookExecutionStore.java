@@ -1,5 +1,7 @@
 package com.baedang.orderbook.repository;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.model.TradingPriceLimits;
 import com.baedang.market.repository.QuoteSnapshotRepository;
@@ -72,7 +74,8 @@ public class JpaOrderBookExecutionStore implements OrderBookExecutionStore {
                 : levelRepository.findBidLevelsForUpdate(expectedBookVersion);
 
         Instant now = clock.instant();
-        Stock stock = stocks.findById(stockId).orElseThrow();
+        Stock stock = stocks.findById(stockId).orElseThrow(() -> new BusinessException(
+                ErrorCode.INTERNAL_ERROR, "체결 호가가 참조하는 종목 누락: stockId=" + stockId));
         QuoteSnapshot quote = quotes.findById(stockId).orElse(null);
         TradingPriceLimits limits = TradingPriceLimits.from(quote);
         if (quote == null || !stock.getCurrency().equals(quote.getCurrency())
