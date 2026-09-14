@@ -1,6 +1,7 @@
 package com.baedang.stock.service;
 
 import com.baedang.stock.dto.StockDetailResponse;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.port.StockWarnings;
 import com.baedang.stock.port.SymbolInfoPort;
@@ -74,7 +75,8 @@ public class StockWarningQueryService {
 
     /** 종목의 현재 활성 유의사항과 조회 성공 여부를 반환한다. 예외를 던지지 않는다. */
     public WarningSnapshot currentWarnings(Stock stock) {
-        LocalDate today = LocalDate.now(clock);
+        // 유의사항 시작·종료일은 한국 날짜 기준이다 — UTC 자정~09시에 전날로 판정하면 안 된다.
+        LocalDate today = LocalDate.now(clock.withZone(MarketCountry.KR.zoneId()));
         Cached cached;
         synchronized (cache) {
             cached = cache.get(stock.getStockId());
