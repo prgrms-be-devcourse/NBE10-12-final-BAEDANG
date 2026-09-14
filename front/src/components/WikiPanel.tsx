@@ -47,18 +47,23 @@ function TermPill({ term, onOpen }: { term: WikiTerm; onOpen: (t: WikiTerm) => v
   // 실제로 보이게 했다. 이 그림자(블러)가 더 넓게 퍼지게 해달라는 후속
   // 요청으로 blur 반경을 14px → 32px로 키우고, spread를 4px 줘서 퍼지는
   // 느낌을 더했다. 이어서 색이 더 진하게 보이게 해달라는 요청으로 알파를
-  // 55% → 75%로 올렸다. 다크 모드일 때는 다른 곳(국내장/해외장 배지,
-  // 로그아웃 버튼, var(--accent) 전체)에 이미 통일한 세련된 남색
-  // (#114f8c)을 이 그림자에도 똑같이 적용해달라는 요청 — 라이트 모드는
-  // 기존 하늘색(#b6d7fd) 그대로 둔다.
-  const hoverShadowRgb = theme === "dark" ? "17,79,140" : "182,215,253";
+  // 55% → 75%로 올렸다. 다크 모드일 때 여러 블루 계열(#114f8c → #a3d2ef →
+  // #5fa0d6 → #1b6da3 → #0f3868 → #175494)과 회색 계열(#b0b0b0 →
+  // #5a5a5a → #787878)을 모두 시도해봤지만 계속 이질적이라는 피드백을
+  // 받아, 최종적으로 순검정(#000000)으로 바꿨다. 이 페이지 배경
+  // (var(--bg) 다크)도 순검정이라 그라데이션이 배경과 거의 구별되지
+  // 않을 수 있다는 점을 미리 안내했고, 그래도 순검정을 쓰기로
+  // 확인받았다. 라이트 모드는 기존 하늘색·blur/spread(#b6d7fd,
+  // 32px/4px) 그대로 둔다.
+  const hoverShadowRgb = theme === "dark" ? "0,0,0" : "182,215,253";
+  const hoverShadowSpread = theme === "dark" ? "16px 2px" : "32px 4px";
   return (
     <button
       type="button"
       onClick={() => onOpen(term)}
       className="flex-none cursor-pointer whitespace-nowrap rounded-full px-[26px] py-[15px] text-[18px] font-normal transition-shadow duration-150"
       style={{ background: "var(--card)", color: "var(--ink)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = `0 4px 32px 4px rgba(${hoverShadowRgb},.75)`)}
+      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = `0 4px ${hoverShadowSpread} rgba(${hoverShadowRgb},.75)`)}
       onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
     >
       {term.name}
@@ -192,10 +197,16 @@ function TermModal({ term, onClose }: { term: WikiTerm; onClose: () => void }) {
 
 export function WikiPanel() {
   const { theme } = useTheme();
-  // 다크 모드일 때 다른 곳에 이미 통일한 세련된 남색(#114f8c)을 "검색해보세요."
-  // 문구와 검색창 포커스 그라데이션에도 적용해달라는 요청 — 라이트 모드는
-  // 기존 색(각각 var(--accentText)·#b6d7fd) 그대로 둔다.
-  const searchAccentRgb = theme === "dark" ? "17,79,140" : "182,215,253";
+  // 다크 모드일 때 검색창 포커스 그라데이션에 여러 블루 계열과 회색
+  // 계열(#b0b0b0 → #5a5a5a → #787878)을 모두 시도해봤지만 계속
+  // 이질적이라는 피드백을 받아, 최종적으로 순검정(#000000,
+  // TermPill 호버와 항상 같은 색)으로 바꿨다 — 이 페이지 배경도
+  // 순검정이라 거의 안 보일 수 있다는 점을 미리 안내했고, 그래도
+  // 순검정을 쓰기로 확인받았다. "검색해보세요." 글자색은 이 요청
+  // 범위가 아니라 #114f8c 그대로 둔다. 라이트 모드는 기존
+  // 색·blur/spread(#b6d7fd, 32px/4px) 그대로다.
+  const searchAccentRgb = theme === "dark" ? "0,0,0" : "182,215,253";
+  const searchShadowSpread = theme === "dark" ? "16px 2px" : "32px 4px";
   const [q, setQ] = useState("");
   const [modal, setModal] = useState<WikiTerm | null>(null);
 
@@ -266,9 +277,9 @@ export function WikiPanel() {
             // 검색창을 클릭(포커스)했을 때도 용어 버튼 호버와 똑같은 그라데이션
             // 그림자 효과를 적용해달라는 요청 — TermPill의 onMouseEnter/
             // onMouseLeave에 쓰던 색·블러·스프레드 값을 그대로 가져와
-            // onFocus/onBlur에 적용했다. 다크 모드에서는 searchAccentRgb로
-            // TermPill과 같은 세련된 남색(#114f8c)을 쓴다.
-            onFocus={(e) => (e.currentTarget.style.boxShadow = `0 4px 32px 4px rgba(${searchAccentRgb},.75)`)}
+            // onFocus/onBlur에 적용했다. searchAccentRgb·searchShadowSpread로
+            // 다크/라이트 모드별 색과 범위를 TermPill과 항상 같게 맞춘다.
+            onFocus={(e) => (e.currentTarget.style.boxShadow = `0 4px ${searchShadowSpread} rgba(${searchAccentRgb},.75)`)}
             onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
           />
         </div>
