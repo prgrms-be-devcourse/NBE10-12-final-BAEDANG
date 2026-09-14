@@ -265,19 +265,32 @@ function OpenCard({
       {report.classified && report.typeCode && shares ? (
         <div className="grid gap-7.5 px-6 py-7 max-md:grid-cols-1" style={{ gridTemplateColumns: "300px minmax(0,1fr)" }}>
           <div className="flex flex-col gap-3.5">
-            {/* 시안은 유형별 AI 생성 이미지를 넣었지만, 실제로 유형마다 만들어 둔 그림이 없어
-                과장하지 않고 코드·별명을 큼직하게 보여주는 장식 카드로 대신했다. */}
-            <div
-              className="flex aspect-square flex-col items-center justify-center gap-2 rounded-[20px] px-4 text-center"
-              style={{ background: "var(--accentSoft)" }}
-            >
-              <span className="font-mono text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
-                {report.typeCode}
-              </span>
-              <span className="text-[13px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
-                {personaType?.nickname ?? report.typeLabel}
-              </span>
-            </div>
+            {/* 시안은 유형별 AI 생성 이미지를 넣었었는데, 실제 이미지를 등록해달라는
+                요청으로 유형별 실제 이미지(public/personality-types/, personaType.image)를
+                연결했다. 이미지가 없는(등록 안 된) 유형이 생기더라도 깨지지 않도록,
+                이미지가 없으면 기존 코드·별명 텍스트 카드로 그대로 폴백한다. 헤더 로고
+                (Nav.tsx)와 같은 이유로 next/image 대신 일반 img를 썼다 — 유형에 따라
+                16장 중 하나만 조건부로 그려서 next/image 최적화 이점이 크지 않다. */}
+            {personaType?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element -- 유형별 16장 중 하나만 조건부로 보여주는 이미지라 next/image 최적화 이점이 없다.
+              <img
+                src={personaType.image}
+                alt={`${personaType.nickname} 이미지`}
+                className="aspect-square w-full rounded-[20px] object-cover"
+              />
+            ) : (
+              <div
+                className="flex aspect-square flex-col items-center justify-center gap-2 rounded-[20px] px-4 text-center"
+                style={{ background: "var(--accentSoft)" }}
+              >
+                <span className="font-mono text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
+                  {report.typeCode}
+                </span>
+                <span className="text-[13px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
+                  {personaType?.nickname ?? report.typeLabel}
+                </span>
+              </div>
+            )}
             <div className="flex items-center gap-2.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--accent)" }}>
               <span className="font-mono text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
               <span className="ml-auto text-[12px] font-bold" style={{ color: "var(--accentText)" }}>{report.typeLabel}</span>
