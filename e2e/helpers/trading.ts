@@ -24,6 +24,12 @@ export async function submit(page: Page, type: 'market' | 'limit', side = '매�
   await button.click();
   const result = await response;
   expect(result.ok(), await result.text()).toBeTruthy();
+  const confirmation = page.getByRole('heading', {
+    name: type === 'market' ? '거래가 체결됐어요' : '주문이 접수됐어요', exact: true,
+  });
+  await expect(confirmation).toBeVisible();
+  await confirmation.locator('..').getByRole('button', { name: '확인', exact: true }).click();
+  await expect(confirmation).toBeHidden();
   return result.json();
 }
 export async function get(request: APIRequestContext, user: { accessToken: string; refreshToken?: string }, path: string) {

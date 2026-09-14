@@ -1,9 +1,16 @@
 import { randomUUID, randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import net from 'node:net';
 import { clean } from './clean.mjs';
 import { root, runtime, windows, output, run, launch, waitFor, stopCommands } from './process.mjs';
+
+const playwrightCli = path.join(root, 'e2e/node_modules/@playwright/test/cli.js');
+const next = path.join(root, 'front/node_modules/next/dist/bin/next');
+for (const [file, directory] of [[playwrightCli, 'e2e'], [next, 'front']]) {
+  try { await access(file); }
+  catch { throw new Error(`Missing ${directory} dependencies. Run npm ci --prefix ${directory} from the repository root.`); }
+}
 
 const id = `baedang-e2e-${randomUUID()}`;
 const statePath = path.join(runtime, 'state.json');
@@ -48,12 +55,11 @@ try {
   const backend = await launch(java, [`-De2e.runId=${id}`, '-cp', classpath, 'com.baedang.e2e.E2eLauncher'], 'backend.log', env);
   state.backPid = backend.pid; await save();
   await waitFor('http://127.0.0.1:18089/health', { 'X-E2E-Key': token }, backend);
-  const next = path.join(root, 'front/node_modules/next/dist/bin/next');
   await run(process.execPath, [next, 'build'], { cwd: path.join(root, 'front'), env });
   const frontend = await launch(process.execPath, [`--title=${id}`, next, 'start', path.join(root, 'front'), '--hostname', '127.0.0.1', '--port', '13000'], 'frontend.log', env);
   state.frontPid = frontend.pid; await save();
   await waitFor('http://127.0.0.1:13000', {}, frontend);
-  await run(process.execPath, [path.join(root, 'e2e/node_modules/@playwright/test/cli.js'), 'test', ...process.argv.slice(2)],
+  await run(process.execPath, [playwrightCli, 'test', ...process.argv.slice(2)],
     { cwd: path.join(root, 'e2e'), env });
 } catch (error) {
   console.error(error.message); process.exitCode = 1;

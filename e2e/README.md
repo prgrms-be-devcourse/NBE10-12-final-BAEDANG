@@ -29,6 +29,11 @@ All modes build the frontend and E2E Java source set first. Ports 13000, 18088 a
 must be free. Existing development servers are never reused. The database port is assigned
 by Docker. Do not invoke Playwright directly: the runner supplies a fresh control key.
 
+If startup reports missing dependencies (or `Cannot find module .../@playwright/test/cli.js`),
+run `npm ci --prefix e2e` from the repository root. Frontend dependencies are installed
+separately with `npm ci --prefix front`. The runner checks both entry points before
+creating its runtime state or starting containers and servers.
+
 ## Isolation and lifecycle
 
 - Exactly one Playwright worker, `fullyParallel: false`, and no retries or sharding.
