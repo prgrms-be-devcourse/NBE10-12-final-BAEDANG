@@ -57,7 +57,7 @@ public class StockWarningQueryService {
     private final SymbolInfoPort symbolInfoPort;
     private final Clock clock;
     private final Duration ttl;
-    private final Map<Long, Cached> cache = new LinkedHashMap<>();
+    private final Map<Long, Cached> cache = new LinkedHashMap<>(16, 0.75f, true);
 
     public StockWarningQueryService(
             SymbolInfoPort symbolInfoPort,
