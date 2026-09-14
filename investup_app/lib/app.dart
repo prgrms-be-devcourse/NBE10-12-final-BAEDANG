@@ -131,6 +131,7 @@ class _InvestUpAppState extends State<InvestUpApp> {
                 stocks: widget.stocks,
                 session: session,
                 exchangeRates: widget.exchangeRates,
+                market: widget.market,
               ),
               ),
             ),

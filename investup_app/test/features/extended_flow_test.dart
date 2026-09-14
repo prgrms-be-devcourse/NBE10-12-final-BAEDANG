@@ -161,6 +161,27 @@ Map<String, Object?> _rankingPage2Json() => <String, Object?>{
   'hasNext': false,
 };
 
+Map<String, Object?> _marketEventsJson(String market) => <String, Object?>{
+  'market': market,
+  'date': '2026-09-15',
+  'items': <Map<String, Object?>>[
+    if (market == 'KOSPI')
+      <String, Object?>{
+        'eventId': 11,
+        'eventType': 'CIRCUIT_BREAKER',
+        'stage': 1,
+        'direction': null,
+        'triggeredAt': '2026-09-15T10:05:00+09:00',
+        'haltUntil': '2026-09-15T10:25:00+09:00',
+        'publishedAt': '2026-09-15T10:05:00+09:00',
+        'receivedAt': '2026-09-15T10:05:30+09:00',
+        'active': true,
+        'title': '코스피 서킷브레이커 1단계 발동',
+        'sourceUrl': 'https://example.com/kind/11',
+      },
+  ],
+};
+
 Map<String, Object?> _usRankingJson() => <String, Object?>{
   'items': <Map<String, Object?>>[
     <String, Object?>{
@@ -197,6 +218,11 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
       if (market == 'US') return FakeResponse.ok(_usRankingJson());
       return FakeResponse.ok(
         cursor == 'cursor-1' ? _rankingPage2Json() : rankingJson(),
+      );
+    }
+    if (path == '/api/market/events') {
+      return FakeResponse.ok(
+        _marketEventsJson(options.uri.queryParameters['market'] ?? ''),
       );
     }
     if (path == '/api/exchange-rates/latest') {
@@ -265,6 +291,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           stocks: harness.stocks,
           session: harness.session,
           exchangeRates: harness.exchangeRates,
+          market: harness.market,
         ),
       ),
     ),
@@ -537,6 +564,32 @@ void main() {
       expect(reqs.last.uri.queryParameters['cursor'], 'cursor-1');
       expect(find.text('SK하이닉스'), findsOneWidget);
       expect(find.text('모든 종목을 불러왔어요'), findsOneWidget);
+    });
+  });
+
+  group('시장조치 배너', () {
+    testWidgets('국내 탭에서 활성 서킷브레이커가 보이고 해외 탭에선 조회하지 않는다', (
+      tester,
+    ) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      // KOSPI의 활성 CB → "매매거래 일시중단" 제목과 발동 중 pill.
+      expect(find.text('지금 매매거래 일시중단 중이에요'), findsOneWidget);
+      expect(find.text('서킷브레이커 1단계 · 10:05'), findsOneWidget);
+      expect(find.text('발동 중'), findsOneWidget);
+
+      // 해외 탭으로 전환하면 시장조치 조회를 하지 않는다.
+      await tester.tap(find.text('해외 주식'));
+      await _settle(tester);
+      expect(find.text('지금 매매거래 일시중단 중이에요'), findsNothing);
+      expect(
+        harness.requestsTo('/api/market/events').length,
+        2, // KOSPI + KOSDAQ 한 번씩만.
+      );
     });
   });
 

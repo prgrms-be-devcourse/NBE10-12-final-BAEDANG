@@ -178,6 +178,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           stocks: harness.stocks,
           session: harness.session,
           exchangeRates: harness.exchangeRates,
+          market: harness.market,
         ),
       ),
     ),

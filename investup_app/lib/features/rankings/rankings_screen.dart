@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rate_api.dart';
+import '../../core/api/market_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/models/exchange_rate.dart';
@@ -15,6 +16,7 @@ import '../../core/models/stock_search.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
 import 'exchange_rate_widgets.dart';
+import 'market_events_banner.dart';
 
 /// 랭킹 탭. 국내/해외 상위 종목과 종목 검색을 보여준다.
 class RankingsScreen extends StatefulWidget {
@@ -23,11 +25,13 @@ class RankingsScreen extends StatefulWidget {
     required this.stocks,
     required this.session,
     required this.exchangeRates,
+    required this.market,
   });
 
   final StockApi stocks;
   final AuthSession session;
   final ExchangeRateApi exchangeRates;
+  final MarketApi market;
 
   @override
   State<RankingsScreen> createState() => _RankingsScreenState();
@@ -383,8 +387,13 @@ class _RankingsScreenState extends State<RankingsScreen> {
         ],
       );
     }
-    // index 0은 환율 배너, 마지막은 "더 보기" 버튼이다.
-    final total = _items.length + 2;
+    // 헤더는 [시장조치 배너(국내만), 환율 배너], 마지막은 "더 보기" 버튼이다.
+    final headers = <Widget>[
+      // 시장조치는 KOSPI·KOSDAQ만 지원한다 — 해외 탭에선 아예 호출하지 않는다.
+      if (_market == MarketCountry.kr) MarketEventsBanner(api: widget.market),
+      ExchangeRateBanner(future: _rateFuture, api: widget.exchangeRates),
+    ];
+    final total = headers.length + _items.length + 1;
     return RefreshIndicator(
       onRefresh: _reload,
       child: ListView.separated(
@@ -393,12 +402,7 @@ class _RankingsScreenState extends State<RankingsScreen> {
         itemCount: total,
         separatorBuilder: (_, _) => const SizedBox(height: 8),
         itemBuilder: (context, index) {
-          if (index == 0) {
-            return ExchangeRateBanner(
-              future: _rateFuture,
-              api: widget.exchangeRates,
-            );
-          }
+          if (index < headers.length) return headers[index];
           if (index == total - 1) {
             return _LoadMoreButton(
               hasNext: _hasNext,
@@ -407,7 +411,7 @@ class _RankingsScreenState extends State<RankingsScreen> {
               onTap: _loadMore,
             );
           }
-          final item = _items[index - 1];
+          final item = _items[index - headers.length];
           return _RankingRow(
             item: item,
             usdKrwRate: _usdKrwRate,
