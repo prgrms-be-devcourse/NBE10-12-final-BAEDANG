@@ -256,6 +256,31 @@ body {
   word-break: keep-all;
 }
 
+/* 로그인 화면에서 브라우저가 저장해 둔 이메일을 자동완성으로 클릭하면 입력창
+   배경이 흰색으로 바뀌는 문제(제보, 첨부 스크린샷) — 크로미움 계열 브라우저는
+   자동완성된 입력창에 background-color를 아무리 줘도 무시하고 자체 배경(보통
+   옅은 노란색·흰색)을 강제로 씌운다. 유일한 우회법은 -webkit-box-shadow의
+   inset을 이용해 입력창 안쪽 전체를 원하는 배경색으로 "덮어 칠하는" 것이다
+   (background-color 자체를 바꾸는 게 아니라 그 위에 그림자를 쌓는 방식이라
+   브라우저의 강제 배경 규칙에 안 걸린다). -webkit-text-fill-color도 같이
+   줘야 자동완성 글자색까지 함께 맞아떨어진다(color만으로는 안 먹는다). 이메일
+   입력창들이 공통으로 쓰는 var(--fill)·var(--ink)를 그대로 써서 로그인/
+   회원가입/비밀번호 찾기/마이페이지 등 모든 입력창에 한 번에 적용된다. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--fill) inset;
+  box-shadow: 0 0 0 1000px var(--fill) inset;
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  /* 자동완성 시 브라우저가 배경색을 바로 칠하지 않고 아주 긴 트랜지션으로
+     "서서히" 칠하는 것처럼 동작하는 걸 역이용해, 사실상 무한(5000초)
+     트랜지션을 줘서 브라우저의 기본 배경이 아예 안 보이게 한다 —
+     -webkit-box-shadow inset과 함께 쓰는 잘 알려진 우회법이다. */
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 /* Tailwind 유틸리티는 @layer utilities 안에 있는데, 이 파일의 평범한 규칙은 레이어가
    없어서(unlayered) 명세상 항상 레이어드 스타일을 이긴다 — 특정도(specificity)와
    무관하게. a에 색을 직접 주면 text-white 같은 유틸리티 클래스가 아예 안 먹혀서
