@@ -250,8 +250,14 @@ export function WikiPanel() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="용어·별칭·초성(ㅅㄱ)으로 검색"
-            className="w-full rounded-[12px] border-0 py-2.5 pl-[42px] pr-4 text-[15px] outline-none"
+            className="w-full rounded-[12px] border-0 py-2.5 pl-[42px] pr-4 text-[15px] outline-none transition-shadow duration-150"
             style={{ background: "var(--card)", color: "var(--ink)" }}
+            // 검색창을 클릭(포커스)했을 때도 용어 버튼 호버와 똑같은 그라데이션
+            // 그림자 효과를 적용해달라는 요청 — TermPill의 onMouseEnter/
+            // onMouseLeave에 쓰던 색·블러·스프레드 값을 그대로 가져와
+            // onFocus/onBlur에 적용했다.
+            onFocus={(e) => (e.currentTarget.style.boxShadow = "0 4px 32px 4px rgba(182,215,253,.75)")}
+            onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
           />
         </div>
         <p className="mt-3 text-[12.5px]" style={{ color: "var(--mut2)" }}>
