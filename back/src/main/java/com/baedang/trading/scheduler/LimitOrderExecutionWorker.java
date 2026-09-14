@@ -1,13 +1,15 @@
 package com.baedang.trading.scheduler;
 
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.model.LimitExecutionOutcome;
 import com.baedang.trading.model.LimitExecutionPreparation;
-import com.baedang.trading.repository.LimitExecutionCandidateRepository;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository.Candidate;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository.Group;
+import com.baedang.trading.repository.LimitExecutionCandidateRepository;
 import com.baedang.trading.scheduler.LimitExecutionProgress.Position;
 import com.baedang.trading.service.LimitOrderExecutionService;
-import io.micrometer.core.instrument.MeterRegistry;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -20,6 +22,8 @@ import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+
+import io.micrometer.core.instrument.MeterRegistry;
 
 /** 단일 인스턴스 전용. 그룹별로 실행 기회를 나누며 시간 예산은 진행 중 정산을 중단하지 않습니다. */
 @Component
@@ -122,7 +126,7 @@ public class LimitOrderExecutionWorker {
                 }
                 boolean stopDirection = switch (result.reason()) {
                     case PRIORITY_CHANGED, BOOK_CHANGED, LOCK_BUSY, ORDER_CHANGED, STATUS_UNAVAILABLE, CONTEXT_EXPIRED,
-                            NO_BOOK, STALE_BOOK, MARKET_CLOSED, NOT_TRADABLE -> true;
+                            NO_BOOK, STALE_BOOK, MARKET_CLOSED, NOT_TRADABLE, PRICE_LIMIT_UNAVAILABLE -> true;
                     default -> false;
                 };
                 if (stopDirection) {
@@ -134,8 +138,18 @@ public class LimitOrderExecutionWorker {
             }
         } catch (RuntimeException exception) {
             progress.reset(group);
-            log.error("지정가 체결 실패, 방향 순회 보류: stockId={} side={}", group.stockId(), group.side(), exception);
-            meters.counter("trading.limit.execution.attempt", "reason", "ERROR").increment();
+            // CB는 시장 전체를 멈추므로 그룹 후순위를 계속 시도하지 않습니다. tick이 이미 afterGroup을
+            // 설정했으므로 이 방문만 끝내면 다음 그룹은 같은 틱에서 계속 처리됩니다.
+            if (exception instanceof BusinessException business
+                    && business.getErrorCode() == ErrorCode.MARKET_TRADING_HALTED) {
+                String market = (String) business.getData().get("market");
+                meters.counter("krx.market_event.order_blocked",
+                        "market", market,
+                        "orderType", "LIMIT_EXECUTION").increment();
+            } else {
+                log.error("지정가 체결 실패, 방향 순회 보류: stockId={} side={}", group.stockId(), group.side(), exception);
+                meters.counter("trading.limit.execution.attempt", "reason", "ERROR").increment();
+            }
         }
         return attempts;
     }

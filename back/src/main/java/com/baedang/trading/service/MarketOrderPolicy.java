@@ -6,6 +6,7 @@ import com.baedang.stock.entity.Stock;
 import com.baedang.trading.entity.OrderSide;
 import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.user.entity.Account;
+
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -37,6 +38,8 @@ public class MarketOrderPolicy {
         if (!marketOpen.getAsBoolean()) return ErrorCode.MARKET_CLOSED;
         ErrorCode quoteTimeRejection = orderPolicy.validateQuoteTime(quote, now);
         if (quoteTimeRejection != null) return quoteTimeRejection;
+        ErrorCode priceRejection = orderPolicy.validateTradingPrice(stock, quote, quote.getLastPrice(), now, false);
+        if (priceRejection != null) return priceRejection;
         if (amount.netAmount().signum() <= 0) return ErrorCode.INVALID_SETTLEMENT_AMOUNT;
         if (side == OrderSide.BUY && account.availableCash().compareTo(amount.netAmount()) < 0) {
             return ErrorCode.INSUFFICIENT_CASH;

@@ -16,8 +16,10 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.service.StockTradingStatusService;
+import com.baedang.support.PriceLimitFixtures;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentMatchers;
@@ -128,12 +130,12 @@ class OrderBookHttpIntegrationTest {
         stock = stockRepository.saveAndFlush(stock);
 
         var quoteAt = BASE.minusSeconds(2).atOffset(ZoneOffset.UTC);
-        quoteSnapshotRepository.saveAndFlush(new QuoteSnapshot(
-                stock.getStockId(), new BigDecimal("70000"), "KRW", quoteAt, quoteAt));
+        quoteSnapshotRepository.saveAndFlush(PriceLimitFixtures.verified(new QuoteSnapshot(
+                stock.getStockId(), new BigDecimal("70000"), "KRW", quoteAt, quoteAt)));
 
         StockDescriptor descriptor = StockDescriptor.from(stock);
         GeneratedOrderBook generated = generator.generate(
-                properties, descriptor, new BigDecimal("70000"), BASE.minusSeconds(2), BASE, 42L);
+                properties, descriptor, new BigDecimal("70000"), BASE.minusSeconds(2), BASE, 42L, PriceLimitFixtures.at(BASE));
         publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
     }
 

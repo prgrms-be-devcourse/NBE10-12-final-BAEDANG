@@ -332,6 +332,7 @@ describe('getStockDetail — 성공', () => {
       },
       info: { marketCap: '1441000000000000', sharesOutstanding: '5969782550', listDate: '1975-06-11' },
       warnings: [],
+      warningsStatus: 'AVAILABLE',
       tradable: true,
       tradableReason: null,
     };

@@ -46,36 +46,36 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | data flow (`close_price` → `prev_close`) |
 | stock → order_book_version | 1:N (max 1 active per stock: is_active=true) |
-| order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 10 ASK, 10 KR BID, 1–10 US BID, CASCADE) |
+| order_book_version → order_book_level | 1:N (up to 20 levels upon publication: 0–10 per side, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (NULL for MARKET, required for LIMIT, RESTRICT) |
 | users → stock_like | 1:N |
 | stock → stock_like | 1:N (CASCADE) |
 
 ### Table Map (22)
 
-| Group                          | Table                    | Note                                                                                               |
-| ------------------------------ | ------------------------ | -------------------------------------------------------------------------------------------------- |
-| **Bookkeeping**                | `users`                  | member (auth added in week 2)                                                                      |
-|                                | `account`                | mock account (round-based) · has `locked_cash`                                                     |
-|                                | `trade_order`            | order + fill (partly TOSS)                                                                         |
-|                                | `ledger_entry`           | ledger · append only                                                                               |
-|                                | `holding`                | holdings · has `locked_quantity`                                                                   |
-|                                | `daily_account_snapshot` | used on screen from week 2                                                                         |
-| **Quote · Master**             | `stock`                  | stock master (TOSS /stocks)                                                                        |
-|                                | `stock_external_id`      | per-source symbol mapping                                                                          |
-|                                | `quote_snapshot`         | current-price snapshot (TOSS /prices)                                                              |
-|                                | `daily_candle`           | daily candles · TimescaleDB (TOSS /candles)                                                        |
-|                                | `minute_candle`          | minute time-series · top-100 scheduler + off-universe on-demand                                    |
-|                                | `exchange_rate`          | FX history · regular table · no FK relations                                                       |
-|                                | `market_calendar`        | optional persisted market-session calendar · currently read through the market-calendar port/cache |
-| **Synthetic Order Book**       | `order_book_version`     | synthetic order book set header refreshed every 3s based on current price                          |
-|                                | `order_book_level`       | Up to 20 levels per version (10 ASK / 10 KR BID / 1–10 US BID) with prices and quantities          |
-| **Financial · Industry (KIS)** | `stock_industry`         | industry classification (standard / large / medium / small)                                        |
-|                                | `stock_financial_period` | annual/quarterly statement period balance sheet, income, ratios                                    |
-|                                | `stock_financial_sync`   | sync timestamps per group for TTL tracking (negative cache support)                                |
-| **Market Events**              | `market_event`           | KRX KIND circuit-breaker/sidecar history · append-only                                             |
-| **Stock Likes**                | `stock_like`             | user stock likes (관심 종목) · unique per user×stock                                               |
-| **Learning Content**           | `wiki_term`              | beginner-facing financial term dictionary                                                          |
+| Group | Table | Note |
+|---|---|---|
+| **Bookkeeping** | `users` | member (auth added in week 2) |
+| | `account` | mock account (round-based) · has `locked_cash` |
+| | `trade_order` | order + fill (partly TOSS) |
+| | `ledger_entry` | ledger · append only |
+| | `holding` | holdings · has `locked_quantity` |
+| | `daily_account_snapshot` | used on screen from week 2 |
+| **Quote · Master** | `stock` | stock master (TOSS /stocks) |
+| | `stock_external_id` | per-source symbol mapping |
+| | `quote_snapshot` | current-price snapshot (TOSS /prices) |
+| | `daily_candle` | daily candles · TimescaleDB (TOSS /candles) |
+| | `minute_candle` | minute time-series · top-100 scheduler + off-universe on-demand |
+| | `exchange_rate` | FX history · regular table · no FK relations |
+| | `market_calendar` | optional persisted market-session calendar · currently read through the market-calendar port/cache |
+| **Synthetic Order Book** | `order_book_version` | synthetic order book set header refreshed every 3s based on current price |
+| | `order_book_level` | Up to 20 levels per version (0–10 per side) with prices and quantities |
+| **Financial · Industry (KIS)** | `stock_industry` | industry classification (standard / large / medium / small) |
+| | `stock_financial_period` | annual/quarterly statement period balance sheet, income, ratios |
+| | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
+| **Market Events** | `market_event` | KRX KIND circuit-breaker/sidecar history · append-only |
+| **Stock Likes** | `stock_like` | user stock likes (관심 종목) · unique per user×stock |
+| **Learning Content** | `wiki_term` | beginner-facing financial term dictionary |
 
 ### MVP Behavior Matrix (confirmed)
 
@@ -250,7 +250,7 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 | `order_type` | VARCHAR(10) | MARKET / LIMIT. |
 | `quantity` | NUMERIC(19,6) | order quantity. KR is whole shares but US allows fractional — NUMERIC leaves room. |
 | `status` | VARCHAR(20) | MARKET immediately settles as FILLED/REJECTED. LIMIT: PENDING → PARTIALLY_FILLED → FILLED, or active remainder → CANCELED/EXPIRED. Validate state/sequence under the account lock. Expiration uses the stored regular-session close. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
 | `reference_price` | NUMERIC(19,4) | Price in the stock currency used to evaluate a `REJECTED` order. Kept separate from `executed_price` because no fill occurred. |
 | `executed_price` | NUMERIC(19,4) | fill price. **In the stock's currency** (USD for US stocks). KRW conversion stored separately in `gross_amount`. |
 | `quote_at` | TIMESTAMPTZ | Quote timestamp used for either fill or rejection evaluation. Copied from `quote_snapshot.quote_at`. |
@@ -263,12 +263,13 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 
 Additional limit-order columns:
 
-| Columns                                                  | Purpose                                                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `limit_price`                                            | Limit price, NUMERIC(19,4) in the stock currency                                                       |
-| `filled_quantity`, `execution_count`, `last_executed_at` | Cumulative filled quantity, applied sequence and latest fill time                                      |
-| `reserved_cash`                                          | Current KRW reserve for the unfilled remainder, NUMERIC(19,4); zero for SELL, MARKET and closed orders |
-| `expires_at`, `closed_at`                                | Accepted session close / actual order closure                                                          |
+| Columns | Purpose |
+|---|---|
+| `limit_price` | Limit price, NUMERIC(19,4) in the stock currency |
+| `filled_quantity`, `execution_count`, `last_executed_at` | Cumulative filled quantity, applied sequence and latest fill time |
+| `reserved_cash` | Current KRW reserve for the unfilled remainder, NUMERIC(19,4); zero for SELL, MARKET and closed orders |
+| `expires_at`, `closed_at` | Accepted session close / actual order closure |
+| `market_event_id` | BIGINT FK to `market_event`; set **only** on a `MARKET_TRADING_HALTED` rejection, otherwise NULL. Pins the exact circuit-breaker event that decided the rejection so an idempotent replay returns the original error data even after the halt expired or a later, longer circuit breaker was collected. The `ck_trade_order_market_event_rejection` CHECK requires the combination `status=REJECTED` + this reason + a non-null event, and NULL for every other order |
 
 Fee/tax rates and the SEC minimum use the project-fixed `.env` settings `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE` and `A_TAX_MIN_USD`. No per-order rates or calculation version are stored. Keep the same settings across restarts/deployments; do not change them while active orders exist. This is separate from FX, which may differ between execution transactions.
 
@@ -423,7 +424,7 @@ Internal `stock_id` is the canonical identifier; external symbols are separated 
 | `last_price` | NUMERIC(19,4) | current price (stock currency). Toss sends **strings — always parse to BigDecimal**. double would drift the balance. |
 | `prev_close` | NUMERIC(19,4) | Verified daily close for the exact trading day immediately before the quote's exchange-local date derived from `quote_at`; recorded in `prev_close_date`. Missing verification returns null change, never a last-price or undated ranking fallback. |
 | `prev_close_date` | DATE | Reference trading day. Derive the quote trading day from quote_at and MarketCountry.zoneId(). Legacy rows retain a null date until refetched. |
-| `upper_limit` `lower_limit` | NUMERIC(19,4) | Provider price limits; displayed only with a matching verified date. Order and synthetic-book enforcement is a separate task. |
+| `upper_limit` `lower_limit` | NUMERIC(19,4) | Provider price limits; displayed only with a matching verified date. Verified current-day KR bounds are required for orders and V2 books (#178). |
 | `price_limit_date` | DATE | KR source timestamp in Asia/Seoul, validated against the requested trading day. NULL for legacy/unverified values and US. Added by V14. |
 | `currency` | VARCHAR(3) | price currency. Duplicated from `stock` for join-free quote reads. |
 | `quote_at` | TIMESTAMPTZ | **the Toss quote timestamp, or calendar regular close for a recovered finalized daily close.** Two uses — the "12:36:59" label, and **order freshness validation** (reject as `STALE_QUOTE` if >15s old). |
@@ -491,33 +492,32 @@ Toss calls 삼성전자 `005930`; future sources may use another identifier such
 
 Header of the shared synthetic order book set generated from the current price (`quote_snapshot`). A new supply set is published every 3 seconds; each stock has at most one active version (`is_active = true`).
 
-| Column            | Type          | Description                                                                                                                          |
-| ----------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `book_version_id` | BIGINT PK     | Synthetic order book set unique identifier; increments on each publication.                                                          |
-| `stock_id`        | BIGINT FK     | Stock ID referencing `stock(stock_id)`. Partial unique index (`WHERE is_active = true`) enforces at most 1 active version per stock. |
-| `base_price`      | NUMERIC(19,4) | Current price used as generation baseline (positive).                                                                                |
-| `currency`        | VARCHAR(3)    | Currency (`KRW` / `USD`).                                                                                                            |
-| `quote_at`        | TIMESTAMPTZ   | Exchange timestamp of the baseline quote; preserved verbatim without being overwritten.                                              |
-| `generated_at`    | TIMESTAMPTZ   | Time the order book version was generated.                                                                                           |
-| `policy_version`  | VARCHAR(20)   | Order book generation policy version (`V1`).                                                                                         |
-| `seed`            | BIGINT        | Random seed used for deterministic quantity noise reproduction.                                                                      |
-| `revision`        | BIGINT        | Count of committed quantity-mutation transactions (default 0); incremented by 1 per #122 execution transaction.                      |
-| `is_active`       | BOOLEAN       | Whether this version is currently active for querying and matching (default true).                                                   |
-| `closed_at`       | TIMESTAMPTZ   | Timestamp when closed upon new publication or market close.                                                                          |
+| Column | Type | Description |
+|---|---|---|
+| `book_version_id` | BIGINT PK | Synthetic order book set unique identifier; increments on each publication. |
+| `stock_id` | BIGINT FK | Stock ID referencing `stock(stock_id)`. Partial unique index (`WHERE is_active = true`) enforces at most 1 active version per stock. |
+| `base_price` | NUMERIC(19,4) | Current price used as generation baseline (positive). |
+| `currency` | VARCHAR(3) | Currency (`KRW` / `USD`). |
+| `quote_at` | TIMESTAMPTZ | Exchange timestamp of the baseline quote; preserved verbatim without being overwritten. |
+| `generated_at` | TIMESTAMPTZ | Time the order book version was generated. |
+| `policy_version` | VARCHAR(20) | Order book generation policy version (`V2`). |
+| `seed` | BIGINT | Random seed used for deterministic quantity noise reproduction. |
+| `revision` | BIGINT | Count of committed quantity-mutation transactions (default 0); incremented by 1 per #122 execution transaction. |
+| `is_active` | BOOLEAN | Whether this version is currently active for querying and matching (default true). |
+| `closed_at` | TIMESTAMPTZ | Timestamp when closed upon new publication or market close. |
 
 #### `order_book_level` — synthetic order book level
+Up to 20 rows are generated per version: 0–10 rows per side, bounded by verified KR limits or valid positive tick prices. The composite unique constraint `(book_version_id, side, level_depth)` is enforced.
 
-Up to 20 rows are generated per version: 10 ASK rows and 1–10 BID rows (KR always has 10 BID rows). The composite unique constraint `(book_version_id, side, level_depth)` is enforced.
-
-| Column               | Type          | Description                                                                                            |
-| -------------------- | ------------- | ------------------------------------------------------------------------------------------------------ |
-| `level_id`           | BIGINT PK     | Unique level identifier; referenced by `trade_execution.book_level_id`.                                |
-| `book_version_id`    | BIGINT FK     | Version ID referencing `order_book_version(book_version_id)` (`ON DELETE CASCADE`).                    |
-| `side`               | VARCHAR(4)    | Side (`BID` / `ASK`).                                                                                  |
-| `level_depth`        | INT           | Level depth (1 to 10).                                                                                 |
-| `price`              | NUMERIC(19,4) | Level price (positive).                                                                                |
-| `initial_quantity`   | NUMERIC(19,6) | Initial supplied quantity (audit baseline, positive). V1 supplied quantities are whole integer shares. |
-| `remaining_quantity` | NUMERIC(19,6) | Currently consumable remaining quantity (`0 <= remaining_quantity <= initial_quantity`).               |
+| Column | Type | Description |
+|---|---|---|
+| `level_id` | BIGINT PK | Unique level identifier; referenced by `trade_execution.book_level_id`. |
+| `book_version_id` | BIGINT FK | Version ID referencing `order_book_version(book_version_id)` (`ON DELETE CASCADE`). |
+| `side` | VARCHAR(4) | Side (`BID` / `ASK`). |
+| `level_depth` | INT | Level depth (1 to 10). |
+| `price` | NUMERIC(19,4) | Level price (positive). |
+| `initial_quantity` | NUMERIC(19,6) | Initial supplied quantity (audit baseline, positive). V2 supplied quantities are whole integer shares. |
+| `remaining_quantity` | NUMERIC(19,6) | Currently consumable remaining quantity (`0 <= remaining_quantity <= initial_quantity`). |
 
 ### Synthetic Order Book Retention and Cleanup Policy (Confirmed)
 
@@ -686,15 +686,21 @@ All three are NULL for MARKET and required for LIMIT. limit_price remains the fi
 
 Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. No legacy row corrections are included.
 
+A circuit-breaker rejection keeps the same LIMIT evidence shape: the requested price/currency and the acceptance rate are stored (they are the idempotency comparison basis and CHECK-required for every LIMIT row), while quote-time evidence and any reservation remain absent — the order is not priced against a quote and no cash or quantity is frozen. `market_event_id` is set only here and only on the stored `REJECTED` row.
+
+### Circuit-breaker execution deferral for existing orders (#167)
+
+Deferring an already accepted LIMIT order during an active KOSPI/KOSDAQ circuit breaker adds **no schema**. The accepted order keeps `status` PENDING/PARTIALLY_FILLED, its original `expires_at`, `reserved_cash` and the matching `locked_cash`/`locked_quantity`. It does **not** receive `market_event_id` — it is not rejected. No `trade_execution` or `ledger_entry` row is written and order-book `remaining_quantity`/`revision` are unchanged, because the attempt transaction rolls back entirely. Normal cancel/expire transitions still clear the remaining reservation during the halt.
+
 ### LIMIT execution indexes (#122)
 
 No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
 
-V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
+Later migrations V8–V15 add the market-event history, the quote-snapshot price-limit date and the circuit-breaker rejection FK. This execution deferral adds no migration, so `V15__trade_order_market_event_rejection.sql` remains the highest version.
 
 ---
 
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V13__stock_like.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V15__trade_order_market_event_rejection.sql`
 
 ## Regular-session trading dates and references (#173)
 
@@ -703,3 +709,5 @@ Use `America/New_York` for US market dates and `Asia/Seoul` for KR. Trade dates 
 Change ratios compare the displayed quote's trade date with the exact preceding trading day's finalized close. Missing verification yields null reference/change. Rankings cannot initialize quotes using aggregation timestamps, and the last sampled price is never a closing-price fallback. Holidays and midnight do not advance a quote's reference.
 
 Recovery runs 5s after startup and every 1m fixed delay thereafter. Today's daily candle is excluded if the request began before regular close + 10m. Empty responses or missing expected dates are not cached as completed refreshes. V10 adds only `quote_snapshot.prev_close_date`. Existing daily history remains visible in charts and weekly aggregates, without claiming retrospective verification. Missing or mismatched references are fetched again even when daily rows exist. Minute bars are also filtered by regular-session opening timestamps.
+
+No migration is added for #178. Existing V1 books become unusable immediately and are replaced/retired through normal publication and retention; orders and historical executions are preserved. Bounds are read from `quote_snapshot`, with no duplicate date/bounds columns on orders or books. This relies on the existing immutable same-day limit policy.

@@ -17,6 +17,8 @@ import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.support.PriceLimitFixtures;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -120,6 +122,7 @@ class OrderBookPublicationIntegrationTest {
         clock.setCurrent(BASE);
         krStock = stockRepository.save(tradableStock());
         descriptor = StockDescriptor.from(krStock);
+        PriceLimitFixtures.persist(jdbcTemplate, krStock, BASE);
     }
 
     private static Stock tradableStock() {
@@ -133,7 +136,7 @@ class OrderBookPublicationIntegrationTest {
     /** 현재 시계 기준의 정상 생성 입력 (quoteAt은 2초 전 시세). */
     private GeneratedOrderBook generatedBook(long seed) {
         Instant now = clock.instant();
-        return generator.generate(properties, descriptor, new BigDecimal("70000"), now.minusSeconds(2), now, seed);
+        return generator.generate(properties, descriptor, new BigDecimal("70000"), now.minusSeconds(2), now, seed, PriceLimitFixtures.at(now));
     }
 
     @Test
@@ -202,7 +205,7 @@ class OrderBookPublicationIntegrationTest {
         clock.advance(Duration.ofSeconds(20));
         GeneratedOrderBook stale = generator.generate(
                 properties, descriptor, new BigDecimal("70000"),
-                clock.instant().minusSeconds(16), clock.instant(), 42L);
+                clock.instant().minusSeconds(16), clock.instant(), 42L, PriceLimitFixtures.at(clock.instant()));
         Optional<Long> rejected = publicationService.publish(stale, clock.instant().plusSeconds(600));
 
         assertThat(rejected).isEmpty();
@@ -217,7 +220,7 @@ class OrderBookPublicationIntegrationTest {
         Instant now = clock.instant();
         GeneratedOrderBook future = generator.generate(
                 properties, descriptor, new BigDecimal("70000"),
-                now.plusSeconds(5), now, 43L);
+                now.plusSeconds(5), now, 43L, PriceLimitFixtures.at(now));
         Optional<Long> rejected = publicationService.publish(future, now.plusSeconds(600));
 
         assertThat(rejected).isEmpty();
@@ -275,9 +278,9 @@ class OrderBookPublicationIntegrationTest {
 
         GeneratedOrderBook valid = generatedBook(42L);
         var invalidLevels = new ArrayList<>(valid.levels());
-        // level_depth 1 중복을 추가하여 uq_order_book_level 유니크 제약 위반 유발
-        invalidLevels.add(new GeneratedOrderBookLevel(
-                OrderBookSide.ASK, 1, new BigDecimal("70100"), BigDecimal.TEN));
+        // 음수 수량으로 DB 제약 위반을 유발해 전체 롤백을 확인합니다.
+        invalidLevels.set(0, new GeneratedOrderBookLevel(
+                OrderBookSide.ASK, 1, new BigDecimal("70100"), BigDecimal.ONE.negate()));
         GeneratedOrderBook corrupt = new GeneratedOrderBook(
                 valid.stockId(), valid.basePrice(), valid.currency(), valid.quoteAt(), valid.generatedAt(),
                 valid.policyVersion(), valid.seed(), invalidLevels);

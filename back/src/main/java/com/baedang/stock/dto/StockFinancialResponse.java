@@ -8,10 +8,17 @@ public record StockFinancialResponse(
         String marketCountry,
         String dataStatus,
         Industry industry,
+        Valuation valuation,
         List<Period> annual,
         List<Period> quarterly,
         SyncedAt syncedAt
 ) {
+
+    public record Valuation(
+            String calculatedPer,
+            String basis
+    ) {
+    }
 
     public record Industry(
             Classification standard,

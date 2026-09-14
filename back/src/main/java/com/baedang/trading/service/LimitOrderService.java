@@ -18,11 +18,13 @@ import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.LimitOrderCommand;
+import com.baedang.trading.model.LimitOrderResult;
 import com.baedang.trading.model.MarketOrderAmount;
 import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderQuoteQueryContext;
 import com.baedang.trading.model.OrderTerms;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -30,8 +32,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 
@@ -99,7 +101,7 @@ public class LimitOrderService {
                 LimitOrderRequestPolicy.price(request.limitPrice(), currency),
                 currency
         );
-        Optional<OrderDetailResponse> existing = transactions.existing(userId, command);
+        Optional<LimitOrderResult> existing = transactions.existing(userId, command);
         if (existing.isPresent()) {
             return unwrap(existing.get());
         }
@@ -119,6 +121,10 @@ public class LimitOrderService {
         try {
             marketData.requireQuote(stock);
         } catch (BusinessException e) {
+            Optional<LimitOrderResult> halted = transactions.rejectIfHalted(userId, command);
+            if (halted.isPresent()) {
+                return unwrap(halted.get());
+            }
             throw retry(e.getErrorCode());
         }
         OrderMarketContext context = prepare(base.terms().marketCountry());
@@ -150,12 +156,23 @@ public class LimitOrderService {
         }
     }
 
-    private OrderDetailResponse unwrap(OrderDetailResponse result) {
-        if (result.status() == OrderStatus.REJECTED) {
-            throw new BusinessException(ErrorCode.valueOf(result.rejectReason()),
-                    ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+    private OrderDetailResponse unwrap(LimitOrderResult result) {
+        if (result.rejected()) {
+            // 커밋된 REJECTED는 새 ID로 재시도하도록 안내한다. CB 거절이면 이벤트 데이터를 함께 내보낸다.
+            ErrorCode reason = ErrorCode.valueOf(result.response().rejectReason());
+            Map<String, Object> data = rejectionResponse(result.rejectionData());
+            if (reason == ErrorCode.PRICE_OUT_OF_RANGE || reason == ErrorCode.INVALID_TICK_SIZE) {
+                data.put("field", "limitPrice");
+            }
+            throw new BusinessException(reason, data);
         }
-        return result;
+        return result.response();
+    }
+
+    private Map<String, Object> rejectionResponse(Map<String, Object> eventData) {
+        Map<String, Object> response = new LinkedHashMap<>(eventData);
+        response.putAll(ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+        return response;
     }
 
     public OrderDetailResponse cancel(Long userId, Long orderId) {
@@ -197,6 +214,9 @@ public class LimitOrderService {
         }
         if (reason == null) {
             reason = policy.validateQuoteTime(db.quote(), now);
+        }
+        if (reason == null) {
+            reason = policy.validateTradingPrice(db.stock(), db.quote(), p.limitPrice(), now, true);
         }
         if (reason == null && terms.side() == OrderSide.BUY && db.account().availableCash().compareTo(p.reserve()) < 0) {
             reason = ErrorCode.INSUFFICIENT_CASH;

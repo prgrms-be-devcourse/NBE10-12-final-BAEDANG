@@ -408,8 +408,6 @@ Sidecar items carry `direction` (`BUY` · `SELL`) instead of `stage`; circuit br
 }
 ```
 
-**Planned enforcement:** blocking new orders during a circuit breaker belongs to the order path and ships in a later change (Part 4/#166). Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — it does not gate anything.
-
 ---
 
 ## Stocks
@@ -534,6 +532,7 @@ Where the price comes from depends on **whether that stock's own market is open*
   "warnings": [
     { "type": "INVESTMENT_WARNING", "label": "투자경고" }
   ],
+  "warningsStatus": "AVAILABLE",
   "tradable": true,
   "tradableReason": null
 }
@@ -542,8 +541,12 @@ Where the price comes from depends on **whether that stock's own market is open*
 **Key fields**
 | Field | Meaning |
 |---|---|
+| `warnings` | active buy-caution items from Toss. `type` keeps the raw source code (`OVERHEATED` · `INVESTMENT_WARNING` · `VI_STATIC` · unknown); `label` is the screen text for that type — `과열종목` · `투자경고` · `변동성완화장치`, falling back to `거래유의종목` for a code we do not map yet |
+| `warningsStatus` | `AVAILABLE` when the caution lookup succeeded, `UNAVAILABLE` when it failed. **`UNAVAILABLE` is not "no cautions"** — the screen must not hide the badge as if the stock were clean |
 | `tradable` | whether this stock can be traded right now |
 | `tradableReason` | reason code when `tradable=false` |
+
+**Cautions are informational and never gate trading.** `warnings` is read from the Toss warnings endpoint through a short-TTL per-stock cache, so the detail screen's polling does not spend one external call per refresh. Only cautions whose `[startDate, endDate]` window contains today are returned. A lookup failure leaves `tradable`/`tradableReason` untouched. **Labels are decided by the backend** (`tools/terms.md` wording); the frontend renders `label` as-is so the same fact is not translated in two places.
 
 **`tradableReason` values**
 | Code | Screen text |
@@ -712,13 +715,13 @@ The ranked-universe collector runs once per minute, sequentially in 20-stock gro
 ### `GET /stocks/{symbol}/orderbook?marketCountry={KR|US}`
 Synthetic order book and depth query based on latest market price
 
-All users share the same synthetic order book snapshot. A single request returns 10 asks and all available bids: KR stocks always have 10 bids, while US stocks may have 1 to 10 bids for low-priced symbols. Query requests never generate new order books; they read from the database using a single SQL snapshot of the current active version.
+All users share the same synthetic order book snapshot. V2 returns up to 10 prices per side. KR prices stop at verified daily limits, and all markets stop where no positive storable tick remains. Either side may be empty. Query requests never generate new order books; they read from the database using a single SQL snapshot of the current active version.
 
 | Field | Required | Description |
 |---|---|---|
 | `symbol` (path parameter) | Y | Stock symbol (e.g., `005930`, `NVDA`) |
 | `marketCountry` (query parameter) | Y | Market country (`KR` / `US`, case-insensitive). Returns 400 if missing or unsupported |
-| none | - | `depth`, `page`, and `cursor` parameters are not accepted; the server returns 10 asks and all available bids (10 for KR, 1–10 for US) |
+| none | - | `depth`, `page`, and `cursor` parameters are not accepted; the server returns all available V2 levels (0–10 per side) |
 
 **Response 200** — `basePrice` and level `price` values are strings formatted by currency: KRW uses whole won with no decimal places, and USD uses exactly two decimal places. Level `quantity` is a string formatted via `FinancialDecimalFormatter.plain()`. `initialQuantity` is an internal audit value and is not exposed in the public API.
 ```json
@@ -760,8 +763,8 @@ All users share the same synthetic order book snapshot. A single request returns
 }
 ```
 
-- `asks`: sell quotes (10 levels in ascending price order, starting with best ask ASK 1).
-- `bids`: buy quotes in descending price order, starting with best bid BID 1. KR returns 10 levels; US returns 1–10 available levels, and a partial US depth must end at the minimum valid price of `$0.01`.
+- `asks`: sell quotes (0–10 levels in ascending price order, starting with best ask ASK 1 when present).
+- `bids`: buy quotes in descending price order, starting with best bid BID 1. V2 returns 0–10 levels, stopping at the lower limit for KR or the lowest valid positive tick. Empty arrays mean no liquidity on that side, not a malformed book.
 - `bookVersion`, `revision`, and levels come from a single database statement snapshot, guaranteeing consistency.
 
 **Errors**
@@ -927,6 +930,27 @@ The failure response's `data.retryPolicy` defines how to handle `clientOrderId`.
 
 Clients must follow `data.retryPolicy` instead of inferring ID reuse from the HTTP status or error code alone. If malformed JSON or another failure has no `retryPolicy`, do not automatically resend the unchanged request.
 
+**Circuit-breaker rejection data.** When a new order is rejected because a circuit breaker is active in the order's market, `data` carries the rejecting event's public fields plus `retryPolicy`. All timestamps are `+09:00`.
+
+Gating applies to **KR stocks in KOSPI and KOSDAQ only**. US stocks and `KR_ETC` are never gated, and a sidecar never blocks an ordinary order — it suspends program trading quotes only. The check runs inside the trading transaction after the account lock, not as a transaction-external preflight.
+
+```json
+{
+  "code": "MARKET_TRADING_HALTED",
+  "message": "현재 해당 시장의 매매거래가 일시 중단됐어요",
+  "data": {
+    "market": "KOSPI",
+    "eventType": "CIRCUIT_BREAKER",
+    "stage": 1,
+    "triggeredAt": "2026-07-13T13:28:32+09:00",
+    "haltUntil": "2026-07-13T13:48:32+09:00",
+    "retryPolicy": "NEW_CLIENT_ORDER_ID"
+  }
+}
+```
+
+The rejected order row stores the `market_event_id` it was decided against. A retry with the same `clientOrderId` replays that exact event's data — including after the circuit breaker has expired or a later, longer circuit breaker was collected — so the terminal response never changes. A market rejection stores no quote/reference/rate evidence; a limit rejection retains the user's requested price/currency and the acceptance rate (needed for idempotent comparison) but no quote evidence and no reservation.
+
 **Response · 201**
 ```json
 {
@@ -957,21 +981,21 @@ Market-order replay selects a normal ledger entry matching the order side with a
 ```
 ① Verify accountId ownership and read clientOrderId; return the stored result on an exact retry even for a closed round
 ② Read the stock and preflight static rules — universe → suspension → liquidation
-③ Only after preflight passes, read market session and US execution FX (KR uses rate 1), then record checkedAt when external data preparation finishes
+③ Only after preflight passes, require a fresh quote, then read market session and US execution FX (KR uses rate 1) and record checkedAt. If quote preparation fails, an account-lock fallback checks only for an active CB; a halt is persisted, otherwise the original preparation error is returned
 ④ SELECT the exact account by accountId and userId FOR UPDATE; reject a CLOSED account instead of carrying the order to a new round
 ⑤ Recheck clientOrderId; if the same order completed while waiting for the lock, return the stored result
 ⑥ For a new order only, reject an expired market context, read the quote, validate its currency, and lock holding for a sell (lock order: account → holding)
-⑦ Validate — universe → suspension → liquidation → session → quote time → settlement → cash/quantity
+⑦ After the sell holding lock, recheck active CB at the current clock instant before context freshness; a new halt stores REJECTED with its event even if the context expired while waiting. Then validate — universe → suspension → liquidation → session → quote time → settlement → cash/quantity
 ⑧ INSERT trade_order FILLED (or REJECTED for a business rejection confirmed in the transaction)
 ⑨ UPDATE account.cash_balance and lock/upsert holding
 ⑩ INSERT ledger_entry (append only; FILLED only)
 ```
 
-Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Field validation failures after a valid `clientOrderId` is parsed, external-market-data failures, static preflight failures, an expired market context, and quote-currency mismatches create no order row and return `SAME_CLIENT_ORDER_ID`. Only failures confirmed inside the transaction store a final `REJECTED` row and return `NEW_CLIENT_ORDER_ID`. A stock state can change between preflight and lock acquisition, so clients must follow `data.retryPolicy` rather than infer retry behavior from the error code alone. Unreadable JSON and an invalid `clientOrderId` have no valid ID to reuse and are outside this rule.
+Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Field validation failures after a valid `clientOrderId` is parsed, external-market-data failures, static preflight failures, an expired market context, and quote-currency mismatches normally create no order row and return `SAME_CLIENT_ORDER_ID`. The exception is a quote-preparation failure while a CB is active: a dedicated transaction locks the account, persists the CB rejection, and returns `NEW_CLIENT_ORDER_ID`; if no CB is active, the original preparation error remains unchanged. Other failures confirmed inside the transaction likewise store a final `REJECTED` row and return `NEW_CLIENT_ORDER_ID`. A stock state can change between preflight and lock acquisition, so clients must follow `data.retryPolicy` rather than infer retry behavior from the error code alone. Unreadable JSON and an invalid `clientOrderId` have no valid ID to reuse and are outside this rule.
 
 The market-order use case is a top-level transaction boundary. It must not be invoked inside another transaction; the application entry point enforces this with `Propagation.NEVER`, while the DB mutation service starts its own `REQUIRED` transaction. This keeps a committed `REJECTED` record from being rolled back by an unrelated outer workflow.
 
-**Trading eligibility** — market/limit orders and both quote APIs support non-ranked stocks. Before a new order, refresh listing status (and KR suspension/liquidation flags) through the shared status cache, and require a source quote no older than 15 seconds. Re-fetching a stale source price does not make it fresh. External preparation occurs before account locks; financial transactions revalidate database state and quote time. Idempotent completed requests return before external calls. Preparation failure stores no rejected order and permits the same clientOrderId retry; follow data.retryPolicy.
+**Trading eligibility** — market/limit orders and both quote APIs support non-ranked stocks. Before a new order, refresh listing status (and KR suspension/liquidation flags) through the shared status cache, and require a source quote no older than 15 seconds. Re-fetching a stale source price does not make it fresh. External preparation occurs before account locks; financial transactions revalidate database state and quote time. Idempotent completed requests return before external calls. A quote-preparation failure runs an external-call-free, account-lock transaction that records an active CB rejection; without an active CB it stores no order and preserves the same clientOrderId retry policy.
 
 One order may contain at most **1,000,000 shares**, configured by `trading.max-order-quantity`; scientific notation is not accepted.
 
@@ -979,6 +1003,7 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 | Code | HTTP | Default retry policy | Screen text |
 |---|---|---|---|
 | `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_TRADING_HALTED` | 422 | `NEW_CLIENT_ORDER_ID` | 현재 해당 시장의 매매거래가 일시 중단됐어요 |
 | `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
 | `STOCK_NOT_TRADABLE` | 422 | read `data.retryPolicy` for the actual path | 현재 거래를 지원하지 않는 종목이에요 |
 | `STOCK_SUSPENDED` | 422 | read `data.retryPolicy` for the actual path | 거래정지 종목이에요 |
@@ -1352,6 +1377,8 @@ A limit order may enter PENDING without an existing book. After commit, the sche
 - One transaction writes all selected fills, per-fill append-only executions and ledger balanceAfter, cumulative order amounts, cash/reserves/holdings and shared level consumption. It advances book revision exactly once if at least one fill commits. Any failure rolls everything back; no legacy repair/replay is synthesized.
 - Cancellation and the existing 30s expiration scan share the account-first boundary; previously settled fills remain historical records. The worker does not mark expired orders itself.
 
+An active circuit breaker for the order's KOSPI/KOSDAQ market defers execution of an already accepted limit order. The accepted order stays PENDING/PARTIALLY_FILLED with its original `expiresAt` and reservation; no order-book quantity/revision, execution, account, holding or ledger state changes. At `now == haltUntil` the halt is already inactive (exclusive boundary), so a still-unexpired order may execute on the next worker pass. Cancellation and expiration remain available during the halt and still release locked cash or quantity. This deferral is a worker-only condition — it is **not** an HTTP `MARKET_TRADING_HALTED` response, creates no REJECTED row and stores no `market_event_id`. The authoritative check runs inside the execution transaction after the existing account → order → book version → levels → holding locks and the second expiry check, before context/planning/mutation, so a CB that starts while the attempt waits for those locks is still caught. Nothing outside the transaction prechecks or caches halt state.
+
 `STOCK_STATUS_UNAVAILABLE` (503) covers missing/unknown status, missing KR restrictions, or status-refresh lock timeout. Unknown data is never treated as tradable. The default status cache TTL is 5 minutes. US responses lack KR-specific suspension/liquidation data, so existing flags are preserved.
 
 ## Regular-session trading dates and references (#173)
@@ -1364,4 +1391,14 @@ Recovery runs 5s after startup and every 1m fixed delay thereafter. Today's dail
 
 ## Price-limit display policy
 
-Stock detail keeps the existing nullable `price.upperLimit` and `price.lowerLimit` fields. During a KR regular session only today's validated limits are visible; outside regular hours they must match the displayed quote's regular-session trade date. Missing/unverified/mismatched dates return null without failing the detail response. US always returns both null and displays "가격 제한 없음"; KR null displays "정보 없음". Collection failure does not change tradability, order admission or synthetic order-book behavior. New collection is regular-session only; pre-open/holiday requests can display matching stored values but cannot backfill past limits.
+Stock detail keeps the existing nullable `price.upperLimit` and `price.lowerLimit` fields. During a KR regular session only today's validated limits are visible; outside regular hours they must match the displayed quote's regular-session trade date. Missing/unverified/mismatched dates return null without failing the detail response. US always returns both null and displays "가격 제한 없음"; KR null displays "정보 없음". Detail remains readable on collection failure. KR order admission and book publication require verified current-day limits; existing LIMIT fills are deferred while those limits are unavailable. New collection is regular-session only; pre-open/holiday requests can display matching stored values but cannot backfill past limits.
+
+## Price-limit enforcement (#178)
+
+Regular-session KR MARKET/LIMIT orders require `price_limit_date` matching the exchange-local current date and valid inclusive bounds. Estimates use the same rules. A LIMIT price must also satisfy `TickSizePolicy`; no clamping or percentage-based fallback is allowed. US null limits are normal and do not block trading. The current quote itself must be within the verified KR bounds. MARKET keeps current-price immediate settlement and does not consume synthetic depth.
+
+`PRICE_LIMIT_UNAVAILABLE` (503) and `QUOTE_OUT_OF_PRICE_LIMIT` (502) abort new submissions without order, reservation, execution or ledger writes and return `SAME_CLIENT_ORDER_ID`. Estimates report these codes as non-executable reasons. `PRICE_OUT_OF_RANGE` and `INVALID_TICK_SIZE` (422) are confirmed LIMIT business rejections: stored REJECTED with `NEW_CLIENT_ORDER_ID`, no reservation or ledger. Existing-order replay precedes validation and never reactivates an order.
+
+Order preparation may use `PriceLimitLoadService.ensureForTrading` outside financial transactions. It shares the existing 2 TPS gate, per-stock in-flight suppression and 1-minute failure cooldown; it does not wait for a gate slot. A granted call still uses broker rate limiting and HTTP timeouts. Quotes are reread after recovery. There are no external calls after account/book locks. The background schedule remains initial delay 60 seconds and fixed delay 5 minutes.
+
+V2 is the only supported generation policy. ASK starts strictly above the base and BID strictly below it. Missing/old-day limits or an out-of-range base prevent publication; readers and fills reject V1 immediately until scheduled V2 replacement. The single SQL snapshot includes limits and retains a header even when both sides are empty. Expected tick arrays distinguish boundary truncation from missing or duplicate levels. A valid empty side yields AVAILABLE/NO_LIQUIDITY with zero preview fills. Existing orders wait without reserve changes; they still expire at their accepted session close. No overnight rollover or intraday limit correction is added.

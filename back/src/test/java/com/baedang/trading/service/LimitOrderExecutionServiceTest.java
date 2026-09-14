@@ -6,6 +6,7 @@ import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.orderbook.service.TickSizePolicy;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -21,6 +22,7 @@ import com.baedang.trading.model.LimitExecutionOutcome;
 import com.baedang.trading.model.LimitExecutionPreparation;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.repository.TradeOrderRepository;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -149,7 +151,7 @@ class LimitOrderExecutionServiceTest {
 
     private void assertThatThrownByContextExpired(OrderMarketContext context, Instant at) {
         Assertions.assertThatThrownBy(() ->
-                new OrderPolicy(15,15,new BigDecimal("1000000")).validateExecutionContextFresh(context,at))
+                new OrderPolicy(15,15,new BigDecimal("1000000"), new TickSizePolicy()).validateExecutionContextFresh(context,at))
                 .isInstanceOfSatisfying(BusinessException.class,
                         exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_CONTEXT_EXPIRED));
     }

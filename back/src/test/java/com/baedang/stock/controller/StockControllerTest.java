@@ -244,7 +244,7 @@ public class StockControllerTest {
                 new StockDetailResponse.Price("241500", "236050", "5450", "0.023089",
                         "313500", "169500", OffsetDateTime.parse("2026-08-27T12:00:00+09:00"), true),
                 new StockDetailResponse.Info("1441498485825000", "5968935760", LocalDate.parse("1975-06-11")),
-                List.of(), true, null);
+                List.of(), StockDetailResponse.WarningStatus.AVAILABLE, true, null);
         when(stockDetailService.getDetail("005930", "KR")).thenReturn(response);
 
         mockMvc.perform(get("/api/stocks/005930").param("marketCountry", "KR"))
@@ -294,6 +294,7 @@ public class StockControllerTest {
                         new StockFinancialResponse.Classification("0326", "전자부품"),
                         null, null, null
                 ),
+                new StockFinancialResponse.Valuation("14.27", "LATEST_ANNUAL_EPS"),
                 List.of(
                         new StockFinancialResponse.Period(
                                 "202512",
@@ -321,6 +322,8 @@ public class StockControllerTest {
                 .andExpect(jsonPath("$.symbol").value("005930"))
                 .andExpect(jsonPath("$.marketCountry").value("KR"))
                 .andExpect(jsonPath("$.dataStatus").value("FRESH"))
+                .andExpect(jsonPath("$.valuation.calculatedPer").value("14.27"))
+                .andExpect(jsonPath("$.valuation.basis").value("LATEST_ANNUAL_EPS"))
                 .andExpect(jsonPath("$.industry.standard.code").value("0326"))
                 .andExpect(jsonPath("$.annual[0].statementYearMonth").value("202512"))
                 .andExpect(jsonPath("$.annual[0].balanceSheet.currentAssets").value("100"))

@@ -21,6 +21,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -227,6 +228,149 @@ class MarketEventRepositoryIntegrationTest {
                 """, String.class))
                 .contains("ck_market_event_market", "ck_market_event_type",
                         "ck_market_event_time", "ck_market_event_payload");
+    }
+
+    /**
+     * CB 거절 주문은 판정에 사용한 이벤트를 FK로 가리켜야 멱등 재생이 최초 이벤트를 복원할 수 있다.
+     * CHECK가 이 연결을 강제하고, 다른 거절·정상 주문에는 남지 않게 막는다.
+     */
+    @Test
+    void trade_order_requires_market_event_for_cb_rejection() {
+        assertThat(jdbc.queryForList("""
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'trade_order'::regclass
+                  AND contype = 'c'
+                """, String.class))
+                .contains("ck_trade_order_market_event_rejection");
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), NULL)
+                """, accountId(), stockId(), java.util.UUID.randomUUID()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** 다른 거절 사유에 CB 이벤트가 붙으면 감사 연결이 거짓이 된다. */
+    @Test
+    void trade_order_forbids_market_event_on_other_rejections() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'INSUFFICIENT_CASH', now(), now(), ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_forbids_market_event_when_reject_reason_is_null() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', NULL, now(), now(), ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_market_event_fk_rejects_unknown_event() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), 999999999)
+                """, accountId(), stockId(), java.util.UUID.randomUUID()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
+     * CB 거절은 REJECTED 확정 행에만 존재할 수 있다. 상태를 보지 않으면 활성 주문이 이 사유와
+     * 이벤트 ID를 들고 있어도 통과해 감사 연결이 거짓이 된다.
+     *
+     * <p>PENDING 지정가의 다른 제약(수량·동결·만료)을 모두 만족시켜, 이 테스트가 오직
+     * `ck_trade_order_market_event_rejection`만으로 거절되는지 확인한다.
+     */
+    @Test
+    void trade_order_rejects_market_event_on_pending_status() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, expires_at, limit_price, reserved_cash,
+                     requested_limit_price, requested_limit_currency, acceptance_exchange_rate,
+                     gross_amount, fee, tax, net_amount, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'LIMIT', 1,
+                        'PENDING', 'MARKET_TRADING_HALTED', now(), now() + interval '1 hour',
+                        1000, 1000, 1000, 'KRW', 1, 0, 0, 0, 0, ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_rejects_market_event_on_filled_status() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, filled_quantity, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'FILLED', 'MARKET_TRADING_HALTED', now(), now(), 1, ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** 제약을 모두 만족하는 CB 거절은 실제로 저장되고 이벤트 ID가 왕복한다. */
+    @Test
+    void trade_order_stores_valid_cb_rejection_with_event_id() {
+        Long account = accountId();
+        Long stock = stockId();
+        Long event = eventId();
+        java.util.UUID clientOrderId = java.util.UUID.randomUUID();
+
+        jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), ?)
+                """, account, stock, clientOrderId, event);
+
+        assertThat(jdbc.queryForObject(
+                "SELECT market_event_id FROM trade_order WHERE account_id = ? AND client_order_id = ?",
+                Long.class, account, clientOrderId)).isEqualTo(event);
+    }
+
+    private Long accountId() {
+        Long userId = jdbc.queryForObject("""
+                INSERT INTO users (email, password_hash, nickname, status, created_at)
+                VALUES (?, 'hash', ?, 'ACTIVE', now())
+                RETURNING user_id
+                """, Long.class, java.util.UUID.randomUUID() + "@example.com",
+                java.util.UUID.randomUUID().toString().substring(0, 8));
+        return jdbc.queryForObject("""
+                INSERT INTO account (user_id, round_no, initial_cash, cash_balance, locked_cash, status, opened_at)
+                VALUES (?, 1, 0, 0, 0, 'ACTIVE', now())
+                RETURNING account_id
+                """, Long.class, userId);
+    }
+
+    private Long stockId() {
+        return jdbc.queryForObject("""
+                INSERT INTO stock (symbol, market_country, market, name, currency, security_type,
+                                   listing_status, is_ranked, created_at, updated_at)
+                VALUES (?, 'KR', 'KOSPI', '테스트 종목', 'KRW', 'STOCK', 'ACTIVE', false, now(), now())
+                RETURNING stock_id
+                """, Long.class, java.util.UUID.randomUUID().toString().substring(0, 6));
+    }
+
+    private Long eventId() {
+        return repository.saveAndFlush(circuitBreaker("20260713000799", START, END)).getMarketEventId();
     }
 
     @Test

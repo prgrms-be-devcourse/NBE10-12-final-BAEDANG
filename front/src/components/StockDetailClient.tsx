@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Tag } from "./Tag";
 import { SignupModal } from "./SignupModal";
 import { PillTabs } from "./PillTabs";
@@ -8,6 +8,7 @@ import { CandleChartSection } from "./CandleChartSection";
 import { ChartExpandModal } from "./ChartExpandModal";
 import { OrderBookPanel } from "./OrderBookPanel";
 import { StockFinancialsSection } from "./StockFinancialsSection";
+import { StockStatusBadges } from "./StockStatusBadges";
 import { TourGuide, type TourStep } from "./TourGuide";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
@@ -30,19 +31,21 @@ import {
   type AccountSummary,
   type Candle,
   type HoldingItem,
-  type LimitOrderQuoteResponse,
   type StockDetail,
 } from "@/lib/api";
 import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-policy";
+import {
+  EMPTY_STOCK_MARKET_EVENT_STATE,
+  fetchStockMarketEvents,
+  type StockMarketEventState,
+} from "@/lib/stock-market-events";
+import { buildStatusBadges, resolveBlockReason, TRADABLE_REASON_LABEL } from "@/lib/stock-status";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
+import { canRetryLimitQuote, createLimitQuoteRefresh, EMPTY_LIMIT_QUOTE } from "@/lib/limit-quote-refresh";
 
-const TRADABLE_REASON_LABEL: Record<string, string> = {
-  MARKET_CLOSED: "장 마감 · 거래 시간이 아니에요",
-  NOT_IN_UNIVERSE: "이 종목은 아직 거래를 지원하지 않아요",
-  SUSPENDED: "거래정지 종목이에요",
-  LIQUIDATION: "정리매매 종목이에요",
-  QUOTE_NOT_FOUND: "시세 정보가 아직 없어요",
-};
+// 시장조치는 발생 빈도가 낮은 긴급 정보라 시세(5초)처럼 자주 볼 필요는 없다.
+// 랭킹 배너와 같은 1분 주기로 맞춰 두 화면이 같은 시점의 상태를 보여준다.
+const MARKET_EVENT_POLL_INTERVAL_MS = 60_000;
 
 // 이 화면을 처음 보는 사용자를 위한 안내 투어. localStorage에 한 번 완료/건너뛰기
 // 기록을 남기면 다음 방문부터는 자동으로 뜨지 않는다("거래하기" 옆 안내 버튼으로
@@ -109,6 +112,7 @@ const CATEGORY_GUIDE: Record<string, string> = {
 // 받을 데이터가 없다 — 그래서 이 둘은 폴링하지 않고, 세그먼트/기간이 바뀔
 // 때만 다시 조회하는 기존 동작을 그대로 둔다.
 const MINUTE_CANDLE_POLL_INTERVAL_MS = 60 * 1000;
+const LIMIT_QUOTE_RETRY_INTERVAL_MS = 5_000;
 const INTRADAY_CANDLE_UNITS: readonly CandleUnit[] = ["1분봉", "5분봉", "10분봉"];
 
 export function StockDetailClient({ detail }: { detail: StockDetail }) {
@@ -150,9 +154,9 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   );
   // 국내 종목은 원화만 허용한다(백엔드 규칙). 미국 종목만 원화/달러 입력을 토글할 수 있다.
   const [limitCurrency, setLimitCurrency] = useState<"KRW" | "USD">("KRW");
-  const [limitQuote, setLimitQuote] = useState<LimitOrderQuoteResponse | null>(null);
-  const [limitQuoteLoading, setLimitQuoteLoading] = useState(false);
-  const [limitQuoteError, setLimitQuoteError] = useState<string | null>(null);
+  const [limitQuoteState, setLimitQuoteState] = useState(EMPTY_LIMIT_QUOTE);
+  const { quote: limitQuote, loading: limitQuoteLoading, error: limitQuoteError } = limitQuoteState;
+  const limitQuoteRequestRef = useRef<ReturnType<typeof createLimitQuoteRefresh> | null>(null);
   // 지정가 접수(POST /orders/limit) 실패가 INVALID_INPUT이고 서버가 어떤 필드가
   // 문제인지(`data.field`) 알려주면, 하단 공용 배너 대신 해당 입력 옆에 표시한다.
   // 회원가입 검증 실패(ApiError.fieldErrors, {필드: 메시지} 맵)와는 계약이 다르다 —
@@ -162,34 +166,41 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const categoryLabelValue = categoryLabel(detail.category, detail.isDividend);
   const changeDecimal = toDecimal(detail.price.changeAmount);
   const isUp = !changeDecimal || changeDecimal.greaterThanOrEqualTo(0);
-  const warningLabel = detail.warnings.find((w) => w.type === "INVESTMENT_WARNING")?.label ?? null;
 
-  // 투자경고 배너("이 종목은 ... 매수 전 확인하세요")가 있으면 왼쪽 컬럼은
-  // breadcrumb → 배너 → 종목명 순으로 내려가는데, 오른쪽 거래하기 패널이 왼쪽
-  // 컬럼과 같은 높이(맨 위, breadcrumb 높이)에서 시작하면 배너보다 훨씬 위에
-  // 떠서 "나란히"가 아니라 배너보다 위에 있는 것처럼 보인다. 배너와 나란히
-  // 시작하게 하려면, 배너 앞에 있는 breadcrumb의 실제 렌더 높이(+ 아래 여백)만큼만
-  // 거래하기 패널을 내리면 된다 — 배너 자체의 높이가 아니라 배너 "앞"의 높이다.
-  const breadcrumbRef = useRef<HTMLDivElement>(null);
-  const [measuredBreadcrumbHeight, setMeasuredBreadcrumbHeight] = useState(0);
-  // 경고가 없는 종목은 애초에 거래하기 패널이 breadcrumb과 같은 높이에서 시작해도
-  // 문제없으므로(맞춰야 할 배너 자체가 없다), 이 경우엔 오프셋을 적용하지 않는다.
-  const tradePanelOffset = warningLabel ? measuredBreadcrumbHeight : 0;
-
-  function measureBreadcrumbHeight() {
-    const el = breadcrumbRef.current;
-    if (el) setMeasuredBreadcrumbHeight(el.offsetHeight + 14); // mb-3.5(14px) = breadcrumb과 배너 사이 여백
-  }
-
-  useLayoutEffect(measureBreadcrumbHeight, [warningLabel]);
-
+  // ── 시장조치(서킷브레이커·사이드카) 상태 ─────────────────────────────────────
+  // 종목의 시장(KOSPI/KOSDAQ)에 대한 오늘의 활성 이벤트만 본다. 미국 종목과
+  // KR_ETC는 KIND 대상이 아니라 조회 자체를 하지 않는다(fetchStockMarketEvents 안에서).
+  // 실패하면 마지막 성공 상태를 유지하고, 한 번도 못 받았으면 비활성으로 둔다 —
+  // 화면이 임의로 주문을 막으면 서버가 허용하는 주문을 클라이언트가 거부하게 된다.
+  const [marketEvents, setMarketEvents] = useState<StockMarketEventState>(EMPTY_STOCK_MARKET_EVENT_STATE);
   useEffect(() => {
-    const el = breadcrumbRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measureBreadcrumbHeight);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [warningLabel]);
+    // 종목이 바뀌면 이전 종목 시장의 상태를 들고 있으면 안 된다 — 먼저 비운다.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMarketEvents(EMPTY_STOCK_MARKET_EVENT_STATE);
+    let cancelled = false;
+    fetchStockMarketEvents(detail.market)
+      .then((next) => {
+        if (!cancelled) setMarketEvents(next);
+      })
+      .catch(() => {
+        // 조회 실패는 조용히 넘긴다 — 다음 폴링에서 다시 시도한다.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.market]);
+  useVisiblePolling(
+    () => {
+      fetchStockMarketEvents(detail.market)
+        .then(setMarketEvents)
+        .catch(() => {});
+    },
+    MARKET_EVENT_POLL_INTERVAL_MS,
+    true,
+  );
+
+  // 종목명 옆에 붙는 정보성 배지 — 주문을 막지 않는 상태만 온다.
+  const statusBadges = buildStatusBadges(detail, marketEvents);
 
   // 처음 방문하는 사용자만 자동으로 안내 투어를 띄운다 — 완료/건너뛰기 기록이
   // 없을 때만 시작한다("거래하기" 옆 안내 버튼으로 언제든 다시 볼 수 있다).
@@ -326,18 +337,20 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const changeKrw = toKrw(changeDecimal, detail.currency, usdKrwRate);
   const priceLabel = formatNumber(lastPriceKrw);
 
-  let blockReason: string | null = null;
-  if (!detail.tradable) {
-    blockReason = detail.tradableReason ? TRADABLE_REASON_LABEL[detail.tradableReason] ?? "지금은 거래할 수 없어요" : "지금은 거래할 수 없어요";
-  } else if (amount === null) {
-    blockReason = "환율 정보를 불러온 후 주문해주세요";
+  // 금액·수량 검증은 종목/차단 상태가 모두 통과한 뒤에만 본다 — 이미 못 사는 종목에
+  // "예수금이 부족해요"를 띄우면 사용자가 엉뚱한 곳을 고치려 든다.
+  let amountReason: string | null = null;
+  if (amount === null) {
+    amountReason = "환율 정보를 불러온 후 주문해주세요";
   } else if (quantity <= 0) {
-    blockReason = "수량은 1주 이상의 정수로 입력해주세요";
+    amountReason = "수량은 1주 이상의 정수로 입력해주세요";
   } else if (side === "매도" && quantity > availableQuantity) {
-    blockReason = "보유 수량이 부족해요";
+    amountReason = "보유 수량이 부족해요";
   } else if (side === "매수" && amount.netAmount > availableCash) {
-    blockReason = "주문가능금액이 부족해요";
+    amountReason = "주문가능금액이 부족해요";
   }
+
+  const blockReason = resolveBlockReason({ detail, events: marketEvents, amountReason });
 
   // ── 지정가 주문 계산 ──────────────────────────────────────────────────────────
   const limitPriceDecimal = toDecimal(limitPriceInput);
@@ -404,58 +417,53 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   useEffect(() => {
     if (orderType !== "지정가" || !isLoggedIn || !detail.tradable || quantity <= 0 || !limitPriceValid) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLimitQuote(null);
-      setLimitQuoteError(null);
-      setLimitQuoteLoading(false);
+      setLimitQuoteState(EMPTY_LIMIT_QUOTE);
       return;
     }
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      setLimitQuoteLoading(true);
-      getLimitOrderQuote({
-        symbol: detail.symbol,
-        marketCountry: detail.marketCountry,
-        side: side === "매수" ? "BUY" : "SELL",
-        quantity: quantityInput,
-        limitPrice: limitPriceInput,
-        limitCurrency,
-      })
-        .then((quote) => {
-          if (cancelled) return;
-          setLimitQuote(quote);
-          setLimitQuoteError(null);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setLimitQuote(null);
-          setLimitQuoteError(err instanceof ApiError ? err.message : "미리보기를 불러오지 못했어요.");
-        })
-        .finally(() => {
-          if (!cancelled) setLimitQuoteLoading(false);
-        });
-    }, 500);
+    // 입력 변경 직후에도 이전 미리보기로 주문 가능 여부를 판단하지 않습니다.
+    setLimitQuoteState({ ...EMPTY_LIMIT_QUOTE, loading: true });
+    const request = createLimitQuoteRefresh(() => getLimitOrderQuote({
+      symbol: detail.symbol,
+      marketCountry: detail.marketCountry,
+      side: side === "매수" ? "BUY" : "SELL",
+      quantity: quantityInput,
+      limitPrice: limitPriceInput,
+      limitCurrency,
+    }), setLimitQuoteState);
+    limitQuoteRequestRef.current = request;
+    const timer = setTimeout(() => { void request.refresh(); }, 500);
     return () => {
-      cancelled = true;
+      request.dispose();
+      limitQuoteRequestRef.current = null;
       clearTimeout(timer);
     };
-  }, [orderType, isLoggedIn, detail.tradable, detail.symbol, detail.marketCountry, side, quantity, quantityInput, limitPriceInput, limitCurrency, limitPriceValid]);
+  }, [orderType, isLoggedIn, detail.tradable, detail.symbol, detail.marketCountry, side, quantity, quantityInput, limitPriceInput, limitCurrency, limitPriceValid, detail.price.upperLimit, detail.price.lowerLimit]);
 
-  let limitBlockReason: string | null = null;
-  if (!detail.tradable) {
-    limitBlockReason = detail.tradableReason ? TRADABLE_REASON_LABEL[detail.tradableReason] ?? "지금은 거래할 수 없어요" : "지금은 거래할 수 없어요";
-  } else if (quantity <= 0) {
-    limitBlockReason = "수량은 1주 이상의 정수로 입력해주세요";
+  // 정상 응답·입력 오류에서는 중단하고, 일시적인 시세 오류만 보이는 탭에서 복구합니다.
+  useVisiblePolling(
+    () => { void limitQuoteRequestRef.current?.retry(); },
+    LIMIT_QUOTE_RETRY_INTERVAL_MS,
+    orderType === "지정가" && isLoggedIn && detail.tradable && quantity > 0 && limitPriceValid
+      && canRetryLimitQuote(limitQuoteState),
+  );
+
+  let limitAmountReason: string | null = null;
+  if (quantity <= 0) {
+    limitAmountReason = "수량은 1주 이상의 정수로 입력해주세요";
   } else if (!limitPriceValid) {
-    limitBlockReason = "지정가를 입력해주세요";
+    limitAmountReason = "지정가를 입력해주세요";
   } else if (side === "매도" && quantity > availableQuantity) {
-    limitBlockReason = "보유 수량이 부족해요";
+    limitAmountReason = "보유 수량이 부족해요";
   } else if (limitQuoteLoading) {
-    limitBlockReason = "미리보기 확인 중…";
+    limitAmountReason = "미리보기 확인 중…";
   } else if (limitQuote && !limitQuote.acceptable) {
-    limitBlockReason = limitQuote.reason ? TRADABLE_REASON_LABEL[limitQuote.reason] ?? "지금은 지정가 주문을 접수할 수 없어요" : "지금은 지정가 주문을 접수할 수 없어요";
+    limitAmountReason = limitQuote.reason ? TRADABLE_REASON_LABEL[limitQuote.reason] ?? "지금은 지정가 주문을 접수할 수 없어요" : "지금은 지정가 주문을 접수할 수 없어요";
   } else if (!limitQuote && limitQuoteError) {
-    limitBlockReason = limitQuoteError;
+    limitAmountReason = limitQuoteError.message;
   }
+
+  // 시장가와 같은 함수를 쓴다 — 두 주문 유형이 같은 차단 사유를 말해야 한다.
+  const limitBlockReason = resolveBlockReason({ detail, events: marketEvents, amountReason: limitAmountReason });
 
   // 매수/매도 필박스 색 — 예전에는 --up/--down 토큰을 그대로 썼는데, 그 토큰을
   // 차트용으로 더 선명하게 조정한 뒤(globals.css) 이 버튼만은 예전 색이 더 낫다는
@@ -615,37 +623,24 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   return (
     <div className="flex gap-6 max-md:flex-col">
       <div className="flex-[1.9]">
-        <div ref={breadcrumbRef} className="mb-3.5 text-[14px]" style={{ color: "var(--mut2)" }}>
+        <div className="mb-3.5 text-[14px]" style={{ color: "var(--mut2)" }}>
           <span className="cursor-pointer">주식 종목 랭킹</span> › {detail.name}
         </div>
 
-        {warningLabel && (
-          <div
-            className="mb-3.5 rounded-[14px] px-4.5 py-3.5 text-[14.5px]"
-            style={
-              // 라이트 모드에서만 좀 더 세련된 레드 계열(와인빛이 도는 딥레드)로 바꿔달라는
-              // 요청 — 다크 모드는 기존 warnBg/warnText/warnBorder 토큰을 그대로 쓴다.
-              // 이 토큰들은 주문 실패 안내(orderError) 등 다른 곳에서도 공유해서 쓰기
-              // 때문에, 전역 토큰이 아니라 이 배너에만 인라인으로 색을 지정했다.
-              theme === "light"
-                ? { background: "oklch(95% 0.035 16)", border: "1px solid oklch(83% 0.09 16)", color: "oklch(40% 0.17 14)" }
-                : { background: "var(--warnBg)", border: "1px solid var(--warnBorder)", color: "var(--warnText)" }
-            }
-          >
-            ⚠ 이 종목은 <b>{warningLabel}</b> 종목으로 지정되어 있습니다. 매수 전 확인하세요.
-          </div>
-        )}
-
         <div className="mb-1.5">
-          <div className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>
+          <div
+            className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[20px] font-bold"
+            style={{ color: "var(--ink)" }}
+          >
             {detail.name} <Tag weightClassName="font-bold">{detail.symbol}</Tag>{" "}
             <Tag weightClassName="font-bold">{detail.market}</Tag>{" "}
             <span
-              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-bold"
+              className="inline-block rounded-md px-1.5 py-0.5 text-[11.5px] font-bold"
               style={CATEGORY_BADGE_STYLE[categoryLabelValue]}
             >
               {categoryLabelValue}
             </span>
+            <StockStatusBadges badges={statusBadges} />
           </div>
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-[30px] font-extrabold" style={{ color: "var(--ink)" }}>
@@ -761,10 +756,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       </div>
 
       {/* 거래 패널 */}
-      <div
-        className="min-w-[300px] flex-1 self-start md:sticky md:top-[70px]"
-        style={{ marginTop: tradePanelOffset }}
-      >
+      <div className="min-w-[300px] flex-1 self-start md:sticky md:top-[70px]">
         <div className="rounded-[24px] p-6" style={{ background: "var(--card)" }}>
           <div className="mb-1 flex items-center justify-between">
             <span className="text-[16px] font-bold" style={{ color: "var(--ink)" }}>거래하기</span>
@@ -919,6 +911,11 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
                   setLimitFieldError(null);
                 }}
               />
+              <p className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
+                {isUsdStock ? "가격 제한 없음" : detail.price.lowerLimit != null && detail.price.upperLimit != null
+                  ? `주문 가능 범위: ${formatNumber(detail.price.lowerLimit)}원 ~ ${formatNumber(detail.price.upperLimit)}원 (호가 단위 적용)`
+                  : "당일 상하한가 확인 후 주문할 수 있어요"}
+              </p>
               {isUsdStock && limitCurrency === "KRW" && limitPriceValid && (
                 <div className="mt-1 text-[11.5px]" style={{ color: "var(--mut2)" }}>
                   약 {limitPriceInStockCurrency != null ? limitPriceInStockCurrency.toFixed(2) : "-"}$로 환산돼요(접수 시점 환율로 최종 확정)

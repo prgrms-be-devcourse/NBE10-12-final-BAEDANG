@@ -3,15 +3,18 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.service.PriceLimitLoadService;
 import com.baedang.market.service.QuoteRefreshCoordinator;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.service.StockTradingStatusService;
 import com.baedang.trading.model.OrderQuoteQueryContext;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
-import com.baedang.market.repository.QuoteSnapshotRepository;
+
 import java.time.Duration;
 
 /** 외부 준비 전용. 금융 트랜잭션/차트 백필을 시작하지 않습니다. */
@@ -22,13 +25,16 @@ public class OrderMarketDataService {
     private final QuoteRefreshCoordinator quotes;
     private final QuoteSnapshotRepository snapshots;
     private final Duration maxAge;
+    private final PriceLimitLoadService priceLimits;
 
     public OrderMarketDataService(StockTradingStatusService statuses, QuoteRefreshCoordinator quotes,
-            QuoteSnapshotRepository snapshots, @Value("${trading.quote-max-staleness-seconds}") long maxAgeSeconds) {
+            QuoteSnapshotRepository snapshots, @Value("${trading.quote-max-staleness-seconds}") long maxAgeSeconds,
+            PriceLimitLoadService priceLimits) {
         this.statuses = statuses;
         this.quotes = quotes;
         this.snapshots = snapshots;
         this.maxAge = Duration.ofSeconds(maxAgeSeconds);
+        this.priceLimits = priceLimits;
     }
 
     public Stock refreshStatus(Stock stock) {
@@ -36,7 +42,9 @@ public class OrderMarketDataService {
     }
 
     public QuoteSnapshot requireQuote(Stock stock) {
-        return quotes.requireFresh(stock, maxAge);
+        QuoteSnapshot quote = quotes.requireFresh(stock, maxAge);
+        priceLimits.ensureForTrading(stock);
+        return snapshots.findById(stock.getStockId()).orElse(quote);
     }
 
     /** 시각 오류는 기존 견적의 실행 불가 reason으로 표현하고, 통신/데이터 부재는 HTTP 오류로 유지합니다. */

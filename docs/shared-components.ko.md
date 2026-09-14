@@ -247,14 +247,14 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 | [LatestCompletedTradingDayResolver](../back/src/main/java/com/baedang/market/service/LatestCompletedTradingDayResolver.java) | `resolve(country)` / `resolve(country, requestedAt)` → `Optional<LocalDate>` | 현지 날짜·캘린더로 최신 확정 거래일 탐색. 현재 마감 확정 지연 10분, 과거 탐색 최대 14일. 조회 장애·응답 불일치·미발견 시 empty |
 
 | [TickSizePolicy](../back/src/main/java/com/baedang/orderbook/service/TickSizePolicy.java) | `nextValidPriceAbove`, `previousValidPriceBelow`, `isValidPrice`, `tickSizeAt` | 시장·종목 유형별 호가 단위 및 경계를 넘는 유효 가격 계산. NUMERIC(19,4) 최대 범위(999999999999999.9999) 내에서 계산 |
-| [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed)` | 고정 seed와 설정 기반 순수 가상 호가 생성기. V1 깊이 배수·정수 노이즈·tick 상대 라운드 넘버 부스트 적용. ASK 10개와 시장별 BID 깊이(국내 10개, 미국 1~10개)를 생성 |
-| [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 지정가 부분 체결 엔진(#122)이 동일 트랜잭션에서 활성 버전과 방향별 실제 레벨을 비관적 락으로 잠금. ASK는 10개, KRW BID는 10개, USD BID는 1~10개이며 10개 미만이면 마지막 가격은 `$0.01`. BUY→ASK, SELL→BID |
-| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V1 기본값: 3s 주기, 15s maxQuoteAge, 1m retention |
+| [OrderBookGenerator](../back/src/main/java/com/baedang/orderbook/service/OrderBookGenerator.java) | `generate(policy, stock, basePrice, quoteAt, generatedAt, seed, limits)` | 단일 V2 생성기. `OrderBookPricePolicy`와 검증된 당일 범위로 각 방향 0~10개 생성; 수량 노이즈 정책 유지 |
+| [OrderBookExecutionStore](../back/src/main/java/com/baedang/orderbook/port/OrderBookExecutionStore.java) | `lockForExecution(stockId, expectedBookVersion, expectedRevision, side)` | MANDATORY. 버전·요청 방향 레벨을 잠근 뒤 DB 당일 범위와 V2 가격 배열 검증. BUY→ASK, SELL→BID; 정상 빈 방향 허용 |
+| [OrderBookProperties](../back/src/main/java/com/baedang/orderbook/config/OrderBookProperties.java) | `policyVersion()`, `krBaseNotional()`, `minQuantity()`, 등 | `trading.orderbook` 런타임 설정값 검증 레코드. V2 기본값: 3s 주기, 15s maxQuoteAge, 1m retention |
 
 | [StockFinancialInfoPort](../back/src/main/java/com/baedang/stock/port/StockFinancialInfoPort.java), [KisStockFinancialInfoAdapter](../back/src/main/java/com/baedang/stock/client/kis/KisStockFinancialInfoAdapter.java) | 산업분류 및 결산연월별 재무제표용 도메인 포트 및 KIS 어댑터 | 포트는 순수 도메인 레코드(`IndustryData`, `PeriodData`) 반환. 어댑터 빈은 `kis.enabled=true` 조건부 등록 |
 | [StockFinancialSyncService](../back/src/main/java/com/baedang/stock/service/StockFinancialSyncService.java) | `ensureFresh(stock, trigger)`, `refresh(stock, trigger)`, `refreshRankedTargets(trigger)` | TTL 판정(재무 7일 / 7d, 산업 30일 / 30d), 종목별 `CompletableFuture` single-flight, 주간 배치 실행. `Optional<StockFinancialInfoPort>` 주입으로 KIS 비활성 시에도 정상 부팅 유지 |
 | [StockFinancialQueryService](../back/src/main/java/com/baedang/stock/service/StockFinancialQueryService.java) | `getFinancials(symbol, marketCountry)` | 캐시 우선 재무 조회 서비스. 국내 비ETF/ETN 종목 검증, 조회 시점 영업이익률 계산, FRESH/STALE 판정 및 폴백 처리 |
-현재 구현의 설정 가능한 가상 호가 V1 기본값은 다음과 같습니다: `policyVersion=V1`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V1 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 10레벨이고 인접 레벨은 유효 호가 1틱 간격이며, 미국 BID는 `$0.01`에서 조기 종료할 수 있습니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
+현재 구현의 설정 가능한 가상 호가 V2 기본값은 다음과 같습니다: `policyVersion=V2`, `refreshInterval=3s`, `refreshInitialDelay=0s`, `maxQuoteAge=15s`, `krBaseNotional=20000000`, `usBaseNotional=15000`, `minQuantity=1`, `maxQuantity=1000000`, `noiseMinBps=8000`, `noiseMaxBps=12000`, `closedVersionRetention=1m`, `retentionInitialDelay=0s`. V2 호가 형상은 런타임 설정이 아니라 코드 불변식입니다. 각 방향은 0~10레벨이고 인접 레벨은 유효 호가 1틱 간격이며 국내 당일 상하한가 또는 양수 저장 가능 가격 경계에서 종료합니다. 종료 버전과 레벨은 소비 여부와 무관하게 retention 후 삭제되며, 체결 가격·수량·정산 금액은 `trade_execution`에 영구 보존됩니다. 다른 형상은 새 정책 버전으로 구현합니다. 이 수치는 #121 PR에서 근거를 제시하고 합의할 모의 공급 제안값이며, 구현만으로 합의가 완료되거나 실제 시장 잔량을 재현한 것은 아닙니다. 두 initial delay는 스케줄러 시작 시점만 제어하는 운영 설정이며 0 이상이어야 합니다.
 
 가상 호가 생성·조회는 상시 활성입니다. 호가는 정규장 중 유효한 시세가 있을 때만 생성합니다. 지정가 접수·취소·만료·체결은 별도 유스케이스입니다. 사용 가능한 호가가 없으면 워커는 물량을 만들지 않고 보류합니다.
 
@@ -283,8 +283,8 @@ String pnlRateText = FinancialDecimalFormatter.plain(pnlRate);
 - **상태 전이 primitive**: 한 트랜잭션에서 여러 레벨을 소비하더라도 `OrderBookVersion.advanceRevision()`은 트랜잭션당 1회만 호출합니다.
 
 #### 3. 수량 및 정밀도 정책
-- **정수 수량 정책**: DB 컬럼은 후속 소수점 호환성을 위해 `NUMERIC(19,6)`을 유지하지만, V1 가상 호가 생성과 체결 소비는 **정수 주 단위** 정책입니다 (`minQuantity=1`, `maxQuantity=1000000`).
-- **수량 분포의 성격**: 깊이 배수와 라운드 넘버 부스트는 모의 시장 V1 공급 정책일 뿐이며, 실제 시장의 호가 잔량 분포를 실증 재현한 것이 아니므로 상단 수량이 항상 크다는 절대 불변식을 가정하지 않습니다.
+- **정수 수량 정책**: DB 컬럼은 후속 소수점 호환성을 위해 `NUMERIC(19,6)`을 유지하지만, V2 가상 호가 생성과 체결 소비는 **정수 주 단위** 정책입니다 (`minQuantity=1`, `maxQuantity=1000000`).
+- **수량 분포의 성격**: 깊이 배수와 라운드 넘버 부스트는 모의 시장 V2 공급 정책일 뿐이며, 실제 시장의 호가 잔량 분포를 실증 재현한 것이 아니므로 상단 수량이 항상 크다는 절대 불변식을 가정하지 않습니다.
 
 
 ### 한국투자증권(KIS) 재무정보 연동 계약
@@ -443,7 +443,7 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - `MarketEventQueryService.get(market, date)`: KST 하루를 반개구간 `[from, to)` UTC 범위로 바꿉니다. 100건 상한, `active`는 저장값이 아니라 응답 시각에 계산합니다. 공개 응답 시각은 항상 `+09:00`이고 저장은 UTC입니다.
 - `MarketEventController`: `GET /api/market/events?market=&date=`는 공개입니다. 두 파라미터를 문자열로 받아 파싱 실패를 다른 API와 같은 `INVALID_INPUT` + `data.field`로 내보냅니다 — enum/날짜 바인딩이 프레임워크 메시지를 내보내게 두지 않습니다.
 - 소비자는 `haltUntil`을 읽고 만료를 기다립니다. RSS 해제 공시나 RSS 상태로 재개를 추론하지 않습니다. 수집 장애가 나도 기존 구간은 그대로 남고 스스로 만료됩니다.
-- 사이드카는 프로그램 호가에만 영향을 줍니다 — 일반 주문을 막으면 안 됩니다. 서킷브레이커 주문 차단은 별도 관심사입니다(Part 4/#166).
+- 사이드카는 프로그램 호가에만 영향을 줍니다 — 일반 주문을 막으면 안 됩니다. 서킷브레이커 주문 차단은 거래 트랜잭션 안에서 강제합니다(account 잠금 후 `MarketTradingHaltPolicy.activeFor`). 트랜잭션 밖 사전 거절이 아닙니다.
 
 
 ## 거래일·종가 복구 (#173)
@@ -469,6 +469,19 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - 시드 성공·백필 완료·해당 날짜 갱신 완료·후속 주봉 갱신은 `DailyCandlePersistenceService.upsert`가 반환한 저장 대상 행으로 판단한다. 미확정 일봉만 받은 경우 완료를 기록하지 않고 다음 요청에서 재시도한다. 정기 수집도 반환된 행에 기대 거래일이 있어야 성공이다.
 - 날짜 변환은 기존 `MarketCountry.zoneId()`를 사용한다. 새 날짜 변환 서비스·범용 수집기·추가 캐시는 만들지 않는다.
 
+
+## 서킷브레이커 주문 차단
+
+- `MarketTradingHaltPolicy.activeFor(stock, at)` / `requireTradingAllowed(stock, at)`: 해당 종목 시장이 중단됐는지 판정한다. KR KOSPI/KOSDAQ에만 적용하고 `KR_ETC`·미국 시장은 차단하지 않으며 사이드카는 차단 사유가 아니다(저장소 조회가 `CIRCUIT_BREAKER`만 선택). 메모리 캐시 없이 호출마다 DB를 읽고, 거래 트랜잭션 안에서 account 잠금 후 호출해야 한다.
+- `ActiveMarketHalt`: 판정 이벤트. 주문 감사 FK용 eventId를 담는다. `asErrorData()`는 `market`/`eventType`/`stage`/`triggeredAt`/`haltUntil`만 `+09:00`으로 노출하며 `eventId`는 노출하지 않는다.
+- `MarketOrderTransactionService` / `LimitOrderTransactionService`: account 잠금·동시 멱등·account 수명 검증·종목 조회 뒤, execution-context 신선도와 시세 검증 앞에서 정책을 호출한다. 트랜잭션 전 시세 준비가 실패하면 `rejectIfHalted`가 외부 호출 없이 같은 account 우선 판정을 수행하고, 중단이면 저장하며 아니면 empty를 반환해 오케스트레이터가 원래 준비 오류를 유지한다. 중단이면 `market_event_id`를 담은 `REJECTED` 1건을 저장하고, MARKET은 quote/reference/rate 증거를 남기지 않으며 LIMIT은 동결하지 않는다.
+- 두 트랜잭션 서비스의 SELL 접수는 holding 잠금 뒤, 두 번째 컨텍스트 신선도 검사 전에 `activeFor(stock, now)`를 다시 호출한다. 잠금 대기 중 커밋된 CB는 컨텍스트·세션·시세 유효기간도 만료됐더라도 같은 감사 이력을 남기는 거절로 처리한다. BUY 접수는 매도 전용 잠금 경계에 대한 추가 조회 없이 account 잠금 뒤의 검사를 유지한다.
+- 재생: 저장된 `market_event_id`로 최초 거절 데이터를 복원한다. 이벤트가 존재하고 `CIRCUIT_BREAKER`이며 주문 시장과 일치해야 하고, 아니면 다른 이벤트로 대체하지 않고 `INTERNAL_ERROR`를 던진다.
+- `LimitOrderExecutionTransactionService`: 권위 있는 `requireTradingAllowed(stock, now)` 호출을 기존 account → 주문 → 호가 버전 → 레벨 → 보유 잠금과 두 번째 만료 판정 뒤, `validateExecutionContextFresh`·계획·변경 앞에서 한 번만 수행한다. 이 위치는 해당 잠금을 기다리는 동안 시작된 CB도 잡는다. 여기서 예외를 잡거나 주문을 REJECTED로 바꾸거나 `expiresAt`을 연장하거나 `LimitExecutionOutcome.Reason`을 추가하지 않는다 — 롤백이 접수된 주문을 재시도 가능하게 남긴다.
+- `LimitOrderExecutionWorker.visit(group)`: 기존 그룹 실패 경계에서 `MARKET_TRADING_HALTED`만 예상 보류로 분류한다. 보류된 그룹을 reset해 이번 방문에서 그 `(stockId, side)`의 나머지를 건너뛰고, `tick`은 다음 그룹을 계속 처리한다. 이 경로는 닫힌 `market` enum 값으로 `krx.market_event.order_blocked{market,orderType=LIMIT_EXECUTION}`만 증가시키고 `trading.limit.execution.attempt{reason=ERROR}`나 WARN/ERROR 스택을 남기지 않는다. 나머지 예외는 기존 ERROR 지표와 로그를 유지한다.
+- `LimitOrderExecutionService.prepare`·취소·만료는 halt 상태를 미리 조회하거나 캐시하지 않는다. 보류는 새 컴포넌트·마이그레이션·스키마를 추가하지 않고, 트랜잭션 판정과 워커의 예상 보류 분류로만 존재한다.
+- `docs/superpowers/` 계획 노트가 Part/이슈 이력을 보관한다. 이 가이드와 `api-spec`에는 로드맵 좌표를 두지 않는다.
+
 ## 상하한가 수집 및 표시
 
 - `MarketDataPort.fetchPriceLimits` / `TossMarketDataAdapter`는 정확한 GET `/api/v1/price-limits` 경로와 `symbol`을 사용하며 MARKET_DATA 제한을 공유합니다. 응답은 `timestamp`, `upperLimitPrice`, `lowerLimitPrice`, `currency`이며 종목 및 별도 적용일 필드는 없습니다. 2026-09-11 공식 OpenAPI 확인.
@@ -481,3 +494,21 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 상세 수집은 `ensureForDisplay(stock, existingQuote)`로 표시할 스냅샷을 반환합니다. 미국 종목, 수집 비활성화, 당일 상하한가가 있는 스냅샷은 추가 SELECT 없이 전달값을 재사용합니다. 수집이 필요하면 서비스 내부에서 읽은 스냅샷을 재사용하고, 저장 시도 후에는 UPDATE가 0건이어도 다시 읽어 다른 요청이 먼저 확보한 값을 반환합니다. 재조회한 값이 당일 값이면 성공으로 처리합니다. 수집 실패 시 마지막으로 읽은 스냅샷을 유지하고 조회에 성공한 적이 없으면 전달받은 스냅샷을 유지합니다. 상하한가 게이트를 즉시 통과하지 못하면 대기 또는 실패 기록 없이 저장된 데이터로 응답합니다. 배경 `ensure`는 기존 2 TPS 게이트에서 순서를 기다리며 표시용 재조회는 하지 않습니다. 허용된 요청에는 기존 브로커 그룹 제한과 HTTP 타임아웃이 적용되며 상세 API 전체를 비동기로 바꾸는 것은 아닙니다.
 
 시도 맵과 내부 가변 필드는 동일한 `synchronized` claim/finish 메서드로 보호합니다. 만료 제거, 중복·용량 확인, 등록은 원자적으로 수행하고 외부 API 호출은 모니터 잠금 밖에서 유지합니다.
+
+### 종목 상세의 표시 상태
+
+- `StockWarningQueryService.currentWarnings(stock)`: 토스 유의사항 API를 `SymbolInfoPort.fetchStockWarnings`로 읽고 종목별 TTL 캐시(`trading.stock-warning-cache-ttl`, 기본 5분)를 둔다. **원본 유의사항**을 캐시하고 활성 구간은 읽는 시점 날짜로 다시 판정한다 — `endDate`가 자정에 지난 유의사항은 캐시가 살아 있어도 사라져야 한다.
+- `warningsStatus`를 함께 반환한다. `UNAVAILABLE`은 조회 실패이고 이전에 확인한 값도 없다는 뜻이다. 이를 "유의사항 없음"으로 취급하지 않고 `tradable`에 접지 않는다 — 유의사항은 정보성이며 주문 자격을 바꾸지 않는다.
+- `StockDetailService`가 `warnings`/`warningsStatus`를 내려준다. 거래정지·정리매매는 여전히 `Stock`의 상태 컬럼과 `listingStatus`에서 오며 유의사항과 무관하다.
+- 유의사항 문구는 종류별로 백엔드가 `tools/terms.md` 표기로 정한다(`OVERHEATED` → `과열종목`, `INVESTMENT_WARNING` → `투자경고`, `VI_STATIC` → `변동성완화장치`, 미지정 코드 → `거래유의종목`). 원천 코드는 `type`에 남는다. 프론트는 서버 `label`을 그대로 표시한다 — 같은 사실을 두 곳에서 번역하면 한쪽만 바뀌었을 때 어긋난다.
+- 프론트 `front/src/lib/stock-status.ts`가 종목 상세 화면의 표시를 결정한다. `buildStatusBadges`는 **차단하지 않는** 배지만 만든다(종류별 유의사항 문구, 활성 사이드카는 방향 포함). `resolveBlockReason`은 버튼 사유 하나를 `SUSPENDED → LIQUIDATION → 활성 CB → 기타 tradable 사유 → 금액·수량` 순서로 만든다. 시장가·지정가가 같은 함수를 호출하므로 두 주문 유형이 다른 말을 할 수 없다.
+- 프론트 `front/src/lib/stock-market-events.ts`가 한 시장의 당일 이벤트를 분류한다. KOSPI/KOSDAQ만 조회한다 — 미국과 `KR_ETC`에는 KIND 이벤트가 없다. 조회가 실패했거나 아직 도착하지 않았으면 화면이 그것으로 **막지 않는다**. 서버 거래 트랜잭션이 권위이고 기존 `MARKET_TRADING_HALTED` 응답이 최종 방어선이다.
+- `MarketEventsBanner`(랭킹 국내 탭)는 이력 의미를 유지한다. 활성 서킷브레이커(`지금 매매거래 일시중단 중이에요`)와 활성 사이드카(`현재 시장조치가 발동 중이에요`)만 제목에서 구분한다 — 사이드카는 프로그램 호가만 정지시킨다.
+
+## 거래 범위와 V2 가격 배열 (#178)
+
+`TradingPriceLimits`는 기존 시세 컬럼으로 만든 불변 값이며 별도 저장하지 않습니다. 국내 거래소 현지 당일을 검증하고 미국 NULL은 제한 없음으로 처리합니다. `OrderPolicy.validateTradingPrice`를 예상 조회·접수·체결이 공유하고 지정가 단위는 기존 `TickSizePolicy`를 사용합니다. 장외 상세 표시 정책을 거래 폴백으로 사용하지 않습니다.
+
+`OrderBookPricePolicy`가 예상 배열과 완전성 검증을 담당하며 조회·미리보기·게시·잠금 저장소가 공유합니다. 예상 배열이 비는 경우만 빈 레벨을 정상으로 처리합니다. V1은 소비하지 않으며 별도 구현도 남기지 않습니다. 게시자는 stock→version, 소비자는 account→order→version→level→holding 순서를 유지합니다. 소비자에 역방향 stock 잠금을 추가하지 않으며 잠금 대기 후 세션·시각을 재검증합니다.
+
+주문 준비는 `PriceLimitLoadService.ensureForTrading`으로 기존 게이트·대기를 공유합니다. 워커·호가 게시에 주문별 외부 조회를 추가하지 않습니다. 기준값 미확보 시 예약·원장 변경 없이 보류합니다. 당일 최초 기준값 불변 정책을 유지하며 스키마 및 과거 이력을 변경하지 않습니다.

@@ -12,6 +12,7 @@ import com.baedang.orderbook.repository.OrderBookRowProjection;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,19 +30,22 @@ public class OrderBookQueryService {
     private final MarketSessionProvider marketSessionProvider;
     private final OrderBookProperties properties;
     private final Clock clock;
+    private final OrderBookPricePolicy prices;
 
     public OrderBookQueryService(
             StockRepository stockRepository,
             OrderBookLevelRepository levelRepository,
             MarketSessionProvider marketSessionProvider,
             OrderBookProperties properties,
-            Clock clock
+            Clock clock,
+            OrderBookPricePolicy prices
     ) {
         this.stockRepository = stockRepository;
         this.levelRepository = levelRepository;
         this.marketSessionProvider = marketSessionProvider;
         this.properties = properties;
         this.clock = clock;
+        this.prices = prices;
     }
 
     @Transactional(propagation = Propagation.NEVER)
@@ -82,6 +86,6 @@ public class OrderBookQueryService {
             throw new BusinessException(ErrorCode.ORDER_BOOK_UNAVAILABLE);
         }
 
-        return OrderBookResponse.from(stock, rows);
+        return OrderBookResponse.from(stock, rows, prices, now);
     }
 }

@@ -4,6 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.repository.ExchangeRateRepository;
 import com.baedang.market.service.ExchangeRateService;
+import com.baedang.orderbook.service.TickSizePolicy;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.service.CandleQueryPolicy;
@@ -11,6 +12,7 @@ import com.baedang.stock.service.RankingService;
 import com.baedang.stock.service.StockDetailService;
 import com.baedang.stock.service.StockSearchService;
 import com.baedang.trading.service.OrderPolicy;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullSource;
@@ -31,7 +33,7 @@ import static org.mockito.Mockito.when;
 /** 공통 정규화 도입 후에도 서비스별 검증·오류 응답 계약이 유지되는지 검증합니다. */
 class DomainNormalizationContractTest {
 
-    private final OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"));
+    private final OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"), new TickSizePolicy());
     private final CandleQueryPolicy candlePolicy = new CandleQueryPolicy();
 
     @ParameterizedTest
@@ -70,7 +72,7 @@ class DomainNormalizationContractTest {
     @NullSource
     @ValueSource(strings = {"", " ", "JP"})
     void 상세와_랭킹의_시장코드_오류문구는_각각_유지한다(String market) {
-        StockDetailService detailService = new StockDetailService(null, null, null, null, null);
+        StockDetailService detailService = new StockDetailService(null, null, null, null, null, null);
         RankingService rankingService = new RankingService(null, null, null, null);
 
         assertThatThrownBy(() -> detailService.getDetail("005930", market))

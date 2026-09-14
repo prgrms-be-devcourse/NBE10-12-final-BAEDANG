@@ -177,9 +177,9 @@ trading:
     max-in-flight-stocks: ${QUOTE_MAX_IN_FLIGHT_STOCKS:1000}
     request-timeout: ${QUOTE_REQUEST_TIMEOUT:20s}
 
-  # 전체 사용자 공유 가상 호가 정책 (V1)
+  # 전체 사용자 공유 가상 호가 정책 (V2)
   orderbook:
-    policy-version: V1
+    policy-version: V2
     refresh-interval: 3s
     refresh-initial-delay: ${ORDERBOOK_REFRESH_INITIAL_DELAY:0s}
     max-quote-age: 15s

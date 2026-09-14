@@ -4,14 +4,18 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.global.normalizer.DomainNormalizer;
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.model.TradingPriceLimits;
+import com.baedang.orderbook.model.StockDescriptor;
+import com.baedang.orderbook.service.TickSizePolicy;
 import com.baedang.stock.entity.ListingStatus;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
-import com.baedang.trading.model.ClientOrderRetryPolicy;
 import com.baedang.trading.model.OrderTerms;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -31,6 +35,7 @@ public class OrderPolicy {
     private static final int MAX_QUANTITY_INPUT_LENGTH = 32;
     private static final Pattern QUANTITY_PATTERN = Pattern.compile("\\d+(\\.0+)?");
 
+    private final TickSizePolicy ticks;
     private final Duration quoteMaxStaleness;
     private final Duration executionContextMaxAge;
     private final BigDecimal maxOrderQuantity;
@@ -38,11 +43,13 @@ public class OrderPolicy {
     public OrderPolicy(
             @Value("${trading.quote-max-staleness-seconds}") long quoteMaxStalenessSeconds,
             @Value("${trading.execution-context-max-age-seconds}") long executionContextMaxAgeSeconds,
-            @Value("${trading.max-order-quantity}") BigDecimal maxOrderQuantity
+            @Value("${trading.max-order-quantity}") BigDecimal maxOrderQuantity,
+            TickSizePolicy ticks
     ) {
         this.quoteMaxStaleness = Duration.ofSeconds(quoteMaxStalenessSeconds);
         this.executionContextMaxAge = Duration.ofSeconds(executionContextMaxAgeSeconds);
         this.maxOrderQuantity = maxOrderQuantity;
+        this.ticks = ticks;
     }
 
     public OrderInput parseInput(
@@ -131,6 +138,15 @@ public class OrderPolicy {
         Duration age = Duration.between(quote.getQuoteAt().toInstant(), now);
         if (age.isNegative()) return ErrorCode.FUTURE_QUOTE;
         if (age.compareTo(quoteMaxStaleness) > 0) return ErrorCode.STALE_QUOTE;
+        return null;
+    }
+
+    public ErrorCode validateTradingPrice(Stock stock, QuoteSnapshot quote, BigDecimal price, Instant now, boolean limitOrder) {
+        TradingPriceLimits limits = TradingPriceLimits.from(quote);
+        if (!limits.usable(stock.getMarketCountry(), now)) return ErrorCode.PRICE_LIMIT_UNAVAILABLE;
+        if (!limits.contains(stock.getMarketCountry(), quote.getLastPrice())) return ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT;
+        if (!limits.contains(stock.getMarketCountry(), price)) return ErrorCode.PRICE_OUT_OF_RANGE;
+        if (limitOrder && !ticks.isValidPrice(StockDescriptor.from(stock), price)) return ErrorCode.INVALID_TICK_SIZE;
         return null;
     }
 

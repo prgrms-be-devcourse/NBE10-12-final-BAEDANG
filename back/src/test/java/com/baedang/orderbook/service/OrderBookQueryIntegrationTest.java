@@ -2,6 +2,7 @@ package com.baedang.orderbook.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.model.TradingPriceLimits;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketSessionProvider;
@@ -15,25 +16,29 @@ import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
-import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+import com.baedang.support.PriceLimitFixtures;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.PostgreSQLContainer;
@@ -42,14 +47,14 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
-import java.time.ZoneOffset;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,6 +78,33 @@ class OrderBookQueryIntegrationTest {
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
             DockerImageName.parse("timescale/timescaledb:latest-pg18")
                     .asCompatibleSubstituteFor("postgres"));
+
+    @ParameterizedTest
+    @CsvSource({"70000,71000,70000,10,0", "69000,70000,70000,0,10", "69800,70200,70000,2,2", "70000,70000,70000,0,0"})
+    void 가격_경계에서_짧거나_빈_호가도_정상_조회한다(String lower, String upper, String base, int asks, int bids) {
+        TradingPriceLimits limits = new TradingPriceLimits(BASE.atZone(MarketCountry.KR.zoneId()).toLocalDate(),
+                new BigDecimal(lower), new BigDecimal(upper));
+        jdbcTemplate.update("UPDATE quote_snapshot SET lower_limit=?,upper_limit=? WHERE stock_id=?",
+                limits.lower(), limits.upper(), krStock.getStockId());
+        GeneratedOrderBook book = generator.generate(properties, descriptor, new BigDecimal(base), BASE, BASE, 1L, limits);
+        publicationService.publish(book, BASE.plusSeconds(3600)).orElseThrow();
+        OrderBookResponse result = queryService.getOrderBook(krStock.getSymbol(), "KR");
+        assertThat(result.asks()).hasSize(asks);
+        assertThat(result.bids()).hasSize(bids);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"legacy", "missing", "yesterday"})
+    void 구버전이나_당일_기준이_없는_호가는_조회하지_않는다(String invalid) {
+        Long version = publicationService.publish(generatedBook(42L, BASE), BASE.plusSeconds(3600)).orElseThrow();
+        switch (invalid) {
+            case "legacy" -> jdbcTemplate.update("UPDATE order_book_version SET policy_version='V1' WHERE book_version_id=?", version);
+            case "missing" -> jdbcTemplate.update("UPDATE quote_snapshot SET price_limit_date=NULL WHERE stock_id=?", krStock.getStockId());
+            case "yesterday" -> jdbcTemplate.update("UPDATE quote_snapshot SET price_limit_date=price_limit_date-1 WHERE stock_id=?", krStock.getStockId());
+        }
+        assertThatThrownBy(() -> queryService.getOrderBook(krStock.getSymbol(), "KR"))
+                .isInstanceOfSatisfying(BusinessException.class, error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.ORDER_BOOK_UNAVAILABLE));
+    }
 
     @TestConfiguration
     static class ClockTestConfig {
@@ -116,6 +148,7 @@ class OrderBookQueryIntegrationTest {
 
         krStock = stockRepository.save(tradableStock());
         descriptor = StockDescriptor.from(krStock);
+        PriceLimitFixtures.persist(jdbcTemplate, krStock, BASE);
     }
 
     private static Stock tradableStock() {
@@ -128,7 +161,7 @@ class OrderBookQueryIntegrationTest {
 
     private GeneratedOrderBook generatedBook(long seed, Instant quoteAt) {
         Instant now = clock.instant();
-        return generator.generate(properties, descriptor, new BigDecimal("70000"), quoteAt, now, seed);
+        return generator.generate(properties, descriptor, new BigDecimal("70000"), quoteAt, now, seed, PriceLimitFixtures.at(now));
     }
 
     @Test
@@ -180,10 +213,11 @@ class OrderBookQueryIntegrationTest {
                 MarketCountry.US, "NASDAQ", "저가 조회 테스트 종목", null, "USD", "STOCK", true));
         usStock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(usStock);
+        PriceLimitFixtures.persist(jdbcTemplate, usStock, BASE);
         StockDescriptor usDescriptor = StockDescriptor.from(usStock);
         GeneratedOrderBook generated = generator.generate(
                 properties, usDescriptor, new BigDecimal("0.10"),
-                BASE.minusSeconds(2), BASE, 42L);
+                BASE.minusSeconds(2), BASE, 42L, PriceLimitFixtures.at(BASE));
         publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
 
         OrderBookResponse response = queryService.getOrderBook(usStock.getSymbol(), "US");
@@ -229,9 +263,10 @@ class OrderBookQueryIntegrationTest {
                 MarketCountry.US, "NASDAQ", "불완전 조회 테스트 종목", null, "USD", "STOCK", true));
         usStock.applyRanking(1, new BigDecimal("1000000"));
         stockRepository.save(usStock);
+        PriceLimitFixtures.persist(jdbcTemplate, usStock, BASE);
         GeneratedOrderBook generated = generator.generate(
                 properties, StockDescriptor.from(usStock), new BigDecimal("100.00"),
-                BASE.minusSeconds(2), BASE, 42L);
+                BASE.minusSeconds(2), BASE, 42L, PriceLimitFixtures.at(BASE));
         Long versionId = publicationService.publish(generated, BASE.plusSeconds(3600)).orElseThrow();
         jdbcTemplate.update(
                 "delete from order_book_level where book_version_id = ? and side = 'BID' and level_depth = 10",

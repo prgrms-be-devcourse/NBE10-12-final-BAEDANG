@@ -2,15 +2,23 @@ package com.baedang.orderbook.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.model.TradingPriceLimits;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.entity.OrderBookLevel;
+import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
 import com.baedang.orderbook.model.GeneratedOrderBook;
+import com.baedang.orderbook.model.GeneratedOrderBookLevel;
+import com.baedang.orderbook.model.StockDescriptor;
 import com.baedang.orderbook.repository.OrderBookLevelRepository;
 import com.baedang.orderbook.repository.OrderBookVersionRepository;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
+
 import jakarta.persistence.EntityManager;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -40,6 +48,8 @@ public class OrderBookPublicationService {
     private final OrderBookProperties properties;
     private final Clock clock;
     private final EntityManager entityManager;
+    private final QuoteSnapshotRepository quotes;
+    private final OrderBookPricePolicy prices;
 
     public OrderBookPublicationService(
             StockRepository stockRepository,
@@ -47,7 +57,7 @@ public class OrderBookPublicationService {
             OrderBookLevelRepository levelRepository,
             OrderBookProperties properties,
             Clock clock,
-            EntityManager entityManager
+            EntityManager entityManager, QuoteSnapshotRepository quotes, OrderBookPricePolicy prices
     ) {
         this.stockRepository = stockRepository;
         this.versionRepository = versionRepository;
@@ -55,6 +65,8 @@ public class OrderBookPublicationService {
         this.properties = properties;
         this.clock = clock;
         this.entityManager = entityManager;
+        this.quotes = quotes;
+        this.prices = prices;
     }
 
     /**
@@ -74,7 +86,8 @@ public class OrderBookPublicationService {
         if (!stock.isTradable()
                 || !stockRepository.isQuoteTarget(stock.getStockId(), lockedAt.atOffset(ZoneOffset.UTC))
                 || !lockedAt.isBefore(sessionValidUntil)
-                || !isValidQuoteTime(generated.quoteAt(), lockedAt)) {
+                || !isValidQuoteTime(generated.quoteAt(), lockedAt)
+                || !validPrices(stock, generated, lockedAt)) {
             if (active != null) active.close(lockedAt);
             return Optional.empty();
         }
@@ -89,6 +102,20 @@ public class OrderBookPublicationService {
         OrderBookVersion next = versionRepository.saveAndFlush(OrderBookVersion.open(generated));
         levelRepository.saveAll(OrderBookLevel.from(next, generated.levels()));
         return Optional.of(next.getBookVersionId());
+    }
+
+    private boolean validPrices(Stock stock, GeneratedOrderBook book, Instant now) {
+        QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElse(null);
+        if (quote == null || !stock.getCurrency().equals(quote.getCurrency())
+                || !stock.getCurrency().equals(book.currency())
+                || !book.quoteAt().atZone(stock.getMarketCountry().zoneId()).toLocalDate()
+                    .equals(now.atZone(stock.getMarketCountry().zoneId()).toLocalDate())) return false;
+        for (OrderBookSide side : OrderBookSide.values()) {
+            if (!prices.matches(StockDescriptor.from(stock), book.basePrice(), book.policyVersion(), side,
+                    TradingPriceLimits.from(quote), now, book.levelsBySide(side),
+                    GeneratedOrderBookLevel::price, GeneratedOrderBookLevel::levelDepth)) return false;
+        }
+        return true;
     }
 
     /** 새 버전 없이 활성 버전만 종료한다(장 마감 열거, 생성 실패 종목용). */
@@ -118,7 +145,7 @@ public class OrderBookPublicationService {
         entityManager.createNativeQuery("SET LOCAL lock_timeout = '2s'").executeUpdate();
     }
 
-    /** 설계서 §5.1 — 미래 시세와 maxQuoteAge 초과만拒绝. abs() 비교 금지. */
+    /** 설계서 §5.1 — 미래 시세와 maxQuoteAge 초과를 거절. abs() 비교 금지. */
     private boolean isValidQuoteTime(Instant quoteAt, Instant now) {
         return !quoteAt.isAfter(now)
                 && !quoteAt.isBefore(now.minus(properties.maxQuoteAge()));

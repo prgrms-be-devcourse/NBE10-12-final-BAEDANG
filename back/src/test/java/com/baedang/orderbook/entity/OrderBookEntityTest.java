@@ -20,7 +20,7 @@ class OrderBookEntityTest {
                 "KRW",
                 generatedAt.minusSeconds(2),
                 generatedAt,
-                "V1",
+                "V2",
                 42L
         );
 
@@ -47,7 +47,7 @@ class OrderBookEntityTest {
                 "KRW",
                 generatedAt.minusSeconds(2),
                 generatedAt,
-                "V1",
+                "V2",
                 42L
         );
 
@@ -66,7 +66,7 @@ class OrderBookEntityTest {
                 "KRW",
                 generatedAt.minusSeconds(2),
                 generatedAt,
-                "V1",
+                "V2",
                 42L
         );
 

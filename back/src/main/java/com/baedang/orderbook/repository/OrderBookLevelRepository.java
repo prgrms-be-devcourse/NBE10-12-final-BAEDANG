@@ -1,7 +1,9 @@
 package com.baedang.orderbook.repository;
 
 import com.baedang.orderbook.entity.OrderBookLevel;
+
 import jakarta.persistence.LockModeType;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -22,13 +24,18 @@ public interface OrderBookLevelRepository extends JpaRepository<OrderBookLevel, 
                    v.generated_at as generatedAt,
                    v.policy_version as policyVersion,
                    v.seed as seed,
+                   q.price_limit_date as priceLimitDate,
+                   q.lower_limit as lowerLimit,
+                   q.upper_limit as upperLimit,
+                   q.currency as limitCurrency,
                    l.level_id as levelId,
                    l.side as side,
                    l.level_depth as levelDepth,
                    l.price as price,
                    l.remaining_quantity as remainingQuantity
               from order_book_version v
-              join order_book_level l on l.book_version_id = v.book_version_id
+              left join order_book_level l on l.book_version_id = v.book_version_id
+              left join quote_snapshot q on q.stock_id = v.stock_id
              where v.stock_id = :stockId
                and v.is_active = true
              order by case when l.side = 'ASK' then 0 else 1 end,

@@ -46,36 +46,36 @@
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | 데이터 흐름 (`close_price` → `prev_close`) |
 | stock → order_book_version | 1:N (is_active=true는 종목당 최대 1개) |
-| order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: ASK 10, KR BID 10, US BID 1~10, CASCADE) |
+| order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: 방향별 0~10개, CASCADE) |
 | trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
 | users → stock_like | 1:N |
 | stock → stock_like | 1:N (CASCADE) |
 
 ### 테이블 맵 (22개)
 
-| 그룹                  | 테이블                   | 비고                                                               |
-| --------------------- | ------------------------ | ------------------------------------------------------------------ |
-| **계정계**            | `users`                  | 회원 및 JWT 인증 정보                                              |
-|                       | `account`                | 모의 계좌 (회차 기반) · `locked_cash` 보유                         |
-|                       | `trade_order`            | 주문+체결 (일부 TOSS)                                              |
-|                       | `ledger_entry`           | 거래 원장 · append only                                            |
-|                       | `holding`                | 보유 종목 · `locked_quantity` 보유                                 |
-|                       | `daily_account_snapshot` | 2주차에 화면 사용                                                  |
-| **시세 · 마스터**     | `stock`                  | 종목 마스터 (TOSS /stocks)                                         |
-|                       | `stock_external_id`      | 소스별 심볼 매핑                                                   |
-|                       | `quote_snapshot`         | 현재가 스냅샷 (TOSS /prices)                                       |
-|                       | `daily_candle`           | 일봉 · TimescaleDB (TOSS /candles)                                 |
-|                       | `minute_candle`          | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드             |
-|                       | `exchange_rate`          | 환율 이력 · 일반 테이블 · FK 관계 없음                             |
-|                       | `market_calendar`        | 선택적 장 운영일 저장 테이블 · 현재는 시장 캘린더 포트/캐시로 조회 |
-| **모의 시장 호가**    | `order_book_version`     | 3초 주기 현재가 기반 가상 호가 세트 헤더                           |
-|                       | `order_book_level`       | 버전당 최대 20개 레벨(ASK 10 / KR BID 10 / US BID 1~10) 가격·수량  |
-| **산업 · 재무 (KIS)** | `stock_industry`         | 표준산업분류 및 지수업종(대·중·소) 분류                            |
-|                       | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율                  |
-|                       | `stock_financial_sync`   | 그룹별 동기화 시각 및 TTL(negative cache 지원)                     |
-| **시장조치**          | `market_event`           | KRX KIND 서킷브레이커·사이드카 이력 · append-only                  |
-| **관심 종목**         | `stock_like`             | 회원별 관심 종목 · 회원×종목당 한 행                               |
-| **학습 콘텐츠**       | `wiki_term`              | 초보 투자자를 위한 금융 용어 사전                                  |
+| 그룹 | 테이블 | 비고 |
+|---|---|---|
+| **계정계** | `users` | 회원 및 JWT 인증 정보 |
+| | `account` | 모의 계좌 (회차 기반) · `locked_cash` 보유 |
+| | `trade_order` | 주문+체결 (일부 TOSS) |
+| | `ledger_entry` | 거래 원장 · append only |
+| | `holding` | 보유 종목 · `locked_quantity` 보유 |
+| | `daily_account_snapshot` | 2주차에 화면 사용 |
+| **시세 · 마스터** | `stock` | 종목 마스터 (TOSS /stocks) |
+| | `stock_external_id` | 소스별 심볼 매핑 |
+| | `quote_snapshot` | 현재가 스냅샷 (TOSS /prices) |
+| | `daily_candle` | 일봉 · TimescaleDB (TOSS /candles) |
+| | `minute_candle` | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드 |
+| | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
+| | `market_calendar` | 선택적 장 운영일 저장 테이블 · 현재는 시장 캘린더 포트/캐시로 조회 |
+| **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
+| | `order_book_level` | 버전당 최대 20개 레벨(방향별 0~10개) 가격·수량 |
+| **산업 · 재무 (KIS)** | `stock_industry` | 표준산업분류 및 지수업종(대·중·소) 분류 |
+| | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율 |
+| | `stock_financial_sync` | 그룹별 동기화 시각 및 TTL(negative cache 지원) |
+| **시장조치** | `market_event` | KRX KIND 서킷브레이커·사이드카 이력 · append-only |
+| **관심 종목** | `stock_like` | 회원별 관심 종목 · 회원×종목당 한 행 |
+| **학습 콘텐츠** | `wiki_term` | 초보 투자자를 위한 금융 용어 사전 |
 
 ### MVP 동작 매트릭스 (확정)
 
@@ -247,7 +247,7 @@ quote_snapshot.prev_close
 | `order_type` | VARCHAR(10) | `MARKET` / `LIMIT`. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
 | `status` | VARCHAR(20) | MARKET은 FILLED/REJECTED로 즉시 확정. LIMIT은 PENDING → PARTIALLY_FILLED → FILLED 또는 활성 잔여분 CANCELED/EXPIRED. 계좌 잠금 아래 상태·체결 순번을 검증하며 EXPIRED는 저장된 정규 세션 종료 시각 기준. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
 | `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
 | `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
@@ -260,12 +260,13 @@ quote_snapshot.prev_close
 
 지정가 주문의 추가 컬럼:
 
-| 컬럼                                                     | 용도                                                                            |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `limit_price`                                            | 지정가. NUMERIC(19,4), 종목 통화 기준                                           |
-| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각                                       |
-| `reserved_cash`                                          | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
-| `expires_at`, `closed_at`                                | 접수 세션 종료 시각 / 실제 주문 종료 시각                                       |
+| 컬럼 | 용도 |
+|---|---|
+| `limit_price` | 지정가. NUMERIC(19,4), 종목 통화 기준 |
+| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각 |
+| `reserved_cash` | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
+| `expires_at`, `closed_at` | 접수 세션 종료 시각 / 실제 주문 종료 시각 |
+| `market_event_id` | `market_event` FK. **`MARKET_TRADING_HALTED` 거절에만** 설정하고 다른 주문은 NULL입니다. 거절을 결정한 정확한 서킷브레이커 이벤트를 고정하므로, CB가 만료된 뒤나 더 긴 CB가 늦게 수집된 뒤에도 멱등 재생이 최초 오류 데이터를 반환합니다. `ck_trade_order_market_event_rejection` CHECK가 `status=REJECTED` + 이 사유 + non-null 이벤트 조합을 요구하고, 그 외 주문에는 NULL을 강제합니다 |
 
 수수료율·세율·SEC 최소액은 `.env`의 `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE`, `A_TAX_MIN_USD`를 프로젝트 고정값으로 사용합니다. 주문별 요율/계산 버전은 저장하지 않습니다. 재시작·재배포에도 동일한 설정을 유지하며, 활성 주문이 있는 동안 변경하지 않습니다. 체결마다 달라질 수 있는 환율과는 별개의 정책입니다.
 
@@ -415,7 +416,7 @@ KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시�
 | `last_price` | NUMERIC(19,4) | 현재가(종목 통화). 토스가 **문자열로 주므로 반드시 BigDecimal 파싱**. double 로 받으면 잔고 어긋남. |
 | `prev_close` | NUMERIC(19,4) | `quote_at`에서 파생한 거래소 현지 시세 거래일의 정확한 직전 거래일 `prev_close_date`에 해당하는 확정 일봉 종가. 검증 실패 시 등락률은 null. `last_price` 또는 날짜 미확인 랭킹 기준가로 대체하지 않는다. |
 | `prev_close_date` | DATE | 기준가의 거래일. 시세 거래일은 quote_at과 MarketCountry.zoneId()로 계산한다. 기존 행의 날짜는 NULL로 두고 재조회한다. |
-| `upper_limit` `lower_limit` | NUMERIC(19,4) | 검증된 날짜와 일치할 때만 표시하는 외부 상하한가. 주문 및 가상 호가 적용은 후속 작업 |
+| `upper_limit` `lower_limit` | NUMERIC(19,4) | 검증된 날짜와 일치할 때만 표시하는 외부 상하한가. 국내 주문 및 V2 호가에 검증된 당일 범위를 적용 (#178) |
 | `price_limit_date` | DATE | 한국 데이터 시각을 Asia/Seoul로 변환하고 요청 거래일과 검증한 날짜. 기존 미검증 값과 미국은 NULL. V14 추가. |
 | `currency` | VARCHAR(3) | 가격의 통화. `stock` 과 중복이지만 조인 없이 시세만 조회할 때 편함. |
 | `quote_at` | TIMESTAMPTZ | **토스가 알려준 시세 기준 시각.** 두 곳에 사용 — 화면의 "12:36:59 기준" 표시, 주문 시 유효시간 검증(15초 넘게 오래됐으면 `STALE_QUOTE` 로 거절). |
@@ -483,32 +484,31 @@ KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시�
 
 현재가(`quote_snapshot`)를 기준으로 생성한 공유 가상 호가 세트의 버전 헤더입니다. 3초 주기로 새 공급 세트가 게시되며 종목당 활성 버전(`is_active = true`)은 최대 1개입니다.
 
-| 컬럼              | 타입          | 설명                                                                                                       |
-| ----------------- | ------------- | ---------------------------------------------------------------------------------------------------------- |
-| `book_version_id` | BIGINT PK     | 가상 호가 세트 고유 식별자. 새 버전 게시 시 증가.                                                          |
-| `stock_id`        | BIGINT FK     | 종목 ID. `stock(stock_id)` 참조. 부분 유니크 인덱스(`WHERE is_active = true`)로 종목당 활성 버전 1개 제한. |
-| `base_price`      | NUMERIC(19,4) | 호가 생성의 기준이 된 현재가 (양수).                                                                       |
-| `currency`        | VARCHAR(3)    | 통화 (`KRW` / `USD`).                                                                                      |
-| `quote_at`        | TIMESTAMPTZ   | 기준 시세의 거래소 시각. 덮어쓰지 않고 실제 시세 시각 보존.                                                |
-| `generated_at`    | TIMESTAMPTZ   | 호가 버전 생성 시각.                                                                                       |
-| `policy_version`  | VARCHAR(20)   | 호가 생성 정책 버전 (`V1`).                                                                                |
-| `seed`            | BIGINT        | 결정론적 수량 노이즈 재현용 난수 seed.                                                                     |
-| `revision`        | BIGINT        | 잔량 변경 트랜잭션 커밋 횟수 (기본 0). #122 체결 트랜잭션당 1씩 증가.                                      |
-| `is_active`       | BOOLEAN       | 현재 조회 및 소비 가능한 활성 버전 여부 (기본 true).                                                       |
-| `closed_at`       | TIMESTAMPTZ   | 새 버전 게시 또는 장 마감으로 종료된 시각.                                                                 |
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `book_version_id` | BIGINT PK | 가상 호가 세트 고유 식별자. 새 버전 게시 시 증가. |
+| `stock_id` | BIGINT FK | 종목 ID. `stock(stock_id)` 참조. 부분 유니크 인덱스(`WHERE is_active = true`)로 종목당 활성 버전 1개 제한. |
+| `base_price` | NUMERIC(19,4) | 호가 생성의 기준이 된 현재가 (양수). |
+| `currency` | VARCHAR(3) | 통화 (`KRW` / `USD`). |
+| `quote_at` | TIMESTAMPTZ | 기준 시세의 거래소 시각. 덮어쓰지 않고 실제 시세 시각 보존. |
+| `generated_at` | TIMESTAMPTZ | 호가 버전 생성 시각. |
+| `policy_version` | VARCHAR(20) | 호가 생성 정책 버전 (`V2`). |
+| `seed` | BIGINT | 결정론적 수량 노이즈 재현용 난수 seed. |
+| `revision` | BIGINT | 잔량 변경 트랜잭션 커밋 횟수 (기본 0). #122 체결 트랜잭션당 1씩 증가. |
+| `is_active` | BOOLEAN | 현재 조회 및 소비 가능한 활성 버전 여부 (기본 true). |
+| `closed_at` | TIMESTAMPTZ | 새 버전 게시 또는 장 마감으로 종료된 시각. |
 
 #### `order_book_level` — 가상 호가 레벨
+버전당 각 방향 0~10개를 생성하며 국내 당일 상하한가 또는 양수 가격 경계에서 종료합니다. `(book_version_id, side, level_depth)` 복합 유니크 제약이 걸려 있습니다.
 
-버전당 ASK 10개와 BID 1~10개(국내는 항상 10개)까지 생성됩니다. `(book_version_id, side, level_depth)` 복합 유니크 제약이 걸려 있습니다.
-
-| 컬럼                 | 타입          | 설명                                                                        |
-| -------------------- | ------------- | --------------------------------------------------------------------------- |
-| `level_id`           | BIGINT PK     | 호가 레벨 고유 식별자. `trade_execution.book_level_id`가 참조.              |
-| `book_version_id`    | BIGINT FK     | 버전 ID. `order_book_version(book_version_id)` 참조 (`ON DELETE CASCADE`).  |
-| `side`               | VARCHAR(4)    | 호가 방향 (`BID` / `ASK`).                                                  |
-| `level_depth`        | INT           | 호가 깊이 (1~10).                                                           |
-| `price`              | NUMERIC(19,4) | 해당 호가 가격 (양수).                                                      |
-| `initial_quantity`   | NUMERIC(19,6) | 최초 공급 수량 (감사용, 양수). V1 공급 수량은 정수 주 단위.                 |
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `level_id` | BIGINT PK | 호가 레벨 고유 식별자. `trade_execution.book_level_id`가 참조. |
+| `book_version_id` | BIGINT FK | 버전 ID. `order_book_version(book_version_id)` 참조 (`ON DELETE CASCADE`). |
+| `side` | VARCHAR(4) | 호가 방향 (`BID` / `ASK`). |
+| `level_depth` | INT | 호가 깊이 (1~10). |
+| `price` | NUMERIC(19,4) | 해당 호가 가격 (양수). |
+| `initial_quantity` | NUMERIC(19,6) | 최초 공급 수량 (감사용, 양수). V2 공급 수량은 정수 주 단위. |
 | `remaining_quantity` | NUMERIC(19,6) | 현재 소비 가능한 잔여 수량 (`0 <= remaining_quantity <= initial_quantity`). |
 
 ### 가상 호가 보존 및 정리 정책 (확정)
@@ -686,15 +686,21 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 
 지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 과거 행 보정은 포함하지 않습니다.
 
+서킷브레이커 거절도 같은 지정가 근거 형태를 유지합니다. 사용자 입력 가격·통화와 접수 환율은 저장하고(멱등 비교 기준이며 모든 LIMIT 행에 CHECK로 요구됩니다), quote 시각 근거와 동결은 남기지 않습니다 — quote로 가격을 매기지 않고 현금·수량을 동결하지 않기 때문입니다. `market_event_id`는 오직 이 경로의 저장된 `REJECTED` 행에만 설정합니다.
+
+### 기존 지정가 체결 중단 (#167)
+
+활성 KOSPI/KOSDAQ 서킷브레이커 동안 이미 접수된 지정가 주문의 체결을 보류하는 데 **스키마는 추가되지 않습니다**. 접수된 주문은 `status`가 PENDING/PARTIALLY_FILLED로 남고 기존 `expires_at`, `reserved_cash`와 이에 대응하는 `locked_cash`/`locked_quantity`를 그대로 유지합니다. 거절이 아니므로 `market_event_id`를 받지 **않습니다**. 체결 트랜잭션 전체가 롤백되므로 `trade_execution`·`ledger_entry` 행이 생기지 않고 호가 `remaining_quantity`/`revision`도 그대로입니다. 보류 중에도 정상 취소·만료 전이는 남은 동결을 해제합니다.
+
 ### 지정가 체결 인덱스 (#122)
 
 테이블/컬럼 추가는 없습니다. `V7__limit_execution_indexes.sql`에서 잔여 수량이 있는 활성 LIMIT 주문에 부분 인덱스를 추가합니다. 수집 EXISTS용 `ix_order_quote_target(stock_id, expires_at)`, 매수용 `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)`, 매도용 가격 오름차순 인덱스입니다. 방향별 인덱스는 side 조건을 포함합니다. 만료는 조회 시 범위 조건이며 now()를 인덱스 조건에 넣지 않습니다. 계좌 이력/활성 주문/만료 인덱스는 유지합니다.
 
-develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
+이후 V8~V15는 시장조치 이력, 시세 상하한가 적용일과 서킷브레이커 거절 FK를 추가합니다. 이 체결 보류는 마이그레이션을 추가하지 않으므로 `V15__trade_order_market_event_rejection.sql`이 최신 버전입니다.
 
 ---
 
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V13__stock_like.sql`까지 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V15__trade_order_market_event_rejection.sql`까지 함께 보세요
 
 ## 정규장 거래일과 기준가 (#173)
 
@@ -703,3 +709,5 @@ develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·�
 등락률은 표시 시세 거래일과 정확한 직전 거래일의 확정 종가를 비교한다. 날짜 검증 실패 시 기준가·등락률은 null이다. 랭킹 집계 시각으로 시세를 초기화하거나 마지막 현재가를 종가로 복사하지 않는다. 휴일·자정에는 기준가를 이동하지 않는다.
 
 기동 5초 후 및 이후 1분 fixed delay로 누락 종가를 복구한다. 정규장 마감 + 10분 이전에 시작한 요청의 당일 일봉은 확정 데이터로 저장하지 않는다. 빈 응답·날짜 누락은 완료로 캐시하지 않는다. V10은 `quote_snapshot.prev_close_date`만 추가한다. 기존 과거 일봉은 차트·주봉에 그대로 포함하되 재검증했다고 간주하지 않는다. 기준가 날짜가 없거나 다르면 DB 일봉 유무와 관계없이 토스에서 다시 받는다. 분봉도 봉 시작 시각으로 정규장만 수용한다.
+
+#178은 마이그레이션을 추가하지 않습니다. 기존 V1 호가는 즉시 조회·체결에서 제외하며 정상 게시·보존기간 정리로 교체합니다. 주문과 과거 체결은 보존합니다. 상하한가는 `quote_snapshot`에서 읽고 주문·호가에 날짜·범위 컬럼을 중복 저장하지 않습니다. 이는 기존 당일 최초 상하한가 불변 정책에 기반합니다.

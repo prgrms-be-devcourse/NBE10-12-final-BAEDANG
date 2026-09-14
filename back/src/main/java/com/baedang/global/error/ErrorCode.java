@@ -50,6 +50,10 @@ public enum ErrorCode {
     INVALID_CURSOR(HttpStatus.BAD_REQUEST, "잘못된 페이지 정보예요. 처음부터 다시 불러와주세요"),
 
     // ── 시세 ────────────────────────────────────────────────────────────────
+    PRICE_LIMIT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "당일 상하한가를 확인할 수 없어요. 잠시 후 다시 시도해주세요"),
+    PRICE_OUT_OF_RANGE(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가격은 당일 하한가와 상한가 사이여야 해요"),
+    INVALID_TICK_SIZE(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가격이 호가 단위에 맞지 않아요"),
+    QUOTE_OUT_OF_PRICE_LIMIT(HttpStatus.BAD_GATEWAY, "현재가가 당일 상하한가 범위를 벗어났어요. 잠시 후 다시 시도해주세요"),
     QUOTE_NOT_FOUND(HttpStatus.NOT_FOUND, "시세 정보를 가져올 수 없어요"),
     QUOTE_CURRENCY_MISMATCH(HttpStatus.BAD_GATEWAY, "시세 통화 정보가 올바르지 않아요"),
     EXCHANGE_RATE_NOT_FOUND(HttpStatus.NOT_FOUND, "환율 정보를 가져올 수 없어요"),
@@ -63,6 +67,7 @@ public enum ErrorCode {
     NOT_IN_UNIVERSE(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 아직 거래를 지원하지 않아요"),
     STOCK_SUSPENDED(HttpStatus.UNPROCESSABLE_ENTITY, "거래정지 종목이에요"),
     STOCK_LIQUIDATION(HttpStatus.UNPROCESSABLE_ENTITY, "정리매매 종목이에요"),
+    MARKET_TRADING_HALTED(HttpStatus.UNPROCESSABLE_ENTITY, "현재 해당 시장의 매매거래가 일시 중단됐어요"),
     INSUFFICIENT_CASH(HttpStatus.UNPROCESSABLE_ENTITY, "주문가능금액이 부족해요"),
     INSUFFICIENT_QUANTITY(HttpStatus.UNPROCESSABLE_ENTITY, "보유 수량이 부족해요"),
     INVALID_QUANTITY(HttpStatus.BAD_REQUEST, "수량은 1주 이상의 정수로 입력해주세요"),
