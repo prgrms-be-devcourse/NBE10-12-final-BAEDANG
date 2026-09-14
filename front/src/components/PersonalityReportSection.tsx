@@ -505,10 +505,15 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           다시 계산돼요(한 번 굳어서 고정되지 않아요). 계좌를 초기화하면 새 계좌 기준으로 다시 4주를
           채워야 해요.
         </p>
+        {/* "닫기" 버튼과 같은 호버 효과(배경이 var(--fill) → var(--line)로
+            바뀜)를 적용해달라는 요청 — 같은 CSS 클래스(report-modal-close-btn)를
+            재사용했다. 이 버튼도 onClick={onClose}로 같은 동작을 하니 이름과도
+            어긋나지 않는다. 인라인 style의 배경은 그대로 두고(기존 디자인
+            유지), :hover는 클래스 쪽 규칙이 적용된다. */}
         <button
           type="button"
           onClick={onClose}
-          className="mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
+          className="report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
           style={{ background: "var(--fill)", color: "var(--ink)" }}
         >
           확인했어요
