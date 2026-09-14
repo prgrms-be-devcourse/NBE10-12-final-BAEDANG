@@ -529,21 +529,11 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-[21px] font-extrabold tracking-[-0.02em]" style={{ color: "var(--ink)" }}>
-              투자 성향은 이렇게 정해져요
-            </h3>
-            <p className="mt-1.5 text-[13px]" style={{ color: "var(--mut2)" }}>4개 축을 조합해 16가지 유형이 나와요</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="report-modal-close-btn cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold"
-            style={{ color: "var(--mut)" }}
-          >
-            닫기
-          </button>
+        <div>
+          <h3 className="text-[21px] font-extrabold tracking-[-0.02em]" style={{ color: "var(--ink)" }}>
+            투자 성향은 이렇게 정해져요
+          </h3>
+          <p className="mt-1.5 text-[13px]" style={{ color: "var(--mut2)" }}>4개 축을 조합해 16가지 유형이 나와요</p>
         </div>
         <div className="mt-4.5 flex flex-col gap-2.5">
           {HELP_ITEMS.map((item) => (
