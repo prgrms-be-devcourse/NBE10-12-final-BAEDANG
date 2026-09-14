@@ -114,9 +114,11 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
             value={range}
             onChange={(value) => setRange(value as FinancialRange)}
             trackClassName="ml-auto w-[132px] gap-0.5 rounded-full p-[3px]"
+            // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+            // 기존 alpha 값을 절반으로 낮췄다.
             trackStyle={{
-              background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-              border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+              background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+              border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
             }}
             buttonClassName="rounded-full px-0 py-1.5 text-[12.5px] font-bold"
             inactiveTextStyle={{ color: "var(--mut)" }}

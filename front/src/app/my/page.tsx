@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
@@ -45,6 +46,23 @@ export default function MyPage() {
   const { rate, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
+  // "포트폴리오 초기화"·"회원 탈퇴" 위험 구역의 배경·글자색을 라이트 모드에서만
+  // 좀 더 세련된 레드 계열로 바꿔달라는 요청 — 다크 모드는 절대 바꾸지 말라고
+  // 명시했으므로, 전역 CSS 변수(--dangerBg/--dangerText/--dangerTextSoft, 다른
+  // 화면(StockDetailClient·OrderDetailModal)에서도 함께 쓰는 값이라 여기서
+  // 바꾸면 그쪽까지 영향을 준다)는 그대로 두고, 라이트 모드일 때만 이
+  // 페이지 안에서 로컬로 새 색을 쓴다(다크 모드는 기존 var(--danger*) 그대로
+  // 참조해 단 하나도 안 바뀐다). 기존 값(oklch 96%/0.02/25 배경,
+  // 50%/0.18/25 글자 — 채도 높은 경고색 느낌)보다 채도를 낮추고 톤을
+  // 와인·버건디 쪽으로 옮겨 더 차분하고 고급스러운 인상을 준다.
+  // 처음엔 hue를 25→10으로 낮췄는데, oklch에서는 hue가 낮을수록(0에 가까울수록)
+  // 오히려 핑크·마젠타 쪽에 가까워진다 — "묘하게 핑크빛이 돈다"는 피드백이 정확히
+  // 이 때문이었다. hue를 원래의 순수한 빨강 쪽(28, 기존 25와 거의 같은 톤)으로
+  // 되돌리고 채도만 낮게 유지해서, 핑크로 새지 않으면서도 기존보다 차분한
+  // "레드"를 만들었다.
+  const dangerBg = theme === "light" ? "oklch(94% 0.035 30)" : "var(--dangerBg)";
+  const dangerText = theme === "light" ? "oklch(40% 0.16 28)" : "var(--dangerText)";
+  const dangerTextSoft = theme === "light" ? "oklch(46% 0.06 28)" : "var(--dangerTextSoft)";
   const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -414,18 +432,34 @@ export default function MyPage() {
   if (!isLoggedIn || !user) {
     return (
       <Reveal delay={0} className="rounded-[20px] py-20 text-center" style={{ background: "var(--card)" }}>
-        <div className="mb-2 text-[17px] font-bold" style={{ color: "var(--ink)" }}>
-          로그인하고 내 계좌를 확인해보세요
-        </div>
-        <div className="mb-5 text-[14px]" style={{ color: "var(--mut2)" }}>
-          보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요.
-        </div>
+        {/* 랭킹·가이드 화면 문구에 이미 적용한 토스인슈어런스(pd-recruit.tossinsu.com)
+            스타일 Line Reveal을 마이페이지 접속 시 등장하는 문구·컴포넌트에도
+            적용해달라는 요청 — 감싸는 Reveal(카드 전체가 살짝 떠오르는 기존
+            애니메이션)은 그대로 두고, 안쪽 텍스트만 RevealText로 바꿨다. */}
+        <RevealText
+          as="div"
+          className="mb-2 text-[17px] font-bold"
+          style={{ color: "var(--ink)" }}
+          lines={["로그인하고 내 계좌를 확인해보세요"]}
+        />
+        <RevealText
+          as="div"
+          className="mb-5 text-[14px]"
+          style={{ color: "var(--mut2)" }}
+          baseDelayMs={45}
+          lines={["보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요."]}
+        />
+        {/* 문구뿐 아니라 컴포넌트(버튼)에도 같은 효과를 적용해달라는 요청 —
+            메인 화면 CTA 버튼(page.tsx)과 같은 방식으로 버튼 라벨을
+            RevealText(as="span" display="inline-block")로 감쌌다. 위
+            제목(0ms)·설명(45ms)에 이어서 자연스럽게 90ms·135ms에
+            시작하도록 이어 붙였다. */}
         <div className="flex justify-center gap-2.5">
           <Link href="/login" className="rounded-xl px-5 py-2.5 text-[14px] font-bold" style={{ background: "var(--fill)", color: "var(--ink)" }}>
-            로그인
+            <RevealText as="span" display="inline-block" baseDelayMs={90} lines={["로그인"]} />
           </Link>
           <Link href="/signup" className="rounded-xl px-5 py-2.5 text-[14px] font-bold text-white" style={{ background: "var(--accent)" }}>
-            회원가입
+            <RevealText as="span" display="inline-block" baseDelayMs={135} lines={["회원가입"]} />
           </Link>
         </div>
       </Reveal>
@@ -450,10 +484,19 @@ export default function MyPage() {
 
   return (
     <div>
+      {/* 랭킹·가이드 화면 문구에 이미 적용한 Line Reveal을 마이페이지 접속 시
+          맨 처음 보이는 "내 계좌" 제목·회차 배지에도 적용했다. */}
       <Reveal delay={0}>
         <div className="mb-4.5 flex items-baseline gap-3">
-          <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
-          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>{account.roundNo}회차</span>
+          <RevealText as="h2" className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }} lines={["내 계좌"]} />
+          <RevealText
+            as="span"
+            display="inline-block"
+            baseDelayMs={45}
+            className="text-[13px]"
+            style={{ color: "var(--mut2)" }}
+            lines={[`${account.roundNo}회차`]}
+          />
         </div>
       </Reveal>
 
@@ -483,9 +526,11 @@ export default function MyPage() {
           value={tab}
           onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders")}
           trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
+          // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+          // 기존 alpha 값을 절반으로 낮췄다.
           trackStyle={{
-            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-            border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+            background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+            border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
           }}
           buttonClassName="rounded-full px-0 py-2 text-[13px] font-bold"
           inactiveTextStyle={{ color: "var(--mut)" }}
@@ -748,137 +793,167 @@ export default function MyPage() {
       </Reveal>
 
       <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
-        <div className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }}>계정 설정</div>
+        <RevealText as="div" className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["계정 설정"]} />
 
-        <form onSubmit={handleChangeNickname} className="mb-6">
-          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
-          <div className="flex max-w-[360px] gap-2">
-            <input
-              type="text"
-              required
-              minLength={2}
-              maxLength={20}
-              value={nicknameInput}
-              onChange={(e) => {
-                setNicknameInput(e.target.value);
-                setNicknameError(null);
-                setNicknameSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <button
-              type="submit"
-              disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
-              className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--accent)" }}
-            >
-              {nicknameSaving ? "변경 중…" : "변경"}
-            </button>
-          </div>
-          {nicknameError && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
-          )}
-          {nicknameSaved && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
-          )}
-        </form>
+        {/* 닉네임 아래에 세로로 쌓여 있던 비밀번호 변경을 닉네임 옆으로
+            배치해달라는 요청 — 구분선(divider)으로 나누던 두 폼을 가로
+            flex로 나란히 놓았다. 좁은 화면(max-md)에서는 겹치지 않도록
+            다시 세로로 쌓이게 했다. */}
+        <div className="flex flex-wrap gap-8 max-md:flex-col">
+          <form onSubmit={handleChangeNickname}>
+            <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
+            <div className="flex max-w-[360px] gap-2">
+              <input
+                type="text"
+                required
+                minLength={2}
+                maxLength={20}
+                value={nicknameInput}
+                onChange={(e) => {
+                  setNicknameInput(e.target.value);
+                  setNicknameError(null);
+                  setNicknameSaved(false);
+                }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
+                className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+              >
+                {nicknameSaving ? "변경 중…" : "변경"}
+              </button>
+            </div>
+            {nicknameError && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
+            )}
+            {nicknameSaved && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
+            )}
+          </form>
 
-        <div className="mb-5 h-px" style={{ background: "var(--line)" }} />
-
-        <form onSubmit={handleChangePassword}>
-          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
-          <div className="flex max-w-[320px] flex-col gap-2">
-            <input
-              type="password"
-              required
-              placeholder="현재 비밀번호"
-              value={currentPassword}
-              onChange={(e) => {
-                setCurrentPassword(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <input
-              type="password"
-              required
-              minLength={8}
-              maxLength={64}
-              placeholder="새 비밀번호 (8자 이상)"
-              value={newPassword}
-              onChange={(e) => {
-                setNewPassword(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <input
-              type="password"
-              required
-              placeholder="새 비밀번호 확인"
-              value={newPasswordConfirm}
-              onChange={(e) => {
-                setNewPasswordConfirm(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <button
-              type="submit"
-              disabled={passwordSaving}
-              className="cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--accent)" }}
-            >
-              {passwordSaving ? "변경 중…" : "비밀번호 변경"}
-            </button>
-          </div>
-          {passwordError && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
-          )}
-          {passwordSaved && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
-          )}
-        </form>
+          {/* 비밀번호 변경 기능을 우측으로 배치해달라는 요청 — ml-auto로
+              같은 줄(flex row)의 오른쪽 끝에 붙였다. 닉네임 폼은 왼쪽에
+              그대로 두고, 남는 공간만큼 이 폼이 오른쪽으로 밀린다. 좁은
+              화면(max-md:flex-col)에서는 세로로 쌓이므로 ml-auto가
+              의미 없어져(자동으로 아래로) 자연스럽게 무시된다. */}
+          <form onSubmit={handleChangePassword} className="ml-auto">
+            <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
+            {/* 현재 비밀번호·새 비밀번호·새 비밀번호 확인·버튼이 세로로 쌓여
+                있어 심미적으로 안 좋다는 요청 — flex-col(세로 스택) 대신
+                가로로 나란히 놓았다. 각 입력칸은 세로 스택 때 쓰던
+                w-full(부모 폭 320px에 꽉 참) 대신 고정 폭(w-[168px])을
+                줘서 가로로 늘어놓아도 한 칸씩 적당한 크기를 유지한다.
+                화면이 좁아지면 flex-wrap으로 다음 줄로 넘어간다.
+                간격을 gap-2 → gap-4 → gap-8까지 넓혔다가 gap-1.5(6px)로
+                좁혔는데, "조금만 더" 넓혀달라는 요청으로 gap-2.5(10px)로
+                살짝만 올렸다. */}
+            <div className="flex flex-wrap items-start gap-2.5">
+              <input
+                type="password"
+                required
+                placeholder="현재 비밀번호"
+                value={currentPassword}
+                onChange={(e) => {
+                  setCurrentPassword(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <input
+                type="password"
+                required
+                minLength={8}
+                maxLength={64}
+                placeholder="새 비밀번호 (8자 이상)"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <input
+                type="password"
+                required
+                placeholder="새 비밀번호 확인"
+                value={newPasswordConfirm}
+                onChange={(e) => {
+                  setNewPasswordConfirm(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={passwordSaving}
+                className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+              >
+                {passwordSaving ? "변경 중…" : "비밀번호 변경"}
+              </button>
+            </div>
+            {passwordError && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
+            )}
+            {passwordSaved && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
+            )}
+          </form>
+        </div>
       </Reveal>
 
-      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: dangerBg }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
-            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
-              <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
-            </div>
+            <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["포트폴리오 초기화"]} />
+            <RevealText
+              as="div"
+              className="text-[15px] leading-relaxed"
+              style={{ color: dangerTextSoft }}
+              baseDelayMs={45}
+              lines={[
+                <>
+                  보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
+                  <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
+                </>,
+              ]}
+            />
           </div>
           <button
             onClick={() => setResetModalOpen(true)}
             className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
-            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+            style={{ background: "var(--card)", color: dangerText }}
           >
             포트폴리오 초기화
           </button>
         </div>
       </Reveal>
 
-      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: dangerBg }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>회원 탈퇴</div>
-            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요.
-            </div>
+            <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["회원 탈퇴"]} />
+            <RevealText
+              as="div"
+              className="text-[15px] leading-relaxed"
+              style={{ color: dangerTextSoft }}
+              baseDelayMs={45}
+              lines={["계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요."]}
+            />
           </div>
           <button
             onClick={() => setWithdrawModalOpen(true)}
             className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
-            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+            style={{ background: "var(--card)", color: dangerText }}
           >
             회원 탈퇴
           </button>
@@ -966,8 +1041,12 @@ export default function MyPage() {
                 {resetError}
               </p>
             )}
+            {/* 두 버튼 모두 cursor-pointer가 빠져 있어서, 마우스를 올려도
+                기본 커서(화살표)만 보이던 문제 — 손가락 커서가 나타나게
+                추가했다. disabled:cursor-not-allowed는 그대로 둬서, 처리
+                중일 때는 여전히 금지 커서로 보인다. */}
             <button
-              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--dangerText)" }}
               onClick={handleReset}
               disabled={resetting}
@@ -975,7 +1054,7 @@ export default function MyPage() {
               {resetting ? "초기화하는 중…" : "초기화할게요"}
             </button>
             <button
-              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               onClick={() => setResetModalOpen(false)}
               disabled={resetting}
@@ -992,7 +1071,10 @@ export default function MyPage() {
 function SummaryCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "up" | "down" }) {
   return (
     <div className="flex-1 rounded-[20px] px-6 py-5.5" style={{ background: "var(--card)" }}>
-      <div className="text-[13px]" style={{ color: "var(--mut)" }}>{label}</div>
+      {/* 라벨(총 자산·예수금 등)에는 Line Reveal을 적용했다. 값(value)은 5초마다
+          폴링으로 계속 갱신되는 숫자라 매번 다시 올라오면 눈에 거슬리므로
+          Reveal/RevealText 없이 그대로 둔다. */}
+      <RevealText as="div" className="text-[13px]" style={{ color: "var(--mut)" }} lines={[label]} />
       <div
         className="mt-1.5 text-[24px] font-extrabold"
         style={{ color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)" }}

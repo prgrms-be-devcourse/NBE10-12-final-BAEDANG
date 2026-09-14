@@ -27,8 +27,12 @@ export function Nav() {
   const { isLoggedIn, user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  // 로그인/회원가입 화면은 페이지 그라데이션이 헤더까지 이어져야 해서 배경을 투명하게 둔다.
-  const transparentHeader = pathname === "/login" || pathname === "/signup";
+  // 로그인/회원가입/비밀번호 찾기 화면은 페이지 그라데이션이 헤더까지 이어져야
+  // 해서 배경을 투명하게 둔다(PageBackground.tsx와 같은 기준이어야 한다 —
+  // 비밀번호 찾기가 빠져 있어서 그 화면만 헤더 아래에서 그라데이션이 끊겨
+  // 보이는 오류가 있었다).
+  const transparentHeader =
+    pathname === "/login" || pathname === "/signup" || pathname === "/forgot-password";
 
   return (
     <header
@@ -95,15 +99,30 @@ export function Nav() {
           value={theme}
           onChange={(v) => setTheme(v as "light" | "dark")}
           trackClassName="w-[132px] box-border gap-0.5 rounded-full border p-[3px] backdrop-blur-[4px]"
+          // 라이트/다크 버튼 뒤에 있는 둥근 사각형(트랙)의 배경 불투명도를
+          // 낮춰 반투명하게 보이게 해달라는 요청 — 기존 alpha 값(다크
+          // .03·라이트 .06)을 절반으로 낮췄다. 테두리도 같은 비율로
+          // 낮춰 트랙 전체가 함께 옅어지도록 했다.
           trackStyle={{
-            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-            borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
+            background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+            borderColor: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
           }}
-          pillColor={theme === "dark" ? "rgba(42,46,51,.5)" : "rgba(15,56,104,.68)"}
+          // 라이트 모드 필박스(="라이트" 버튼) 배경을 여러 파란 계열로
+          // 시도해본 끝에, 메인 화면과 가장 잘 어우러지는 색을 골라달라는
+          // 요청 — 사이트 전체(로그인/회원가입 필박스, 상단 메인/랭킹/가이드
+          // 탭, "모의 투자금 받고 시작하기" 등 CTA 버튼)에서 이미 일관되게
+          // 쓰고 있는 브랜드 색 var(--accent)(진한 남색)를 그대로 채택했다 —
+          // 새 색을 만드는 대신 이미 검증된 사이트 대표색을 재사용해 통일감을
+          // 유지한다. PillTabs의 기본 pillColor 값도 var(--accent)라
+          // 사실상 다른 탭들과 동일한 방식으로 돌아온 것이다.
+          pillColor={theme === "dark" ? "rgba(42,46,51,.5)" : "var(--accent)"}
           // "라이트/다크" 글자 크기를 키워달라는 요청 — 12px → 13.5px.
           buttonClassName="rounded-full px-0 py-1.5 text-[13.5px] font-bold"
           inactiveTextStyle={{ color: theme === "dark" ? "oklch(75% 0.02 258)" : "rgba(15,56,104,.75)" }}
-          activeTextClassName="text-white"
+          // 필박스 배경이 다시 진한 남색(var(--accent))이 되면서, 사이트의
+          // 다른 필박스(메인 네비, 로그인/회원가입)와 마찬가지로 흰 글자가
+          // 잘 어울려 activeTextClassName="text-white" 기본값을 그대로 둔다
+          // (별도 activeTextStyle 오버라이드 없음).
         />
 
         {isLoggedIn && user ? (
@@ -114,7 +133,11 @@ export function Nav() {
             </span>
             {/* 회원가입 버튼(비로그인 상태의 PillTabs 활성 필박스)과 같은 디자인 —
                 rounded-lg, var(--accent) 배경, 흰색 굵은 글자로 맞췄다. 글자 크기를
-                키워달라는 요청으로 13px → 14.5px(닉네임과 같은 크기)로 올렸다. */}
+                키워달라는 요청으로 13px → 14.5px(닉네임과 같은 크기)로 올렸다.
+                한때 다크 모드 accent(#5fa0d6)가 가볍다는 이유로 이 버튼만
+                로컬로 #114f8c를 썼는데, 이후 dark accent 자체가 #114f8c로
+                통일되면서(globals.css) var(--accent) 하나만 써도 같은 색이라
+                로컬 오버라이드를 정리했다. */}
             <button
               onClick={logout}
               className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[14.5px] font-bold text-white"

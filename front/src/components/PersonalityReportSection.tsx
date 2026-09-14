@@ -265,19 +265,32 @@ function OpenCard({
       {report.classified && report.typeCode && shares ? (
         <div className="grid gap-7.5 px-6 py-7 max-md:grid-cols-1" style={{ gridTemplateColumns: "300px minmax(0,1fr)" }}>
           <div className="flex flex-col gap-3.5">
-            {/* 시안은 유형별 AI 생성 이미지를 넣었지만, 실제로 유형마다 만들어 둔 그림이 없어
-                과장하지 않고 코드·별명을 큼직하게 보여주는 장식 카드로 대신했다. */}
-            <div
-              className="flex aspect-square flex-col items-center justify-center gap-2 rounded-[20px] px-4 text-center"
-              style={{ background: "var(--accentSoft)" }}
-            >
-              <span className="font-mono text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
-                {report.typeCode}
-              </span>
-              <span className="text-[13px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
-                {personaType?.nickname ?? report.typeLabel}
-              </span>
-            </div>
+            {/* 시안은 유형별 AI 생성 이미지를 넣었었는데, 실제 이미지를 등록해달라는
+                요청으로 유형별 실제 이미지(public/personality-types/, personaType.image)를
+                연결했다. 이미지가 없는(등록 안 된) 유형이 생기더라도 깨지지 않도록,
+                이미지가 없으면 기존 코드·별명 텍스트 카드로 그대로 폴백한다. 헤더 로고
+                (Nav.tsx)와 같은 이유로 next/image 대신 일반 img를 썼다 — 유형에 따라
+                16장 중 하나만 조건부로 그려서 next/image 최적화 이점이 크지 않다. */}
+            {personaType?.image ? (
+              // eslint-disable-next-line @next/next/no-img-element -- 유형별 16장 중 하나만 조건부로 보여주는 이미지라 next/image 최적화 이점이 없다.
+              <img
+                src={personaType.image}
+                alt={`${personaType.nickname} 이미지`}
+                className="aspect-square w-full rounded-[20px] object-cover"
+              />
+            ) : (
+              <div
+                className="flex aspect-square flex-col items-center justify-center gap-2 rounded-[20px] px-4 text-center"
+                style={{ background: "var(--accentSoft)" }}
+              >
+                <span className="font-mono text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
+                  {report.typeCode}
+                </span>
+                <span className="text-[13px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
+                  {personaType?.nickname ?? report.typeLabel}
+                </span>
+              </div>
+            )}
             <div className="flex items-center gap-2.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--accent)" }}>
               <span className="font-mono text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
               <span className="ml-auto text-[12px] font-bold" style={{ color: "var(--accentText)" }}>{report.typeLabel}</span>
@@ -453,12 +466,15 @@ function ReportStat({ label, value, sub, color }: { label: string; value: string
 }
 
 const HELP_ITEMS = [
-  { title: "분산 · 집중(C) ↔ 분산(D)", desc: "가장 큰 종목의 평가비중으로 판단해요. 한 종목이 50% 이상이면 집중(C), 아니면 분산(D)이에요." },
+  // "가장 큰 종목의 평가비중으로 판단해요." 뒤와 "...안정(B)이에요." 뒤에서
+  // 줄바꿈해달라는 요청 — desc를 렌더링하는 div에 whiteSpace: "pre-line"을
+  // 줘서 이 \n이 실제 줄바꿈으로 보이게 했다.
+  { title: "분산 · 집중(C) ↔ 분산(D)", desc: "가장 큰 종목의 평가비중으로 판단해요.\n한 종목이 50% 이상이면 집중(C), 아니면 분산(D)이에요." },
   { title: "시장 · 국내(K) ↔ 해외(G)", desc: "국내 종목 평가비중이 50% 이상이면 국내(K), 아니면 해외(G)예요." },
   { title: "유형 · 개별주(S) ↔ ETF(E)", desc: "개별주(개별주·우선주) 평가비중이 50% 이상이면 개별주(S), 아니면 ETF(E)예요." },
   // 백엔드는 아직 변동성을 반영하지 않는 Phase 1 프록시라(레버리지·인버스 비중만 봄),
   // 시안의 "일간 변동성을 합쳐서 본다"는 문구는 실제와 달라 정확하게 고쳤다.
-  { title: "공격성 · 공격(A) ↔ 안정(B)", desc: "레버리지·인버스 상품 평가비중이 20% 이상이면 공격(A), 아니면 안정(B)이에요. (변동성 반영은 추후 예정)" },
+  { title: "공격성 · 공격(A) ↔ 안정(B)", desc: "레버리지·인버스 상품 평가비중이 20% 이상이면 공격(A), 아니면 안정(B)이에요.\n(변동성 반영은 추후 예정)" },
 ];
 
 function HelpModal({ onClose }: { onClose: () => void }) {
@@ -493,7 +509,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           {HELP_ITEMS.map((item) => (
             <div key={item.title} className="rounded-2xl px-4 py-3.5" style={{ background: "var(--bg)" }}>
               <div className="text-[13px] font-bold" style={{ color: "var(--accent)" }}>{item.title}</div>
-              <div className="mt-1.5 text-[13px] leading-[1.65]" style={{ color: "var(--body)" }}>{item.desc}</div>
+              <div className="mt-1.5 text-[13px] leading-[1.65]" style={{ color: "var(--body)", whiteSpace: "pre-line" }}>{item.desc}</div>
             </div>
           ))}
         </div>
@@ -502,11 +518,21 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           다시 계산돼요(한 번 굳어서 고정되지 않아요). 계좌를 초기화하면 새 계좌 기준으로 다시 4주를
           채워야 해요.
         </p>
+        {/* "닫기" 버튼과 같은 호버 효과(배경이 var(--fill) → var(--line)로
+            바뀜)를 적용해달라는 요청 — 같은 CSS 클래스(report-modal-close-btn)를
+            재사용했다. 이 버튼도 onClick={onClose}로 같은 동작을 하니 이름과도
+            어긋나지 않는다.
+            처음엔 기존 인라인 background: "var(--fill)"을 그대로 둔 채
+            클래스만 추가했는데, 인라인 style은 :hover를 포함한 어떤
+            외부 스타일시트 규칙보다도 우선이라 호버 자체가 아예 안
+            먹혔다("닫기" 버튼들은 애초에 배경을 인라인으로 주지 않아서
+            클래스가 base·hover 배경을 전부 제어한다) — 그래서 인라인
+            background를 지우고 클래스에게 완전히 맡겼다. */}
         <button
           type="button"
           onClick={onClose}
-          className="mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
-          style={{ background: "var(--fill)", color: "var(--ink)" }}
+          className="report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
+          style={{ color: "var(--ink)" }}
         >
           확인했어요
         </button>
