@@ -52,6 +52,7 @@ export function PersonalityReportSection() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [typeBoardOpen, setTypeBoardOpen] = useState(false);
+  const [imageOpen, setImageOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -95,6 +96,7 @@ export function PersonalityReportSection() {
           onHelp={() => setHelpOpen(true)}
           onOpenBoard={() => setBoardOpen(true)}
           onOpenTypeBoard={() => setTypeBoardOpen(true)}
+          onOpenImage={() => setImageOpen(true)}
         />
       )}
 
@@ -102,6 +104,12 @@ export function PersonalityReportSection() {
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
       {typeBoardOpen && (
         <TypeComparisonModal myTypeCode={report.typeCode} onClose={() => setTypeBoardOpen(false)} />
+      )}
+      {/* 유형 이미지를 더 크게 볼 수 있게 해달라는 요청 — LockedCard에서는 이미지
+          자체가 없어(잠금 상태) 이 모달을 열 방법도 없으니, OpenCard일 때만
+          personaType.image가 있으면 연다. */}
+      {imageOpen && report.typeCode && PERSONALITY_TYPES[report.typeCode]?.image && (
+        <PersonalityImageModal typeCode={report.typeCode} onClose={() => setImageOpen(false)} />
       )}
     </div>
   );
@@ -252,11 +260,13 @@ function OpenCard({
   onHelp,
   onOpenBoard,
   onOpenTypeBoard,
+  onOpenImage,
 }: {
   report: PersonalityReport;
   onHelp: () => void;
   onOpenBoard: () => void;
   onOpenTypeBoard: () => void;
+  onOpenImage: () => void;
 }) {
   const { theme } = useTheme();
   const shares = report.shares;
@@ -298,11 +308,13 @@ function OpenCard({
                 (Nav.tsx)와 같은 이유로 next/image 대신 일반 img를 썼다 — 유형에 따라
                 16장 중 하나만 조건부로 그려서 next/image 최적화 이점이 크지 않다. */}
             {personaType?.image ? (
+              // 이미지를 더 자세히 보고 싶다는 요청 — 클릭하면 확대 모달을 연다.
               // eslint-disable-next-line @next/next/no-img-element -- 유형별 16장 중 하나만 조건부로 보여주는 이미지라 next/image 최적화 이점이 없다.
               <img
                 src={personaType.image}
                 alt={`${personaType.nickname} 이미지`}
-                className="aspect-square w-full rounded-[20px] object-cover"
+                className="aspect-square w-full cursor-pointer rounded-[20px] object-cover transition-[filter] duration-150 hover:brightness-95"
+                onClick={onOpenImage}
               />
             ) : (
               <div
@@ -595,6 +607,52 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         >
           확인했어요
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** 유형 이미지를 더 자세히 볼 수 있게 확대해서 보여주는 모달. */
+function PersonalityImageModal({ typeCode, onClose }: { typeCode: string; onClose: () => void }) {
+  const personaType = PERSONALITY_TYPES[typeCode];
+  if (!personaType?.image) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+      style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[24px] p-5"
+        style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="font-mono text-[18px] font-extrabold tracking-[.04em]" style={{ color: "var(--ink)" }}>
+              {typeCode}
+            </h3>
+            <p className="mt-0.5 truncate text-[13px] font-bold" style={{ color: "var(--mut2)" }}>
+              {personaType.nickname}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="report-modal-close-btn shrink-0 cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            style={{ color: "var(--mut)" }}
+            aria-label="닫기"
+          >
+            닫기
+          </button>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- 유형별 16장 중 하나만 조건부로 보여주는 이미지라 next/image 최적화 이점이 없다. */}
+        <img
+          src={personaType.image}
+          alt={`${personaType.nickname} 이미지`}
+          className="aspect-square w-full rounded-[18px] object-cover"
+        />
       </div>
     </div>
   );
