@@ -812,7 +812,12 @@ export default function MyPage() {
             )}
           </form>
 
-          <form onSubmit={handleChangePassword}>
+          {/* 비밀번호 변경 기능을 우측으로 배치해달라는 요청 — ml-auto로
+              같은 줄(flex row)의 오른쪽 끝에 붙였다. 닉네임 폼은 왼쪽에
+              그대로 두고, 남는 공간만큼 이 폼이 오른쪽으로 밀린다. 좁은
+              화면(max-md:flex-col)에서는 세로로 쌓이므로 ml-auto가
+              의미 없어져(자동으로 아래로) 자연스럽게 무시된다. */}
+          <form onSubmit={handleChangePassword} className="ml-auto">
             <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
             {/* 현재 비밀번호·새 비밀번호·새 비밀번호 확인·버튼이 세로로 쌓여
                 있어 심미적으로 안 좋다는 요청 — flex-col(세로 스택) 대신
@@ -820,11 +825,10 @@ export default function MyPage() {
                 w-full(부모 폭 320px에 꽉 참) 대신 고정 폭(w-[168px])을
                 줘서 가로로 늘어놓아도 한 칸씩 적당한 크기를 유지한다.
                 화면이 좁아지면 flex-wrap으로 다음 줄로 넘어간다.
-                변경 버튼과 입력칸 사이 간격을 넓혀달라는 요청 —
-                gap-2(8px) → gap-4(16px) → gap-8(32px, "많이 넓게"
-                후속 요청). flex-wrap이라 줄이 어떻게 꺾이든 모든
-                요소 사이 간격이 함께 넓어진다. */}
-            <div className="flex flex-wrap items-start gap-8">
+                간격을 gap-2 → gap-4 → gap-8까지 넓혔다가, 이번엔 다시
+                좁혀달라는 요청으로 gap-1.5(6px)로 되돌렸다 — 처음
+                gap-2(8px)보다도 살짝 더 좁다. */}
+            <div className="flex flex-wrap items-start gap-1.5">
               <input
                 type="password"
                 required
