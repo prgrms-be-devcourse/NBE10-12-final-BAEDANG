@@ -157,9 +157,11 @@ export default function MainPage() {
                 <RevealText as="span" display="inline-block" baseDelayMs={45} lines={[<SwapText key="label">가이드 보기</SwapText>]} />
               </Link>
             </div>
+            {/* 버튼 두 개(모의 투자금 받고 시작하기·가이드 보기)와 이 문구 사이
+                간격을 띄워달라는 요청 — mt-3.5(14px) → mt-6(24px). */}
             <RevealText
               as="div"
-              className="mt-3.5 text-[14px]"
+              className="mt-6 text-[14px]"
               style={{ color: "var(--heroSub)" }}
               lines={["실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요"]}
             />
