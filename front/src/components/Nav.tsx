@@ -99,11 +99,26 @@ export function Nav() {
             background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
             borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
           }}
-          pillColor={theme === "dark" ? "rgba(42,46,51,.5)" : "rgba(15,56,104,.68)"}
+          // 라이트 모드일 때의 필박스(=현재 "라이트" 버튼) 배경을 메인 화면 히어로
+          // 사각형("실전처럼 경험하고, 나만의 투자 감각을 키워요" 문구가 놓인 카드)의
+          // 배경과 똑같이 맞춰달라는 요청 — page.tsx 히어로 div에 쓴 background 값
+          // (토스임팩트 스타일 radial-gradient + var(--heroBg))을 그대로 가져왔다.
+          // var(--heroBg)를 쓰므로 라이트 모드 값(#dceefa)이 그대로 반영된다.
+          pillColor={
+            theme === "dark"
+              ? "rgba(42,46,51,.5)"
+              : "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), var(--heroBg)"
+          }
           // "라이트/다크" 글자 크기를 키워달라는 요청 — 12px → 13.5px.
           buttonClassName="rounded-full px-0 py-1.5 text-[13.5px] font-bold"
           inactiveTextStyle={{ color: theme === "dark" ? "oklch(75% 0.02 258)" : "rgba(15,56,104,.75)" }}
-          activeTextClassName="text-white"
+          // 필박스 배경을 히어로 카드와 같은 옅은 하늘색으로 바꾸면서, 기존
+          // activeTextClassName="text-white"를 라이트 모드에도 그대로 두면 밝은
+          // 배경 위에 흰 글자가 묻혀 안 보인다 — 히어로 문구가 라이트 모드에서
+          // var(--heroText)(짙은 남색)를 쓰는 것과 같은 이유로, 라이트 모드
+          // 활성 글자만 짙은 남색(var(--ink))으로 바꿨다. 다크 모드는 배경이
+          // 그대로 어두운 회색이라 흰 글자를 유지한다.
+          activeTextStyle={{ color: theme === "dark" ? "#ffffff" : "var(--ink)" }}
         />
 
         {isLoggedIn && user ? (
