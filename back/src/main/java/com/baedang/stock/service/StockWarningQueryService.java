@@ -75,7 +75,10 @@ public class StockWarningQueryService {
     /** 종목의 현재 활성 유의사항과 조회 성공 여부를 반환한다. 예외를 던지지 않는다. */
     public WarningSnapshot currentWarnings(Stock stock) {
         LocalDate today = LocalDate.now(clock);
-        Cached cached = cache.get(stock.getStockId());
+        Cached cached;
+        synchronized (cache) {
+            cached = cache.get(stock.getStockId());
+        }
         if (cached != null && cached.isFresh(clock.instant(), ttl)) {
             return new WarningSnapshot(activeWarnings(cached.warnings(), today), StockDetailResponse.WarningStatus.AVAILABLE);
         }
@@ -101,9 +104,11 @@ public class StockWarningQueryService {
     }
 
     private void remember(Long stockId, Cached cached) {
-        cache.put(stockId, cached);
-        while (cache.size() > MAX_CACHE_SIZE) {
-            cache.remove(cache.keySet().iterator().next());
+        synchronized (cache) {
+            cache.put(stockId, cached);
+            while (cache.size() > MAX_CACHE_SIZE) {
+                cache.remove(cache.keySet().iterator().next());
+            }
         }
     }
 
