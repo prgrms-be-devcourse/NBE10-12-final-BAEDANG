@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 import { WikiPanel } from "@/components/WikiPanel";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -99,15 +100,29 @@ export default function GuidePage() {
         <WikiPanel />
       ) : (
         <>
+          {/* 랭킹 화면 문구에 이미 적용한 토스인슈어런스(pd-recruit.tossinsu.com)
+              스타일 Line Reveal(아래→위 마스크 등장)을 이용가이드 탭의 문구·
+              컴포넌트에도 적용해달라는 요청 — 제목/부제, 카드 6개의 제목·본문,
+              하단 안내 문구까지 모두 RevealText로 바꿨다. 각 요소를 감싸던
+              Reveal(카드 전체가 살짝 떠오르는 기존 애니메이션)은 그대로 두고,
+              그 안의 텍스트만 RevealText로 한 줄씩 마스크 안에서 올라오게
+              했다 — RevealText는 자체 IntersectionObserver로 각 카드가 실제로
+              스크롤에 걸릴 때 개별적으로 반응한다. */}
           <Reveal delay={0.02}>
-            <h2 className="text-[26px] font-extrabold" style={{ color: "var(--ink)" }}>
-              이용가이드
-            </h2>
+            <RevealText
+              as="h2"
+              className="text-[26px] font-extrabold"
+              style={{ color: "var(--ink)" }}
+              lines={["이용가이드"]}
+            />
           </Reveal>
           <Reveal delay={0.08} className="mt-2.5 mb-6">
-            <p className="text-[15px]" style={{ color: "var(--mut)" }}>
-              이 서비스에서 거래가 어떻게 이루어지는지 안내해 드려요
-            </p>
+            <RevealText
+              as="p"
+              className="text-[15px]"
+              style={{ color: "var(--mut)" }}
+              lines={["이 서비스에서 거래가 어떻게 이루어지는지 안내해 드려요"]}
+            />
           </Reveal>
 
           {/* 왼쪽 열(1·2·3)과 오른쪽 열(4·5·6)이 같은 줄끼리 카드 높이를 맞춰야 해서
@@ -121,8 +136,19 @@ export default function GuidePage() {
                   className="h-full"
                   style={{ background: "var(--card)", borderRadius: 20, padding: "22px 24px" }}
                 >
-                  <h4 className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>{s.title}</h4>
-                  <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>{s.body}</p>
+                  <RevealText
+                    as="h4"
+                    className="mb-1.5 text-[15px] font-bold"
+                    style={{ color: "var(--ink)" }}
+                    lines={[s.title]}
+                  />
+                  <RevealText
+                    as="p"
+                    className="text-[13.5px] leading-relaxed"
+                    style={{ color: "var(--body)" }}
+                    baseDelayMs={45}
+                    lines={[s.body]}
+                  />
                 </div>
               </Reveal>
             ))}
@@ -130,11 +156,18 @@ export default function GuidePage() {
 
           <Reveal delay={0.5} className="mt-4.5">
             <div className="rounded-2xl px-5 py-4" style={{ background: "var(--accentSoft)" }}>
-              <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--onAccentSoftText)" }}>
-                <b>참고</b> — 이 서비스의 시세는 실제 시장 데이터를 사용하지만 수 초의 지연이 있으며, 회원의
-                매수·매도는 실제 시장 가격에 영향을 주지 않아요. 모의 투자 결과가 실제 투자 성과를 보장하지
-                않아요.
-              </p>
+              <RevealText
+                as="p"
+                className="text-[12.5px] leading-relaxed"
+                style={{ color: "var(--onAccentSoftText)" }}
+                lines={[
+                  <>
+                    <b>참고</b> — 이 서비스의 시세는 실제 시장 데이터를 사용하지만 수 초의 지연이 있으며, 회원의
+                    매수·매도는 실제 시장 가격에 영향을 주지 않아요. 모의 투자 결과가 실제 투자 성과를 보장하지
+                    않아요.
+                  </>,
+                ]}
+              />
             </div>
           </Reveal>
         </>

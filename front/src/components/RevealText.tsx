@@ -22,7 +22,7 @@ type RevealTextProps = {
    */
   lines: ReactNode[];
   /** 감싸는 태그. 기존 문구가 h1/p였다면 그대로 h1/p를 줘서 마크업 의미를 유지한다. */
-  as?: "div" | "span" | "h1" | "h2" | "p";
+  as?: "div" | "span" | "h1" | "h2" | "h4" | "p";
   /** 기존 요소에 있던 font-size/weight/line-height/color 등 클래스를 그대로 옮긴다. */
   className?: string;
   style?: CSSProperties;
