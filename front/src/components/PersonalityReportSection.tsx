@@ -453,12 +453,15 @@ function ReportStat({ label, value, sub, color }: { label: string; value: string
 }
 
 const HELP_ITEMS = [
-  { title: "분산 · 집중(C) ↔ 분산(D)", desc: "가장 큰 종목의 평가비중으로 판단해요. 한 종목이 50% 이상이면 집중(C), 아니면 분산(D)이에요." },
+  // "가장 큰 종목의 평가비중으로 판단해요." 뒤와 "...안정(B)이에요." 뒤에서
+  // 줄바꿈해달라는 요청 — desc를 렌더링하는 div에 whiteSpace: "pre-line"을
+  // 줘서 이 \n이 실제 줄바꿈으로 보이게 했다.
+  { title: "분산 · 집중(C) ↔ 분산(D)", desc: "가장 큰 종목의 평가비중으로 판단해요.\n한 종목이 50% 이상이면 집중(C), 아니면 분산(D)이에요." },
   { title: "시장 · 국내(K) ↔ 해외(G)", desc: "국내 종목 평가비중이 50% 이상이면 국내(K), 아니면 해외(G)예요." },
   { title: "유형 · 개별주(S) ↔ ETF(E)", desc: "개별주(개별주·우선주) 평가비중이 50% 이상이면 개별주(S), 아니면 ETF(E)예요." },
   // 백엔드는 아직 변동성을 반영하지 않는 Phase 1 프록시라(레버리지·인버스 비중만 봄),
   // 시안의 "일간 변동성을 합쳐서 본다"는 문구는 실제와 달라 정확하게 고쳤다.
-  { title: "공격성 · 공격(A) ↔ 안정(B)", desc: "레버리지·인버스 상품 평가비중이 20% 이상이면 공격(A), 아니면 안정(B)이에요. (변동성 반영은 추후 예정)" },
+  { title: "공격성 · 공격(A) ↔ 안정(B)", desc: "레버리지·인버스 상품 평가비중이 20% 이상이면 공격(A), 아니면 안정(B)이에요.\n(변동성 반영은 추후 예정)" },
 ];
 
 function HelpModal({ onClose }: { onClose: () => void }) {
@@ -493,7 +496,7 @@ function HelpModal({ onClose }: { onClose: () => void }) {
           {HELP_ITEMS.map((item) => (
             <div key={item.title} className="rounded-2xl px-4 py-3.5" style={{ background: "var(--bg)" }}>
               <div className="text-[13px] font-bold" style={{ color: "var(--accent)" }}>{item.title}</div>
-              <div className="mt-1.5 text-[13px] leading-[1.65]" style={{ color: "var(--body)" }}>{item.desc}</div>
+              <div className="mt-1.5 text-[13px] leading-[1.65]" style={{ color: "var(--body)", whiteSpace: "pre-line" }}>{item.desc}</div>
             </div>
           ))}
         </div>
