@@ -14,6 +14,7 @@ class WhitelistTest {
             "/api/v1/market-calendar/KR, MARKET_INFO",
             "/api/v1/market-calendar/US, MARKET_INFO",
             "/api/v1/prices, MARKET_DATA",
+            "/api/v1/price-limits, MARKET_DATA",
             "/api/v1/candles, MARKET_DATA_CHART",
             "/api/v1/stocks, STOCK",
             "/api/v1/stocks/all, STOCK_ALL",

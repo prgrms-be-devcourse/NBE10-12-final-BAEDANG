@@ -11,6 +11,7 @@ public enum Whitelist {
     MARKET_CALENDAR_US("/api/v1/market-calendar/US", TossApiGroup.MARKET_INFO),
 
     // ── Market Data ─────────────────────────────────────────────────────────
+    PRICE_LIMITS("/api/v1/price-limits", TossApiGroup.MARKET_DATA),
     PRICES("/api/v1/prices", TossApiGroup.MARKET_DATA),
     CANDLES("/api/v1/candles", TossApiGroup.MARKET_DATA_CHART),
 

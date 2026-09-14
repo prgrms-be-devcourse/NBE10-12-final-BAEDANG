@@ -8,6 +8,9 @@ import java.util.List;
  */
 public interface MarketDataPort {
 
+    /** 단일 종목의 당일 상하한가를 조회한다. */
+    PriceLimits fetchPriceLimits(String symbol);
+
     /** 여러 종목의 현재가를 조회한다. */
     List<PriceQuote> fetchPrices(List<String> symbols);
     /**

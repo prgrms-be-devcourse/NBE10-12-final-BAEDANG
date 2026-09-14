@@ -44,6 +44,11 @@ public class QuoteSnapshot {
     @Column(name = "lower_limit", precision = 19, scale = 4)
     private BigDecimal lowerLimit;
 
+    @Column(name = "price_limit_date")
+    private LocalDate priceLimitDate;
+
+    public LocalDate getPriceLimitDate() { return priceLimitDate; }
+
     @Column(name = "currency", nullable = false, length = 3)
     private String currency;
 

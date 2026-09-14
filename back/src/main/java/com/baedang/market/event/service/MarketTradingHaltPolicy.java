@@ -3,6 +3,7 @@ package com.baedang.market.event.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.event.entity.KrMarket;
+import com.baedang.market.event.entity.MarketEventType;
 import com.baedang.market.event.model.ActiveMarketHalt;
 import com.baedang.market.event.repository.MarketEventRepository;
 import com.baedang.stock.entity.MarketCountry;
@@ -43,6 +44,28 @@ public class MarketTradingHaltPolicy {
         return krMarketOf(stock)
                 .flatMap(market -> repository.findActiveCircuitBreaker(market, at))
                 .map(ActiveMarketHalt::from);
+    }
+
+    /**
+     * 저장된 CB 거절 이벤트를 멱등 응답용으로 복원한다.
+     *
+     * <p>FK는 행 존재만 보장하므로 이벤트 유형과 주문 종목 시장도 함께 검증한다.
+     */
+    public ActiveMarketHalt restoreRecordedHalt(Long eventId, Stock stock) {
+        if (eventId == null) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "CB rejection without market_event_id");
+        }
+        KrMarket expected = krMarketOf(stock)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INTERNAL_ERROR, "CB rejection on unsupported market"));
+        return repository.findById(eventId)
+                .filter(event -> event.getEventType() == MarketEventType.CIRCUIT_BREAKER)
+                .filter(event -> event.getMarket() == expected)
+                .map(ActiveMarketHalt::from)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "market_event mismatch for CB rejection: marketEventId=" + eventId
+                                + ", expectedMarket=" + expected));
     }
 
     /**

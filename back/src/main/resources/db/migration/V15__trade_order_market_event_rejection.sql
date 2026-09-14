@@ -1,4 +1,4 @@
--- V14__trade_order_market_event_rejection.sql
+-- V15__trade_order_market_event_rejection.sql
 -- CB 거절 주문의 정확한 이벤트 감사 연결 (#166)
 --
 -- 왜 필요한가: 멱등 재생은 최초 판정에 사용한 이벤트를 그대로 복원해야 한다.

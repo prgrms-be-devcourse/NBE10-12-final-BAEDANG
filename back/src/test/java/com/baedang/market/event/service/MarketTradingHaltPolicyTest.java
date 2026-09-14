@@ -70,6 +70,25 @@ class MarketTradingHaltPolicyTest {
     }
 
     @Test
+    void restores_recorded_cb_for_matching_market() {
+        when(repository.findById(99L)).thenReturn(Optional.of(cb()));
+
+        ActiveMarketHalt restored = policy.restoreRecordedHalt(99L, kospiStock());
+
+        assertThat(restored.eventId()).isEqualTo(99L);
+        assertThat(restored.market()).isEqualTo(KrMarket.KOSPI);
+    }
+
+    @Test
+    void rejects_recorded_cb_for_different_market() {
+        when(repository.findById(99L)).thenReturn(Optional.of(cb()));
+
+        assertThatThrownBy(() -> policy.restoreRecordedHalt(99L, kosdaqStock()))
+                .isInstanceOfSatisfying(BusinessException.class, exception ->
+                        assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+    }
+
+    @Test
     void error_data_uses_public_contract_fields_but_hides_internal_event_id() {
         MarketEvent stored = cb();
         ActiveMarketHalt halt = ActiveMarketHalt.from(stored);

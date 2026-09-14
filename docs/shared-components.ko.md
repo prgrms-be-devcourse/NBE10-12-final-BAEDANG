@@ -480,3 +480,16 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - `LimitOrderExecutionWorker.visit(group)`: 기존 그룹 실패 경계에서 `MARKET_TRADING_HALTED`만 예상 보류로 분류한다. 보류된 그룹을 reset해 이번 방문에서 그 `(stockId, side)`의 나머지를 건너뛰고, `tick`은 다음 그룹을 계속 처리한다. 이 경로는 닫힌 `market` enum 값으로 `krx.market_event.order_blocked{market,orderType=LIMIT_EXECUTION}`만 증가시키고 `trading.limit.execution.attempt{reason=ERROR}`나 WARN/ERROR 스택을 남기지 않는다. 나머지 예외는 기존 ERROR 지표와 로그를 유지한다.
 - `LimitOrderExecutionService.prepare`·취소·만료는 halt 상태를 미리 조회하거나 캐시하지 않는다. 보류는 새 컴포넌트·마이그레이션·스키마를 추가하지 않고, 트랜잭션 판정과 워커의 예상 보류 분류로만 존재한다.
 - `docs/superpowers/` 계획 노트가 Part/이슈 이력을 보관한다. 이 가이드와 `api-spec`에는 로드맵 좌표를 두지 않는다.
+
+## 상하한가 수집 및 표시
+
+- `MarketDataPort.fetchPriceLimits` / `TossMarketDataAdapter`는 정확한 GET `/api/v1/price-limits` 경로와 `symbol`을 사용하며 MARKET_DATA 제한을 공유합니다. 응답은 `timestamp`, `upperLimitPrice`, `lowerLimitPrice`, `currency`이며 종목 및 별도 적용일 필드는 없습니다. 2026-09-11 공식 OpenAPI 확인.
+- `PriceLimitLoadService`는 기존 Clock과 MarketTradingDayPolicy를 사용합니다. 장전 갱신 시점 보장이 없어 국내 정규장부터 수집합니다. 데이터 시각의 한국 날짜와 요청 거래일을 검증하고 미래 시각, 국내 null, 정밀도/범위 오류, 역전 가격을 거절합니다. 비율 계산 폴백은 없습니다.
+- `PriceLimitScheduler`는 시작 60초 후 및 처리 완료 후 5분마다 랭킹/활성 지정가 국내 종목을 전용 단일 스레드에서 확인합니다. `toss.enabled=false`이면 외부 수집하지 않습니다. 그룹 제한 외에 상하한가 전용 2 TPS 제한을 공유합니다.
+- 상세 조회와 배경 수집은 종목별 진행 중 요청 억제 및 실패 후 1분 대기를 공유합니다. 상태는 최대 1000개이며 만료 실패는 접근 시 제거하고 새 거래일이면 초기화합니다. 진행 중 요청은 제거하지 않으며 용량 부족 시 새 작업을 보류합니다. 단일 인스턴스 정책이며 분산 잠금은 아닙니다.
+- `PriceLimitRepository`는 두 가격과 적용일만 갱신합니다. 시세 행이 없으면 만들지 않고 기존 시세 수집 후 재시도합니다. 과거 및 동일 날짜 응답은 이미 저장한 날짜를 덮어쓰지 않습니다. 이번 단계에서는 당일 정정 및 과거 상하한가 조회를 지원하지 않습니다.
+- V14는 `price_limit_date`만 추가하고 기존 행을 보존합니다. develop의 선행 마이그레이션 순서에 맞춘 버전이며 선행 마이그레이션을 추가하거나 번호를 바꾸지 않습니다.
+
+상세 수집은 `ensureForDisplay(stock, existingQuote)`로 표시할 스냅샷을 반환합니다. 미국 종목, 수집 비활성화, 당일 상하한가가 있는 스냅샷은 추가 SELECT 없이 전달값을 재사용합니다. 수집이 필요하면 서비스 내부에서 읽은 스냅샷을 재사용하고, 저장 시도 후에는 UPDATE가 0건이어도 다시 읽어 다른 요청이 먼저 확보한 값을 반환합니다. 재조회한 값이 당일 값이면 성공으로 처리합니다. 수집 실패 시 마지막으로 읽은 스냅샷을 유지하고 조회에 성공한 적이 없으면 전달받은 스냅샷을 유지합니다. 상하한가 게이트를 즉시 통과하지 못하면 대기 또는 실패 기록 없이 저장된 데이터로 응답합니다. 배경 `ensure`는 기존 2 TPS 게이트에서 순서를 기다리며 표시용 재조회는 하지 않습니다. 허용된 요청에는 기존 브로커 그룹 제한과 HTTP 타임아웃이 적용되며 상세 API 전체를 비동기로 바꾸는 것은 아닙니다.
+
+시도 맵과 내부 가변 필드는 동일한 `synchronized` claim/finish 메서드로 보호합니다. 만료 제거, 중복·용량 확인, 등록은 원자적으로 수행하고 외부 API 호출은 모니터 잠금 밖에서 유지합니다.
