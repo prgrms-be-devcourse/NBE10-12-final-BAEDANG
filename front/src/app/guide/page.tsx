@@ -4,6 +4,7 @@ import { useState } from "react";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
 import { RevealText } from "@/components/RevealText";
+import { TiltCard } from "@/components/TiltCard";
 import { WikiPanel } from "@/components/WikiPanel";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -132,7 +133,12 @@ export default function GuidePage() {
           <div className="grid grid-cols-2 gap-4 gap-y-3.5 max-md:grid-cols-1">
             {[SECTIONS[0], SECTIONS[3], SECTIONS[1], SECTIONS[4], SECTIONS[2], SECTIONS[5]].map((s, i) => (
               <Reveal key={s.title} delay={0.14 + i * 0.06}>
-                <div
+                {/* 서비스 소개 화면의 STEP 카드에 쓰던 마우스 방향 반응형
+                    3D 틸트 효과(TiltCard)를 이 카드들에도 적용해달라는
+                    요청 — 카드를 감싸던 평범한 div를 TiltCard로 바꿨다.
+                    className·style(배경·라운드·패딩)은 그대로 넘겨서
+                    기존 디자인은 바뀌지 않는다. */}
+                <TiltCard
                   className="h-full"
                   style={{ background: "var(--card)", borderRadius: 20, padding: "22px 24px" }}
                 >
@@ -149,7 +155,7 @@ export default function GuidePage() {
                     baseDelayMs={45}
                     lines={[s.body]}
                   />
-                </div>
+                </TiltCard>
               </Reveal>
             ))}
           </div>
