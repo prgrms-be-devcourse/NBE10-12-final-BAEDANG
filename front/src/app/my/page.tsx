@@ -776,15 +776,8 @@ export default function MyPage() {
         {/* 닉네임 아래에 세로로 쌓여 있던 비밀번호 변경을 닉네임 옆으로
             배치해달라는 요청 — 구분선(divider)으로 나누던 두 폼을 가로
             flex로 나란히 놓았다. 좁은 화면(max-md)에서는 겹치지 않도록
-            다시 세로로 쌓이게 했다. 닉네임 변경과 비밀번호 변경 사이가
-            허전하다는 피드백으로 그 사이에 가입 이메일(user.email —
-            이미 로그인 정보에 있지만 계정 설정 어디에도 안 보이던
-            값) 표시를 추가했다 — 수정 불가능한 값이라 입력칸이 아니라
-            읽기 전용 텍스트로만 보여준다. 세 요소를 justify-between으로
-            펼쳐서 닉네임은 왼쪽, 이메일은 가운데, 비밀번호 변경은
-            오른쪽에 자연스럽게 놓이게 했다(비밀번호 폼에 따로 주던
-            ml-auto는 이제 필요 없어 지웠다). */}
-        <div className="flex flex-wrap items-start justify-between gap-8 max-md:flex-col">
+            다시 세로로 쌓이게 했다. */}
+        <div className="flex flex-wrap gap-8 max-md:flex-col">
           <form onSubmit={handleChangeNickname}>
             <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
             <div className="flex max-w-[360px] gap-2">
@@ -819,19 +812,12 @@ export default function MyPage() {
             )}
           </form>
 
-          <div>
-            <div className="mb-1.5 text-[13px] font-bold" style={{ color: "var(--mut2)" }}>이메일</div>
-            <div className="rounded-xl px-4 py-2.5 text-[13.5px]" style={{ background: "var(--fill)", color: "var(--mut)" }}>
-              {user.email}
-            </div>
-          </div>
-
-          {/* 비밀번호 변경 기능을 우측으로 배치해달라는 요청 — justify-between으로
-              같은 줄(flex row)의 오른쪽 끝에 놓인다. 닉네임 폼은 왼쪽에
+          {/* 비밀번호 변경 기능을 우측으로 배치해달라는 요청 — ml-auto로
+              같은 줄(flex row)의 오른쪽 끝에 붙였다. 닉네임 폼은 왼쪽에
               그대로 두고, 남는 공간만큼 이 폼이 오른쪽으로 밀린다. 좁은
-              화면(max-md:flex-col)에서는 세로로 쌓이므로 justify-between이
+              화면(max-md:flex-col)에서는 세로로 쌓이므로 ml-auto가
               의미 없어져(자동으로 아래로) 자연스럽게 무시된다. */}
-          <form onSubmit={handleChangePassword}>
+          <form onSubmit={handleChangePassword} className="ml-auto">
             <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
             {/* 현재 비밀번호·새 비밀번호·새 비밀번호 확인·버튼이 세로로 쌓여
                 있어 심미적으로 안 좋다는 요청 — flex-col(세로 스택) 대신
