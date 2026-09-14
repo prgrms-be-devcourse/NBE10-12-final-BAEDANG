@@ -530,7 +530,7 @@ Where the price comes from depends on **whether that stock's own market is open*
     "listDate": "1975-06-11"
   },
   "warnings": [
-    { "type": "INVESTMENT_WARNING", "label": "거래유의종목" }
+    { "type": "INVESTMENT_WARNING", "label": "투자경고" }
   ],
   "warningsStatus": "AVAILABLE",
   "tradable": true,
@@ -541,12 +541,12 @@ Where the price comes from depends on **whether that stock's own market is open*
 **Key fields**
 | Field | Meaning |
 |---|---|
-| `warnings` | active buy-caution items from Toss. `type` keeps the raw source code (`OVERHEATED` · `INVESTMENT_WARNING` · `VI_STATIC` · unknown); `label` is the single screen badge `거래유의종목` |
+| `warnings` | active buy-caution items from Toss. `type` keeps the raw source code (`OVERHEATED` · `INVESTMENT_WARNING` · `VI_STATIC` · unknown); `label` is the screen text for that type — `과열종목` · `투자경고` · `변동성완화장치`, falling back to `거래유의종목` for a code we do not map yet |
 | `warningsStatus` | `AVAILABLE` when the caution lookup succeeded, `UNAVAILABLE` when it failed. **`UNAVAILABLE` is not "no cautions"** — the screen must not hide the badge as if the stock were clean |
 | `tradable` | whether this stock can be traded right now |
 | `tradableReason` | reason code when `tradable=false` |
 
-**Cautions are informational and never gate trading.** `warnings` is read from the Toss warnings endpoint through a short-TTL per-stock cache, so the detail screen's polling does not spend one external call per refresh. Only cautions whose `[startDate, endDate]` window contains today are returned. A lookup failure leaves `tradable`/`tradableReason` untouched.
+**Cautions are informational and never gate trading.** `warnings` is read from the Toss warnings endpoint through a short-TTL per-stock cache, so the detail screen's polling does not spend one external call per refresh. Only cautions whose `[startDate, endDate]` window contains today are returned. A lookup failure leaves `tradable`/`tradableReason` untouched. **Labels are decided by the backend** (`tools/terms.md` wording); the frontend renders `label` as-is so the same fact is not translated in two places.
 
 **`tradableReason` values**
 | Code | Screen text |
