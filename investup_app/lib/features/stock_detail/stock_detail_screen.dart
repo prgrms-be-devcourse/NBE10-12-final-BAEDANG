@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +12,7 @@ import '../../core/models/candle.dart';
 import '../../core/models/market_country.dart';
 import '../../core/models/order_book.dart';
 import '../../core/models/stock_detail.dart';
+import '../../core/polling.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
 import 'candle_chart.dart';
@@ -57,11 +60,16 @@ const _ranges = <(String label, String interval, String range)>[
 
 class _StockDetailScreenState extends State<StockDetailScreen> {
   late Future<StockDetail> _detailFuture;
+  StockDetail? _detail;
   Future<CandleSeries>? _candleFuture;
   Future<OrderBook>? _bookFuture;
   int _rangeIndex = 0;
   int? _stockLikeId;
   bool _likeBusy = false;
+
+  bool _pollInFlight = false;
+  late final PollingTimer _pricePoll;
+  late final PollingTimer _refreshPoll;
 
   /// 이 종목의 보유 수량. 매도 한도로 쓴다 — 없거나 조회 실패면 null.
   /// 서버 주문 트랜잭션이 최종 권위라 여기서는 미리 보여주는 용도다.
@@ -71,10 +79,26 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   void initState() {
     super.initState();
     _stockLikeId = widget.stockLikeId;
+    _pricePoll = PollingTimer(
+      interval: const Duration(seconds: 5),
+      onTick: _pollDetail,
+    )..start();
+    // 장 마감 뒤 재개장 전환도 잡아야 realtime 플래그가 다시 켜진다.
+    _refreshPoll = PollingTimer(
+      interval: const Duration(minutes: 1),
+      onTick: _pollDetailForce,
+    )..start();
     _loadDetail();
     _loadCandles();
     _loadOrderBook();
     _loadHolding();
+  }
+
+  @override
+  void dispose() {
+    _pricePoll.dispose();
+    _refreshPoll.dispose();
+    super.dispose();
   }
 
   Future<void> _loadHolding() async {
@@ -94,10 +118,41 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   }
 
   void _loadDetail() {
-    _detailFuture = widget.stocks.getDetail(
-      symbol: widget.symbol,
-      marketCountry: widget.marketCountry,
-    );
+    _detailFuture = widget.stocks
+        .getDetail(symbol: widget.symbol, marketCountry: widget.marketCountry)
+        .then((d) {
+          _detail = d;
+          return d;
+        });
+  }
+
+  bool get _routeVisible => ModalRoute.of(context)?.isCurrent ?? true;
+
+  /// 5초 시세 폴링 — realtime(정규장)일 때만. 장 마감이면 quote_snapshot이
+  /// 갱신되지 않아 폴링해도 새 값이 없다. 실패해도 현재 데이터를 유지한다.
+  Future<void> _pollDetail() async {
+    if (_detail?.price?.realtime != true) return;
+    await _pollDetailForce();
+  }
+
+  Future<void> _pollDetailForce() async {
+    if (_pollInFlight || !_routeVisible) return;
+    _pollInFlight = true;
+    try {
+      final detail = await widget.stocks.getDetail(
+        symbol: widget.symbol,
+        marketCountry: widget.marketCountry,
+      );
+      if (!mounted) return;
+      _detail = detail;
+      setState(() {
+        _detailFuture = Future.value(detail);
+      });
+    } on ApiException {
+      // 다음 주기에 재시도.
+    } finally {
+      _pollInFlight = false;
+    }
   }
 
   void _loadCandles() {

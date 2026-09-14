@@ -124,7 +124,7 @@ Map<String, Object?> _nvdaDetailJson() => <String, Object?>{
     'prevClose': '180.00',
     'changeAmount': '2.40',
     'changeRate': '0.013333',
-    'realtime': true,
+    'realtime': false,
   },
   'info': <String, Object?>{},
   'warnings': <Object?>[],
@@ -327,6 +327,9 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
   storage: signedIn ? FakeTokenStorage(initialRefreshToken: 'rt') : null,
   adapter: FakeHttpAdapter((options) async {
     final path = options.uri.path;
+    if (path == '/api/market/status') {
+      return FakeResponse.ok(marketStatusJson());
+    }
     if (path == '/api/stocks/rankings') {
       final market = options.uri.queryParameters['market'];
       final cursor = options.uri.queryParameters['cursor'];
@@ -1088,6 +1091,65 @@ void main() {
 
       expect(find.text('엔비디아'), findsWidgets);
       expect(find.text('재무제표'), findsNothing);
+    });
+  });
+
+  group('시세 폴링', () {
+    testWidgets('장이 열린 랭킹은 5초마다 다시 조회하고 마감 땐 조용하다', (
+      tester,
+    ) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      // fixture의 KR은 open=true — 5초 뒤 랭킹 재조회.
+      final krBefore = harness.countTo('/api/stocks/rankings');
+      await tester.pump(const Duration(seconds: 5));
+      await _settle(tester);
+      expect(
+        harness.countTo('/api/stocks/rankings'),
+        greaterThan(krBefore),
+      );
+
+      // US는 open=false — 해외 탭으로 바꿔도 랭킹 재조회가 5초마다 나가지 않는다.
+      await tester.tap(find.text('해외 주식'));
+      await _settle(tester);
+      final usBefore = harness.countTo('/api/stocks/rankings');
+      await tester.pump(const Duration(seconds: 6));
+      await _settle(tester);
+      expect(harness.countTo('/api/stocks/rankings'), usBefore);
+    });
+
+    testWidgets('실시간 종목 상세는 5초마다 갱신하고 종가 종목은 갱신하지 않는다', (
+      tester,
+    ) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      // realtime=true 삼성전자 → 5초 폴링.
+      await tester.tap(find.text('삼성전자'));
+      await _settle(tester);
+      final krBefore = harness.countTo('/api/stocks/005930');
+      await tester.pump(const Duration(seconds: 5));
+      await _settle(tester);
+      expect(harness.countTo('/api/stocks/005930'), greaterThan(krBefore));
+
+      // realtime=false 엔비디아(장 마감) → 폴링하지 않는다.
+      await tester.pageBack();
+      await _settle(tester);
+      await tester.tap(find.text('해외 주식'));
+      await _settle(tester);
+      await tester.tap(find.text('엔비디아'));
+      await _settle(tester);
+      final usBefore = harness.countTo('/api/stocks/NVDA');
+      await tester.pump(const Duration(seconds: 6));
+      await _settle(tester);
+      expect(harness.countTo('/api/stocks/NVDA'), usBefore);
     });
   });
 }

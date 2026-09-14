@@ -11,7 +11,9 @@ import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/models/exchange_rate.dart';
 import '../../core/models/market_country.dart';
+import '../../core/models/market_status.dart';
 import '../../core/models/ranking.dart';
+import '../../core/polling.dart';
 import '../../core/models/stock_search.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
@@ -42,6 +44,13 @@ class _RankingsScreenState extends State<RankingsScreen> {
   Future<ExchangeRateLatest>? _rateFuture;
   String? _usdKrwRate;
 
+  /// 시세 폴링 게이트 — 장이 닫힌 시장은 quote_snapshot이 갱신되지 않아
+  /// 폴링해도 새 값이 없다. 60초 주기로 함께 갱신해 재개장도 따라간다.
+  MarketStatus? _marketStatus;
+  bool _pollInFlight = false;
+  late final PollingTimer _pricePoll;
+  late final PollingTimer _slowPoll;
+
   /// 커서 페이지네이션으로 누적하는 랭킹 목록. 오프셋 방식은 갱신 사이에
   /// 순위가 바뀌어 중복/누락이 생기므로 서버가 주는 nextCursor만 쓴다.
   List<RankingItem> _items = const [];
@@ -65,12 +74,22 @@ class _RankingsScreenState extends State<RankingsScreen> {
   @override
   void initState() {
     super.initState();
+    _pricePoll = PollingTimer(
+      interval: const Duration(seconds: 5),
+      onTick: _pollPrices,
+    )..start();
+    _slowPoll = PollingTimer(
+      interval: const Duration(minutes: 1),
+      onTick: _pollSlow,
+    )..start();
     _load();
     _searchController.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _pricePoll.dispose();
+    _slowPoll.dispose();
     _debounce?.cancel();
     _searchToken?.cancel();
     _searchController.dispose();
@@ -79,11 +98,59 @@ class _RankingsScreenState extends State<RankingsScreen> {
 
   void _load() {
     _refreshRankings();
+    _loadRate();
+    _loadMarketStatus();
+  }
+
+  void _loadRate() {
     // 환율은 해외 종목 원화 환산 표시에도 쓰므로 화면이 들고 있는다.
     _rateFuture = widget.exchangeRates.getLatest().then((r) {
       if (mounted) setState(() => _usdKrwRate = r.rate);
       return r;
     });
+  }
+
+  Future<void> _loadMarketStatus() async {
+    try {
+      final status = await widget.market.getMarketStatus();
+      if (mounted) setState(() => _marketStatus = status);
+    } on ApiException {
+      // 실패해도 다음 주기에 다시 시도한다. 상태가 없으면 폴링은 하지 않는다.
+    }
+  }
+
+  bool get _currentRouteVisible =>
+      ModalRoute.of(context)?.isCurrent ?? true;
+
+  /// 5초 폴링 — 지금까지 로드된 만큼을 처음부터 다시 조회해 시세를 갱신한다.
+  /// 실패해도 화면을 에러로 덮지 않고 다음 주기에 조용히 재시도한다.
+  Future<void> _pollPrices() async {
+    if (_pollInFlight || _loading || !_currentRouteVisible) return;
+    if (_marketStatus?.sessionOf(_market)?.open != true) return;
+    _pollInFlight = true;
+    try {
+      final page = await widget.stocks.getRankings(
+        market: _market,
+        size: _items.isEmpty ? 20 : _items.length,
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = page.items;
+        _nextCursor = page.nextCursor;
+        _hasNext = page.hasNext;
+      });
+    } on ApiException {
+      // 다음 주기에 재시도.
+    } finally {
+      _pollInFlight = false;
+    }
+  }
+
+  /// 60초 폴링 — 시장 상태(개장 전환 감지)와 환율을 갱신한다.
+  void _pollSlow() {
+    if (!_currentRouteVisible) return;
+    _loadMarketStatus();
+    _loadRate();
   }
 
   Future<void> _refreshRankings() async {
