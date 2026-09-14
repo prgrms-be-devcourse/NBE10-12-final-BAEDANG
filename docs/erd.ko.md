@@ -689,15 +689,19 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 
 서킷브레이커 거절도 같은 지정가 근거 형태를 유지합니다. 사용자 입력 가격·통화와 접수 환율은 저장하고(멱등 비교 기준이며 모든 LIMIT 행에 CHECK로 요구됩니다), quote 시각 근거와 동결은 남기지 않습니다 — quote로 가격을 매기지 않고 현금·수량을 동결하지 않기 때문입니다. `market_event_id`는 오직 이 경로의 저장된 `REJECTED` 행에만 설정합니다.
 
+### 기존 지정가 체결 중단 (#167)
+
+활성 KOSPI/KOSDAQ 서킷브레이커 동안 이미 접수된 지정가 주문의 체결을 보류하는 데 **스키마는 추가되지 않습니다**. 접수된 주문은 `status`가 PENDING/PARTIALLY_FILLED로 남고 기존 `expires_at`, `reserved_cash`와 이에 대응하는 `locked_cash`/`locked_quantity`를 그대로 유지합니다. 거절이 아니므로 `market_event_id`를 받지 **않습니다**. 체결 트랜잭션 전체가 롤백되므로 `trade_execution`·`ledger_entry` 행이 생기지 않고 호가 `remaining_quantity`/`revision`도 그대로입니다. 보류 중에도 정상 취소·만료 전이는 남은 동결을 해제합니다.
+
 ### 지정가 체결 인덱스 (#122)
 
 테이블/컬럼 추가는 없습니다. `V7__limit_execution_indexes.sql`에서 잔여 수량이 있는 활성 LIMIT 주문에 부분 인덱스를 추가합니다. 수집 EXISTS용 `ix_order_quote_target(stock_id, expires_at)`, 매수용 `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)`, 매도용 가격 오름차순 인덱스입니다. 방향별 인덱스는 side 조건을 포함합니다. 만료는 조회 시 범위 조건이며 now()를 인덱스 조건에 넣지 않습니다. 계좌 이력/활성 주문/만료 인덱스는 유지합니다.
 
-develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
+이후 V8~V15는 시장조치 이력, 시세 상하한가 적용일과 서킷브레이커 거절 FK를 추가합니다. 이 체결 보류는 마이그레이션을 추가하지 않으므로 `V15__trade_order_market_event_rejection.sql`이 최신 버전입니다.
 
 ---
 
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V13__stock_like.sql`까지 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V15__trade_order_market_event_rejection.sql`까지 함께 보세요
 
 ## 정규장 거래일과 기준가 (#173)
 
