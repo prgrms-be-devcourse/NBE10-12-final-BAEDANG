@@ -9,6 +9,8 @@ import com.baedang.market.port.Candle;
 import com.baedang.market.port.CandleInterval;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceQuote;
+import com.baedang.market.port.PriceLimits;
+import com.baedang.market.client.toss.dto.TossPriceLimitResponse;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -27,6 +29,27 @@ public class TossMarketDataAdapter implements MarketDataPort {
 
     public TossMarketDataAdapter(TossSecuritiesClient tossSecuritiesClient) {
         this.tossSecuritiesClient = tossSecuritiesClient;
+    }
+
+    @Override
+    public PriceLimits fetchPriceLimits(String symbol) {
+        if (symbol == null || symbol.isBlank()) throw new IllegalArgumentException("종목 코드는 필수입니다");
+        TossPriceLimitResponse response = tossSecuritiesClient.get("/api/v1/price-limits",
+                Map.of("symbol", symbol), TossPriceLimitResponse.class);
+        if (response == null || response.result() == null) {
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR, "상하한가 응답이 비어 있음");
+        }
+        TossPriceLimitResponse.Result result = response.result();
+        if (result.timestamp() == null || !("KRW".equals(result.currency()) || "USD".equals(result.currency()))) {
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR, "상하한가 필수 정보 누락");
+        }
+        try {
+            return new PriceLimits(result.timestamp(),
+                    result.upperLimitPrice() == null ? null : new BigDecimal(result.upperLimitPrice()),
+                    result.lowerLimitPrice() == null ? null : new BigDecimal(result.lowerLimitPrice()), result.currency());
+        } catch (NumberFormatException exception) {
+            throw new BusinessException(ErrorCode.TOSS_API_ERROR, "상하한가 숫자 형식 오류");
+        }
     }
 
     @Override
