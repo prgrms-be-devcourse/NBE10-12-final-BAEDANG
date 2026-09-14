@@ -94,6 +94,37 @@ Map<String, Object?> holdingsJson() => <String, Object?>{
   'asOf': '2026-09-15T10:00:00+09:00',
 };
 
+Map<String, Object?> ledgerJson() => <String, Object?>{
+  'items': <Map<String, Object?>>[
+    <String, Object?>{
+      'entryId': 1,
+      'entryType': 'INITIAL_DEPOSIT',
+      'amount': '50000000',
+      'balanceAfter': '50000000',
+      'exchangeRate': '1',
+      'memo': '모의 투자금 지급',
+      'orderId': null,
+      'symbol': null,
+      'name': null,
+      'occurredAt': '2026-09-15T09:00:00+09:00',
+    },
+    <String, Object?>{
+      'entryId': 2,
+      'entryType': 'BUY',
+      'amount': '-148148',
+      'balanceAfter': '49851852',
+      'exchangeRate': '1',
+      'memo': '삼성전자 매수',
+      'orderId': 77,
+      'symbol': '005930',
+      'name': '삼성전자',
+      'occurredAt': '2026-09-15T10:01:00+09:00',
+    },
+  ],
+  'nextCursor': null,
+  'hasNext': false,
+};
+
 Map<String, Object?> exchangeRateJson() => <String, Object?>{
   'baseCurrency': 'USD',
   'quoteCurrency': 'KRW',

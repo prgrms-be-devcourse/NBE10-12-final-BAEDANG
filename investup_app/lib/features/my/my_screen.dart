@@ -10,6 +10,7 @@ import '../../core/auth/auth_session.dart';
 import '../../core/auth/token_storage.dart';
 import '../../core/models/exchange_rate.dart';
 import '../../core/models/holding.dart';
+import '../../core/models/ledger.dart';
 import '../../core/models/order_detail.dart';
 import '../../core/models/stock_like.dart';
 import '../../formatters.dart';
@@ -71,6 +72,7 @@ class _MyScreenState extends State<MyScreen> {
       return;
     }
     setState(() {
+      _ledgerTick++;
       _likesFuture = widget.stocks.getLikes(size: 20);
       _ordersFuture = widget.account.getOrders(size: 20);
       _holdingsFuture = widget.account.getHoldings();
@@ -136,6 +138,50 @@ class _MyScreenState extends State<MyScreen> {
 
   // 주문 취소 뒤 예약금 해제가 계좌에 반영된다.
   void _refreshAccount() => widget.session.reloadAccount();
+
+  /// 원장 섹션의 갱신 신호. 로그인·당겨서 새로고침·거래 반영 때 올린다.
+  int _ledgerTick = 0;
+
+  Future<void> _resetAccount() async {
+    final accountId = widget.session.account?.accountId;
+    if (accountId == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('포트폴리오를 정말 초기화할까요?'),
+        content: const Text(
+          '보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 '
+          '50,000,000원으로 되돌아가요.\n되돌릴 수 없어요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('초기화할게요'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await widget.account.resetAccount(accountId: accountId);
+    } on ApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+      return;
+    }
+    if (!mounted) return;
+    // 새 회차로 바뀌었으니 계좌·목록·원장을 전부 다시 읽는다.
+    await widget.session.reloadAccount();
+    _loadLists();
+    setState(() => _ledgerTick++);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -269,6 +315,8 @@ class _MyScreenState extends State<MyScreen> {
               onRetry: _loadLists,
             ),
             const SizedBox(height: 24),
+            _LedgerSection(account: widget.account, tick: _ledgerTick),
+            const SizedBox(height: 24),
             _LikesSection(
               future: _likesFuture,
               busyIds: _busyIds,
@@ -282,6 +330,10 @@ class _MyScreenState extends State<MyScreen> {
               onRetry: _loadLists,
             ),
             const SizedBox(height: 24),
+            _ResetCard(
+              onReset: _resetAccount,
+            ),
+            const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: _loggingOut ? null : _logOut,
               icon: const Icon(Icons.logout),
@@ -784,6 +836,281 @@ class _HoldingRow extends StatelessWidget {
             style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
           ),
       ],
+    );
+  }
+}
+
+/// 체결 내역(원장) 섹션 — 돈이 어떻게 움직였나. 커서 페이지네이션은
+/// 이 섹션이 스스로 누적한다. [tick]이 바뀌면 처음부터 다시 읽는다.
+class _LedgerSection extends StatefulWidget {
+  const _LedgerSection({required this.account, required this.tick});
+
+  final AccountApi account;
+  final int tick;
+
+  @override
+  State<_LedgerSection> createState() => _LedgerSectionState();
+}
+
+class _LedgerSectionState extends State<_LedgerSection> {
+  List<LedgerItem> _items = const [];
+  String? _cursor;
+  bool _hasNext = false;
+  bool _loading = true;
+  bool _loadingMore = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_LedgerSection old) {
+    super.didUpdateWidget(old);
+    if (old.tick != widget.tick) _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+      _items = const [];
+      _cursor = null;
+      _hasNext = false;
+    });
+    try {
+      final page = await widget.account.getLedger();
+      if (!mounted) return;
+      setState(() {
+        _items = page.items;
+        _cursor = page.nextCursor;
+        _hasNext = page.hasNext;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    final cursor = _cursor;
+    if (!_hasNext || cursor == null || _loadingMore) return;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await widget.account.getLedger(cursor: cursor);
+      if (!mounted) return;
+      setState(() {
+        _items = [..._items, ...page.items];
+        _cursor = page.nextCursor;
+        _hasNext = page.hasNext;
+        _loadingMore = false;
+      });
+    } on ApiException {
+      if (mounted) setState(() => _loadingMore = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('체결 내역', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 8),
+        if (_error != null)
+          Notice(message: _error!, onRetry: _load)
+        else if (_loading)
+          const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (_items.isEmpty)
+          AppCard(
+            child: Text(
+              '체결 내역이 없어요',
+              style: TextStyle(color: scheme.onSurfaceVariant),
+            ),
+          )
+        else
+          Column(
+            children: [
+              AppCard(
+                child: Column(
+                  children: [
+                    for (final entry in _items) _LedgerRow(entry: entry),
+                  ],
+                ),
+              ),
+              if (_hasNext)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton(
+                      onPressed: _loadingMore ? null : _loadMore,
+                      child: Text(_loadingMore ? '불러오는 중…' : '더 보기'),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+      ],
+    );
+  }
+}
+
+class _LedgerRow extends StatelessWidget {
+  const _LedgerRow({required this.entry});
+
+  final LedgerItem entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final amount = double.tryParse(entry.amount);
+    final positive = amount == null || amount >= 0;
+    final at = entry.occurredAt?.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          _LedgerBadge(type: entry.entryType),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.memo ?? '-',
+                  style: theme.textTheme.bodyMedium,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (at != null)
+                  Text(
+                    '${two(at.month)}-${two(at.day)} '
+                    '${two(at.hour)}:${two(at.minute)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${positive ? '+' : ''}${formatNumber(entry.amount)}원',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: positive
+                      ? const Color(0xFFEF4444)
+                      : const Color(0xFF3B82F6),
+                ),
+              ),
+              Text(
+                '잔액 ${formatNumber(entry.balanceAfter)}원',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedgerBadge extends StatelessWidget {
+  const _LedgerBadge({required this.type});
+
+  final String type;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // 매수는 돈이 나가니 파랑(하락색), 매도는 들어오니 빨강 — 웹 LedgerBadge와 같다.
+    final (label, color) = switch (type) {
+      'BUY' => ('매수', const Color(0xFF3B82F6)),
+      'SELL' => ('매도', const Color(0xFFEF4444)),
+      'INITIAL_DEPOSIT' => ('초기지급', scheme.primary),
+      _ => (type, scheme.onSurfaceVariant),
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+}
+
+/// 포트폴리오 초기화 카드. 실제 초기화와 확인 대화상자는 부모가 연다.
+class _ResetCard extends StatelessWidget {
+  const _ResetCard({required this.onReset});
+
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '포트폴리오 초기화',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '보유 종목과 체결 내역이 모두 정리되고 모의 투자금이 '
+            '50,000,000원으로 되돌아가요. 되돌릴 수 없어요.',
+            style: TextStyle(
+              fontSize: 13,
+              color: scheme.onErrorContainer,
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: onReset,
+            child: const Text('포트폴리오 초기화'),
+          ),
+        ],
+      ),
     );
   }
 }

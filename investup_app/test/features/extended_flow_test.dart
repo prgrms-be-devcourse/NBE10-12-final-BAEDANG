@@ -282,6 +282,17 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
       return FakeResponse.ok(<String, Object?>{'stockLikeId': 9});
     }
     if (path.startsWith('/api/stocks/likes/')) return FakeResponse(204, null);
+    if (path == '/api/accounts/me/ledger') {
+      return FakeResponse.ok(ledgerJson());
+    }
+    if (path == '/api/accounts/me/reset' && options.method == 'POST') {
+      return FakeResponse.ok(<String, Object?>{
+        'accountId': 4,
+        'roundNo': 2,
+        'initialCash': '50000000',
+        'cashBalance': '50000000',
+      });
+    }
     if (path == '/api/accounts/me/holdings') {
       return FakeResponse.ok(holdingsJson());
     }
@@ -495,6 +506,61 @@ void main() {
       await tester.tap(find.byTooltip('찜 해제'));
       await _settle(tester);
       expect(harness.countTo('/api/stocks/likes/9'), 1);
+    });
+
+    testWidgets('체결 내역이 나오고 포트폴리오 초기화는 확인 후 새 회차로 간다', (
+      tester,
+    ) async {
+      final harness = _harness(signedIn: true);
+      unawaited(harness.session.restore());
+      await tester.pumpWidget(
+        MaterialApp.router(
+          routerConfig: GoRouter(
+            initialLocation: '/my',
+            routes: [
+              GoRoute(
+                path: '/my',
+                builder: (context, state) => Scaffold(
+                  body: MyScreen(
+                    session: harness.session,
+                    stocks: harness.stocks,
+                    account: harness.account,
+                    orders: harness.orders,
+                    exchangeRates: harness.exchangeRates,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      await _settle(tester);
+
+      // 체결 내역: 초기지급·매수 배지와 증감액이 나온다.
+      await tester.scrollUntilVisible(find.text('체결 내역'), 300);
+      await _settle(tester);
+      expect(find.text('초기지급'), findsOneWidget);
+      expect(find.text('모의 투자금 지급'), findsOneWidget);
+      expect(find.text('삼성전자 매수'), findsOneWidget);
+      expect(find.textContaining('-148,148원'), findsOneWidget);
+
+      // 포트폴리오 초기화: 확인 대화상자를 거쳐 POST가 나간다.
+      await tester.scrollUntilVisible(
+        find.widgetWithText(OutlinedButton, '포트폴리오 초기화'),
+        300,
+      );
+      await _settle(tester);
+      await tester.tap(
+        find.widgetWithText(OutlinedButton, '포트폴리오 초기화'),
+      );
+      await _settle(tester);
+      expect(find.text('포트폴리오를 정말 초기화할까요?'), findsOneWidget);
+
+      await tester.tap(find.text('초기화할게요'));
+      await _settle(tester);
+      final resets = harness.requestsTo('/api/accounts/me/reset');
+      expect(resets, hasLength(1));
+      expect(resets.single.data, <String, dynamic>{'accountId': 3});
     });
   });
 
