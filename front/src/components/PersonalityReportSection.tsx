@@ -337,7 +337,9 @@ function OpenCard({
                   모드는 두 값이 달라 우연히 문제가 없었다). 바로 옆 유형 코드
                   글자(위 span)처럼 이 배경 위에서는 처음부터 흰색(text-white)만
                   맞는 조합이라, 같은 방식으로 고쳤다. */}
-              <span className="ml-auto text-[12px] font-bold text-white">{report.typeLabel}</span>
+              {/* 키워드 글자가 옆 유형 코드에 비해 너무 작아 보인다는 피드백 —
+                  12px → 15px로 키웠다. */}
+              <span className="ml-auto text-[15px] font-bold text-white">{report.typeLabel}</span>
             </div>
           </div>
 
