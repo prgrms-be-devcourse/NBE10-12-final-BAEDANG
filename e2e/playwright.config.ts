@@ -16,5 +16,12 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', testIgnore: '**/responsive.spec.ts', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'mobile-chromium',
+      grep: /@responsive/,
+      use: { ...devices['Pixel 5'], viewport: { width: 375, height: 812 } },
+    },
+  ],
 });

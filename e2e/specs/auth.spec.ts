@@ -1,6 +1,7 @@
 import { test, expect, PASSWORD } from '../fixtures/test.js';
+import { openNavigation } from '../helpers/navigation.js';
 
-test('로그인 후 새로고침해도 인증을 유지한다 @smoke', async ({ page, user }) => {
+test('로그인 후 새로고침해도 인증을 유지한다 @smoke @responsive', async ({ page, user }) => {
   await page.goto('/login?next=/my');
   await page.getByPlaceholder('you@example.com').fill(user.email);
   await page.getByPlaceholder('비밀번호를 입력하세요').fill(PASSWORD);
@@ -10,6 +11,7 @@ test('로그인 후 새로고침해도 인증을 유지한다 @smoke', async ({ 
   await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('trading-auth-user') ?? 'null')?.email)).toBe(user.email);
   await page.goto('/my');
   await expect(page.getByRole('heading', { name: '내 계좌' })).toBeVisible();
+  await openNavigation(page);
   await page.getByRole('button', { name: '로그아웃', exact: true }).click();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('trading-auth-user'))).toBeNull();
   await page.goto('/my');

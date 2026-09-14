@@ -18,7 +18,7 @@ test('회원가입 화면에서 약관 동의 후 새 계좌를 생성한다 @sm
 test('비로그인 사용자는 종목을 조회하고 주문 시 로그인 안내를 받는다 @smoke', async ({ page }) => {
   await page.context().addCookies([{ name: 'iv_intro_seen', value: '1', url: 'http://127.0.0.1:13000' }]);
   await page.goto('/rankings');
-  await expect(page.getByText('테스트전자').first()).toBeVisible();
+  await expect(page.getByText('테스트전자').filter({ visible: true }).first()).toBeVisible();
   await page.getByRole('link', { name: /테스트전자 005930/ }).click();
   await expect(page).toHaveURL(/\/stocks\/005930/);
   await expect(page.getByText('비로그인 상태에서 누르면 회원가입으로 안내돼요')).toBeVisible();

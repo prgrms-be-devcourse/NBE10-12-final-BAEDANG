@@ -1,7 +1,7 @@
 import { test, expect, API } from '../fixtures/test.js';
 import { authenticate, openStock, submit, get, cancel } from '../helpers/trading.js';
 
-test('부분 체결 후 취소는 체결 이력을 유지하고 잔량을 해제한다', async ({ page, request, user, control }) => {
+test('부분 체결 후 취소는 체결 이력을 유지하고 잔량을 해제한다 @responsive', async ({ page, request, user, control }) => {
   await authenticate(page, user); await openStock(page);
   const order = await submit(page, 'limit', '매수', '20', '11000');
   await control('publish'); await control('liquidity'); await control('tick');
@@ -14,7 +14,7 @@ test('부분 체결 후 취소는 체결 이력을 유지하고 잔량을 해제
   expect(canceled.filledQuantity).toBe(partial.filledQuantity);
   expect(Number(canceled.reservedCash)).toBe(0);
   await page.goto('/my');
-  await expect(page.getByText('테스트전자').first()).toBeVisible();
+  await expect(page.getByText('테스트전자').filter({ visible: true }).first()).toBeVisible();
 });
 test('정규장 종료 후 지정가가 만료된다', async ({ page, request, user, control }) => {
   await authenticate(page, user); await openStock(page);
@@ -24,7 +24,7 @@ test('정규장 종료 후 지정가가 만료된다', async ({ page, request, u
   expect(expired.status).toBe('EXPIRED'); expect(Number(expired.reservedCash)).toBe(0);
   await page.goto('/my');
   await page.getByRole('button', { name: '주문 내역', exact: true }).click();
-  await expect(page.getByText('만료', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('만료', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 test('CB는 기존 지정가를 보류하지만 취소는 허용한다', async ({ page, request, user, control }) => {
   await authenticate(page, user); await openStock(page);
@@ -34,7 +34,7 @@ test('CB는 기존 지정가를 보류하지만 취소는 허용한다', async (
   expect(pending.status).toBe('PENDING'); expect(pending.reservedCash).toBe(order.reservedCash);
   expect((await cancel(request, user, order.orderId)).status).toBe('CANCELED');
   await page.goto('/my'); await page.getByRole('button', { name: '주문 내역', exact: true }).click();
-  await expect(page.getByText('취소됨', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('취소됨', { exact: true }).filter({ visible: true }).first()).toBeVisible();
 });
 test('CB 발동 중 신규 주문은 거절 안내를 표시한다', async ({ page, user, control }) => {
   await authenticate(page, user); await openStock(page); await control('halt');

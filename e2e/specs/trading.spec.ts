@@ -15,7 +15,7 @@ test('시장가 매수와 매도를 실제 계좌에 반영한다 @smoke', async
   await expect(page.getByRole('heading', { name: '내 계좌' })).toBeVisible();
 });
 
-test('지정가 접수 후 취소하면 예약금을 해제한다 @smoke', async ({ page, request, user }) => {
+test('지정가 접수 후 취소하면 예약금을 해제한다 @smoke @responsive', async ({ page, request, user }) => {
   await authenticate(page, user); await openStock(page);
   const order = await submit(page, 'limit');
   expect(order.status).toBe('PENDING');
@@ -24,7 +24,7 @@ test('지정가 접수 후 취소하면 예약금을 해제한다 @smoke', async
   await page.getByRole('button', { name: '주문 내역', exact: true }).click();
   await page.getByRole('button', { name: '상세', exact: true }).click();
   await page.getByRole('button', { name: '주문 취소', exact: true }).click();
-  await expect(page.getByText('취소됨', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('취소됨', { exact: true }).filter({ visible: true }).first()).toBeVisible();
   const canceled = await get(request, user, `/api/orders/${order.orderId}`);
   expect(canceled.status).toBe('CANCELED');
   expect(Number(canceled.reservedCash)).toBe(0);
@@ -39,7 +39,7 @@ test('실제 V2 호가와 워커로 지정가를 체결한다 @smoke', async ({ 
   expect(filled.status).toBe('FILLED');
   expect(filled.filledQuantity).toBe('1');
   await page.goto('/my');
-  await expect(page.getByText('테스트전자').first()).toBeVisible();
+  await expect(page.getByText('테스트전자').filter({ visible: true }).first()).toBeVisible();
 });
 
 test('지정가 매도 예약수량은 취소 후 다시 주문할 수 있다 @smoke', async ({ page, request, user }) => {

@@ -25,6 +25,8 @@ npm run clean
 ```
 
 `npm test -- --grep "CB"` selects tests; `npm test -- --repeat-each=2` checks repeatability.
+`npm test -- --project mobile-chromium` runs the five responsive flows only;
+`npm test -- --project chromium` runs the 24 desktop flows.
 All modes build the frontend and E2E Java source set first. Ports 13000, 18088 and 18089
 must be free. Existing development servers are never reused. The database port is assigned
 by Docker. Do not invoke Playwright directly: the runner supplies a fresh control key.
@@ -37,6 +39,12 @@ creating its runtime state or starting containers and servers.
 ## Isolation and lifecycle
 
 - Exactly one Playwright worker, `fullyParallel: false`, and no retries or sharding.
+- Desktop Chromium runs 24 scenarios. Mobile Chromium uses touch/mobile emulation at
+  375×812 and runs only `@responsive` scenarios (five runs); the full suite totals 29.
+  Mobile coverage includes menu navigation, login/logout, ranking-to-detail navigation,
+  order confirmation, partial fills, holdings/ledger cards and order cancellation.
+  Targeted overflow and viewport assertions cover rankings, detail inputs and account
+  cards. This is not real-device, Safari, screenshot-diff or every-breakpoint coverage.
 - Each run owns a uniquely labelled container and anonymous storage. Existing local DBs
   are not used. The launcher rejects URLs outside `127.0.0.1:<port>/baedang_e2e`.
 - Flyway applies the existing production migrations; no test migration changes the schema.
@@ -96,6 +104,12 @@ markers are used only where input labels are not associated with their controls.
 add sleeps or reuse another test's orders. Network interception is limited to transport
 delay/failure tests and retains real backend responses.
 
+Responsive views can render both desktop and mobile content in the DOM. Filter text
+locators to visible elements before selecting a match; role locators already exclude
+hidden elements by default. Use `openNavigation` before accessing collapsed mobile menu
+actions. Add `@responsive` only to flows that need both screen sizes; mobile-only flows
+live in `responsive.spec.ts`, which the desktop project excludes.
+
 HTML reports live in `playwright-report`; failure screenshots and traces in `test-results`.
 Server logs live in `.runtime`. These files can contain disposable auth state and are
 ignored by Git; do not publish traces from sessions using real accounts.
@@ -105,6 +119,8 @@ ignored by Git; do not publish traces from sessions using real accounts.
 `.github/workflows/e2e.yml` runs smoke on PR updates to develop/main and the full suite
 on pushes to develop/main. Manual runs select smoke or full. A change-detection step
 skips unrelated documentation changes while leaving a completed workflow check.
+Smoke totals 14 runs (11 desktop + 3 mobile); full totals 29 (24 desktop + 5 mobile).
+Both projects run serially with one worker and the same per-test cleanup policy.
 Superseded runs of the same PR are cancelled. Cleanup and seven-day diagnostic artifacts
 run even after failure. Require a full run on the final merge candidate manually.
 
