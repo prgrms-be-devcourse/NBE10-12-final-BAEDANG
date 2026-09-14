@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../models/account_summary.dart';
+import '../models/holding.dart';
 import '../models/order_detail.dart';
 import 'api_client.dart';
 import 'auth_requirement.dart';
@@ -20,6 +21,16 @@ class AccountApi {
       cancelToken: cancelToken,
     );
     return _client.decode(() => AccountSummary.fromJson(json));
+  }
+
+  /// 보유 종목 목록. 평가금액·평가손익은 서버가 원화 환산까지 끝내서 내려준다.
+  Future<Holdings> getHoldings({CancelToken? cancelToken}) async {
+    final json = await _client.getObject(
+      'accounts/me/holdings',
+      auth: AuthRequirement.required,
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => Holdings.fromJson(json));
   }
 
   /// 현재 라운드 주문 내역. 최신순 커서 페이징.

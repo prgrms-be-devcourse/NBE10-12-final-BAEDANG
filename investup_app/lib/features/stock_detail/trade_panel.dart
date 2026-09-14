@@ -23,11 +23,19 @@ class TradePanel extends StatefulWidget {
     required this.detail,
     required this.session,
     required this.orders,
+    this.heldQuantity,
+    this.onOrderDone,
   });
 
   final StockDetail detail;
   final AuthSession session;
   final OrderApi orders;
+
+  /// 이 종목의 보유 수량. 매도 상한으로 쓴다 — 보유가 없으면 0.
+  final num? heldQuantity;
+
+  /// 주문이 끝나면 호출 — 부모가 보유 수량을 다시 조회한다.
+  final VoidCallback? onOrderDone;
 
   @override
   State<TradePanel> createState() => _TradePanelState();
@@ -85,6 +93,15 @@ class _TradePanelState extends State<TradePanel> {
   bool get _inputsValid =>
       _quantityValid && (_orderType == 'MARKET' || _priceValid);
 
+  /// 매도 수량이 보유를 넘는지. 보유 수량을 아직 못 받았으면(null) 0으로 본다 —
+  /// 어차피 보유 없는 종목은 한 주도 못 판다.
+  bool get _sellQuantityExceeded {
+    if (_side != 'SELL') return false;
+    final q = num.tryParse(_quantity);
+    if (q == null || q <= 0) return false;
+    return q > (widget.heldQuantity ?? 0);
+  }
+
   void _onInputChanged() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), _fetchQuote);
@@ -98,7 +115,7 @@ class _TradePanelState extends State<TradePanel> {
   }
 
   Future<void> _fetchQuote() async {
-    if (!_inputsValid) {
+    if (!_inputsValid || _sellQuantityExceeded) {
       setState(() {
         _marketQuote = null;
         _limitQuote = null;
@@ -250,8 +267,9 @@ class _TradePanelState extends State<TradePanel> {
           _submitting = false;
         });
       }
-      // 주문 뒤 계좌 잔고를 다시 불러온다.
+      // 주문 뒤 계좌 잔고·보유 수량을 다시 불러온다.
       unawaited(widget.session.reloadAccount());
+      widget.onOrderDone?.call();
     } on ApiException catch (e) {
       if (!mounted) return;
       // 서버 지시에 따라 재시도 정책을 적용한다.
@@ -292,6 +310,7 @@ class _TradePanelState extends State<TradePanel> {
 
   String get _submitLabel {
     if (_submitting) return '주문 중...';
+    if (_sellQuantityExceeded) return '보유 수량이 부족해요';
     if (_orderType == 'MARKET') {
       final quote = _marketQuote;
       if (quote != null && !quote.executable) {
@@ -310,6 +329,7 @@ class _TradePanelState extends State<TradePanel> {
     if (_submitting ||
         _quoteLoading ||
         !_inputsValid ||
+        _sellQuantityExceeded ||
         _marketResult != null ||
         _limitResult != null) {
       return false;
@@ -380,6 +400,19 @@ class _TradePanelState extends State<TradePanel> {
                 suffixText: '주',
               ),
             ),
+            // 매도는 보유 수량이 자연스러운 상한이다 — 버튼이 막기 전에 알려준다.
+            if (_side == 'SELL') ...[
+              const SizedBox(height: 6),
+              Text(
+                '보유 ${formatNumber(widget.heldQuantity ?? 0)}주',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: _sellQuantityExceeded
+                      ? scheme.error
+                      : scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             if (_quoteLoading)
               const Center(

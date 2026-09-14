@@ -282,6 +282,9 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
       return FakeResponse.ok(<String, Object?>{'stockLikeId': 9});
     }
     if (path.startsWith('/api/stocks/likes/')) return FakeResponse(204, null);
+    if (path == '/api/accounts/me/holdings') {
+      return FakeResponse.ok(holdingsJson());
+    }
     if (path == '/api/accounts/me/orders') {
       return FakeResponse.ok(_ordersJson());
     }
@@ -332,6 +335,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           stocks: harness.stocks,
           account: harness.account,
           orders: harness.orders,
+          exchangeRates: harness.exchangeRates,
         ),
       ),
     ),
@@ -345,6 +349,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           stocks: harness.stocks,
           session: harness.session,
           orders: harness.orders,
+          account: harness.account,
           stockId: int.tryParse(params['stockId'] ?? ''),
           stockLikeId: int.tryParse(params['likeId'] ?? ''),
         );
@@ -435,6 +440,7 @@ void main() {
                     stocks: harness.stocks,
                     account: harness.account,
                     orders: harness.orders,
+                    exchangeRates: harness.exchangeRates,
                   ),
                 ),
               ),
@@ -448,6 +454,18 @@ void main() {
       );
       await _settle(tester);
 
+      // 보유 종목: 수량·평균단가·현재가·평가금액·평가손익이 나온다.
+      await tester.scrollUntilVisible(find.text('보유 종목'), 300);
+      await _settle(tester);
+      expect(find.text('보유 종목'), findsOneWidget);
+      expect(find.text('삼성전자 005930'), findsOneWidget);
+      expect(find.text('10주'), findsOneWidget);
+      expect(find.text('745,000원'), findsOneWidget);
+      expect(find.textContaining('+5,000'), findsOneWidget);
+
+      // 관심 종목은 보유 종목 아래에 있다 — 스크롤해서 찾는다.
+      await tester.scrollUntilVisible(find.text('관심 종목'), 300);
+      await _settle(tester);
       expect(find.text('관심 종목'), findsOneWidget);
       // 주문 내역 섹션은 스크롤 아래에 있다.
       await tester.scrollUntilVisible(find.text('주문 내역'), 300);
@@ -602,6 +620,40 @@ void main() {
       expect(reqs.last.uri.queryParameters['cursor'], 'cursor-1');
       expect(find.text('SK하이닉스'), findsOneWidget);
       expect(find.text('모든 종목을 불러왔어요'), findsOneWidget);
+    });
+  });
+
+  group('매도 한도', () {
+    testWidgets('보유 수량을 넘는 매도는 견적 없이 막힌다', (tester) async {
+      final harness = _harness(signedIn: true);
+      unawaited(harness.session.restore());
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('삼성전자'));
+      await _settle(tester);
+      await tester.tap(find.text('거래하기'));
+      await _settle(tester);
+
+      // 보유 10주 — 11주 매도는 '보유 수량이 부족해요'로 막힌다.
+      await tester.tap(find.text('매도'));
+      await _settle(tester);
+      expect(find.text('보유 10주'), findsOneWidget);
+
+      await tester.enterText(find.widgetWithText(TextField, '수량'), '11');
+      await tester.pump(const Duration(milliseconds: 500));
+      await _settle(tester);
+      expect(find.text('보유 수량이 부족해요'), findsWidgets);
+      // 견적 요청은 나가지 않는다.
+      expect(harness.countTo('/api/orders/quote/market'), 0);
+
+      // 보유 안의 수량은 견적을 부른다.
+      await tester.enterText(find.widgetWithText(TextField, '수량'), '5');
+      await tester.pump(const Duration(milliseconds: 500));
+      await _settle(tester);
+      expect(harness.countTo('/api/orders/quote/market'), 1);
     });
   });
 

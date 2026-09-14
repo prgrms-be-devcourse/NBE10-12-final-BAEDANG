@@ -158,6 +158,9 @@ TestHarness _harness({bool tradable = true, bool signedIn = false}) =>
     if (path == '/api/accounts/me') {
       return FakeResponse.ok(accountSummaryJson());
     }
+    if (path == '/api/accounts/me/holdings') {
+      return FakeResponse.ok(holdingsJson());
+    }
     if (path == '/api/orders/quote/market') {
       return FakeResponse.ok(_quoteJson());
     }
@@ -196,6 +199,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           stocks: harness.stocks,
           session: harness.session,
           orders: harness.orders,
+          account: harness.account,
           stockId: int.tryParse(params['stockId'] ?? ''),
           stockLikeId: int.tryParse(params['likeId'] ?? ''),
         );

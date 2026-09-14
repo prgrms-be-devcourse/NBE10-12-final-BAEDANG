@@ -75,6 +75,25 @@ Map<String, Object?> rankingJson() => <String, Object?>{
   'hasNext': true,
 };
 
+Map<String, Object?> holdingsJson() => <String, Object?>{
+  'items': <Map<String, Object?>>[
+    <String, Object?>{
+      'symbol': '005930',
+      'name': '삼성전자',
+      'currency': 'KRW',
+      'quantity': '10',
+      'avgBuyPrice': '74000',
+      'avgExchangeRate': '1',
+      'lastPrice': '74500',
+      'evaluationAmount': '745000',
+      'unrealizedPnl': '5000',
+      'unrealizedPnlRate': '0.006757',
+      'realtime': true,
+    },
+  ],
+  'asOf': '2026-09-15T10:00:00+09:00',
+};
+
 Map<String, Object?> exchangeRateJson() => <String, Object?>{
   'baseCurrency': 'USD',
   'quoteCurrency': 'KRW',

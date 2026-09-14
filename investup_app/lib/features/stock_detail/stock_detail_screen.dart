@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/api/account_api.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/order_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/models/candle.dart';
+import '../../core/models/holding.dart';
 import '../../core/models/market_country.dart';
 import '../../core/models/order_book.dart';
 import '../../core/models/stock_detail.dart';
@@ -24,6 +26,7 @@ class StockDetailScreen extends StatefulWidget {
     required this.stocks,
     required this.session,
     required this.orders,
+    required this.account,
     this.stockId,
     this.stockLikeId,
   });
@@ -33,6 +36,7 @@ class StockDetailScreen extends StatefulWidget {
   final StockApi stocks;
   final AuthSession session;
   final OrderApi orders;
+  final AccountApi account;
 
   /// 랭킹에서 넘어올 때만 안다. 검색·상세 응답에는 stockId가 없어서
   /// 없으면 찜 버튼을 숨긴다.
@@ -59,6 +63,10 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   int? _stockLikeId;
   bool _likeBusy = false;
 
+  /// 이 종목의 보유 수량. 매도 한도로 쓴다 — 없거나 조회 실패면 null.
+  /// 서버 주문 트랜잭션이 최종 권위라 여기서는 미리 보여주는 용도다.
+  num? _heldQuantity;
+
   @override
   void initState() {
     super.initState();
@@ -66,6 +74,23 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     _loadDetail();
     _loadCandles();
     _loadOrderBook();
+    _loadHolding();
+  }
+
+  Future<void> _loadHolding() async {
+    if (!widget.session.isAuthenticated) return;
+    try {
+      final holdings = await widget.account.getHoldings();
+      if (!mounted) return;
+      final held = holdings.items
+          .where((h) => h.symbol == widget.symbol)
+          .firstOrNull;
+      setState(() {
+        _heldQuantity = num.tryParse(held?.quantity ?? '') ?? 0;
+      });
+    } on ApiException {
+      // 실패해도 막지 않는다 — 서버가 주문 시 다시 판정한다.
+    }
   }
 
   void _loadDetail() {
@@ -158,6 +183,8 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         detail: detail,
         session: widget.session,
         orders: widget.orders,
+        heldQuantity: _heldQuantity,
+        onOrderDone: _loadHolding,
       ),
     );
   }

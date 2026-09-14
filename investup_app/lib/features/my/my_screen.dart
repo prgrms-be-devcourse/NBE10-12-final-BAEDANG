@@ -3,10 +3,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api/account_api.dart';
 import '../../core/api/api_error.dart';
+import '../../core/api/exchange_rate_api.dart';
 import '../../core/api/order_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/auth/token_storage.dart';
+import '../../core/models/exchange_rate.dart';
+import '../../core/models/holding.dart';
 import '../../core/models/order_detail.dart';
 import '../../core/models/stock_like.dart';
 import '../../formatters.dart';
@@ -21,12 +24,14 @@ class MyScreen extends StatefulWidget {
     required this.stocks,
     required this.account,
     required this.orders,
+    required this.exchangeRates,
   });
 
   final AuthSession session;
   final StockApi stocks;
   final AccountApi account;
   final OrderApi orders;
+  final ExchangeRateApi exchangeRates;
 
   @override
   State<MyScreen> createState() => _MyScreenState();
@@ -36,6 +41,9 @@ class _MyScreenState extends State<MyScreen> {
   bool _loggingOut = false;
   Future<StockLikePage>? _likesFuture;
   Future<OrderPage>? _ordersFuture;
+  Future<Holdings>? _holdingsFuture;
+  Future<ExchangeRateLatest>? _rateFuture;
+  String? _usdKrwRate;
   final Set<int> _busyIds = {};
 
   @override
@@ -57,12 +65,20 @@ class _MyScreenState extends State<MyScreen> {
       setState(() {
         _likesFuture = null;
         _ordersFuture = null;
+        _holdingsFuture = null;
+        _rateFuture = null;
       });
       return;
     }
     setState(() {
       _likesFuture = widget.stocks.getLikes(size: 20);
       _ordersFuture = widget.account.getOrders(size: 20);
+      _holdingsFuture = widget.account.getHoldings();
+      // 해외 종목의 평균단가·현재가 원화 환산에 쓴다.
+      _rateFuture = widget.exchangeRates.getLatest().then((r) {
+        if (mounted) setState(() => _usdKrwRate = r.rate);
+        return r;
+      });
     });
   }
 
@@ -245,6 +261,13 @@ class _MyScreenState extends State<MyScreen> {
                   ],
                 ),
               ),
+            const SizedBox(height: 24),
+            _HoldingsSection(
+              future: _holdingsFuture,
+              usdKrwRate: _usdKrwRate,
+              rateLoaded: _rateFuture != null,
+              onRetry: _loadLists,
+            ),
             const SizedBox(height: 24),
             _LikesSection(
               future: _likesFuture,
@@ -536,6 +559,231 @@ class _OrderRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 보유 종목 섹션. 웹 7열 그리드를 모바일 행 카드로 옮겼다 —
+/// 종목/수량 + 평균단가·현재가(USD는 원화 환산 병기) + 평가금액·평가손익.
+class _HoldingsSection extends StatelessWidget {
+  const _HoldingsSection({
+    required this.future,
+    required this.usdKrwRate,
+    required this.rateLoaded,
+    required this.onRetry,
+  });
+
+  final Future<Holdings>? future;
+
+  /// 최신 USD/KRW — 해외 종목의 현재가 원화 환산에만 쓴다.
+  final String? usdKrwRate;
+  final bool rateLoaded;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('보유 종목', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 8),
+        FutureBuilder<Holdings>(
+          future: future,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Notice(
+                message: snapshot.error is ApiException
+                    ? (snapshot.error! as ApiException).message
+                    : '보유 종목을 불러오지 못했어요',
+                onRetry: onRetry,
+              );
+            }
+            final holdings = snapshot.data;
+            if (holdings == null) {
+              return const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (holdings.items.isEmpty) {
+              return AppCard(
+                child: Text(
+                  '보유 중인 종목이 없어요',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+              );
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppCard(
+                  child: Column(
+                    children: [
+                      for (final h in holdings.items)
+                        _HoldingRow(item: h, usdKrwRate: usdKrwRate),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  usdKrwRate == null
+                      ? '환율 정보가 없어 해외 종목 현재가를 원화로 환산할 수 없어요'
+                      : '해외 종목 현재가는 적용 환율(${formatNumber(usdKrwRate)} '
+                            'KRW/USD)로 환산돼요',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _HoldingRow extends StatelessWidget {
+  const _HoldingRow({required this.item, required this.usdKrwRate});
+
+  final HoldingItem item;
+  final String? usdKrwRate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // 평균단가는 매수 시점 환율(avgExchangeRate), 현재가는 최신 환율로 환산한다.
+    final avgKrw = toKrw(item.avgBuyPrice, item.currency, item.avgExchangeRate);
+    final lastKrw = toKrw(item.lastPrice, item.currency, usdKrwRate);
+    final pnl = double.tryParse(item.unrealizedPnl ?? '');
+    final pnlUp = pnl == null || pnl >= 0;
+
+    return InkWell(
+      onTap: () => context.push(
+        '/stocks/${item.symbol}'
+        '?marketCountry=${item.isUsd ? 'US' : 'KR'}',
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${item.name} ${item.symbol}',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${formatNumber(item.quantity)}주',
+                  style: theme.textTheme.bodyMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: _priceCell(
+                    '평균단가',
+                    avgKrw == null ? '-' : '${formatNumber(avgKrw)}원',
+                    item.isUsd && item.avgBuyPrice != null
+                        ? '\$${formatNumber(item.avgBuyPrice)}'
+                        : null,
+                    scheme,
+                  ),
+                ),
+                Expanded(
+                  child: _priceCell(
+                    '현재가',
+                    lastKrw == null ? '-' : '${formatNumber(lastKrw)}원',
+                    item.isUsd && item.lastPrice != null
+                        ? '\$${formatNumber(item.lastPrice)}'
+                        : null,
+                    scheme,
+                  ),
+                ),
+                Expanded(
+                  child: _priceCell(
+                    '평가금액',
+                    '${formatNumber(item.evaluationAmount)}원',
+                    null,
+                    scheme,
+                  ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        '평가손익',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                      Text(
+                        '${pnl != null && pnl > 0 ? '+' : ''}'
+                        '${formatNumber(item.unrealizedPnl)}원',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: pnlUp
+                              ? const Color(0xFFEF4444)
+                              : const Color(0xFF3B82F6),
+                        ),
+                      ),
+                      Text(
+                        formatRate(item.unrealizedPnlRate),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: pnlUp
+                              ? const Color(0xFFEF4444)
+                              : const Color(0xFF3B82F6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _priceCell(
+    String label,
+    String krw,
+    String? native,
+    ColorScheme scheme,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+        ),
+        Text(
+          krw,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        if (native != null)
+          Text(
+            native,
+            style: TextStyle(fontSize: 10.5, color: scheme.onSurfaceVariant),
+          ),
+      ],
     );
   }
 }
