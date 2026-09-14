@@ -35,9 +35,17 @@ class RankingsScreen extends StatefulWidget {
 
 class _RankingsScreenState extends State<RankingsScreen> {
   MarketCountry _market = MarketCountry.kr;
-  Future<RankingPage>? _future;
   Future<ExchangeRateLatest>? _rateFuture;
   String? _usdKrwRate;
+
+  /// 커서 페이지네이션으로 누적하는 랭킹 목록. 오프셋 방식은 갱신 사이에
+  /// 순위가 바뀌어 중복/누락이 생기므로 서버가 주는 nextCursor만 쓴다.
+  List<RankingItem> _items = const [];
+  String? _nextCursor;
+  bool _hasNext = false;
+  bool _loading = true;
+  bool _loadingMore = false;
+  String? _loadError;
 
   final _searchController = TextEditingController();
   Timer? _debounce;
@@ -66,7 +74,7 @@ class _RankingsScreenState extends State<RankingsScreen> {
   }
 
   void _load() {
-    _future = widget.stocks.getRankings(market: _market, size: 50);
+    _refreshRankings();
     // 환율은 해외 종목 원화 환산 표시에도 쓰므로 화면이 들고 있는다.
     _rateFuture = widget.exchangeRates.getLatest().then((r) {
       if (mounted) setState(() => _usdKrwRate = r.rate);
@@ -74,30 +82,72 @@ class _RankingsScreenState extends State<RankingsScreen> {
     });
   }
 
+  Future<void> _refreshRankings() async {
+    setState(() {
+      _loading = true;
+      _loadError = null;
+      _items = const [];
+      _nextCursor = null;
+      _hasNext = false;
+      _likeOverrides.clear();
+    });
+    try {
+      final page = await widget.stocks.getRankings(market: _market, size: 20);
+      if (!mounted) return;
+      setState(() {
+        _items = page.items;
+        _nextCursor = page.nextCursor;
+        _hasNext = page.hasNext;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    final cursor = _nextCursor;
+    if (!_hasNext || cursor == null || _loadingMore) return;
+    setState(() => _loadingMore = true);
+    try {
+      final page = await widget.stocks.getRankings(
+        market: _market,
+        size: 20,
+        cursor: cursor,
+      );
+      if (!mounted) return;
+      setState(() {
+        _items = [..._items, ...page.items];
+        _nextCursor = page.nextCursor;
+        _hasNext = page.hasNext;
+        _loadingMore = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _loadingMore = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   Future<void> _reload() async {
-    final future = widget.stocks.getRankings(market: _market, size: 50);
     final rateFuture = widget.exchangeRates.getLatest().then((r) {
       if (mounted) setState(() => _usdKrwRate = r.rate);
       return r;
     });
-    setState(() {
-      _likeOverrides.clear();
-      _future = future;
-      _rateFuture = rateFuture;
-    });
-    try {
-      await future;
-    } on ApiException {
-      // FutureBuilder가 오류 상태를 그린다.
-    }
+    setState(() => _rateFuture = rateFuture);
+    await _refreshRankings();
   }
 
   void _select(MarketCountry market) {
     if (market == _market) return;
-    setState(() {
-      _market = market;
-      _load();
-    });
+    setState(() => _market = market);
+    _refreshRankings();
   }
 
   void _onSearchChanged() {
@@ -311,67 +361,114 @@ class _RankingsScreenState extends State<RankingsScreen> {
   }
 
   Widget _buildRankings(ThemeData theme) {
-    return FutureBuilder<RankingPage>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.hasError) {
-          return PageList(
-            onRefresh: _reload,
-            children: [
-              Notice(
-                message: snapshot.error is ApiException
-                    ? (snapshot.error! as ApiException).message
-                    : '랭킹을 불러오지 못했어요',
-                onRetry: _reload,
-              ),
-            ],
-          );
-        }
-        final page = snapshot.data;
-        if (page == null) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        if (page.items.isEmpty) {
-          return PageList(
-            onRefresh: _reload,
-            children: [
-              AppCard(
-                child: Text(
-                  '표시할 종목이 없어요',
-                  style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-                ),
-              ),
-            ],
-          );
-        }
-        return RefreshIndicator(
-          onRefresh: _reload,
-          child: ListView.separated(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-            // index 0은 환율 배너, 나머지가 종목 행이다.
-            itemCount: page.items.length + 1,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              if (index == 0) {
-                return ExchangeRateBanner(
-                  future: _rateFuture,
-                  api: widget.exchangeRates,
-                );
-              }
-              final item = page.items[index - 1];
-              return _RankingRow(
-                item: item,
-                usdKrwRate: _usdKrwRate,
-                likeId: _likeIdOf(item),
-                busy: _likeBusy.contains(item.stockId),
-                onTap: () => _openDetail(item),
-                onLike: () => _toggleLike(item),
-              );
-            },
+    if (_loadError != null && _items.isEmpty) {
+      return PageList(
+        onRefresh: _reload,
+        children: [Notice(message: _loadError!, onRetry: _reload)],
+      );
+    }
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_items.isEmpty) {
+      return PageList(
+        onRefresh: _reload,
+        children: [
+          AppCard(
+            child: Text(
+              '표시할 종목이 없어요',
+              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+            ),
           ),
-        );
-      },
+        ],
+      );
+    }
+    // index 0은 환율 배너, 마지막은 "더 보기" 버튼이다.
+    final total = _items.length + 2;
+    return RefreshIndicator(
+      onRefresh: _reload,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+        itemCount: total,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) {
+          if (index == 0) {
+            return ExchangeRateBanner(
+              future: _rateFuture,
+              api: widget.exchangeRates,
+            );
+          }
+          if (index == total - 1) {
+            return _LoadMoreButton(
+              hasNext: _hasNext,
+              loading: _loadingMore,
+              shown: _items.length,
+              onTap: _loadMore,
+            );
+          }
+          final item = _items[index - 1];
+          return _RankingRow(
+            item: item,
+            usdKrwRate: _usdKrwRate,
+            likeId: _likeIdOf(item),
+            busy: _likeBusy.contains(item.stockId),
+            onTap: () => _openDetail(item),
+            onLike: () => _toggleLike(item),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 커서 페이지네이션의 "더 보기" 버튼. in-flight 요청 중엔 막고,
+/// hasNext가 꺼지면 안내 문구만 남긴다.
+class _LoadMoreButton extends StatelessWidget {
+  const _LoadMoreButton({
+    required this.hasNext,
+    required this.loading,
+    required this.shown,
+    required this.onTap,
+  });
+
+  final bool hasNext;
+  final bool loading;
+  final int shown;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (!hasNext) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Center(
+          child: Text(
+            '모든 종목을 불러왔어요',
+            style: TextStyle(
+              fontSize: 12.5,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        Text(
+          '$shown개 표시 중',
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 6),
+        OutlinedButton(
+          onPressed: loading ? null : onTap,
+          child: Text(loading ? '불러오는 중…' : '더 보기'),
+        ),
+      ],
     );
   }
 }
@@ -459,6 +556,15 @@ class _RankingRow extends StatelessWidget {
                     color: rateColor,
                   ),
                 ),
+                // 랭킹 선정 기준(거래대금)을 그대로 보여준다 — 왜 이 순서인지 알 수 있게.
+                if (item.tradingAmount != null)
+                  Text(
+                    '거래대금 ${formatKoreanAmount(item.tradingAmount)}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
               ],
             ),
             IconButton(

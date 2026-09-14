@@ -135,6 +135,32 @@ Map<String, Object?> _ordersJson() => <String, Object?>{
   'hasNext': false,
 };
 
+Map<String, Object?> _rankingPage2Json() => <String, Object?>{
+  'items': <Map<String, Object?>>[
+    <String, Object?>{
+      'rank': 2,
+      'stockId': 102,
+      'symbol': '000660',
+      'name': 'SK하이닉스',
+      'market': 'KOSPI',
+      'category': 'INDIVIDUAL',
+      'isDividend': false,
+      'leverageFactor': null,
+      'currency': 'KRW',
+      'lastPrice': '1683000',
+      'prevClose': '1660000',
+      'changeAmount': '23000',
+      'changeRate': '0.013855',
+      'tradingAmount': '987000000',
+      'quoteAt': '2026-09-15T09:30:00+09:00',
+      'realtime': true,
+      'stockLikeId': null,
+    },
+  ],
+  'nextCursor': null,
+  'hasNext': false,
+};
+
 Map<String, Object?> _usRankingJson() => <String, Object?>{
   'items': <Map<String, Object?>>[
     <String, Object?>{
@@ -167,8 +193,10 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
     final path = options.uri.path;
     if (path == '/api/stocks/rankings') {
       final market = options.uri.queryParameters['market'];
+      final cursor = options.uri.queryParameters['cursor'];
+      if (market == 'US') return FakeResponse.ok(_usRankingJson());
       return FakeResponse.ok(
-        market == 'US' ? _usRankingJson() : rankingJson(),
+        cursor == 'cursor-1' ? _rankingPage2Json() : rankingJson(),
       );
     }
     if (path == '/api/exchange-rates/latest') {
@@ -482,6 +510,33 @@ void main() {
       expect(find.text('결제일'), findsOneWidget);
       expect(find.text('별칭: 보통거래'), findsOneWidget);
       expect(find.text('시가총액'), findsNothing);
+    });
+  });
+
+  group('랭킹 페이지네이션', () {
+    testWidgets('더 보기로 다음 페이지를 붙이고 마지막이면 안내를 보인다', (
+      tester,
+    ) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      expect(find.text('삼성전자'), findsOneWidget);
+      // 거래대금 열이 표시된다.
+      expect(find.textContaining('거래대금'), findsWidgets);
+      expect(find.text('더 보기'), findsOneWidget);
+
+      await tester.tap(find.text('더 보기'));
+      await _settle(tester);
+
+      // cursor로 다음 페이지를 요청했고 결과가 이어 붙는다.
+      final reqs = harness.requestsTo('/api/stocks/rankings');
+      expect(reqs, hasLength(2));
+      expect(reqs.last.uri.queryParameters['cursor'], 'cursor-1');
+      expect(find.text('SK하이닉스'), findsOneWidget);
+      expect(find.text('모든 종목을 불러왔어요'), findsOneWidget);
     });
   });
 
