@@ -129,6 +129,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
   const [quantityInput, setQuantityInput] = useState("10");
   const [modalOpen, setModalOpen] = useState(false);
   const [orderResult, setOrderResult] = useState<string | null>(null);
+  // 팀원 건의: 체결 문구가 화면 아래(주문 폼 밑)에만 나와서 체결됐는지 확인이
+  // 명확하지 않다는 피드백 — 화면 중앙에 팝업을 띄우고 "확인"을 눌러야
+  // 닫히게 해달라는 요청. 기존 orderResult(아래쪽 배너, 이후에도 계속
+  // 남아 있는 기록용)는 그대로 두고, 주문이 성공(시장가 체결·지정가
+  // 접수/일부체결)할 때만 이 상태를 true로 켜서 팝업을 띄운다 — 주문
+  // 거절·오류(orderError)는 팝업 대상이 아니다.
+  const [orderResultModalOpen, setOrderResultModalOpen] = useState(false);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // 실패한 주문을 재시도할 때 이 clientOrderId를 재사용할지, 새로 발급할지는
@@ -504,6 +511,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           `${detail.currency === "USD" ? "$" : "원"} · 총 ${side === "매수" ? "차감" : "입금"}액 ` +
           `${formatNumber(response.netAmount)}원)`
       );
+      setOrderResultModalOpen(true);
       setClientOrderId(null); // 성공했으니 다음 주문은 완전히 새로 시작한다.
       // 체결 후 잔여 예수금·보유 수량 즉시 반영
       setAccount((prev) =>
@@ -573,6 +581,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           `${detail.name} ${response.quantity}주 지정가(${priceLabelForMsg}) ${side} 주문을 접수했어요` +
             `${response.status === "PARTIALLY_FILLED" ? " (일부 체결)" : ""}. 체결 전까지 예약금이 잠겨요.`
         );
+        setOrderResultModalOpen(true);
       }
       setClientOrderId(null); // 성공(거절 포함, 최종 결과가 확정됐으니)했으니 다음 주문은 새로 시작한다.
       // 예약금이 잠기거나(성공) 잠금 시도 자체가 없었을 수(거절) 있으니 계좌 요약을 다시 조회한다.
@@ -1142,6 +1151,41 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
       </div>
 
       <SignupModal open={modalOpen} onClose={() => setModalOpen(false)} />
+
+      {/* 팀원 건의: 체결 문구가 화면 아래에만 나와서 체결됐는지 확인이
+          명확하지 않다는 피드백 — 화면 중앙에 팝업을 띄우고 "확인"을
+          눌러야 닫히게 해달라는 요청. 마이페이지 탈퇴/초기화 확인
+          모달과 같은 스타일(modalFade·modalPop 애니메이션,
+          rounded-[24px] 카드)을 그대로 따랐다. 시장가는 즉시 체결,
+          지정가는 접수(또는 일부체결)라 제목을 상황에 맞게 나눴다. */}
+      {orderResultModalOpen && orderResult && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+          style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+          onClick={() => setOrderResultModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-[380px] rounded-[24px] px-7.5 pt-8 pb-6.5 text-center"
+            style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-[18px] font-bold" style={{ color: "var(--ink)" }}>
+              {orderType === "시장가" ? "거래가 체결됐어요" : "주문이 접수됐어요"}
+            </h3>
+            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
+              {orderResult}
+            </p>
+            <button
+              type="button"
+              onClick={() => setOrderResultModalOpen(false)}
+              className="w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white"
+              style={{ background: "var(--accent)" }}
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
 
       <TourGuide
         steps={STOCK_DETAIL_TOUR_STEPS}
