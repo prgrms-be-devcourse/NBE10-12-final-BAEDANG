@@ -34,6 +34,8 @@ import org.springframework.transaction.TransactionStatus;
 import com.baedang.global.clients.kis.KisProperties;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.StockFinancialResponse;
 import com.baedang.stock.entity.FinancialPeriodType;
 import com.baedang.stock.entity.MarketCountry;
@@ -68,6 +70,7 @@ class StockFinancialQueryServiceTest {
     @Mock StockIndustryRepository industryRepository;
     @Mock StockFinancialPeriodRepository periodRepository;
     @Mock StockFinancialSyncRepository syncRepository;
+    @Mock QuoteSnapshotRepository quoteSnapshotRepository;
     @Mock PlatformTransactionManager transactionManager;
     @Mock TransactionStatus transactionStatus;
     @Mock Stock stock;
@@ -317,6 +320,78 @@ class StockFinancialQueryServiceTest {
         assertThat(response.annual().get(2).ratios().operatingProfitMargin()).isNull();
     }
 
+    @Test
+    void calculated_per_uses_current_quote_and_latest_annual_eps() {
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry(SYMBOL, MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(syncService.ensureFresh(stock, SyncTrigger.ON_DEMAND))
+                .thenReturn(new SyncResult(
+                        GroupResult.fresh(),
+                        GroupResult.fresh(),
+                        GroupResult.fresh()));
+        stubDatabaseData(NOW);
+        when(periodRepository.findByStockIdAndPeriodTypeOrderByStatementYearMonthDesc(
+                STOCK_ID, FinancialPeriodType.QUARTERLY)).thenReturn(List.of(
+                period(FinancialPeriodType.QUARTERLY, "202509", new BigDecimal("120000"),
+                        new BigDecimal("15000"), new BigDecimal("1000"))));
+        when(quoteSnapshotRepository.findById(STOCK_ID)).thenReturn(Optional.of(new QuoteSnapshot(
+                STOCK_ID,
+                new BigDecimal("74200"),
+                "KRW",
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC))));
+
+        StockFinancialResponse response = service.getFinancials(SYMBOL, "KR");
+
+        assertThat(response.valuation().calculatedPer()).isEqualTo("14.27");
+        assertThat(response.valuation().basis()).isEqualTo("LATEST_ANNUAL_EPS");
+    }
+
+    @Test
+    void calculated_per_is_null_when_annual_eps_is_not_positive() {
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry(SYMBOL, MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(syncService.ensureFresh(stock, SyncTrigger.ON_DEMAND))
+                .thenReturn(new SyncResult(
+                        GroupResult.fresh(),
+                        GroupResult.fresh(),
+                        GroupResult.fresh()));
+        when(syncRepository.findById(STOCK_ID)).thenReturn(Optional.of(sync(NOW, NOW, NOW)));
+        when(industryRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
+        when(periodRepository.findByStockIdAndPeriodTypeOrderByStatementYearMonthDesc(
+                STOCK_ID, FinancialPeriodType.ANNUAL)).thenReturn(List.of(
+                period(FinancialPeriodType.ANNUAL, "202512", new BigDecimal("500000"), new BigDecimal("50000"),
+                        BigDecimal.ZERO)));
+        when(periodRepository.findByStockIdAndPeriodTypeOrderByStatementYearMonthDesc(
+                STOCK_ID, FinancialPeriodType.QUARTERLY)).thenReturn(List.of());
+        when(quoteSnapshotRepository.findById(STOCK_ID)).thenReturn(Optional.of(new QuoteSnapshot(
+                STOCK_ID,
+                new BigDecimal("74200"),
+                "KRW",
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC),
+                OffsetDateTime.ofInstant(NOW, ZoneOffset.UTC))));
+
+        StockFinancialResponse response = service.getFinancials(SYMBOL, "KR");
+
+        assertThat(response.valuation().calculatedPer()).isNull();
+    }
+
+    @Test
+    void calculated_per_is_null_when_current_quote_is_missing() {
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry(SYMBOL, MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(syncService.ensureFresh(stock, SyncTrigger.ON_DEMAND))
+                .thenReturn(new SyncResult(
+                        GroupResult.fresh(),
+                        GroupResult.fresh(),
+                        GroupResult.fresh()));
+        stubDatabaseData(NOW);
+
+        StockFinancialResponse response = service.getFinancials(SYMBOL, "KR");
+
+        assertThat(response.valuation().calculatedPer()).isNull();
+    }
+
     private StockFinancialQueryService service(boolean kisEnabled) {
         return new StockFinancialQueryService(
                 stockRepository,
@@ -324,6 +399,7 @@ class StockFinancialQueryServiceTest {
                 industryRepository,
                 periodRepository,
                 syncRepository,
+                quoteSnapshotRepository,
                 transactionManager,
                 properties(kisEnabled),
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -377,6 +453,11 @@ class StockFinancialQueryServiceTest {
 
     private static StockFinancialPeriod period(
             FinancialPeriodType type, String yearMonth, BigDecimal sales, BigDecimal op) {
+        return period(type, yearMonth, sales, op, new BigDecimal("5200"));
+    }
+
+    private static StockFinancialPeriod period(
+            FinancialPeriodType type, String yearMonth, BigDecimal sales, BigDecimal op, BigDecimal eps) {
         StockFinancialPeriod p = StockFinancialPeriod.create(STOCK_ID, type, yearMonth);
         p.applyIncomeStatement(new IncomeStatement(sales, op, new BigDecimal("40000")));
         p.applyBalanceSheet(new BalanceSheet(
@@ -386,7 +467,7 @@ class StockFinancialQueryServiceTest {
                 new BigDecimal("200000")));
         p.applyFinancialRatios(new Ratios(
                 new BigDecimal("10.5"), new BigDecimal("12.3"), new BigDecimal("8.2"),
-                new BigDecimal("15.1"), new BigDecimal("5200"), new BigDecimal("65000"),
+                new BigDecimal("15.1"), eps, new BigDecimal("65000"),
                 new BigDecimal("42000"), new BigDecimal("850.5"), new BigDecimal("50.0"),
                 new BigDecimal("8.0")));
         return p;

@@ -294,6 +294,7 @@ public class StockControllerTest {
                         new StockFinancialResponse.Classification("0326", "전자부품"),
                         null, null, null
                 ),
+                new StockFinancialResponse.Valuation("14.27", "LATEST_ANNUAL_EPS"),
                 List.of(
                         new StockFinancialResponse.Period(
                                 "202512",
@@ -321,6 +322,8 @@ public class StockControllerTest {
                 .andExpect(jsonPath("$.symbol").value("005930"))
                 .andExpect(jsonPath("$.marketCountry").value("KR"))
                 .andExpect(jsonPath("$.dataStatus").value("FRESH"))
+                .andExpect(jsonPath("$.valuation.calculatedPer").value("14.27"))
+                .andExpect(jsonPath("$.valuation.basis").value("LATEST_ANNUAL_EPS"))
                 .andExpect(jsonPath("$.industry.standard.code").value("0326"))
                 .andExpect(jsonPath("$.annual[0].statementYearMonth").value("202512"))
                 .andExpect(jsonPath("$.annual[0].balanceSheet.currentAssets").value("100"))

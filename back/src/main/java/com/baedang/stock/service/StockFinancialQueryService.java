@@ -18,6 +18,8 @@ import com.baedang.global.clients.kis.KisProperties;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.global.formatter.FinancialDecimalFormatter;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.dto.StockFinancialResponse;
 import com.baedang.stock.dto.StockFinancialResponse.BalanceSheet;
 import com.baedang.stock.dto.StockFinancialResponse.Classification;
@@ -26,6 +28,7 @@ import com.baedang.stock.dto.StockFinancialResponse.Industry;
 import com.baedang.stock.dto.StockFinancialResponse.Period;
 import com.baedang.stock.dto.StockFinancialResponse.Ratios;
 import com.baedang.stock.dto.StockFinancialResponse.SyncedAt;
+import com.baedang.stock.dto.StockFinancialResponse.Valuation;
 import com.baedang.stock.entity.FinancialPeriodType;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -44,11 +47,14 @@ import com.baedang.stock.service.StockFinancialSyncService.SyncTrigger;
 @Service
 public class StockFinancialQueryService {
 
+    private static final String ANNUAL_EPS_BASIS = "LATEST_ANNUAL_EPS";
+
     private final StockRepository stockRepository;
     private final StockFinancialSyncService syncService;
     private final StockIndustryRepository industryRepository;
     private final StockFinancialPeriodRepository periodRepository;
     private final StockFinancialSyncRepository syncRepository;
+    private final QuoteSnapshotRepository quoteSnapshotRepository;
     private final TransactionTemplate snapshotTransaction;
     private final boolean kisEnabled;
     private final Duration financialTtl;
@@ -61,6 +67,7 @@ public class StockFinancialQueryService {
             StockIndustryRepository industryRepository,
             StockFinancialPeriodRepository periodRepository,
             StockFinancialSyncRepository syncRepository,
+            QuoteSnapshotRepository quoteSnapshotRepository,
             PlatformTransactionManager transactionManager,
             KisProperties kisProperties,
             Clock clock
@@ -70,6 +77,7 @@ public class StockFinancialQueryService {
         this.industryRepository = Objects.requireNonNull(industryRepository, "industryRepository");
         this.periodRepository = Objects.requireNonNull(periodRepository, "periodRepository");
         this.syncRepository = Objects.requireNonNull(syncRepository, "syncRepository");
+        this.quoteSnapshotRepository = Objects.requireNonNull(quoteSnapshotRepository, "quoteSnapshotRepository");
         this.snapshotTransaction = new TransactionTemplate(
                 Objects.requireNonNull(transactionManager, "transactionManager"));
         this.snapshotTransaction.setReadOnly(true);
@@ -184,6 +192,11 @@ public class StockFinancialQueryService {
                 .findByStockIdAndPeriodTypeOrderByStatementYearMonthDesc(stockId, FinancialPeriodType.QUARTERLY);
         List<Period> quarterly = quarterlyEntities.stream().map(this::toPeriod).toList();
 
+        BigDecimal currentPrice = quoteSnapshotRepository.findById(stockId)
+                .map(QuoteSnapshot::getLastPrice)
+                .orElse(null);
+        Valuation valuation = calculateValuation(annualEntities, currentPrice);
+
         StockFinancialSync sync = syncRepository.findById(stockId).orElse(null);
         SyncedAt syncedAt = new SyncedAt(
                 sync == null ? null : sync.getIndustrySyncedAt(),
@@ -196,6 +209,7 @@ public class StockFinancialQueryService {
                 stock.getMarketCountry().name(),
                 dataStatus,
                 industry,
+                valuation,
                 annual,
                 quarterly,
                 syncedAt
@@ -266,6 +280,17 @@ public class StockFinancialQueryService {
                 incomeStatement,
                 ratios
         );
+    }
+
+    private static Valuation calculateValuation(
+            List<StockFinancialPeriod> annualEntities, BigDecimal currentPrice) {
+        BigDecimal annualEps = annualEntities.isEmpty() ? null : annualEntities.get(0).getEps();
+        if (currentPrice == null || currentPrice.signum() <= 0
+                || annualEps == null || annualEps.signum() <= 0) {
+            return new Valuation(null, ANNUAL_EPS_BASIS);
+        }
+        BigDecimal calculatedPer = currentPrice.divide(annualEps, 2, RoundingMode.HALF_UP);
+        return new Valuation(FinancialDecimalFormatter.plain(calculatedPer), ANNUAL_EPS_BASIS);
     }
 
     static BigDecimal calculateOperatingProfitMargin(BigDecimal operatingProfit, BigDecimal sales) {

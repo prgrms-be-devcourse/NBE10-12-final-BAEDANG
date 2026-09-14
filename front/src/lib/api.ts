@@ -617,6 +617,10 @@ export type StockFinancials = {
     medium: StockFinancialClassification;
     small: StockFinancialClassification;
   } | null;
+  valuation: {
+    calculatedPer: string | null;
+    basis: "LATEST_ANNUAL_EPS";
+  };
   annual: StockFinancialPeriod[];
   quarterly: StockFinancialPeriod[];
   syncedAt: {
