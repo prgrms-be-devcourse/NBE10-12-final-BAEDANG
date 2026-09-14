@@ -150,23 +150,20 @@ function TermModal({ term, onClose }: { term: WikiTerm; onClose: () => void }) {
         <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
           {paras.map((p, i) =>
             p.code ? (
-              // 코드블록(```)은 두 종류로 쓰인다 — ① PER·PBR·예수금처럼 여러 줄의
-              // 숫자를 칸에 맞춰 정렬해서 보여주는 표(모노스페이스가 실제로
-              // 필요), ② "투자경고"의 "투자주의 → 투자경고 → 투자위험"처럼
-              // 강조용 사각형 배경만 필요한 한 줄짜리 문구(정렬할 게 없어
-              // 모노스페이스가 필요 없고, 오히려 본문과 폰트가 달라 보여
-              // 어색하다는 피드백을 받았다). 사각형(배경·라운드·패딩)은 두
-              // 경우 모두 유지하되, 줄바꿈이 있는(여러 줄) 코드블록만
-              // 모노스페이스를 쓰고 한 줄짜리는 본문과 같은 폰트를 쓴다.
+              // 코드블록(```)에 처음엔 모노스페이스(ui-monospace,Menlo,monospace)를
+              // 썼다 — PER·PBR·예수금처럼 여러 줄의 숫자를 칸에 맞춰 정렬해
+              // 보여주는 표라 필요하다고 판단했는데, "투자경고"뿐 아니라
+              // "예수금"의 여러 줄짜리 표에서도 본문과 폰트가 달라 보인다는
+              // 피드백을 받았다 — 정렬보다 사이트 전체 폰트 통일이 우선이라,
+              // 줄 수와 무관하게 모든 코드블록에 본문과 같은 Pretendard를
+              // 쓴다. 사각형(배경·라운드·패딩)은 그대로 유지된다.
               <pre
                 key={i}
                 className="whitespace-pre-wrap rounded-[12px] px-4 py-3.5 text-[12.5px] leading-[1.7]"
                 style={{
                   background: "var(--fill)",
                   color: "var(--body)",
-                  fontFamily: p.text.includes("\n")
-                    ? "ui-monospace,Menlo,monospace"
-                    : "Pretendard,-apple-system,'Apple SD Gothic Neo',sans-serif",
+                  fontFamily: "Pretendard,-apple-system,'Apple SD Gothic Neo',sans-serif",
                 }}
               >
                 {p.text}
