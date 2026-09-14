@@ -530,8 +530,9 @@ Where the price comes from depends on **whether that stock's own market is open*
     "listDate": "1975-06-11"
   },
   "warnings": [
-    { "type": "INVESTMENT_WARNING", "label": "투자경고" }
+    { "type": "INVESTMENT_WARNING", "label": "거래유의종목" }
   ],
+  "warningsStatus": "AVAILABLE",
   "tradable": true,
   "tradableReason": null
 }
@@ -540,8 +541,12 @@ Where the price comes from depends on **whether that stock's own market is open*
 **Key fields**
 | Field | Meaning |
 |---|---|
+| `warnings` | active buy-caution items from Toss. `type` keeps the raw source code (`OVERHEATED` · `INVESTMENT_WARNING` · `VI_STATIC` · unknown); `label` is the single screen badge `거래유의종목` |
+| `warningsStatus` | `AVAILABLE` when the caution lookup succeeded, `UNAVAILABLE` when it failed. **`UNAVAILABLE` is not "no cautions"** — the screen must not hide the badge as if the stock were clean |
 | `tradable` | whether this stock can be traded right now |
 | `tradableReason` | reason code when `tradable=false` |
+
+**Cautions are informational and never gate trading.** `warnings` is read from the Toss warnings endpoint through a short-TTL per-stock cache, so the detail screen's polling does not spend one external call per refresh. Only cautions whose `[startDate, endDate]` window contains today are returned. A lookup failure leaves `tradable`/`tradableReason` untouched.
 
 **`tradableReason` values**
 | Code | Screen text |
