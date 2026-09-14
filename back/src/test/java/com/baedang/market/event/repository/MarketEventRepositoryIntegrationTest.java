@@ -268,6 +268,18 @@ class MarketEventRepositoryIntegrationTest {
     }
 
     @Test
+    void trade_order_forbids_market_event_when_reject_reason_is_null() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', NULL, now(), now(), ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     void trade_order_market_event_fk_rejects_unknown_event() {
         assertThatThrownBy(() -> jdbc.update("""
                 INSERT INTO trade_order

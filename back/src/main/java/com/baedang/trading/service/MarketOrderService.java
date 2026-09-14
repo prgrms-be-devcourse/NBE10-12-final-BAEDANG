@@ -78,7 +78,17 @@ public class MarketOrderService {
             return unwrap(existing.get());
         }
 
-        OrderMarketContext executionContext = prepareExecutionContext(command);
+        Stock stock = prepareStock(command);
+        try {
+            marketData.requireQuote(stock);
+        } catch (BusinessException e) {
+            Optional<MarketOrderResult> halted = transactionService.rejectIfHalted(userId, command);
+            if (halted.isPresent()) {
+                return unwrap(halted.get());
+            }
+            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
+        }
+        OrderMarketContext executionContext = prepareExecutionContext(stock);
         MarketOrderResult result = transactionService.execute(userId, command, executionContext);
         return unwrap(result);
     }
@@ -94,7 +104,7 @@ public class MarketOrderService {
         return responseAssembler.assemble(result.receipt());
     }
 
-    private OrderMarketContext prepareExecutionContext(MarketOrderCommand command) {
+    private Stock prepareStock(MarketOrderCommand command) {
         Stock stock = stockRepository
                 .findBySymbolIgnoreCaseAndMarketCountry(
                         command.terms().symbol(), command.terms().marketCountry())
@@ -113,11 +123,10 @@ public class MarketOrderService {
             throw new BusinessException(
                     staticRejection, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
         }
-        try {
-            marketData.requireQuote(stock);
-        } catch (BusinessException e) {
-            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
-        }
+        return stock;
+    }
+
+    private OrderMarketContext prepareExecutionContext(Stock stock) {
         Instant sessionLookupAt = clock.instant();
         MarketSessionStatus session;
         ExecutionRateEvidence rateEvidence = null;

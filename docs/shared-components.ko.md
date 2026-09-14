@@ -474,7 +474,7 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 
 - `MarketTradingHaltPolicy.activeFor(stock, at)` / `requireTradingAllowed(stock, at)`: 해당 종목 시장이 중단됐는지 판정한다. KR KOSPI/KOSDAQ에만 적용하고 `KR_ETC`·미국 시장은 차단하지 않으며 사이드카는 차단 사유가 아니다(저장소 조회가 `CIRCUIT_BREAKER`만 선택). 메모리 캐시 없이 호출마다 DB를 읽고, 거래 트랜잭션 안에서 account 잠금 후 호출해야 한다.
 - `ActiveMarketHalt`: 판정 이벤트. 주문 감사 FK용 eventId를 담는다. `asErrorData()`는 `market`/`eventType`/`stage`/`triggeredAt`/`haltUntil`만 `+09:00`으로 노출하며 `eventId`는 노출하지 않는다.
-- `MarketOrderTransactionService` / `LimitOrderTransactionService`: account 잠금·동시 멱등·account 수명 검증·종목 조회 뒤, execution-context 신선도와 시세 검증 앞에서 정책을 호출한다. 중단이면 `market_event_id`를 담은 `REJECTED` 1건을 저장하고, MARKET은 quote/reference/rate 증거를 남기지 않으며 LIMIT은 동결하지 않는다.
+- `MarketOrderTransactionService` / `LimitOrderTransactionService`: account 잠금·동시 멱등·account 수명 검증·종목 조회 뒤, execution-context 신선도와 시세 검증 앞에서 정책을 호출한다. 트랜잭션 전 시세 준비가 실패하면 `rejectIfHalted`가 외부 호출 없이 같은 account 우선 판정을 수행하고, 중단이면 저장하며 아니면 empty를 반환해 오케스트레이터가 원래 준비 오류를 유지한다. 중단이면 `market_event_id`를 담은 `REJECTED` 1건을 저장하고, MARKET은 quote/reference/rate 증거를 남기지 않으며 LIMIT은 동결하지 않는다.
 - 재생: 저장된 `market_event_id`로 최초 거절 데이터를 복원한다. 이벤트가 존재하고 `CIRCUIT_BREAKER`이며 주문 시장과 일치해야 하고, 아니면 다른 이벤트로 대체하지 않고 `INTERNAL_ERROR`를 던진다.
 - Part·이슈 이력은 `docs/superpowers/` 계획 노트에 두고, 이 가이드와 `api-spec`에는 로드맵 좌표를 남기지 않는다.
 

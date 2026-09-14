@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -113,6 +114,33 @@ public class LimitOrderTransactionService {
         return LimitOrderResult.normal(response);
     }
 
+    /**
+     * 시세 준비 실패 시에만 호출합니다. 계좌 잠금 뒤 활성 CB가 확인되거나 동시 요청 결과가 있으면
+     * 그 결과를 확정하고, 둘 다 아니면 호출부가 원래 준비 오류를 반환하도록 empty를 돌려줍니다.
+     */
+    @Transactional
+    public Optional<LimitOrderResult> rejectIfHalted(Long userId, LimitOrderCommand c) {
+        Account account = accounts.findByAccountIdAndUserIdForUpdate(c.accountId(), userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
+        Optional<TradeOrder> existing = orders.findByAccountIdAndClientOrderId(
+                account.getAccountId(), c.clientOrderId());
+        if (existing.isPresent()) {
+            return Optional.of(replay(existing.get(), c));
+        }
+        requireActive(account);
+        OrderTerms terms = c.terms();
+        Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(terms.symbol(), terms.marketCountry())
+                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
+        Instant now = clock.instant();
+        Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
+        if (halt.isEmpty()) {
+            return Optional.empty();
+        }
+        OffsetDateTime at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        return Optional.of(rejectByHalt(
+                account, stock, c, c.requestedPrice(), BigDecimal.ONE, halt.get(), at));
+    }
+
     @Transactional
     public LimitOrderResult accept(
             Long userId,
@@ -137,13 +165,8 @@ public class LimitOrderTransactionService {
         OffsetDateTime at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
         Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
         if (halt.isPresent()) {
-            // 동결하지 않는다. 판정 이벤트를 FK로 고정해 같은 clientOrderId 재요청이 최초 데이터를 재생한다.
-            TradeOrder rejected = orders.save(TradeOrder.rejectedLimitOrderByHalt(
-                    account.getAccountId(), stock.getStockId(), c.clientOrderId(), t.side(), t.quantity(),
-                    price.limitPrice(), c.requestedPrice(), c.currency(), context.executionRate(),
-                    halt.get().eventId(), at));
-            return LimitOrderResult.rejected(
-                    OrderDetailResponse.from(rejected, stock), halt.get().asErrorData());
+            return rejectByHalt(
+                    account, stock, c, price.limitPrice(), context.executionRate(), halt.get(), at);
         }
 
         policy.validateExecutionContextFresh(context, now);
@@ -185,6 +208,24 @@ public class LimitOrderTransactionService {
         events.publishEvent(new LimitOrderAcceptedEvent(stock.getStockId(), t.side(), accepted.getOrderId(),
                 accepted.getLimitPrice(), accepted.getOrderedAt()));
         return LimitOrderResult.normal(OrderDetailResponse.from(accepted, stock));
+    }
+
+    private LimitOrderResult rejectByHalt(
+            Account account,
+            Stock stock,
+            LimitOrderCommand command,
+            BigDecimal limitPrice,
+            BigDecimal executionRate,
+            ActiveMarketHalt halt,
+            OffsetDateTime at
+    ) {
+        OrderTerms terms = command.terms();
+        TradeOrder rejected = orders.save(TradeOrder.rejectedLimitOrderByHalt(
+                account.getAccountId(), stock.getStockId(), command.clientOrderId(),
+                terms.side(), terms.quantity(), limitPrice, command.requestedPrice(),
+                command.currency(), executionRate, halt.eventId(), at));
+        return LimitOrderResult.rejected(
+                OrderDetailResponse.from(rejected, stock), halt.asErrorData());
     }
 
     /** 만료 경합 결과를 예외가 아닌 값으로 반환하여 종료 및 동결 해제를 먼저 커밋합니다. */

@@ -117,6 +117,38 @@ public class MarketOrderTransactionService {
         return Optional.of(existingResult(existing, stock));
     }
 
+    /**
+     * 시세 준비 실패 시에만 호출합니다. 계좌 잠금 뒤 활성 CB가 확인되거나 동시 요청 결과가 있으면
+     * 그 결과를 확정하고, 둘 다 아니면 호출부가 원래 준비 오류를 반환하도록 empty를 돌려줍니다.
+     */
+    @Transactional
+    public Optional<MarketOrderResult> rejectIfHalted(Long userId, MarketOrderCommand command) {
+        Account account = accountRepository.findByAccountIdAndUserIdForUpdate(command.accountId(), userId)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.ACCOUNT_NOT_FOUND, "accountId=" + command.accountId()));
+        OrderTerms terms = command.terms();
+        TradeOrder existing = tradeOrderRepository
+                .findByAccountIdAndClientOrderId(account.getAccountId(), command.clientOrderId())
+                .orElse(null);
+        if (existing != null) {
+            Stock stock = stockRepository.findById(existing.getStockId())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
+            verifySameRequest(existing, account, stock, terms);
+            return Optional.of(existingResult(existing, stock));
+        }
+        rejectChangedRound(account);
+        Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(terms.symbol(), terms.marketCountry())
+                .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND, "symbol=" + terms.symbol()));
+        Instant now = clock.instant();
+        Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
+        if (halt.isEmpty()) {
+            return Optional.empty();
+        }
+        OffsetDateTime orderedAt = OffsetDateTime.ofInstant(
+                now.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
+        return Optional.of(rejectByHalt(account, stock, command, halt.get(), orderedAt));
+    }
+
     @Transactional
     public MarketOrderResult execute(
             Long userId,
@@ -158,14 +190,7 @@ public class MarketOrderTransactionService {
                 now.truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
         Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
         if (halt.isPresent()) {
-            // CB 거절에는 시세가 필요 없으므로 quote/reference/rate 증거를 남기지 않는다. 대신 판정에
-            // 사용한 이벤트를 FK로 고정해, 같은 clientOrderId 재요청이 최초 오류 데이터를 재생한다.
-            TradeOrder halted = tradeOrderRepository.save(TradeOrder.rejectedMarketOrderByHalt(
-                    account.getAccountId(), stock.getStockId(), command.clientOrderId(), terms.side(),
-                    terms.quantity(), halt.get().eventId(), orderedAt));
-            log.info("시장가 주문 CB 거절: orderId={}, accountId={}, stockId={}, marketEventId={}",
-                    halted.getOrderId(), account.getAccountId(), stock.getStockId(), halt.get().eventId());
-            return MarketOrderResult.rejected(ErrorCode.MARKET_TRADING_HALTED, halt.get().asErrorData());
+            return rejectByHalt(account, stock, command, halt.get(), orderedAt);
         }
 
         // 신규 주문만 검사합니다. 락 대기 중 같은 주문이 먼저 확정됐다면 위에서 저장 결과를 반환합니다.
@@ -260,6 +285,22 @@ public class MarketOrderTransactionService {
 
         return MarketOrderResult.filled(MarketOrderReceipt.from(
                 order, stock, account.getCashBalance()));
+    }
+
+    private MarketOrderResult rejectByHalt(
+            Account account,
+            Stock stock,
+            MarketOrderCommand command,
+            ActiveMarketHalt halt,
+            OffsetDateTime orderedAt
+    ) {
+        OrderTerms terms = command.terms();
+        TradeOrder rejected = tradeOrderRepository.save(TradeOrder.rejectedMarketOrderByHalt(
+                account.getAccountId(), stock.getStockId(), command.clientOrderId(), terms.side(),
+                terms.quantity(), halt.eventId(), orderedAt));
+        log.info("시장가 주문 CB 거절: orderId={}, accountId={}, stockId={}, marketEventId={}",
+                rejected.getOrderId(), account.getAccountId(), stock.getStockId(), halt.eventId());
+        return MarketOrderResult.rejected(ErrorCode.MARKET_TRADING_HALTED, halt.asErrorData());
     }
 
     private MarketOrderResult existingResult(TradeOrder order, Stock stock) {

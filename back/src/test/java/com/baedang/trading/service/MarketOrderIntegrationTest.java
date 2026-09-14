@@ -1253,6 +1253,35 @@ class MarketOrderIntegrationTest {
                 .isEmpty();
     }
 
+    @Test
+    void 활성_CB는_오래된_시세_준비실패보다_우선한다() {
+        Fixture fixture = createKrFixture(new BigDecimal("50000"), new BigDecimal("10000"));
+        QuoteSnapshot quote = quoteSnapshotRepository.findById(fixture.stockId()).orElseThrow();
+        OffsetDateTime staleAt = OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(2);
+        quote.updatePrice(quote.getLastPrice(), quote.getCurrency(), staleAt, staleAt);
+        quoteSnapshotRepository.saveAndFlush(quote);
+        MarketEvent cb = saveActiveCb("20260713000717");
+        MarketOrderRequest request = request(fixture, "BUY", "2");
+
+        assertThatThrownBy(() -> marketOrderService.place(fixture.userId(), request))
+                .isInstanceOfSatisfying(BusinessException.class, exception -> {
+                    assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(exception.getData())
+                            .containsEntry("stage", 1)
+                            .containsEntry("retryPolicy", "NEW_CLIENT_ORDER_ID");
+                });
+
+        TradeOrder rejected = tradeOrderRepository.findByAccountIdAndClientOrderId(
+                fixture.accountId(), UUID.fromString(request.clientOrderId())).orElseThrow();
+        assertThat(rejected.getStatus()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(rejected.getMarketEventId()).isEqualTo(cb.getMarketEventId());
+        assertThat(rejected.getQuoteAt()).isNull();
+        assertThat(accountRepository.findById(fixture.accountId()).orElseThrow().getCashBalance())
+                .isEqualByComparingTo("50000");
+        assertThat(entryCount(fixture)).isZero();
+        assertThat(executionCount(fixture)).isZero();
+    }
+
     /**
      * 멱등 재생은 최초 판정 이벤트를 정확히 복원해야 한다. 최초 거절 뒤 같은 orderedAt 시점에 활성인
      * 더 긴 CB가 늦게 수집되면, orderedAt 재검색은 다른 단계·시각을 돌려준다.

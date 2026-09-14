@@ -121,6 +121,10 @@ public class LimitOrderService {
         try {
             marketData.requireQuote(stock);
         } catch (BusinessException e) {
+            Optional<LimitOrderResult> halted = transactions.rejectIfHalted(userId, command);
+            if (halted.isPresent()) {
+                return unwrap(halted.get());
+            }
             throw retry(e.getErrorCode());
         }
         OrderMarketContext context = prepare(base.terms().marketCountry());
