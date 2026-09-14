@@ -155,22 +155,11 @@ export default function GuidePage() {
           </div>
 
           <Reveal delay={0.5} className="mt-4.5">
-            {/* "참고" 안내 박스 배경을 히어로 카드와 똑같은 값으로 맞췄더니
-                막상 적용해보니 너무 진하다는 피드백 — 특히 다크 모드는
-                var(--heroBg)가 꽤 채도 높은 남색(#114f8c)이라 튀어 보였다.
-                같은 방향(히어로의 하늘색 radial-gradient)은 유지하되, 훨씬
-                연하게 보이도록 두 가지를 낮췄다: ① 그라데이션 알파를
-                0.55→0.18로 낮추고, ② 바탕색을 var(--heroBg) 대신 이 페이지의
-                다른 박스들과 같은 var(--card)(라이트 흰색·다크 무채색에
-                가까운 짙은 회색)로 바꿔, 다크 모드에서도 배경 자체가 채도
-                높은 남색이 되지 않게 했다. */}
-            <div
-              className="rounded-2xl px-5 py-4"
-              style={{
-                background:
-                  "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.18) 0%, rgba(150,196,255,0) 70%), var(--card)",
-              }}
-            >
+            {/* "참고" 안내 박스 배경을 히어로 카드와 같은 계열로 맞춰봤지만
+                (그대로 → 알파를 낮춘 연한 버전) 두 시도 모두 마음에 들지
+                않는다는 피드백을 받아, 원래 쓰던 var(--accentSoft)로
+                되돌렸다. */}
+            <div className="rounded-2xl px-5 py-4" style={{ background: "var(--accentSoft)" }}>
               <RevealText
                 as="p"
                 className="text-[12.5px] leading-relaxed"
