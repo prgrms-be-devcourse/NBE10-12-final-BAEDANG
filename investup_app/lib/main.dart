@@ -17,6 +17,7 @@ void main() {
       market: core.market,
       stocks: core.stocks,
       account: core.account,
+      orders: core.orders,
     ),
   );
 }

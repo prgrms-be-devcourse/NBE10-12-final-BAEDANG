@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import 'core/api/account_api.dart';
 import 'core/api/market_api.dart';
+import 'core/api/order_api.dart';
 import 'core/api/stock_api.dart';
 import 'core/auth/auth_session.dart';
+import 'core/models/market_country.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
 import 'features/guide/guide_screen.dart';
@@ -14,6 +16,7 @@ import 'features/my/my_screen.dart';
 import 'features/rankings/rankings_screen.dart';
 import 'features/shell/main_shell.dart';
 import 'features/splash/splash_screen.dart';
+import 'features/stock_detail/stock_detail_screen.dart';
 import 'theme/app_theme.dart';
 
 /// 앱 루트. 라우팅과 테마만 담고, 인증 상태에 따른 화면 전환은
@@ -25,12 +28,14 @@ class InvestUpApp extends StatefulWidget {
     required this.market,
     required this.stocks,
     required this.account,
+    required this.orders,
   });
 
   final AuthSession session;
   final MarketApi market;
   final StockApi stocks;
   final AccountApi account;
+  final OrderApi orders;
 
   @override
   State<InvestUpApp> createState() => _InvestUpAppState();
@@ -75,6 +80,21 @@ class _InvestUpAppState extends State<InvestUpApp> {
           path: '/signup',
           builder: (context, state) => SignupScreen(session: session),
         ),
+        GoRoute(
+          path: '/stocks/:symbol',
+          builder: (context, state) {
+            final params = state.uri.queryParameters;
+            return StockDetailScreen(
+              symbol: state.pathParameters['symbol']!,
+              marketCountry: MarketCountry.fromWire(params['marketCountry']),
+              stocks: widget.stocks,
+              session: session,
+              orders: widget.orders,
+              stockId: int.tryParse(params['stockId'] ?? ''),
+              stockLikeId: int.tryParse(params['likeId'] ?? ''),
+            );
+          },
+        ),
         ShellRoute(
           builder: (context, state, child) => MainShell(child: child),
           routes: [
@@ -89,7 +109,7 @@ class _InvestUpAppState extends State<InvestUpApp> {
             GoRoute(
               path: '/rankings',
               pageBuilder: (context, state) => NoTransitionPage(
-                child: RankingsScreen(stocks: widget.stocks),
+                child: RankingsScreen(stocks: widget.stocks, session: session),
               ),
             ),
             GoRoute(

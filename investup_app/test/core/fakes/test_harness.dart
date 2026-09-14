@@ -4,6 +4,7 @@ import 'package:investup_app/core/api/api_client.dart';
 import 'package:investup_app/core/api/api_config.dart';
 import 'package:investup_app/core/api/auth_api.dart';
 import 'package:investup_app/core/api/market_api.dart';
+import 'package:investup_app/core/api/order_api.dart';
 import 'package:investup_app/core/api/stock_api.dart';
 import 'package:investup_app/core/auth/auth_session.dart';
 import 'package:investup_app/core/auth/token_manager.dart';
@@ -32,6 +33,7 @@ class TestHarness {
     market = MarketApi(client);
     stocks = StockApi(client);
     account = AccountApi(client);
+    orders = OrderApi(client);
     session = AuthSession(client: client, authApi: auth, accountApi: account);
   }
 
@@ -44,6 +46,7 @@ class TestHarness {
   late final MarketApi market;
   late final StockApi stocks;
   late final AccountApi account;
+  late final OrderApi orders;
   late final AuthSession session;
 
   /// 이미 로그인된 상태를 만든다.

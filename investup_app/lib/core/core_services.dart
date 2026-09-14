@@ -5,6 +5,7 @@ import 'api/api_client.dart';
 import 'api/api_config.dart';
 import 'api/auth_api.dart';
 import 'api/market_api.dart';
+import 'api/order_api.dart';
 import 'api/stock_api.dart';
 import 'auth/auth_session.dart';
 import 'auth/token_manager.dart';
@@ -38,6 +39,7 @@ class CoreServices {
       market: MarketApi(client),
       stocks: StockApi(client),
       account: AccountApi(client),
+      orders: OrderApi(client),
     );
   }
 
@@ -48,6 +50,7 @@ class CoreServices {
     required this.market,
     required this.stocks,
     required this.account,
+    required this.orders,
   });
 
   final TokenManager tokens;
@@ -56,6 +59,7 @@ class CoreServices {
   final MarketApi market;
   final StockApi stocks;
   final AccountApi account;
+  final OrderApi orders;
 
   AuthSession createAuthSession() =>
       AuthSession(client: client, authApi: auth, accountApi: account);

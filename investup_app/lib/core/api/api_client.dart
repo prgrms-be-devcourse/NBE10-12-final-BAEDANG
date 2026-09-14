@@ -145,6 +145,20 @@ class ApiClient {
     );
   }
 
+  /// 성공 본문이 비어 있는 DELETE(찜 해제 등).
+  Future<void> deleteVoid(
+    String path, {
+    AuthRequirement auth = AuthRequirement.public,
+    CancelToken? cancelToken,
+  }) async {
+    await _request(
+      'DELETE',
+      path,
+      auth: auth,
+      cancelToken: cancelToken,
+    );
+  }
+
   /// DTO 파싱 실패(필수 필드 누락, 형식 불일치)를 사용자 문구가 있는 예외로 바꾼다.
   T decode<T>(T Function() parse) {
     try {

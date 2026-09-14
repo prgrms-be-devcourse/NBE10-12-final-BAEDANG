@@ -19,6 +19,7 @@ void main() {
         market: harness.market,
         stocks: harness.stocks,
         account: harness.account,
+        orders: harness.orders,
       ),
     );
     await tester.pumpAndSettle();
