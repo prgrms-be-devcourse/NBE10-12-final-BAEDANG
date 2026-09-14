@@ -814,7 +814,13 @@ export default function MyPage() {
 
           <form onSubmit={handleChangePassword}>
             <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
-            <div className="flex max-w-[320px] flex-col gap-2">
+            {/* 현재 비밀번호·새 비밀번호·새 비밀번호 확인·버튼이 세로로 쌓여
+                있어 심미적으로 안 좋다는 요청 — flex-col(세로 스택) 대신
+                가로로 나란히 놓았다. 각 입력칸은 세로 스택 때 쓰던
+                w-full(부모 폭 320px에 꽉 참) 대신 고정 폭(w-[168px])을
+                줘서 가로로 늘어놓아도 한 칸씩 적당한 크기를 유지한다.
+                화면이 좁아지면 flex-wrap으로 다음 줄로 넘어간다. */}
+            <div className="flex flex-wrap items-start gap-2">
               <input
                 type="password"
                 required
@@ -825,7 +831,7 @@ export default function MyPage() {
                   setPasswordError(null);
                   setPasswordSaved(false);
                 }}
-                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
                 style={{ background: "var(--fill)", color: "var(--ink)" }}
               />
               <input
@@ -840,7 +846,7 @@ export default function MyPage() {
                   setPasswordError(null);
                   setPasswordSaved(false);
                 }}
-                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
                 style={{ background: "var(--fill)", color: "var(--ink)" }}
               />
               <input
@@ -853,13 +859,13 @@ export default function MyPage() {
                   setPasswordError(null);
                   setPasswordSaved(false);
                 }}
-                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
                 style={{ background: "var(--fill)", color: "var(--ink)" }}
               />
               <button
                 type="submit"
                 disabled={passwordSaving}
-                className="cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 style={{ background: "var(--accent)" }}
               >
                 {passwordSaving ? "변경 중…" : "비밀번호 변경"}
