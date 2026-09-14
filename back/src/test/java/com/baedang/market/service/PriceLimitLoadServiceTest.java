@@ -2,7 +2,6 @@ package com.baedang.market.service;
 
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.global.clients.FixedIntervalGate;
-import java.util.concurrent.atomic.AtomicLong;
 import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceLimits;
@@ -28,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
@@ -74,6 +74,103 @@ class PriceLimitLoadServiceTest {
         when(quote.getPriceLimitDate()).thenReturn(DATE);
         service.ensure(stock);
         verifyNoInteractions(data, persistence);
+    }
+
+    @Test
+    void 상세의_당일_스냅샷은_추가조회없이_반환한다() {
+        when(quote.getPriceLimitDate()).thenReturn(DATE);
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(quote);
+        verifyNoInteractions(quotes, days, data, persistence);
+    }
+
+    @Test
+    void 미국_상세는_기존_스냅샷을_그대로_반환한다() {
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(quote);
+        verifyNoInteractions(quotes, days, data, persistence);
+    }
+
+    @Test
+    void 수집_비활성화시_기존_스냅샷을_반환한다() {
+        PriceLimitLoadService disabled = new PriceLimitLoadService(data, days, quotes, persistence, clock, false);
+        assertThat(disabled.ensureForDisplay(stock, quote)).isSameAs(quote);
+        verifyNoInteractions(quotes, days, data, persistence);
+    }
+
+    @Test
+    void 저장후_읽은_스냅샷을_반환한다() {
+        QuoteSnapshot updated = mock(QuoteSnapshot.class);
+        when(updated.getPriceLimitDate()).thenReturn(DATE);
+        when(quotes.findById(1L)).thenReturn(Optional.of(quote), Optional.of(updated));
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(updated);
+        verify(persistence).save(eq(1L), eq(DATE), any());
+        verify(quotes, times(2)).findById(1L);
+    }
+
+    @Test
+    void 다른_요청이_이미_확보한_스냅샷은_수집없이_반환한다() {
+        QuoteSnapshot updated = mock(QuoteSnapshot.class);
+        when(updated.getPriceLimitDate()).thenReturn(DATE);
+        when(quotes.findById(1L)).thenReturn(Optional.of(updated));
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(updated);
+        verify(quotes, times(1)).findById(1L);
+        verifyNoInteractions(data, persistence);
+    }
+
+    @Test
+    void 경쟁_요청으로_저장이_0건이어도_최신값을_반환하고_실패대기를_남기지_않는다() {
+        QuoteSnapshot updated = mock(QuoteSnapshot.class);
+        when(updated.getPriceLimitDate()).thenReturn(DATE);
+        when(quotes.findById(1L)).thenReturn(Optional.of(quote), Optional.of(updated));
+        when(persistence.save(any(), any(), any())).thenReturn(false);
+
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(updated);
+        // 다음 호출에도 오래된 스냅샷이 들어와도 실패 대기 없이 DB의 확보된 값을 확인합니다.
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(updated);
+        verify(quotes, times(3)).findById(1L);
+        verify(data, times(1)).fetchPriceLimits(any());
+    }
+
+    @Test
+    void 수집실패시_이미_읽은_스냅샷을_반환하고_추가조회하지_않는다() {
+        QuoteSnapshot newer = mock(QuoteSnapshot.class);
+        when(quotes.findById(1L)).thenReturn(Optional.of(newer));
+        when(data.fetchPriceLimits(any())).thenThrow(new IllegalStateException());
+
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(newer);
+        assertThat(service.ensureForDisplay(stock, newer)).isSameAs(newer);
+        verify(quotes, times(1)).findById(1L);
+        verify(data, times(1)).fetchPriceLimits(any());
+        verifyNoInteractions(persistence);
+    }
+
+    @Test
+    void 캘린더_실패시_전달받은_스냅샷을_유지한다() {
+        when(days.calendar(any(), any())).thenThrow(new IllegalStateException());
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(quote);
+        verifyNoInteractions(quotes, data, persistence);
+    }
+
+    @Test
+    void 저장후_재조회가_실패하면_기존_스냅샷을_유지한다() {
+        when(quotes.findById(1L)).thenReturn(Optional.of(quote)).thenThrow(new IllegalStateException());
+        assertThat(service.ensureForDisplay(stock, quote)).isSameAs(quote);
+        verify(persistence).save(eq(1L), eq(DATE), any());
+    }
+
+    @Test
+    void 시세가_끝까지_없으면_null을_유지한다() {
+        when(quotes.findById(1L)).thenReturn(Optional.empty());
+        assertThat(service.ensureForDisplay(stock, null)).isNull();
+        verifyNoInteractions(data, persistence);
+    }
+
+    @Test
+    void 저장가능한_최대가격은_허용한다() {
+        when(data.fetchPriceLimits(any())).thenReturn(new PriceLimits(clock.instant().atOffset(ZoneOffset.UTC),
+                new BigDecimal("999999999999999.9999"), new BigDecimal("1"), "KRW"));
+        service.ensure(stock);
+        verify(persistence).save(eq(1L), eq(DATE), any());
     }
 
     @Test
@@ -174,7 +271,7 @@ class PriceLimitLoadServiceTest {
             Future<?> first = executor.submit(() -> service.ensure(stock));
             try {
                 assertThat(entered.await(5, TimeUnit.SECONDS)).isTrue();
-                service.ensure(stock);
+                assertThat(service.ensureForDisplay(stock, quote)).isSameAs(quote);
                 verify(data, times(1)).fetchPriceLimits(any());
             } finally { release.countDown(); }
             first.get(5, TimeUnit.SECONDS);
@@ -200,10 +297,11 @@ class PriceLimitLoadServiceTest {
                 ignored -> { throw new AssertionError("상세 조회가 게이트에서 대기하면 안 됩니다"); });
         PriceLimitLoadService displayService = new PriceLimitLoadService(data, days, quotes, persistence, clock, true, gate);
         assertThat(gate.tryAcquire()).isTrue();
-        displayService.ensureForDisplay(stock);
+        assertThat(displayService.ensureForDisplay(stock, quote)).isSameAs(quote);
         verifyNoInteractions(data, persistence);
+        verify(quotes, times(1)).findById(1L);
         nanos.set(TimeUnit.MILLISECONDS.toNanos(500));
-        displayService.ensureForDisplay(stock);
+        displayService.ensureForDisplay(stock, quote);
         verify(data).fetchPriceLimits("005930");
         verify(persistence).save(eq(1L), eq(DATE), any());
     }
@@ -215,13 +313,13 @@ class PriceLimitLoadServiceTest {
                 ignored -> { throw new AssertionError("상세 조회 대기 금지"); });
         PriceLimitLoadService displayService = new PriceLimitLoadService(data, days, quotes, persistence, clock, true, gate);
         when(data.fetchPriceLimits(any())).thenThrow(new IllegalStateException());
-        displayService.ensureForDisplay(stock);
+        displayService.ensureForDisplay(stock, quote);
         nanos.set(TimeUnit.SECONDS.toNanos(2));
         clock.advance(Duration.ofSeconds(59));
-        displayService.ensureForDisplay(stock);
+        displayService.ensureForDisplay(stock, quote);
         verify(data, times(1)).fetchPriceLimits(any());
         clock.advance(Duration.ofSeconds(1));
-        displayService.ensureForDisplay(stock);
+        displayService.ensureForDisplay(stock, quote);
         verify(data, times(2)).fetchPriceLimits(any());
     }
 
