@@ -224,6 +224,19 @@ export function refreshAccessToken(refreshToken: string): Promise<{ accessToken:
   return request<{ accessToken: string }>("/api/auth/refresh", { method: "POST", body: { refreshToken } });
 }
 
+/**
+ * `POST /api/auth/logout` — 프론트-백엔드 연동 점검 중 발견된 미연동 API. 백엔드는
+ * stateless JWT라 이 호출 자체가 토큰을 실제로 무효화하진 않는다(`docs/api-spec.md`:
+ * "Stateless logout. The client discards local tokens." — 클라이언트가 로컬 토큰을
+ * 지우는 것 자체가 로그아웃의 본체). 그래도 서버가 로그아웃 이벤트를 감사 로그로
+ * 남기거나, 나중에 토큰 블록리스트가 추가될 가능성에 대비해 문서화된 계약대로
+ * 호출은 해준다 — `AuthProvider.logout()`이 로컬 상태를 지우기 전에 best-effort로
+ * 부른다(실패해도 로컬 로그아웃 자체는 항상 성공해야 하므로 에러를 던지지 않는다).
+ */
+export function logoutUser(): Promise<void> {
+  return request<void>("/api/auth/logout", { method: "POST", auth: true });
+}
+
 // ── 회원 정보 ──────────────────────────────────────────────────────────────────
 
 export type UserProfile = {
