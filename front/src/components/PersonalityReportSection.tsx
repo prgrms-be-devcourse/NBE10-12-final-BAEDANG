@@ -311,7 +311,13 @@ function OpenCard({
             )}
             <div className="flex items-center gap-2.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--accent)" }}>
               <span className="font-mono text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
-              <span className="ml-auto text-[12px] font-bold" style={{ color: "var(--accentText)" }}>{report.typeLabel}</span>
+              {/* 라이트 모드에서 이 문구(유형 4글자 요약, 예: "분산·해외·개별주·안정형")가
+                  안 보인다는 제보 — var(--accentText)가 라이트 모드에서는 이 배경과
+                  똑같은 var(--accent)(#0f3868)라 글자가 배경에 완전히 묻혔다(다크
+                  모드는 두 값이 달라 우연히 문제가 없었다). 바로 옆 유형 코드
+                  글자(위 span)처럼 이 배경 위에서는 처음부터 흰색(text-white)만
+                  맞는 조합이라, 같은 방식으로 고쳤다. */}
+              <span className="ml-auto text-[12px] font-bold text-white">{report.typeLabel}</span>
             </div>
           </div>
 
