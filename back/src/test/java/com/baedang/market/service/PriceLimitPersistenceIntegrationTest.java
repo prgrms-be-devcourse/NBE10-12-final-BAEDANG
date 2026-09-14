@@ -1,7 +1,9 @@
 package com.baedang.market.service;
 
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.port.MarketCalendarDay;
 import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceLimits;
 import com.baedang.market.repository.PriceLimitRepository;
 import com.baedang.market.repository.QuoteSnapshotBatchRepository;
@@ -21,8 +23,10 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
@@ -31,6 +35,8 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 @Testcontainers
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
@@ -73,6 +79,32 @@ class PriceLimitPersistenceIntegrationTest {
         assertThat(saved.getUpperLimit()).isEqualByComparingTo("130");
         assertThat(saved.getLastPrice()).isEqualByComparingTo("100");
         assertThat(saved.getQuoteAt().toInstant()).isEqualTo(AT.toInstant());
+    }
+
+    @Test
+    void 수집중_다른_요청이_먼저_저장하면_DB에_확정된_스냅샷을_반환한다() {
+        Stock stock = stock(MarketCountry.KR);
+        QuoteSnapshot before = quotes.saveAndFlush(quote(stock, "100", AT));
+        MarketDataPort data = mock(MarketDataPort.class);
+        MarketTradingDayPolicy days = mock(MarketTradingDayPolicy.class);
+        Clock clock = Clock.fixed(AT.plusHours(1).toInstant(), ZoneOffset.UTC);
+        when(days.calendar(MarketCountry.KR, DATE)).thenReturn(new MarketCalendarDay(
+                MarketCountry.KR, DATE, true, AT, AT.withHour(15).withMinute(30), null));
+        PriceLimits accepted = new PriceLimits(AT, new BigDecimal("135"), new BigDecimal("75"), "KRW");
+        when(data.fetchPriceLimits(stock.getSymbol())).thenAnswer(invocation -> {
+            // 외부 응답 대기 중 다른 트랜잭션이 먼저 커밋한 순서를 재현합니다.
+            assertThat(limits.save(stock.getStockId(), DATE, accepted)).isTrue();
+            return value();
+        });
+        PriceLimitLoadService service = new PriceLimitLoadService(data, days, quotes, limits, clock, true);
+
+        QuoteSnapshot result = service.ensureForDisplay(stock, before);
+
+        assertThat(result.getPriceLimitDate()).isEqualTo(DATE);
+        assertThat(result.getUpperLimit()).isEqualByComparingTo("135");
+        assertThat(result.getLowerLimit()).isEqualByComparingTo("75");
+        assertThat(result.getLastPrice()).isEqualByComparingTo("100");
+        assertThat(result.getQuoteAt().toInstant()).isEqualTo(AT.toInstant());
     }
 
     @Test

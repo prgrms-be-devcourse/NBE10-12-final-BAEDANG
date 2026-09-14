@@ -33,6 +33,8 @@ public class PriceLimitLoadService {
     private static final Logger log = LoggerFactory.getLogger(PriceLimitLoadService.class);
     private static final Duration RETRY_DELAY = Duration.ofMinutes(1);
     private static final int MAX_PENDING = 1000;
+    private static final BigDecimal MAX_PRICE_EXCLUSIVE = new BigDecimal("1000000000000000");
+    // 맵과 Attempt의 가변 필드는 모두 claim/finish의 동일한 모니터 잠금 안에서 접근합니다.
     private final Map<Long, Attempt> attempts = new HashMap<>();
     private final FixedIntervalGate requests;
     private final MarketDataPort data;
@@ -63,40 +65,43 @@ public class PriceLimitLoadService {
 
     /** 배경 수집은 속도 제한 순서를 기다려 누락 대상 전체를 처리합니다. */
     public void ensure(Stock stock) {
-        ensure(stock, true);
+        ensure(stock, null, true);
     }
 
-    /** 상세 조회는 상하한가 전용 게이트에서 대기하지 않습니다. */
-    public void ensureForDisplay(Stock stock) {
-        ensure(stock, false);
+    /** 상세 조회는 게이트에서 대기하지 않고, 보충한 시세 또는 기존 스냅샷을 반환합니다. */
+    public QuoteSnapshot ensureForDisplay(Stock stock, QuoteSnapshot existing) {
+        return ensure(stock, existing, false);
     }
 
     /** 주문 준비도 게이트 대기 없이 동일한 중복 억제·실패 대기를 사용합니다. */
     public void ensureForTrading(Stock stock) {
-        ensure(stock, false);
+        ensure(stock, null, false);
     }
 
-    private void ensure(Stock stock, boolean waitForPermit) {
-        if (!enabled || stock.getMarketCountry() != MarketCountry.KR) return;
+    private QuoteSnapshot ensure(Stock stock, QuoteSnapshot existing, boolean waitForPermit) {
+        if (!enabled || stock.getMarketCountry() != MarketCountry.KR) return existing;
         Instant started = clock.instant();
         LocalDate date = started.atZone(MarketCountry.KR.zoneId()).toLocalDate();
+        if (existing != null && date.equals(existing.getPriceLimitDate())) return existing;
         Attempt attempt = claim(stock.getStockId(), date, started);
-        if (attempt == null) return;
+        if (attempt == null) return existing;
         boolean success = false;
+        QuoteSnapshot quote = existing;
         try {
             MarketCalendarDay day = tradingDays.calendar(MarketCountry.KR, date);
             // 장전 갱신 보장 시점이 명세에 없으므로 정규장 중에만 새 값을 수집합니다.
-            if (!day.isRegularSessionAt(started)) { success = true; return; }
-            QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElse(null);
-            if (quote == null) return;
-            if (date.equals(quote.getPriceLimitDate())) { success = true; return; }
+            if (!day.isRegularSessionAt(started)) { success = true; return quote; }
+            QuoteSnapshot stored = quotes.findById(stock.getStockId()).orElse(null);
+            if (stored == null) return quote;
+            quote = stored;
+            if (date.equals(quote.getPriceLimitDate())) { success = true; return quote; }
             if (waitForPermit) requests.acquire();
             else if (!requests.tryAcquire()) {
                 // 호출을 시도하지 않은 경우 실패 대기를 남기지 않아 다음 조회에서 다시 확인합니다.
                 success = true;
-                return;
+                return quote;
             }
-            if (!day.isRegularSessionAt(clock.instant())) return;
+            if (!day.isRegularSessionAt(clock.instant())) return quote;
             PriceLimits limits = data.fetchPriceLimits(stock.getSymbol());
             Instant received = clock.instant();
             if (limits == null || limits.timestamp() == null || !"KRW".equals(limits.currency())
@@ -108,16 +113,22 @@ public class PriceLimitLoadService {
                 throw new IllegalArgumentException("상하한가 날짜 또는 가격이 유효하지 않습니다");
             }
             success = persistence.save(stock.getStockId(), date, limits);
+            if (!waitForPermit) {
+                // 다른 요청이 먼저 저장해 UPDATE가 0건이어도 DB의 최신 값을 확인합니다.
+                quote = quotes.findById(stock.getStockId()).orElse(quote);
+                success = success || date.equals(quote.getPriceLimitDate());
+            }
         } catch (RuntimeException exception) {
             log.warn("상하한가 수집 보류: stockId={} type={}", stock.getStockId(), exception.getClass().getSimpleName());
         } finally {
             finish(stock.getStockId(), attempt, success);
         }
+        return quote;
     }
 
     private boolean validPrice(BigDecimal price) {
         return price != null && price.signum() > 0 && price.stripTrailingZeros().scale() <= 4
-                && price.compareTo(new BigDecimal("1000000000000000")) < 0;
+                && price.compareTo(MAX_PRICE_EXCLUSIVE) < 0;
     }
 
     private synchronized Attempt claim(Long id, LocalDate date, Instant now) {

@@ -416,7 +416,7 @@ KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시�
 | `prev_close` | NUMERIC(19,4) | `quote_at`에서 파생한 거래소 현지 시세 거래일의 정확한 직전 거래일 `prev_close_date`에 해당하는 확정 일봉 종가. 검증 실패 시 등락률은 null. `last_price` 또는 날짜 미확인 랭킹 기준가로 대체하지 않는다. |
 | `prev_close_date` | DATE | 기준가의 거래일. 시세 거래일은 quote_at과 MarketCountry.zoneId()로 계산한다. 기존 행의 날짜는 NULL로 두고 재조회한다. |
 | `upper_limit` `lower_limit` | NUMERIC(19,4) | 검증된 날짜와 일치할 때만 표시하는 외부 상하한가. 국내 주문 및 V2 호가에 검증된 당일 범위를 적용 (#178) |
-| `price_limit_date` | DATE | 한국 데이터 시각을 Asia/Seoul로 변환하고 요청 거래일과 검증한 날짜. 기존 미검증 값과 미국은 NULL. V13 추가. |
+| `price_limit_date` | DATE | 한국 데이터 시각을 Asia/Seoul로 변환하고 요청 거래일과 검증한 날짜. 기존 미검증 값과 미국은 NULL. V14 추가. |
 | `currency` | VARCHAR(3) | 가격의 통화. `stock` 과 중복이지만 조인 없이 시세만 조회할 때 편함. |
 | `quote_at` | TIMESTAMPTZ | **토스가 알려준 시세 기준 시각.** 두 곳에 사용 — 화면의 "12:36:59 기준" 표시, 주문 시 유효시간 검증(15초 넘게 오래됐으면 `STALE_QUOTE` 로 거절). |
 | `collected_at` | TIMESTAMPTZ | 우리가 수집한 시각. `quote_at` 과의 차이로 수집 파이프라인 지연 모니터링. |

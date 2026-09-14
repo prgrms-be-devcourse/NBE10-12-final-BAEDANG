@@ -11,6 +11,7 @@ import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
 import { useTheme } from "@/components/ThemeProvider";
 import { OrderDetailModal, OrderSideBadge, OrderStatusBadge } from "@/components/OrderDetailModal";
+import { PersonalityReportSection } from "@/components/PersonalityReportSection";
 import {
   ApiError,
   getAccountSummary,
@@ -736,6 +737,15 @@ export default function MyPage() {
           onUpdated={handleOrderUpdated}
         />
       )}
+
+      {/* 첨부받은 디자인 시안("투자 성향 리포트 (standalone).html")을 마이페이지에
+          적용해달라는 요청 — 시안이 놓았던 자리(보유 종목 표 아래, 계정 설정 위)에
+          그대로 넣었다. 컴포넌트 자체가 /api/reports/me·/api/reports/leaderboard를
+          독립적으로 불러오므로(ExchangeRateTrendModal과 같은 방식), 이 페이지의 기존
+          계좌/보유종목 상태와는 얽히지 않는다. */}
+      <Reveal delay={0.32} className="mt-7">
+        <PersonalityReportSection />
+      </Reveal>
 
       <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
         <div className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }}>계정 설정</div>

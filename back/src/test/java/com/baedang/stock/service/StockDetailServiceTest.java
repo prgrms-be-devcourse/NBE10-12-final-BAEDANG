@@ -41,6 +41,8 @@ class StockDetailServiceTest {
         // "넘겨받은 시세를 그대로 돌려준다"로 고정해 기존 시나리오에 영향이 없게 한다.
         when(stockOnDemandQuoteService.ensureQuote(any(), any()))
                 .thenAnswer(invocation -> invocation.getArgument(1));
+        when(priceLimits.ensureForDisplay(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
         stock = mock(Stock.class);
         when(stock.getStockId()).thenReturn(1L);
         when(stock.getSymbol()).thenReturn("ABC");
@@ -66,12 +68,14 @@ class StockDetailServiceTest {
         QuoteSnapshot after = quote("120", "100");
         when(after.getUpperLimit()).thenReturn(new BigDecimal("130"));
         when(after.getLowerLimit()).thenReturn(new BigDecimal("70"));
-        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(before), Optional.of(after));
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(before));
+        when(priceLimits.ensureForDisplay(stock, before)).thenReturn(after);
         when(priceLimits.canDisplay(stock, after)).thenReturn(true);
         StockDetailResponse response = service.getDetail("abc", "KR");
         assertThat(response.price().upperLimit()).isEqualTo("130");
         assertThat(response.price().lowerLimit()).isEqualTo("70");
-        verify(priceLimits).ensureForDisplay(stock);
+        verify(priceLimits).ensureForDisplay(stock, before);
+        verify(quoteSnapshotRepository, times(1)).findById(1L);
     }
 
     @Test
@@ -84,6 +88,7 @@ class StockDetailServiceTest {
         assertThat(response.price().lastPrice()).isEqualTo("120");
         assertThat(response.price().upperLimit()).isNull();
         assertThat(response.price().lowerLimit()).isNull();
+        verify(quoteSnapshotRepository, times(1)).findById(1L);
     }
 
     @Test

@@ -7,6 +7,7 @@ import { PillTabs } from "./PillTabs";
 import { CandleChartSection } from "./CandleChartSection";
 import { ChartExpandModal } from "./ChartExpandModal";
 import { OrderBookPanel } from "./OrderBookPanel";
+import { StockFinancialsSection } from "./StockFinancialsSection";
 import { TourGuide, type TourStep } from "./TourGuide";
 import { useAuth } from "./AuthProvider";
 import { useExchangeRate } from "./ExchangeRateProvider";
@@ -690,6 +691,8 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         )}
 
         <OrderBookPanel symbol={detail.symbol} marketCountry={detail.marketCountry} />
+
+        <StockFinancialsSection symbol={detail.symbol} marketCountry={detail.marketCountry} />
 
         <div className="mb-3.5 rounded-[20px] p-5.5" style={{ background: "var(--card)" }}>
           <h4 className="mb-2.5 text-[16px] font-bold" style={{ color: "var(--ink)" }}>

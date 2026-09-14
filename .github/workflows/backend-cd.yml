@@ -113,7 +113,7 @@ jobs:
   buildAndPushDockerImage:
     name: 2. 도커 이미지 빌드 및 푸시
     needs: [createTagAndRelease]
-    runs-on: ubuntu-26.04-arm
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
@@ -141,7 +141,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ${{ env.DOCKERFILE_DIR }}
-          platforms: linux/arm64
+          platforms: linux/amd64
           push: true
           cache-from: type=gha
           cache-to: type=gha,mode=max

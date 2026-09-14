@@ -36,7 +36,7 @@
 | [PasswordConfig](../back/src/main/java/com/baedang/global/config/PasswordConfig.java) | `PasswordEncoder` 빈 주입 후 `encode(raw)`, `matches(raw, encoded)` 사용 | 현재 BCrypt 사용. 직접 해시 함수를 만들거나 인코더를 반복 생성하지 않음 |
 | [JpaConfig](../back/src/main/java/com/baedang/global/config/JpaConfig.java) | JPA Auditing과 `auditingDateTimeProvider` 자동 적용 | 현재 제공자는 `OffsetDateTime.now(ZoneOffset.UTC)`를 직접 사용하므로 주입 Clock을 고정해도 감사 시각은 고정되지 않음 |
 | [BaseEntity](../back/src/main/java/com/baedang/global/entity/BaseEntity.java) | 상속으로 `createdAt`, `updatedAt` 자동 기록 | 실제 테이블에 `created_at`, `updated_at` 두 컬럼이 있는 경우만 상속. 계좌의 `openedAt`·원장의 `occurredAt`을 대체하지 않음 |
-| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 공용 `taskScheduler`, 만료 전용 `limitOrderTaskScheduler`, 호가 전용 `orderBookTaskScheduler`, 일봉 전용 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 호가 갱신·정리는 공용 배치와 분리된 단일 스레드에서 직렬 실행하고 DB 트랜잭션에 로컬 2초 락 타임아웃을 적용. 일봉 전용 실행기는 스레드 1개, 큐 10개, 종료 대기 최대 30초. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
+| [SchedulingConfig](../back/src/main/java/com/baedang/global/config/SchedulingConfig.java) | 공용 `taskScheduler`, 만료 전용 `limitOrderTaskScheduler`, 호가 전용 `orderBookTaskScheduler`, 리더보드 전용 `leaderboardTaskScheduler`, 일봉 전용 `dailyCandleTaskExecutor` 빈 제공. 해당 실행기는 `@Qualifier("dailyCandleTaskExecutor")`로 주입 | 호가 갱신·정리는 공용 배치와 분리된 단일 스레드에서 직렬 실행하고 DB 트랜잭션에 로컬 2초 락 타임아웃을 적용. 일봉 전용 실행기는 스레드 1개, 큐 10개, 종료 대기 최대 30초. 리더보드는 종료 시 미실행 예약을 폐기하고 취소된 예약을 대기열에서 즉시 제거하며, 실행 중인 배치에는 기존 최대 30초의 완료 대기를 보장. 다른 비동기 작업을 무조건 공유시키지 않으며 배치 활성화 조건은 각 스케줄러 책임 |
 | [CorsConfig](../back/src/main/java/com/baedang/global/config/CorsConfig.java) | `/api/**`에 자동 적용. 허용 출처는 `cors.allowed-origins` / `CORS_ALLOWED_ORIGINS`로 설정 | 직접 호출할 필요 없음. CORS 허용은 인증·인가를 대신하지 않음 |
 
 ### 오류 처리·외부 통신
@@ -476,9 +476,11 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 - `PriceLimitScheduler`는 시작 60초 후 및 처리 완료 후 5분마다 랭킹/활성 지정가 국내 종목을 전용 단일 스레드에서 확인합니다. `toss.enabled=false`이면 외부 수집하지 않습니다. 그룹 제한 외에 상하한가 전용 2 TPS 제한을 공유합니다.
 - 상세 조회와 배경 수집은 종목별 진행 중 요청 억제 및 실패 후 1분 대기를 공유합니다. 상태는 최대 1000개이며 만료 실패는 접근 시 제거하고 새 거래일이면 초기화합니다. 진행 중 요청은 제거하지 않으며 용량 부족 시 새 작업을 보류합니다. 단일 인스턴스 정책이며 분산 잠금은 아닙니다.
 - `PriceLimitRepository`는 두 가격과 적용일만 갱신합니다. 시세 행이 없으면 만들지 않고 기존 시세 수집 후 재시도합니다. 과거 및 동일 날짜 응답은 이미 저장한 날짜를 덮어쓰지 않습니다. 이번 단계에서는 당일 정정 및 과거 상하한가 조회를 지원하지 않습니다.
-- V13은 `price_limit_date`만 추가하고 기존 행을 보존합니다. 배포 전 선행 마이그레이션 순서를 확인하며 이 브랜치에서 V9/V11/V12를 임의 생성하거나 복사하지 않습니다.
+- V14는 `price_limit_date`만 추가하고 기존 행을 보존합니다. develop의 선행 마이그레이션 순서에 맞춘 버전이며 선행 마이그레이션을 추가하거나 번호를 바꾸지 않습니다.
 
-상세 수집은 `ensureForDisplay`를 사용하며 상하한가 게이트를 즉시 통과하지 못하면 대기 또는 실패 기록 없이 저장된 데이터로 응답합니다. 배경 `ensure`는 기존 2 TPS 게이트에서 순서를 기다립니다. 허용된 요청에는 기존 브로커 그룹 제한과 HTTP 타임아웃이 적용되며 상세 API 전체를 비동기로 바꾸는 것은 아닙니다.
+상세 수집은 `ensureForDisplay(stock, existingQuote)`로 표시할 스냅샷을 반환합니다. 미국 종목, 수집 비활성화, 당일 상하한가가 있는 스냅샷은 추가 SELECT 없이 전달값을 재사용합니다. 수집이 필요하면 서비스 내부에서 읽은 스냅샷을 재사용하고, 저장 시도 후에는 UPDATE가 0건이어도 다시 읽어 다른 요청이 먼저 확보한 값을 반환합니다. 재조회한 값이 당일 값이면 성공으로 처리합니다. 수집 실패 시 마지막으로 읽은 스냅샷을 유지하고 조회에 성공한 적이 없으면 전달받은 스냅샷을 유지합니다. 상하한가 게이트를 즉시 통과하지 못하면 대기 또는 실패 기록 없이 저장된 데이터로 응답합니다. 배경 `ensure`는 기존 2 TPS 게이트에서 순서를 기다리며 표시용 재조회는 하지 않습니다. 허용된 요청에는 기존 브로커 그룹 제한과 HTTP 타임아웃이 적용되며 상세 API 전체를 비동기로 바꾸는 것은 아닙니다.
+
+시도 맵과 내부 가변 필드는 동일한 `synchronized` claim/finish 메서드로 보호합니다. 만료 제거, 중복·용량 확인, 등록은 원자적으로 수행하고 외부 API 호출은 모니터 잠금 밖에서 유지합니다.
 
 ## 거래 범위와 V2 가격 배열 (#178)
 

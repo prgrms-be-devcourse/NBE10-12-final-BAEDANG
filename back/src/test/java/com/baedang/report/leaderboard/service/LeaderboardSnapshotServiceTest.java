@@ -8,6 +8,8 @@ import com.baedang.report.leaderboard.entity.LeaderboardSnapshot;
 import com.baedang.report.leaderboard.repository.LeaderboardRunRepository;
 import com.baedang.report.leaderboard.repository.LeaderboardSnapshotRepository;
 import com.baedang.report.leaderboard.service.LeaderboardSnapshotService.SnapshotResult;
+import com.baedang.report.service.InvestmentTypeService;
+import com.baedang.report.support.InvestmentProfile;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
@@ -40,12 +42,13 @@ class LeaderboardSnapshotServiceTest {
 
     @Mock AccountRepository accountRepository;
     @Mock AccountValuationService accountValuationService;
+    @Mock InvestmentTypeService investmentTypeService;
     @Mock LeaderboardSnapshotRepository snapshotRepository;
     @Mock LeaderboardRunRepository runRepository;
 
     private LeaderboardSnapshotService service(boolean includeSeed) {
         return new LeaderboardSnapshotService(
-                accountRepository, accountValuationService, snapshotRepository, runRepository,
+                accountRepository, accountValuationService, investmentTypeService, snapshotRepository, runRepository,
                 4, includeSeed, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -79,6 +82,7 @@ class LeaderboardSnapshotServiceTest {
         givenValuation(best, 10_000_000);
         givenValuation(tieLow, 5_000_000);
         givenValuation(tieHigh, 5_000_000);
+        when(investmentTypeService.classify(any(), any(), any())).thenReturn(InvestmentProfile.unclassified(1));
 
         SnapshotResult result = service(true).refresh();
 

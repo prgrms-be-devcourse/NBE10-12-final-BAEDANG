@@ -35,12 +35,36 @@ export function Nav() {
       className="relative z-[2] mb-6 flex w-full items-center gap-1.5 px-8 py-3"
       style={{ background: transparentHeader ? "transparent" : "var(--headerBg)" }}
     >
-      <Link
-        href="/"
-        className="mr-1.5 whitespace-nowrap text-[16px] font-extrabold"
-        style={{ color: "var(--headerLogo)" }}
-      >
-        InvestUP
+      {/* "InvestUP" 텍스트를 로고 이미지로 바꿔달라는 요청 — 첨부받은 이미지는
+          짙은 남색(라이트 모드 텍스트 색 #0f3868과 같은 톤) 한 가지 색으로만
+          되어 있어서, 다크 모드에서 쓰던 색 전환(--headerLogo: #ffffff)을 이미지
+          하나로는 그대로 재현할 수 없다. 대신 다크 모드일 때만
+          filter: brightness(0) invert(1)을 걸어 같은 PNG를 흰색 실루엣으로
+          렌더링한다 — 별도의 다크 모드 로고 파일 없이도 텍스트였을 때와 동일하게
+          라이트=남색/다크=흰색으로 보인다.
+          로고를 클릭하면 서비스 소개 화면("/intro")으로 이동하게 해달라는
+          요청 — 홈("/")은 첫 방문자만 자동으로 리다이렉트되므로(proxy.ts),
+          로고 클릭은 그 소개 화면을 언제든 다시 보고 싶을 때 쓰는 통로다. */}
+      <Link href="/intro" className="mr-1.5 inline-flex items-center whitespace-nowrap" aria-label="InvestUP">
+        {/* eslint-disable-next-line @next/next/no-img-element -- 헤더 로고 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
+        <img
+          src="/investup-logo-symbol-light.png"
+          alt="InvestUP"
+          style={{
+            display: "block",
+            // 로고 이미지 크기를 키워달라는 요청을 두 차례 거쳐
+            // 22 → 30 → 40으로 키웠다.
+            height: 40,
+            width: "auto",
+            filter: theme === "dark" ? "brightness(0) invert(1)" : "none",
+            // 로고 위치를 좀 더 아래로 옮겨달라는 요청(5px)에 이어,
+            // "메인" 탭 문구와 나란히 놓이도록 다시 살짝만 위로 올려달라는
+            // 요청으로 5px → 2px로 줄였다. 헤더의 다른 요소들(PillTabs
+            // 등)과의 정렬(items-center)에는 영향을 주지 않도록 레이아웃에
+            // 관여하는 margin 대신 순수 시각적 이동인 transform을 쓴다.
+            transform: "translateY(2px)",
+          }}
+        />
       </Link>
 
       <PillTabs
@@ -50,13 +74,19 @@ export function Nav() {
         trackClassName="w-[340px] gap-0.5 p-[3px]"
         pillRadius="8px"
         squashAnimation="liquid"
-        buttonClassName="rounded-lg px-1 py-[7px] text-[12.5px] font-bold"
+        // "메인/랭킹/가이드/마이페이지" 글자 크기를 키워달라는 요청 —
+        // 12.5px → 14px.
+        buttonClassName="rounded-lg px-1 py-[7px] text-[14px] font-bold"
         activeTextClassName="text-white"
         inactiveTextClassName="hover:brightness-95"
         inactiveTextStyle={{ color: "var(--headerNavInactive)" }}
       />
 
-      <div className="ml-auto flex items-center gap-2.5">
+      {/* 라이트/다크 모드 버튼과 닉네임 문구, 닉네임과 로그아웃 버튼 사이의
+          간격을 조금씩 띄워달라는 요청 — 이 셋이 같은 flex 컨테이너의
+          gap 하나를 공유해서, gap 값을 2.5(10px) → 4(16px)로 올리면
+          두 간격 모두 똑같이 넓어진다. */}
+      <div className="ml-auto flex items-center gap-4">
         <PillTabs
           options={[
             { value: "light", label: "라이트" },
@@ -70,21 +100,24 @@ export function Nav() {
             borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
           }}
           pillColor={theme === "dark" ? "rgba(42,46,51,.5)" : "rgba(15,56,104,.68)"}
-          buttonClassName="rounded-full px-0 py-1.5 text-[12px] font-bold"
+          // "라이트/다크" 글자 크기를 키워달라는 요청 — 12px → 13.5px.
+          buttonClassName="rounded-full px-0 py-1.5 text-[13.5px] font-bold"
           inactiveTextStyle={{ color: theme === "dark" ? "oklch(75% 0.02 258)" : "rgba(15,56,104,.75)" }}
           activeTextClassName="text-white"
         />
 
         {isLoggedIn && user ? (
           <>
-            <span className="text-[13px]" style={{ color: "var(--mut)" }}>
+            {/* 닉네임 글자 크기를 키워달라는 요청 — 13px → 14.5px. */}
+            <span className="text-[14.5px]" style={{ color: "var(--mut)" }}>
               {user.nickname}님
             </span>
             {/* 회원가입 버튼(비로그인 상태의 PillTabs 활성 필박스)과 같은 디자인 —
-                rounded-lg, var(--accent) 배경, 흰색 굵은 13px 글자로 맞췄다. */}
+                rounded-lg, var(--accent) 배경, 흰색 굵은 글자로 맞췄다. 글자 크기를
+                키워달라는 요청으로 13px → 14.5px(닉네임과 같은 크기)로 올렸다. */}
             <button
               onClick={logout}
-              className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[13px] font-bold text-white"
+              className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[14.5px] font-bold text-white"
               style={{ background: "var(--accent)" }}
             >
               로그아웃
@@ -103,7 +136,9 @@ export function Nav() {
             onChange={(v) => router.push(`/${v}?next=${encodeURIComponent(pathname)}`)}
             trackClassName="w-[176px] gap-0.5 rounded-lg p-[3px]"
             pillRadius="8px"
-            buttonClassName="rounded-lg px-1 py-[7px] text-[13px] font-bold"
+            // "로그인" 글자 크기를 키워달라는 요청 — 같은 필박스를 쓰는
+            // "회원가입"도 함께 13px → 14.5px로 커진다.
+            buttonClassName="rounded-lg px-1 py-[7px] text-[14.5px] font-bold"
             activeTextClassName="text-white"
             inactiveTextStyle={{ color: "var(--headerNavInactive)" }}
           />

@@ -63,34 +63,34 @@ resource "aws_route_table_association" "association_1" {
 resource "aws_security_group" "ec2_sg_1" {
   name = "${var.prefix}-ec2-sg-1"
 
-  # ingress {
-  #   from_port   = 80
-  #   to_port     = 80
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
-  # ingress {
-  #   from_port   = 81
-  #   to_port     = 81
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
-  # ingress {
-  #   from_port   = 443
-  #   to_port     = 443
-  #   protocol    = "tcp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
-  # ingress {
-  #   from_port   = 443
-  #   to_port     = 443
-  #   protocol    = "udp"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 81
+    to_port     = 81
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "udp"
     cidr_blocks = ["0.0.0.0/0"]
   }
   ingress {
@@ -131,10 +131,10 @@ resource "aws_iam_role" "ec2_role_1" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "ec2_ssm" {
-  role       = aws_iam_role.ec2_role_1.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
+# resource "aws_iam_role_policy_attachment" "ec2_ssm" {
+#   role       = aws_iam_role.ec2_role_1.name
+#   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+# }
 
 resource "aws_iam_role_policy" "s3_read" {
   name = "${var.prefix}-ec2-role-1-policy-s3_read"
@@ -240,7 +240,7 @@ resource "aws_ssm_parameter" "github_access_token" {
 }
 
 data "aws_ssm_parameter" "ubuntu_ami" {
-  name = "/aws/service/canonical/ubuntu/server/26.04/stable/current/arm64/hvm/ebs-gp3/ami-id"
+  name = "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id"
 }
 
 locals {
@@ -251,9 +251,7 @@ locals {
   ]
 
   s3_dump_keys = [
-    "data.sql",
-    "daily_candle.csv",
-    "minute_candle.csv",
+    "trading.dump",
     "prometheus.tgz"
   ]
 
@@ -339,8 +337,19 @@ locals {
   done
   echo "=================================================="
 
-  echo "=============== 6. Docker Compose ================"
+  echo "=============== 6. Docker Compose & Restore Data ================"
   cd /opt/${var.prefix}
+
+  docker compose up -d --wait postgres
+
+  docker compose create prometheus
+  docker run --rm -v ${var.prefix}_promdata:/data -v "$PWD/dump":/backup alpine sh -c "rm -rf /data/* && tar xzf /backup/prometheus.tgz -C /data"
+
+  docker exec trading-db psql -U trading -d trading -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" -c "SELECT timescaledb_pre_restore();"
+  RESTORE_STATUS=0
+  docker exec -i trading-db pg_restore -U trading -d trading --no-owner < dump/trading.dump 2> restore_errors.log || RESTORE_STATUS=$?
+  docker exec trading-db psql -U trading -d trading -c "SELECT timescaledb_post_restore();" -c "ANALYZE;"
+  if [ "$RESTORE_STATUS" -ne 0 ]; then echo "RESTORE_HAD_ERRORS: /opt/${var.prefix}/restore_errors.log 확인"; cat restore_errors.log; fi
 
   docker compose up -d
   echo "=================================================="
@@ -351,7 +360,7 @@ locals {
 
 resource "aws_instance" "ec2_1" {
   ami                         = data.aws_ssm_parameter.ubuntu_ami.value
-  instance_type               = "t4g.micro"
+  instance_type               = "t3a.small"
   subnet_id                   = aws_subnet.subnet_1.id
   vpc_security_group_ids      = [aws_security_group.ec2_sg_1.id]
   associate_public_ip_address = true
@@ -359,7 +368,7 @@ resource "aws_instance" "ec2_1" {
   user_data_replace_on_change = true
   root_block_device {
     volume_type = "gp3"
-    volume_size = 16
+    volume_size = 20
   }
   user_data = <<-EOF
   ${local.ec2_bootstrap}
