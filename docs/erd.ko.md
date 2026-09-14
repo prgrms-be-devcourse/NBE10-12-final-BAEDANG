@@ -247,7 +247,7 @@ quote_snapshot.prev_close
 | `order_type` | VARCHAR(10) | `MARKET` / `LIMIT`. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
 | `status` | VARCHAR(20) | MARKET은 FILLED/REJECTED로 즉시 확정. LIMIT은 PENDING → PARTIALLY_FILLED → FILLED 또는 활성 잔여분 CANCELED/EXPIRED. 계좌 잠금 아래 상태·체결 순번을 검증하며 EXPIRED는 저장된 정규 세션 종료 시각 기준. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
 | `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
 | `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
@@ -260,12 +260,13 @@ quote_snapshot.prev_close
 
 지정가 주문의 추가 컬럼:
 
-| 컬럼                                                     | 용도                                                                            |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `limit_price`                                            | 지정가. NUMERIC(19,4), 종목 통화 기준                                           |
-| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각                                       |
-| `reserved_cash`                                          | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
-| `expires_at`, `closed_at`                                | 접수 세션 종료 시각 / 실제 주문 종료 시각                                       |
+| 컬럼 | 용도 |
+|---|---|
+| `limit_price` | 지정가. NUMERIC(19,4), 종목 통화 기준 |
+| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각 |
+| `reserved_cash` | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
+| `expires_at`, `closed_at` | 접수 세션 종료 시각 / 실제 주문 종료 시각 |
+| `market_event_id` | `market_event` FK. **`MARKET_TRADING_HALTED` 거절에만** 설정하고 다른 주문은 NULL입니다. 거절을 결정한 정확한 서킷브레이커 이벤트를 고정하므로, CB가 만료된 뒤나 더 긴 CB가 늦게 수집된 뒤에도 멱등 재생이 최초 오류 데이터를 반환합니다. `ck_trade_order_market_event_rejection` CHECK가 `status=REJECTED` + 이 사유 + non-null 이벤트 조합을 요구하고, 그 외 주문에는 NULL을 강제합니다 |
 
 수수료율·세율·SEC 최소액은 `.env`의 `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE`, `A_TAX_MIN_USD`를 프로젝트 고정값으로 사용합니다. 주문별 요율/계산 버전은 저장하지 않습니다. 재시작·재배포에도 동일한 설정을 유지하며, 활성 주문이 있는 동안 변경하지 않습니다. 체결마다 달라질 수 있는 환율과는 별개의 정책입니다.
 
@@ -685,15 +686,21 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 
 지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 과거 행 보정은 포함하지 않습니다.
 
+서킷브레이커 거절도 같은 지정가 근거 형태를 유지합니다. 사용자 입력 가격·통화와 접수 환율은 저장하고(멱등 비교 기준이며 모든 LIMIT 행에 CHECK로 요구됩니다), quote 시각 근거와 동결은 남기지 않습니다 — quote로 가격을 매기지 않고 현금·수량을 동결하지 않기 때문입니다. `market_event_id`는 오직 이 경로의 저장된 `REJECTED` 행에만 설정합니다.
+
+### 기존 지정가 체결 중단 (#167)
+
+활성 KOSPI/KOSDAQ 서킷브레이커 동안 이미 접수된 지정가 주문의 체결을 보류하는 데 **스키마는 추가되지 않습니다**. 접수된 주문은 `status`가 PENDING/PARTIALLY_FILLED로 남고 기존 `expires_at`, `reserved_cash`와 이에 대응하는 `locked_cash`/`locked_quantity`를 그대로 유지합니다. 거절이 아니므로 `market_event_id`를 받지 **않습니다**. 체결 트랜잭션 전체가 롤백되므로 `trade_execution`·`ledger_entry` 행이 생기지 않고 호가 `remaining_quantity`/`revision`도 그대로입니다. 보류 중에도 정상 취소·만료 전이는 남은 동결을 해제합니다.
+
 ### 지정가 체결 인덱스 (#122)
 
 테이블/컬럼 추가는 없습니다. `V7__limit_execution_indexes.sql`에서 잔여 수량이 있는 활성 LIMIT 주문에 부분 인덱스를 추가합니다. 수집 EXISTS용 `ix_order_quote_target(stock_id, expires_at)`, 매수용 `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)`, 매도용 가격 오름차순 인덱스입니다. 방향별 인덱스는 side 조건을 포함합니다. 만료는 조회 시 범위 조건이며 now()를 인덱스 조건에 넣지 않습니다. 계좌 이력/활성 주문/만료 인덱스는 유지합니다.
 
-develop이 V4, 금융정보 PR이 V5를 사용 중이므로 배포 전 번호·적용 순서를 조율합니다. 기본 순차 적용 정책에서 V6를 먼저 적용한 DB에 누락됐던 하위 V4/V5를 나중에 추가하는 배포는 하지 않습니다.
+이후 V8~V15는 시장조치 이력, 시세 상하한가 적용일과 서킷브레이커 거절 FK를 추가합니다. 이 체결 보류는 마이그레이션을 추가하지 않으므로 `V15__trade_order_market_event_rejection.sql`이 최신 버전입니다.
 
 ---
 
-> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V13__stock_like.sql`까지 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V15__trade_order_market_event_rejection.sql`까지 함께 보세요
 
 ## 정규장 거래일과 기준가 (#173)
 

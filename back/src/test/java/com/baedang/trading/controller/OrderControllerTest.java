@@ -273,6 +273,48 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.data.retryPolicy").value("NEW_CLIENT_ORDER_ID"));
     }
 
+    /** CB 거절은 이벤트 데이터와 NEW_CLIENT_ORDER_ID를 422 응답으로 직렬화한다. */
+    @Test
+    void 지정가_CB거절을_이벤트데이터와_함께_422로_변환한다() throws Exception {
+        LimitOrderRequest request = new LimitOrderRequest(
+                10L, "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f", "005930", "KR", "BUY", "10", "240000", "KRW");
+        when(limitOrderService.place(1L, request))
+                .thenThrow(new BusinessException(
+                        ErrorCode.MARKET_TRADING_HALTED,
+                        Map.of(
+                                "market", "KOSPI",
+                                "eventType", "CIRCUIT_BREAKER",
+                                "stage", 1,
+                                "triggeredAt", "2026-07-13T13:28:32+09:00",
+                                "haltUntil", "2026-07-13T13:48:32+09:00",
+                                "retryPolicy", "NEW_CLIENT_ORDER_ID")));
+
+        mockMvc.perform(post("/api/orders/limit")
+                        .with(authenticatedUser(1L))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "accountId": 10,
+                                  "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
+                                  "symbol": "005930",
+                                  "marketCountry": "KR",
+                                  "side": "BUY",
+                                  "quantity": "10",
+                                  "limitPrice": "240000",
+                                  "limitCurrency": "KRW"
+                                }
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("MARKET_TRADING_HALTED"))
+                .andExpect(jsonPath("$.message").value("현재 해당 시장의 매매거래가 일시 중단됐어요"))
+                .andExpect(jsonPath("$.data.market").value("KOSPI"))
+                .andExpect(jsonPath("$.data.eventType").value("CIRCUIT_BREAKER"))
+                .andExpect(jsonPath("$.data.stage").value(1))
+                .andExpect(jsonPath("$.data.triggeredAt").value("2026-07-13T13:28:32+09:00"))
+                .andExpect(jsonPath("$.data.haltUntil").value("2026-07-13T13:48:32+09:00"))
+                .andExpect(jsonPath("$.data.retryPolicy").value("NEW_CLIENT_ORDER_ID"));
+    }
+
     @Test
     void 체결_종목정보는_응답_상위에만_제공한다() throws Exception {
         var execution = new ExecutionResponse(5L, 1, "2", "100.00", "1400",

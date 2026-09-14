@@ -4,6 +4,7 @@ import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.market.event.service.MarketTradingHaltPolicy;
 import com.baedang.orderbook.entity.OrderBookLevel;
 import com.baedang.orderbook.entity.OrderBookSide;
 import com.baedang.orderbook.entity.OrderBookVersion;
@@ -59,6 +60,7 @@ public class LimitOrderExecutionTransactionService {
     private final LimitOrderExecutionPlanner planner;
     private final LimitExecutionBookReader bookReader;
     private final OrderPolicy policy;
+    private final MarketTradingHaltPolicy marketTradingHaltPolicy;
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final long lockTimeoutMillis;
@@ -67,7 +69,8 @@ public class LimitOrderExecutionTransactionService {
     public LimitOrderExecutionTransactionService(AccountRepository accounts, TradeOrderRepository orders,
             OrderBookExecutionStore books, HoldingRepository holdings, StockRepository stocks,
             TradeExecutionRepository executions, LedgerService ledger, LimitOrderExecutionPlanner planner,
-            LimitExecutionBookReader bookReader, OrderPolicy policy, JdbcTemplate jdbc, Clock clock,
+            LimitExecutionBookReader bookReader, OrderPolicy policy, MarketTradingHaltPolicy marketTradingHaltPolicy,
+            JdbcTemplate jdbc, Clock clock,
             @Value("${trading.limit-execution.lock-timeout:2s}") Duration lockTimeout, QuoteSnapshotRepository quotes) {
         if (lockTimeout == null || lockTimeout.toMillis() < 1 || lockTimeout.toMillis() > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("체결 락 대기 제한은 양수 밀리초 범위여야 합니다");
@@ -84,6 +87,7 @@ public class LimitOrderExecutionTransactionService {
         this.planner = planner;
         this.bookReader = bookReader;
         this.policy = policy;
+        this.marketTradingHaltPolicy = marketTradingHaltPolicy;
         this.jdbc = jdbc;
         this.clock = clock;
     }
@@ -110,6 +114,9 @@ public class LimitOrderExecutionTransactionService {
         Stock stock = stocks.findById(order.getStockId()).orElseThrow(() -> internal("종목 누락"));
         Instant now = clock.instant();
         if (!now.isBefore(order.getExpiresAt().toInstant())) return deferred(EXPIRED);
+        // 권위 있는 CB 판정은 모든 잠금과 두 번째 만료 판정을 마친 뒤, context 검증·계획·변경보다 앞입니다.
+        // 호가/holding 락 대기 중 시작된 CB를 마지막으로 잡고, 예외는 트랜잭션 전체를 롤백시킵니다.
+        marketTradingHaltPolicy.requireTradingAllowed(stock, now);
         policy.validateExecutionContextFresh(attempt.context(), now);
         if (stock.getMarketCountry() != attempt.context().marketCountry()) throw internal("시장 불일치");
         if (!attempt.context().isMarketOpenAt(now)) return deferred(MARKET_CLOSED);

@@ -1,6 +1,13 @@
 package com.baedang.trading.service;
 
 import com.baedang.market.model.TradingPriceLimits;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.market.event.entity.KrMarket;
+import com.baedang.market.event.entity.MarketEvent;
+import com.baedang.market.event.entity.MarketEventSource;
+import com.baedang.market.event.entity.SidecarDirection;
+import com.baedang.market.event.repository.MarketEventRepository;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketCalendarPort;
@@ -64,12 +71,15 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -200,12 +210,18 @@ class LimitOrderExecutionIntegrationTest {
     @Autowired StockRepository stocks;
     @Autowired PlatformTransactionManager manager;
     @Autowired LimitExecutionCandidateRepository candidates;
+    @Autowired MarketEventRepository marketEvents;
     long user, account, stock, version;
-    String symbol;
+    long krStock, kqStock;
+    String symbol, krSymbol, kqSymbol;
 
     @BeforeEach
     void setup() {
         clock.setCurrent(NOW);
+        // CB 이벤트는 시장 전체를 막으므로 남아 있으면 뒤따르는 KOSPI 체결이 모두 거절된다.
+        // CB 거절 주문이 FK로 참조하므로 주문을 먼저 지운다.
+        jdbc.execute("DELETE FROM trade_order WHERE market_event_id IS NOT NULL");
+        jdbc.execute("DELETE FROM market_event");
         when(sessions.currentSession(any(),any())).thenReturn(new MarketSessionStatus(true,NOW.plusSeconds(3600)));
         when(statuses.requireCurrent(any())).thenAnswer(inv -> inv.getArgument(0));
         rate("1400");
@@ -805,6 +821,256 @@ class LimitOrderExecutionIntegrationTest {
         }
         assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
         assertThat(jdbc.queryForObject("SHOW lock_timeout",String.class)).isEqualTo("0");
+        assertCashConservation();
+    }
+
+    // ==========================================
+    // 서킷브레이커 기존 지정가 체결 중단 (#167) — 실제 PostgreSQL 통합
+    // ==========================================
+
+    private static final URI CB_URL =
+            URI.create("https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
+
+    private void prepareKrKospi() {
+        krSymbol = "K" + UUID.randomUUID().toString().substring(0,7);
+        krStock = jdbc.queryForObject("INSERT INTO stock(symbol,market_country,market,name,currency,security_type,is_ranked) VALUES (?,'KR','KOSPI','테스트','KRW','STOCK',true) RETURNING stock_id",Long.class,krSymbol);
+        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at,price_limit_date,lower_limit,upper_limit) VALUES (?,1000,'KRW',?,?,?,1,2000)",
+                krStock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate());
+    }
+
+    private void prepareKrKosdaq() {
+        kqSymbol = "Q" + UUID.randomUUID().toString().substring(0,7);
+        kqStock = jdbc.queryForObject("INSERT INTO stock(symbol,market_country,market,name,currency,security_type,is_ranked) VALUES (?,'KR','KOSDAQ','코스닥테스트','KRW','STOCK',true) RETURNING stock_id",Long.class,kqSymbol);
+        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at,price_limit_date,lower_limit,upper_limit) VALUES (?,1000,'KRW',?,?,?,1,2000)",
+                kqStock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate());
+    }
+
+    private MarketEvent activeCb(String acptNo, KrMarket market, int stage, Instant haltUntil) {
+        return marketEvents.saveAndFlush(MarketEvent.circuitBreaker(MarketEventSource.KRX_KIND, acptNo, market, stage,
+                NOW.minusSeconds(120), haltUntil, NOW.minusSeconds(120), NOW.minusSeconds(60),
+                "유가증권시장 매매거래 일시중단(" + stage + "단계 CB 발동)", CB_URL));
+    }
+
+    /** CB 시나리오의 체결 수량은 유지하면서 당일 범위와 양방향 V2 호가를 구성합니다. */
+    private void krBook(long stockId, String firstAsk) {
+        BigDecimal base = new BigDecimal(firstAsk).subtract(BigDecimal.ONE);
+        jdbc.update("UPDATE quote_snapshot SET last_price=? WHERE stock_id=?", base, stockId);
+        TradingPriceLimits limits = new TradingPriceLimits(NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate(),
+                BigDecimal.ONE, new BigDecimal("2000"));
+        GeneratedOrderBook generated = generator.generate(bookProperties, StockDescriptor.from(stocks.findById(stockId).orElseThrow()),
+                base, NOW, NOW, 1L, limits);
+        GeneratedOrderBook sized = new GeneratedOrderBook(generated.stockId(), generated.basePrice(), generated.currency(),
+                generated.quoteAt(), generated.generatedAt(), generated.policyVersion(), generated.seed(),
+                generated.levels().stream().map(level -> new GeneratedOrderBookLevel(level.side(), level.levelDepth(),
+                        level.price(), BigDecimal.valueOf(level.levelDepth() == 1 ? 2 : 5))).toList());
+        version = publication.publish(sized, NOW.plusSeconds(3600)).orElseThrow();
+    }
+
+    private long krPlace(String krSymbol, String side, String quantity, String price) {
+        return admission.place(user,new LimitOrderRequest(account,UUID.randomUUID().toString(),krSymbol,"KR",side,quantity,price,"KRW")).orderId();
+    }
+
+    /** 보류 판정이 만들어선 안 되는 변경을 한 번에 비교하기 위한 실제 DB 상태 스냅샷. */
+    private Map<String,Object> executionState(long orderId) {
+        Map<String,Object> state = new LinkedHashMap<>();
+        state.put("status",jdbc.queryForObject("SELECT status FROM trade_order WHERE order_id=?",String.class,orderId));
+        state.put("filledQuantity",number("SELECT filled_quantity FROM trade_order WHERE order_id=?",orderId));
+        state.put("reservedCash",number("SELECT reserved_cash FROM trade_order WHERE order_id=?",orderId));
+        state.put("expiresAt",jdbc.queryForObject("SELECT expires_at FROM trade_order WHERE order_id=?",OffsetDateTime.class,orderId));
+        state.put("executionCount",number("SELECT count(*) FROM trade_execution WHERE order_id=?",orderId));
+        state.put("ledgerCount",number("SELECT count(*) FROM ledger_entry WHERE account_id=?",account));
+        state.put("cashBalance",number("SELECT cash_balance FROM account WHERE account_id=?",account));
+        state.put("lockedCash",number("SELECT locked_cash FROM account WHERE account_id=?",account));
+        state.put("holdingQuantity",number("SELECT coalesce(sum(quantity),0) FROM holding WHERE account_id=?",account));
+        state.put("lockedQuantity",number("SELECT coalesce(sum(locked_quantity),0) FROM holding WHERE account_id=?",account));
+        state.put("bookRevision",number("SELECT revision FROM order_book_version WHERE book_version_id=?",version));
+        state.put("bookRemaining",number("SELECT sum(remaining_quantity) FROM order_book_level WHERE book_version_id=?",version));
+        return state;
+    }
+
+    @Test
+    void 활성CB중_PENDING_지정가는_체결하지않고_상태와_동결을_유지한다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        Map<String,Object> before = executionState(order);
+        activeCb("20260713000801",KrMarket.KOSPI,1,NOW.plusSeconds(1080));
+
+        assertThatThrownBy(() -> execute(order)).isInstanceOfSatisfying(BusinessException.class, e -> {
+            assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+            assertThat(e.getData())
+                    .containsEntry("market","KOSPI")
+                    .containsEntry("eventType","CIRCUIT_BREAKER")
+                    .containsEntry("stage",1);
+        });
+
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(executionState(order)).isEqualTo(before);
+        assertCashConservation();
+    }
+
+    @Test
+    void 활성CB중_PARTIALLY_FILLED_지정가는_남은수량을_체결하지않는다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        // 최우선 매도 2주를 먼저 확정한 뒤 CB를 저장해 잔여 주문의 보류를 검증한다.
+        long order = krPlace(krSymbol,"BUY","4","1000");
+        assertThat(execute(order).executionCount()).isPositive();
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
+        Map<String,Object> before = executionState(order);
+        activeCb("20260713000802",KrMarket.KOSPI,1,NOW.plusSeconds(1080));
+
+        assertThatThrownBy(() -> execute(order)).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED));
+
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
+        assertThat(orders.findById(order).orElseThrow().getExpiresAt()).isEqualTo(before.get("expiresAt"));
+        assertThat(executionState(order)).isEqualTo(before);
+        assertCashConservation();
+    }
+
+    @Test
+    void KOSPI_CB는_KOSDAQ_지정가_체결을_막지않는다() {
+        prepareKrKospi();
+        prepareKrKosdaq();
+        activeCb("20260713000803",KrMarket.KOSPI,1,NOW.plusSeconds(1080));
+        krBook(kqStock,"1000");
+        long order = krPlace(kqSymbol,"BUY","2","1000");
+
+        assertThat(execute(order).executionCount()).isEqualTo(1);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+    }
+
+    @Test
+    void 사이드카만_있으면_같은시장_지정가를_체결한다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        marketEvents.saveAndFlush(MarketEvent.sidecar(MarketEventSource.KRX_KIND,"20260713000804",KrMarket.KOSPI,
+                SidecarDirection.BUY,NOW.minusSeconds(120),NOW.plusSeconds(300),
+                NOW.minusSeconds(120),NOW.minusSeconds(60),"유가증권시장 프로그램매매 호가 일시정지",CB_URL));
+        long order = krPlace(krSymbol,"BUY","2","1000");
+
+        assertThat(execute(order).executionCount()).isEqualTo(1);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+    }
+
+    @Test
+    void haltUntil_정각에는_차단하지_않고_체결한다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        // haltUntil == now 이므로 활성 판정의 배타 경계상 이미 비활성이다.
+        activeCb("20260713000805",KrMarket.KOSPI,1,NOW);
+
+        assertThat(execute(order).executionCount()).isEqualTo(1);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+    }
+
+    @Test
+    void CB가_만료되면_다음체결시도에서_재개한다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        Instant haltUntil = NOW.plusSeconds(600);
+        activeCb("20260713000806",KrMarket.KOSPI,1,haltUntil);
+
+        assertThatThrownBy(() -> execute(order)).isInstanceOfSatisfying(BusinessException.class,
+                e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED));
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?",order)).isZero();
+
+        // CB 종료 시각에는 호가도 같은 시점 기준으로 갱신돼야 만료된 호가로 보류되지 않는다.
+        clock.setCurrent(haltUntil);
+        jdbc.update("UPDATE order_book_version SET quote_at=?,generated_at=? WHERE book_version_id=?",
+                haltUntil.atOffset(ZoneOffset.UTC),haltUntil.atOffset(ZoneOffset.UTC),version);
+
+        assertThat(execute(order).executionCount()).isEqualTo(1);
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertCashConservation();
+    }
+
+    /**
+     * CB 판정은 호가/holding 잠금을 확보한 뒤에 해야 한다. 그래야 이 두 잠금을 기다리는 동안 시작된
+     * CB가 체결로 새어나가지 않는다. 잠금 대기 중 CB를 저장해 그 보장을 고정한다.
+     */
+    @Test
+    void 호가잠금을_기다리는동안_시작된_CB는_체결을_막는다() throws Exception {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        LimitExecutionAttempt attempt = krAttempt(order);
+        Map<String,Object> before = executionState(order);
+        Long levelId = jdbc.queryForObject("SELECT min(level_id) FROM order_book_level WHERE book_version_id=?",Long.class,version);
+
+        CountDownLatch locked = new CountDownLatch(1), release = new CountDownLatch(1);
+        try (ExecutorService pool = Executors.newFixedThreadPool(2)) {
+            Future<?> blocker = pool.submit(() -> new TransactionTemplate(manager).executeWithoutResult(tx -> {
+                jdbc.queryForObject("SELECT level_id FROM order_book_level WHERE level_id=? FOR UPDATE",Long.class,levelId);
+                locked.countDown();
+                try { if (!release.await(10,TimeUnit.SECONDS)) throw new IllegalStateException("timeout"); }
+                catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new IllegalStateException(e); }
+            }));
+            assertThat(locked.await(5,TimeUnit.SECONDS)).isTrue();
+            Future<Throwable> fill = pool.submit(() -> {
+                try { transactions.execute(attempt); return null; }
+                catch (Throwable thrown) { return thrown; }
+            });
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+            boolean waiting = false;
+            while (System.nanoTime() < deadline) {
+                waiting = jdbc.queryForObject("SELECT count(*) > 0 FROM pg_stat_activity WHERE wait_event_type='Lock'"
+                        + " AND query ILIKE '%order_book_level%'",Boolean.class);
+                if (waiting) break;
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+            }
+            assertThat(waiting).as("체결 트랜잭션이 호가 레벨 잠금을 기다림").isTrue();
+            // 바로 이 창에서 CB가 시작된다. 판정이 잠금 앞이면 이 주문은 이미 체결됐을 것이다.
+            activeCb("20260713000811",KrMarket.KOSPI,1,NOW.plusSeconds(1080));
+            release.countDown();
+            blocker.get(5,TimeUnit.SECONDS);
+            assertThat(fill.get(5,TimeUnit.SECONDS)).isInstanceOfSatisfying(BusinessException.class,
+                    e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED));
+        } finally { release.countDown(); }
+
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(executionState(order)).isEqualTo(before);
+        assertCashConservation();
+    }
+
+    /** 국내 지정가 실행 시도의 준비 근거. 컨텍스트 신선도 경계를 테스트가 직접 통제할 수 있게 한다. */
+    private LimitExecutionAttempt krAttempt(long orderId) {
+        TradeOrder order = orders.findById(orderId).orElseThrow();
+        LimitExecutionBook book = books.read(stocks.findById(krStock).orElseThrow(),order.getSide(),NOW).orElseThrow();
+        return new LimitExecutionAttempt(order.getAccountId(),orderId,krStock,order.getExecutionCount(),
+                book.version(),book.revision(),new OrderMarketContext(MarketCountry.KR,true,NOW.plusSeconds(3600),
+                ExecutionRateEvidence.krw(NOW.atOffset(ZoneOffset.UTC)),NOW));
+    }
+
+    /**
+     * CB 판정은 컨텍스트 신선도 검증보다 앞이어야 한다. 뒤에 두면 락 대기 중 context가 만료된 CB
+     * 주문이 중단 사유 대신 CONTEXT_EXPIRED로 분류돼 지표와 사유가 함께 틀어진다.
+     */
+    @Test
+    void 컨텍스트가_만료돼도_활성CB가_중단사유로_우선한다() {
+        prepareKrKospi();
+        krBook(krStock,"1000");
+        long order = krPlace(krSymbol,"BUY","2","1000");
+        LimitExecutionAttempt attempt = krAttempt(order);
+        Map<String,Object> before = executionState(order);
+        // 컨텍스트는 만료시키되 호가는 신선하게 유지한다. 순서가 뒤집히면 CONTEXT_EXPIRED가 먼저 나간다.
+        Instant stale = NOW.plusSeconds(120);
+        clock.setCurrent(stale);
+        jdbc.update("UPDATE order_book_version SET quote_at=?,generated_at=? WHERE book_version_id=?",
+                stale.atOffset(ZoneOffset.UTC),stale.atOffset(ZoneOffset.UTC),version);
+        activeCb("20260713000812",KrMarket.KOSPI,1,stale.plusSeconds(1080));
+
+        assertThatThrownBy(() -> transactions.execute(attempt))
+                .isInstanceOfSatisfying(BusinessException.class, e -> {
+                    assertThat(e.getErrorCode()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+                    assertThat(e.getData()).containsEntry("market","KOSPI").containsEntry("stage",1);
+                });
+
+        assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(executionState(order)).isEqualTo(before);
         assertCashConservation();
     }
 }

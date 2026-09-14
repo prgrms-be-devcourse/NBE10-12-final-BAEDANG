@@ -59,6 +59,7 @@ class MarketOrderTransactionServiceTest {
     @Mock MarketOrderSettlementCalculator amountCalculator;
     @Mock OrderPolicy orderPolicy;
     @Mock MarketOrderPolicy marketOrderPolicy;
+    @Mock com.baedang.market.event.service.MarketTradingHaltPolicy marketTradingHaltPolicy;
 
     private Clock clock;
     private MarketOrderTransactionService service;
@@ -76,7 +77,7 @@ class MarketOrderTransactionServiceTest {
         service = new MarketOrderTransactionService(
                 accountRepository, stockRepository, quoteSnapshotRepository, holdingRepository,
                 tradeOrderRepository, ledgerEntryRepository, tradeExecutionRepository, ledgerService,
-                amountCalculator, orderPolicy, marketOrderPolicy, clock);
+                amountCalculator, orderPolicy, marketOrderPolicy, marketTradingHaltPolicy, clock);
     }
 
     // ==========================================
@@ -337,6 +338,186 @@ class MarketOrderTransactionServiceTest {
                 .isInstanceOfSatisfying(BusinessException.class, e -> {
                     assertThat(e.getErrorCode()).isEqualTo(ErrorCode.QUOTE_NOT_FOUND);
                 });
+    }
+
+    // ==========================================
+    // 3. 서킷브레이커 거절 (#166)
+    // ==========================================
+
+    /** 정책이 저장 이벤트를 복원할 수 없으면 멱등 재생도 같은 내부 오류로 실패한다. */
+    @Test
+    void execute_재생시_halt_복원_실패를_INTERNAL_ERROR로_전파한다() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+        TradeOrder halted = createHaltedOrder(88L);
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID))
+                .thenReturn(Optional.of(halted));
+        when(marketTradingHaltPolicy.restoreRecordedHalt(88L, stock))
+                .thenThrow(new BusinessException(ErrorCode.INTERNAL_ERROR));
+
+        assertThatThrownBy(() -> service.execute(USER_ID, command, context))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        e -> assertThat(e.getErrorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+    }
+
+    @Test
+    void execute_재생시_같은_시장_이벤트면_데이터를_복원한다() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+        TradeOrder halted = createHaltedOrder(88L);
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(stockRepository.findById(STOCK_ID)).thenReturn(Optional.of(stock));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID))
+                .thenReturn(Optional.of(halted));
+        when(marketTradingHaltPolicy.restoreRecordedHalt(88L, stock))
+                .thenReturn(new com.baedang.market.event.model.ActiveMarketHalt(
+                        88L, com.baedang.market.event.entity.KrMarket.KOSPI, 1,
+                        OffsetDateTime.parse("2026-07-13T13:28:32+09:00"),
+                        OffsetDateTime.parse("2026-07-13T13:48:32+09:00")));
+
+        MarketOrderResult result = service.execute(USER_ID, command, context);
+
+        assertThat(result.rejectionReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+        assertThat(result.rejectionData()).containsEntry("market", "KOSPI").containsEntry("stage", 1);
+    }
+
+    private TradeOrder createHaltedOrder(Long marketEventId) {
+        TradeOrder order = TradeOrder.rejectedMarketOrderByHalt(
+                ACCOUNT_ID, STOCK_ID, CLIENT_ORDER_ID, OrderSide.BUY,
+                BigDecimal.ONE, marketEventId, AT);
+        ReflectionTestUtils.setField(order, "orderId", 50L);
+        return order;
+    }
+
+
+    /**
+     * CB는 account 잠금 뒤에만 판정한다. 락 대기 중 CB가 시작된 주문을 잡으려면 종목 조회 직후,
+     * execution-context 신선도 검증보다 앞에서 확인해야 한다.
+     */
+    @Test
+    void execute_CB가_활성이면_정확한_이벤트로_REJECTED를_저장한다() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+        var halt = new com.baedang.market.event.model.ActiveMarketHalt(
+                99L, com.baedang.market.event.entity.KrMarket.KOSPI, 1,
+                OffsetDateTime.parse("2026-07-13T13:28:32+09:00"),
+                OffsetDateTime.parse("2026-07-13T13:48:32+09:00"));
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketTradingHaltPolicy.activeFor(stock, NOW)).thenReturn(Optional.of(halt));
+        org.mockito.Mockito.when(tradeOrderRepository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(i -> i.getArgument(0));
+
+        MarketOrderResult result = service.execute(USER_ID, command, context);
+
+        assertThat(result.rejected()).isTrue();
+        assertThat(result.rejectionReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+        assertThat(result.rejectionData())
+                .containsEntry("market", "KOSPI")
+                .containsEntry("stage", 1)
+                .doesNotContainKey("eventId");
+
+        org.mockito.ArgumentCaptor<TradeOrder> captor = org.mockito.ArgumentCaptor.forClass(TradeOrder.class);
+        org.mockito.Mockito.verify(tradeOrderRepository).save(captor.capture());
+        TradeOrder saved = captor.getValue();
+        assertThat(saved.getStatus()).isEqualTo(OrderStatus.REJECTED);
+        assertThat(saved.getRejectReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED.name());
+        assertThat(saved.getMarketEventId()).isEqualTo(99L);
+        assertThat(saved.getReferencePrice()).isNull();
+        assertThat(saved.getQuoteAt()).isNull();
+        assertThat(saved.getExchangeRate()).isNull();
+
+        org.mockito.Mockito.verifyNoInteractions(tradeExecutionRepository, ledgerService, quoteSnapshotRepository, amountCalculator);
+        assertThat(account.getCashBalance()).isEqualByComparingTo("1000000");
+    }
+
+    /** 락 대기 중 컨텍스트가 만료됐더라도 그 사이 시작된 CB가 우선한다. */
+    @Test
+    void execute_CB는_execution_context_신선도보다_먼저_판정한다() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext staleContext = new OrderMarketContext(
+                MarketCountry.KR, true, NOW.plusSeconds(3600), ExecutionRateEvidence.krw(AT), NOW.minusSeconds(600));
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+        var halt = new com.baedang.market.event.model.ActiveMarketHalt(
+                99L, com.baedang.market.event.entity.KrMarket.KOSPI, 2,
+                OffsetDateTime.parse("2026-07-13T13:28:32+09:00"),
+                OffsetDateTime.parse("2026-07-13T13:48:32+09:00"));
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketTradingHaltPolicy.activeFor(stock, NOW)).thenReturn(Optional.of(halt));
+        org.mockito.Mockito.when(tradeOrderRepository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(i -> i.getArgument(0));
+
+        MarketOrderResult result = service.execute(USER_ID, command, staleContext);
+
+        assertThat(result.rejectionReason()).isEqualTo(ErrorCode.MARKET_TRADING_HALTED);
+        org.mockito.Mockito.verify(orderPolicy, org.mockito.Mockito.never())
+                .validateExecutionContextFresh(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    }
+
+    /** account 잠금이 CB 조회보다 앞서야 락 대기 중 시작된 CB를 잡을 수 있다. */
+    @Test
+    void execute_account_잠금이_CB_조회보다_먼저다() {
+        MarketOrderCommand command = command("005930", MarketCountry.KR, OrderSide.BUY, BigDecimal.ONE);
+        OrderMarketContext context = executionContext(MarketCountry.KR);
+        Account account = createAccount();
+        Stock stock = createStock("005930", MarketCountry.KR);
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR)).thenReturn(Optional.of(stock));
+        when(marketTradingHaltPolicy.activeFor(stock, NOW)).thenReturn(Optional.empty());
+        when(quoteSnapshotRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.execute(USER_ID, command, context))
+                .isInstanceOf(BusinessException.class);
+
+        org.mockito.InOrder inOrder = org.mockito.Mockito.inOrder(
+                accountRepository, stockRepository, marketTradingHaltPolicy, orderPolicy);
+        inOrder.verify(accountRepository).findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID);
+        inOrder.verify(stockRepository).findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR);
+        inOrder.verify(marketTradingHaltPolicy).activeFor(stock, NOW);
+        inOrder.verify(orderPolicy).validateExecutionContextFresh(context, NOW);
+    }
+
+    /**
+     * 미국 종목은 CB 대상이 아니므로 정책이 빈 값을 돌려주고 정상 흐름이 이어진다. 조회 자체는
+     * 정책이 시장을 판단하므로 호출된다 — 비적용 판단의 소유자는 정책이다.
+     */
+    @Test
+    void execute_미국종목은_CB_거절되지_않는다() {
+        MarketOrderCommand command = command("AAPL", MarketCountry.US, OrderSide.BUY, BigDecimal.ONE);
+
+        Account account = createAccount();
+        Stock usStock = Stock.create("AAPL", MarketCountry.US, "NASDAQ", "Apple", null, "USD", "STOCK", true);
+        ReflectionTestUtils.setField(usStock, "stockId", STOCK_ID);
+        OrderMarketContext usContext = new OrderMarketContext(
+                MarketCountry.US, true, NOW.plusSeconds(3600),
+                ExecutionRateEvidence.from(new com.baedang.market.port.ExecutionExchangeRateSnapshot(
+                        new BigDecimal("1383.600000"), AT, AT, AT.plusSeconds(60))), NOW);
+
+        when(accountRepository.findByAccountIdAndUserIdForUpdate(ACCOUNT_ID, USER_ID)).thenReturn(Optional.of(account));
+        when(tradeOrderRepository.findByAccountIdAndClientOrderId(ACCOUNT_ID, CLIENT_ORDER_ID)).thenReturn(Optional.empty());
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("AAPL", MarketCountry.US)).thenReturn(Optional.of(usStock));
+        when(marketTradingHaltPolicy.activeFor(usStock, NOW)).thenReturn(Optional.empty());
+        when(quoteSnapshotRepository.findById(STOCK_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.execute(USER_ID, command, usContext))
+                .isInstanceOfSatisfying(BusinessException.class, e ->
+                        assertThat(e.getErrorCode()).isEqualTo(ErrorCode.QUOTE_NOT_FOUND));
     }
 
     // ==========================================

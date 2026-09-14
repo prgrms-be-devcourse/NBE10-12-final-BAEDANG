@@ -250,7 +250,7 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 | `order_type` | VARCHAR(10) | MARKET / LIMIT. |
 | `quantity` | NUMERIC(19,6) | order quantity. KR is whole shares but US allows fractional — NUMERIC leaves room. |
 | `status` | VARCHAR(20) | MARKET immediately settles as FILLED/REJECTED. LIMIT: PENDING → PARTIALLY_FILLED → FILLED, or active remainder → CANCELED/EXPIRED. Validate state/sequence under the account lock. Expiration uses the stored regular-session close. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. Basis for the screen message. |
 | `reference_price` | NUMERIC(19,4) | Price in the stock currency used to evaluate a `REJECTED` order. Kept separate from `executed_price` because no fill occurred. |
 | `executed_price` | NUMERIC(19,4) | fill price. **In the stock's currency** (USD for US stocks). KRW conversion stored separately in `gross_amount`. |
 | `quote_at` | TIMESTAMPTZ | Quote timestamp used for either fill or rejection evaluation. Copied from `quote_snapshot.quote_at`. |
@@ -263,12 +263,13 @@ Stores order terms and cumulative execution results. Individual fill evidence li
 
 Additional limit-order columns:
 
-| Columns                                                  | Purpose                                                                                                |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `limit_price`                                            | Limit price, NUMERIC(19,4) in the stock currency                                                       |
-| `filled_quantity`, `execution_count`, `last_executed_at` | Cumulative filled quantity, applied sequence and latest fill time                                      |
-| `reserved_cash`                                          | Current KRW reserve for the unfilled remainder, NUMERIC(19,4); zero for SELL, MARKET and closed orders |
-| `expires_at`, `closed_at`                                | Accepted session close / actual order closure                                                          |
+| Columns | Purpose |
+|---|---|
+| `limit_price` | Limit price, NUMERIC(19,4) in the stock currency |
+| `filled_quantity`, `execution_count`, `last_executed_at` | Cumulative filled quantity, applied sequence and latest fill time |
+| `reserved_cash` | Current KRW reserve for the unfilled remainder, NUMERIC(19,4); zero for SELL, MARKET and closed orders |
+| `expires_at`, `closed_at` | Accepted session close / actual order closure |
+| `market_event_id` | BIGINT FK to `market_event`; set **only** on a `MARKET_TRADING_HALTED` rejection, otherwise NULL. Pins the exact circuit-breaker event that decided the rejection so an idempotent replay returns the original error data even after the halt expired or a later, longer circuit breaker was collected. The `ck_trade_order_market_event_rejection` CHECK requires the combination `status=REJECTED` + this reason + a non-null event, and NULL for every other order |
 
 Fee/tax rates and the SEC minimum use the project-fixed `.env` settings `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE` and `A_TAX_MIN_USD`. No per-order rates or calculation version are stored. Keep the same settings across restarts/deployments; do not change them while active orders exist. This is separate from FX, which may differ between execution transactions.
 
@@ -685,15 +686,21 @@ All three are NULL for MARKET and required for LIMIT. limit_price remains the fi
 
 Rejected LIMIT requests retain input and conversion evidence but have no reservation or fills. expires_at is required for accepted LIMIT orders; a rejection outside a regular session need not have a session expiry. No legacy row corrections are included.
 
+A circuit-breaker rejection keeps the same LIMIT evidence shape: the requested price/currency and the acceptance rate are stored (they are the idempotency comparison basis and CHECK-required for every LIMIT row), while quote-time evidence and any reservation remain absent — the order is not priced against a quote and no cash or quantity is frozen. `market_event_id` is set only here and only on the stored `REJECTED` row.
+
+### Circuit-breaker execution deferral for existing orders (#167)
+
+Deferring an already accepted LIMIT order during an active KOSPI/KOSDAQ circuit breaker adds **no schema**. The accepted order keeps `status` PENDING/PARTIALLY_FILLED, its original `expires_at`, `reserved_cash` and the matching `locked_cash`/`locked_quantity`. It does **not** receive `market_event_id` — it is not rejected. No `trade_execution` or `ledger_entry` row is written and order-book `remaining_quantity`/`revision` are unchanged, because the attempt transaction rolls back entirely. Normal cancel/expire transitions still clear the remaining reservation during the halt.
+
 ### LIMIT execution indexes (#122)
 
 No tables/columns are added. `V7__limit_execution_indexes.sql` adds partial indexes for active LIMIT orders with quantity > filled_quantity: `ix_order_quote_target(stock_id, expires_at)` for collection EXISTS; `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)` and SELL's ascending-price equivalent. The latter indexes include side-specific predicates. Runtime expiry remains a query range, not a now()-dependent index predicate. Account history/active-order/expiration indexes are retained.
 
-V4 is already reserved by develop and V5 by the financial-information PR. Coordinate migration numbering/order before deployment; this branch must not be deployed with missing earlier migrations that will later be introduced below V6 under Flyway's default ordered policy.
+Later migrations V8–V15 add the market-event history, the quote-snapshot price-limit date and the circuit-breaker rejection FK. This execution deferral adds no migration, so `V15__trade_order_market_event_rejection.sql` remains the highest version.
 
 ---
 
-> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V13__stock_like.sql`
+> Mock Stock Trading Service · Current ERD · see also `db/migration/V1__init.sql` through `V15__trade_order_market_event_rejection.sql`
 
 ## Regular-session trading dates and references (#173)
 

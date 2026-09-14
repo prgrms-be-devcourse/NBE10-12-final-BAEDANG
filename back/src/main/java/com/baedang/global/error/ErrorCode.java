@@ -67,6 +67,7 @@ public enum ErrorCode {
     NOT_IN_UNIVERSE(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 아직 거래를 지원하지 않아요"),
     STOCK_SUSPENDED(HttpStatus.UNPROCESSABLE_ENTITY, "거래정지 종목이에요"),
     STOCK_LIQUIDATION(HttpStatus.UNPROCESSABLE_ENTITY, "정리매매 종목이에요"),
+    MARKET_TRADING_HALTED(HttpStatus.UNPROCESSABLE_ENTITY, "현재 해당 시장의 매매거래가 일시 중단됐어요"),
     INSUFFICIENT_CASH(HttpStatus.UNPROCESSABLE_ENTITY, "주문가능금액이 부족해요"),
     INSUFFICIENT_QUANTITY(HttpStatus.UNPROCESSABLE_ENTITY, "보유 수량이 부족해요"),
     INVALID_QUANTITY(HttpStatus.BAD_REQUEST, "수량은 1주 이상의 정수로 입력해주세요"),

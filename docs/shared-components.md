@@ -443,7 +443,7 @@ The detail stage re-classifies the title and re-checks the stated duration, so a
 - `MarketEventQueryService.get(market, date)`: KST day as a half-open `[from, to)` UTC range; 100-item cap; `active` is computed at response time, not stored. Public response timestamps are always `+09:00` while storage stays UTC.
 - `MarketEventController`: `GET /api/market/events?market=&date=` is public. Parse both params as strings so failures produce `INVALID_INPUT` with `data.field` like the rest of the API; do not let enum/date binding emit framework messages.
 - Consumers read `haltUntil` and let it expire; never infer resumption from an RSS "release" disclosure or from RSS health. A collection outage leaves existing windows untouched and they lapse on their own.
-- Sidecar affects program quotes only — it must not gate ordinary orders. Circuit-breaker order gating is a separate concern (Part 4/#166).
+- Sidecar affects program quotes only — it must not gate ordinary orders. Circuit-breaker order gating is enforced inside the trading transactions (`MarketTradingHaltPolicy.activeFor` after the account lock), not as a transaction-external preflight.
 
 
 ## Trading dates and closing-price recovery (#173)
@@ -468,6 +468,18 @@ The detail stage re-classifies the title and re-checks the stated duration, so a
 - Daily backfill checks completion once inside the shared daily-candle lock and then fetches/writes. It does not acquire the separate quote-refresh lock. Quote and daily-candle operations keep separate locks.
 - Seed success, initial backfill completion, refresh-through-date tracking and subsequent weekly refresh use the rows accepted by `DailyCandlePersistenceService.upsert`. A response containing only unfinished candles does not mark completion and remains retryable. Scheduled collection likewise requires the expected date in the returned rows.
 - Date conversion continues to use `MarketCountry.zoneId()`. No separate date-conversion service, generic collector or additional cache is introduced.
+
+
+## Circuit-breaker order gating
+
+- `MarketTradingHaltPolicy.activeFor(stock, at)` / `requireTradingAllowed(stock, at)`: decides whether a stock's market is halted. Applies only to KR KOSPI/KOSDAQ — `KR_ETC` and US markets are never gated, and sidecars are not a blocking reason (the repository query selects `CIRCUIT_BREAKER` only). No memory cache: it reads the database per call and must be invoked inside the trading transaction after the account lock.
+- `ActiveMarketHalt`: the deciding event, carrying eventId for the order's audit FK. `asErrorData()` exposes only `market`/`eventType`/`stage`/`triggeredAt`/`haltUntil` in `+09:00`; never expose `eventId`.
+- `MarketOrderTransactionService` / `LimitOrderTransactionService`: call the policy after the account lock, concurrent idempotency, account-lifecycle check and stock load, and before execution-context freshness and quote validation. If pre-transaction quote preparation fails, `rejectIfHalted` performs the same account-first check without external calls; it stores a halt or returns empty so the orchestrator can preserve the original preparation error. A halt stores one `REJECTED` row with `market_event_id`, no quote/reference/rate evidence for MARKET and no reservation for LIMIT.
+- Replay: the stored `market_event_id` restores the original rejection data. The event must still exist, be a `CIRCUIT_BREAKER`, and match the order's market; otherwise raise `INTERNAL_ERROR` rather than inventing or falling back to another event.
+- `LimitOrderExecutionTransactionService`: makes the single authoritative `requireTradingAllowed(stock, now)` call after the existing account → order → book version → levels → holding locks and the second expiry check, and before `validateExecutionContextFresh`, planning and mutation. That position also catches a CB that starts while the attempt waits for the book/holding locks. Do not catch the exception there, mark the order REJECTED, extend `expiresAt`, or add a `LimitExecutionOutcome.Reason` — the rollback leaves the accepted order retryable.
+- `LimitOrderExecutionWorker.visit(group)`: classifies only `MARKET_TRADING_HALTED` from the existing group failure boundary as an expected deferral. It resets the halted group so the rest of that `(stockId, side)` is skipped this visit, while `tick` continues with the next group. This path increments `krx.market_event.order_blocked{market,orderType=LIMIT_EXECUTION}` using the bounded `market` enum value and records no `trading.limit.execution.attempt{reason=ERROR}` or WARN/ERROR stack. Every other exception keeps the existing ERROR metric and log.
+- `LimitOrderExecutionService.prepare`, cancellation and expiration never precheck or cache halt state. Deferral adds no component, no migration and no schema: it exists only as the transactional decision plus the worker's expected-deferral classification.
+- `docs/superpowers/` planning notes hold the Part/issue history; keep roadmap coordinates out of this guide and `api-spec`.
 
 ## Price-limit collection and display
 
