@@ -99,15 +99,16 @@ export function Nav() {
             background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
             borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
           }}
-          // 라이트 모드일 때의 필박스(=현재 "라이트" 버튼) 배경을 메인 화면 히어로
-          // 사각형("실전처럼 경험하고, 나만의 투자 감각을 키워요" 문구가 놓인 카드)의
-          // 배경과 똑같이 맞춰달라는 요청 — page.tsx 히어로 div에 쓴 background 값
-          // (토스임팩트 스타일 radial-gradient + var(--heroBg))을 그대로 가져왔다.
-          // var(--heroBg)를 쓰므로 라이트 모드 값(#dceefa)이 그대로 반영된다.
+          // 라이트 모드일 때의 필박스(="라이트" 버튼) 배경을 첨부받은 참고
+          // 이미지(위쪽은 부드러운 하늘색, 아래로 갈수록 흰색으로 옅어지는
+          // 세로 그라데이션)와 같은 색감으로 맞춰달라는 요청. 파란 톤 자체는
+          // 히어로 카드에서 쓰던 색(rgba(150,196,255))과 같아서 재사용하되,
+          // 히어로 카드의 방사형(radial) 그라데이션 대신 사진처럼 위→아래로
+          // 옅어지는 세로형(linear) 그라데이션으로 방향만 바꿨다.
           pillColor={
             theme === "dark"
               ? "rgba(42,46,51,.5)"
-              : "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), var(--heroBg)"
+              : "linear-gradient(180deg, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), #ffffff"
           }
           // "라이트/다크" 글자 크기를 키워달라는 요청 — 12px → 13.5px.
           buttonClassName="rounded-full px-0 py-1.5 text-[13.5px] font-bold"
