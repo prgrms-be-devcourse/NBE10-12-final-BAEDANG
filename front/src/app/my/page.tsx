@@ -46,6 +46,18 @@ export default function MyPage() {
   const { rate, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
+  // "포트폴리오 초기화"·"회원 탈퇴" 위험 구역의 배경·글자색을 라이트 모드에서만
+  // 좀 더 세련된 레드 계열로 바꿔달라는 요청 — 다크 모드는 절대 바꾸지 말라고
+  // 명시했으므로, 전역 CSS 변수(--dangerBg/--dangerText/--dangerTextSoft, 다른
+  // 화면(StockDetailClient·OrderDetailModal)에서도 함께 쓰는 값이라 여기서
+  // 바꾸면 그쪽까지 영향을 준다)는 그대로 두고, 라이트 모드일 때만 이
+  // 페이지 안에서 로컬로 새 색을 쓴다(다크 모드는 기존 var(--danger*) 그대로
+  // 참조해 단 하나도 안 바뀐다). 기존 값(oklch 96%/0.02/25 배경,
+  // 50%/0.18/25 글자 — 채도 높은 경고색 느낌)보다 채도를 낮추고 톤을
+  // 와인·버건디 쪽으로 옮겨 더 차분하고 고급스러운 인상을 준다.
+  const dangerBg = theme === "light" ? "oklch(95% 0.03 15)" : "var(--dangerBg)";
+  const dangerText = theme === "light" ? "oklch(38% 0.13 10)" : "var(--dangerText)";
+  const dangerTextSoft = theme === "light" ? "oklch(44% 0.045 10)" : "var(--dangerTextSoft)";
   const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -889,14 +901,14 @@ export default function MyPage() {
         </div>
       </Reveal>
 
-      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: dangerBg }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
             <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["포트폴리오 초기화"]} />
             <RevealText
               as="div"
               className="text-[15px] leading-relaxed"
-              style={{ color: "var(--dangerTextSoft)" }}
+              style={{ color: dangerTextSoft }}
               baseDelayMs={45}
               lines={[
                 <>
@@ -909,21 +921,21 @@ export default function MyPage() {
           <button
             onClick={() => setResetModalOpen(true)}
             className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
-            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+            style={{ background: "var(--card)", color: dangerText }}
           >
             포트폴리오 초기화
           </button>
         </div>
       </Reveal>
 
-      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: dangerBg }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
             <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["회원 탈퇴"]} />
             <RevealText
               as="div"
               className="text-[15px] leading-relaxed"
-              style={{ color: "var(--dangerTextSoft)" }}
+              style={{ color: dangerTextSoft }}
               baseDelayMs={45}
               lines={["계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요."]}
             />
@@ -931,7 +943,7 @@ export default function MyPage() {
           <button
             onClick={() => setWithdrawModalOpen(true)}
             className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
-            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+            style={{ background: "var(--card)", color: dangerText }}
           >
             회원 탈퇴
           </button>
