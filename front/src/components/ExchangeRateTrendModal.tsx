@@ -1,11 +1,22 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { createChart, LineSeries, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
+import { AreaSeries, createChart, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
 import { PillTabs } from "./PillTabs";
 import { useTheme } from "./ThemeProvider";
 import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRatePeriod } from "@/lib/api";
 import { resolveCssColor } from "@/lib/chart-colors";
+// 굴곡진 선(라인) 아래에 그라데이션 효과를 넣어달라는 요청을 첨부받은 참고
+// 이미지(선 아래로 점점 옅어지는 붉은 그라데이션 영역)처럼 구현하려고, 선
+// 색상(accent)에 알파값만 다르게 입혀 위(선 바로 아래, 진하게)→아래
+// (완전 투명)로 옅어지는 두 색을 만든다. resolveCssColor가 항상
+// "rgb(r, g, b)" 형태로 정규화해 돌려주므로 정규식으로 채널만 뽑아 쓴다.
+function withAlpha(rgbColor: string, alpha: number): string {
+  const channels = rgbColor.match(/\d+(\.\d+)?/g);
+  if (!channels || channels.length < 3) return rgbColor;
+  const [r, g, b] = channels;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 import { formatCrosshairTime, formatTickMark, isTimeVisible, nextExchangeRateRange, toLinePoints } from "@/lib/exchange-rate-chart-data";
 import { formatNumber } from "@/lib/format";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
@@ -35,7 +46,7 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
-  const seriesRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
   const refreshRef = useRef<(() => Promise<void>) | null>(null);
   const fittedRef = useRef(false);
   const lastPointRef = useRef<UTCTimestamp | undefined>(undefined);
@@ -81,9 +92,16 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
         tickMarkFormatter: formatTickMark,
       },
     });
-    const series = chart.addSeries(LineSeries, {
-      color: resolveCssColor("--accent", "#0f3868"),
+    // 기존 디자인(선 색상·굵기·그리드·배경 등)은 그대로 두고, 선 아래에만
+    // 그라데이션 영역을 추가해달라는 요청 — LineSeries를 AreaSeries로 바꿔
+    // 선(lineColor)은 그대로 유지하면서 그 아래 영역만 위(topColor, 진하게)
+    // →아래(bottomColor, 완전 투명)로 옅어지는 채움을 얹었다.
+    const accentColor = resolveCssColor("--accent", "#0f3868");
+    const series = chart.addSeries(AreaSeries, {
+      lineColor: accentColor,
       lineWidth: 2,
+      topColor: withAlpha(accentColor, 0.32),
+      bottomColor: withAlpha(accentColor, 0),
     });
 
     chartRef.current = chart;
@@ -142,7 +160,12 @@ export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
       rightPriceScale: { borderColor: line2 },
       timeScale: { borderColor: line2 },
     });
-    series.applyOptions({ color: resolveCssColor("--accent", "#0f3868") });
+    const accentColor = resolveCssColor("--accent", "#0f3868");
+    series.applyOptions({
+      lineColor: accentColor,
+      topColor: withAlpha(accentColor, 0.32),
+      bottomColor: withAlpha(accentColor, 0),
+    });
   }, [theme]);
 
   const latestRate = items.length > 0 ? items[items.length - 1].rate : null;
