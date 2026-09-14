@@ -508,13 +508,18 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         {/* "닫기" 버튼과 같은 호버 효과(배경이 var(--fill) → var(--line)로
             바뀜)를 적용해달라는 요청 — 같은 CSS 클래스(report-modal-close-btn)를
             재사용했다. 이 버튼도 onClick={onClose}로 같은 동작을 하니 이름과도
-            어긋나지 않는다. 인라인 style의 배경은 그대로 두고(기존 디자인
-            유지), :hover는 클래스 쪽 규칙이 적용된다. */}
+            어긋나지 않는다.
+            처음엔 기존 인라인 background: "var(--fill)"을 그대로 둔 채
+            클래스만 추가했는데, 인라인 style은 :hover를 포함한 어떤
+            외부 스타일시트 규칙보다도 우선이라 호버 자체가 아예 안
+            먹혔다("닫기" 버튼들은 애초에 배경을 인라인으로 주지 않아서
+            클래스가 base·hover 배경을 전부 제어한다) — 그래서 인라인
+            background를 지우고 클래스에게 완전히 맡겼다. */}
         <button
           type="button"
           onClick={onClose}
           className="report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
-          style={{ background: "var(--fill)", color: "var(--ink)" }}
+          style={{ color: "var(--ink)" }}
         >
           확인했어요
         </button>
