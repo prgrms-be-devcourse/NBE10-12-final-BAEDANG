@@ -10,6 +10,8 @@ import com.baedang.trading.scheduler.LimitOrderExecutionWorker;
 import com.baedang.trading.service.LimitOrderExpirationService;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -17,6 +19,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -27,6 +30,7 @@ import java.util.concurrent.Executors;
 
 /** 단일 테스트 제어 서버. 운영 클래스패스에는 존재하지 않으며 루프백/실행별 키만 허용합니다. */
 public final class E2eLauncher {
+    private static final Logger log = LoggerFactory.getLogger(E2eLauncher.class);
     private ConfigurableApplicationContext app;
     private final String token = required("E2E_CONTROL_TOKEN");
     private final String jdbcUrl = required("E2E_DB_URL");
@@ -42,7 +46,7 @@ public final class E2eLauncher {
         server.setExecutor(Executors.newSingleThreadExecutor());
         Runtime.getRuntime().addShutdownHook(new Thread(() -> { server.stop(0); launcher.close(); }));
         server.start();
-        System.out.println("E2E control ready");
+        log.info("E2E 제어 서버 준비 완료");
     }
 
     private static String required(String name) {
@@ -100,16 +104,19 @@ public final class E2eLauncher {
     }
 
     private synchronized void handle(HttpExchange request) throws IOException {
+        String action = request.getRequestURI().getPath();
         try {
             if (!token.equals(request.getRequestHeaders().getFirst("X-E2E-Key"))) { reply(request, 403, "forbidden"); return; }
-            String action = request.getRequestURI().getPath();
             if (action.equals("/health") && request.getRequestMethod().equals("GET")) { reply(request, 200, "ready"); return; }
             if (!request.getRequestMethod().equals("POST")) { reply(request, 405, "method"); return; }
-            Map<String, String> params = new HashMap<>();
-            String query = request.getRequestURI().getRawQuery();
-            if (query != null) for (String pair : query.split("&")) {
-                String[] parts = pair.split("=", 2);
-                if (parts.length == 2) params.put(parts[0], parts[1]);
+            Map<String, String> params;
+            try {
+                params = parseQuery(request.getRequestURI().getRawQuery());
+            } catch (IllegalArgumentException exception) {
+                // 잘못된 인코딩만 요청 오류로 분류하고 원본 쿼리는 기록하지 않습니다.
+                log.warn("E2E 제어 명령 쿼리 인코딩 오류: action={}", action);
+                reply(request, 400, "invalid query encoding");
+                return;
             }
             if (action.equals("/reset")) start(params.getOrDefault("market", "KR"));
             else if (action.equals("/clear")) {
@@ -147,9 +154,23 @@ public final class E2eLauncher {
             }
             reply(request, 200, "ok");
         } catch (Exception exception) {
-            exception.printStackTrace();
+            log.error("E2E 제어 명령 처리 실패: action={}", action, exception);
             reply(request, 500, exception.getClass().getSimpleName());
         }
+    }
+
+    private static Map<String, String> parseQuery(String query) {
+        Map<String, String> params = new HashMap<>();
+        if (query == null) return params;
+        // 구분자를 먼저 분리해야 값에 포함된 %26과 %3D가 새 파라미터가 되지 않습니다.
+        for (String pair : query.split("&")) {
+            String[] parts = pair.split("=", 2);
+            if (parts.length == 2) {
+                params.put(URLDecoder.decode(parts[0], StandardCharsets.UTF_8),
+                        URLDecoder.decode(parts[1], StandardCharsets.UTF_8));
+            }
+        }
+        return params;
     }
 
     private void reply(HttpExchange request, int status, String message) throws IOException {
