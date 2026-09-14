@@ -19,7 +19,9 @@ import {
   getHoldings,
   getLedger,
   getMyOrders,
+  getStockLikes,
   resetAccount,
+  unlikeStock,
   updateNickname,
   changeUserPassword,
   withdrawAccount,
@@ -28,6 +30,7 @@ import {
   type LedgerItem,
   type MarketCountry,
   type OrderDetailResponse,
+  type StockLikeItem,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
@@ -84,7 +87,7 @@ export default function MyPage() {
   // 낮추고 hue를 순빨강 쪽인 28로)으로, 명도만 버튼 배경에 맞게 낮춰
   // 와인빛이 도는 차분한 레드로 만들었다.
   const dangerButtonBg = theme === "dark" ? "oklch(46% 0.15 28)" : "var(--dangerText)";
-  const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
+  const [tab, setTab] = useState<"holdings" | "ledger" | "orders" | "likes">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
@@ -100,6 +103,14 @@ export default function MyPage() {
   const [ordersHasNext, setOrdersHasNext] = useState(false);
   const [ordersLoadingMore, setOrdersLoadingMore] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetailResponse | null>(null);
+
+  // ── 관심 종목(찜) ────────────────────────────────────────────────────────────
+  const [likes, setLikes] = useState<StockLikeItem[]>([]);
+  const [likesCursor, setLikesCursor] = useState<string | null>(null);
+  const [likesHasNext, setLikesHasNext] = useState(false);
+  const [likesLoadingMore, setLikesLoadingMore] = useState(false);
+  const [likeRemoving, setLikeRemoving] = useState<Set<number>>(new Set());
+
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -280,9 +291,17 @@ export default function MyPage() {
     isLoggedIn && !!user && hasActiveOrders
   );
 
-  function handleTabChange(nextTab: "holdings" | "ledger" | "orders") {
+  function handleTabChange(nextTab: "holdings" | "ledger" | "orders" | "likes") {
     setTab(nextTab);
-    if (nextTab === "orders") {
+    if (nextTab === "likes") {
+      getStockLikes()
+        .then((res) => {
+          setLikes(res.items);
+          setLikesCursor(res.nextCursor);
+          setLikesHasNext(res.hasNext);
+        })
+        .catch(() => {});
+    } else if (nextTab === "orders") {
       getMyOrders()
         .then((res) => {
           setOrders(res.items);
@@ -364,6 +383,42 @@ export default function MyPage() {
       })
       .catch(() => {})
       .finally(() => setLedgerLoadingMore(false));
+  }
+
+  function loadMoreLikes() {
+    if (likesLoadingMore || !likesCursor) return;
+    setLikesLoadingMore(true);
+    getStockLikes({ cursor: likesCursor })
+      .then((res) => {
+        setLikes((prev) => {
+          const existingIds = new Set(prev.map((l) => l.stockLikeId));
+          const additions = res.items.filter((l) => !existingIds.has(l.stockLikeId));
+          return [...prev, ...additions];
+        });
+        setLikesCursor(res.nextCursor);
+        setLikesHasNext(res.hasNext);
+      })
+      .catch(() => {})
+      .finally(() => setLikesLoadingMore(false));
+  }
+
+  // 랭킹 화면의 찜 해제와 같은 원칙 — 서버 응답을 받은 뒤에만 목록에서 지운다
+  // (실패하면 목록에 그대로 남아, 다시 눌러 재시도할 수 있다).
+  function handleUnlike(item: StockLikeItem) {
+    if (likeRemoving.has(item.stockLikeId)) return;
+    setLikeRemoving((prev) => new Set(prev).add(item.stockLikeId));
+    unlikeStock(item.stockLikeId)
+      .then(() => {
+        setLikes((prev) => prev.filter((l) => l.stockLikeId !== item.stockLikeId));
+      })
+      .catch(() => {})
+      .finally(() => {
+        setLikeRemoving((prev) => {
+          const next = new Set(prev);
+          next.delete(item.stockLikeId);
+          return next;
+        });
+      });
   }
 
   // 주문 취소가 성공하면(모달 안에서) 목록의 해당 행과 모달 둘 다 최신 상태로
@@ -543,10 +598,11 @@ export default function MyPage() {
             { value: "holdings", label: "보유 종목" },
             { value: "orders", label: "주문 내역" },
             { value: "ledger", label: "체결 내역" },
+            { value: "likes", label: "관심 종목" },
           ]}
           value={tab}
-          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders")}
-          trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
+          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders" | "likes")}
+          trackClassName="mb-4.5 w-[380px] max-md:w-full gap-0.5 rounded-full p-[3px]"
           // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
           // 기존 alpha 값을 절반으로 낮췄다.
           trackStyle={{
@@ -812,7 +868,8 @@ export default function MyPage() {
           )}
         </>
       )
-      ) : ledger.length === 0 ? (
+      ) : tab === "ledger" ? (
+      ledger.length === 0 ? (
         <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
           체결 내역이 없어요
         </div>
@@ -889,6 +946,108 @@ export default function MyPage() {
               style={{ background: "var(--card)", color: "var(--ink)" }}
             >
               {ledgerLoadingMore ? "불러오는 중…" : "더 보기"}
+            </button>
+          )}
+        </>
+      )
+      ) : likes.length === 0 ? (
+        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+          찜한 종목이 없어요
+        </div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 다른 테이블들과 같은 방식. */}
+            <div
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
+              style={{
+                gridTemplateColumns: "1.8fr 1fr 1fr 80px",
+                columnGap: "16px",
+                borderBottom: "1px solid var(--line2)",
+                color: "var(--mut2)",
+              }}
+            >
+              <span>종목</span>
+              <span className="text-right">현재가</span>
+              <span className="text-right">전일대비</span>
+              <span />
+            </div>
+            {likes.map((item) => {
+              const isUsd = item.marketCountry === "US";
+              const krwPriceDecimal = toKrw(item.lastPrice, isUsd ? "USD" : "KRW", rate);
+              const krwPrice = krwPriceDecimal ? krwPriceDecimal.round().toNumber() : null;
+              const changeRateDecimal = toDecimal(item.changeRate);
+              const isUp = !changeRateDecimal || changeRateDecimal.greaterThanOrEqualTo(0);
+              const priceText = item.lastPrice == null
+                ? "-"
+                : isUsd ? formatUsd(item.lastPrice) : formatNumber(krwPrice);
+              const changeNode = item.changeRate == null ? (
+                <span className="text-[12.5px]" style={{ color: "var(--mut2)" }}>시세 정보 없음</span>
+              ) : (
+                <span
+                  className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
+                  style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
+                >
+                  {isUp ? "▲" : "▼"} {formatPercent(item.changeRate)}
+                </span>
+              );
+              const unlikeButton = (
+                <button
+                  type="button"
+                  onClick={() => handleUnlike(item)}
+                  disabled={likeRemoving.has(item.stockLikeId)}
+                  className="cursor-pointer text-[16px] leading-none disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ color: "var(--heartActive)", WebkitTextStroke: "1.3px" }}
+                  aria-label="찜 해제하기"
+                >
+                  ♥
+                </button>
+              );
+              return (
+                <Link
+                  key={item.stockLikeId}
+                  href={`/stocks/${item.symbol}?marketCountry=${item.marketCountry}`}
+                  className="block px-5 py-3 text-[15px] transition-[background] duration-150"
+                  style={{ borderBottom: "1px solid var(--line2)" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {/* 데스크톱(md 이상). */}
+                  <div className="hidden items-center md:grid" style={{ gridTemplateColumns: "1.8fr 1fr 1fr 80px", columnGap: "16px" }}>
+                    <span style={{ color: "var(--ink)" }}>
+                      {item.name} <Tag weightClassName="font-bold">{item.symbol}</Tag>
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    <span className="flex justify-end">{changeNode}</span>
+                    <span className="text-right">{unlikeButton}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 md:hidden">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate" style={{ color: "var(--ink)" }}>
+                        {item.name} <Tag weightClassName="font-bold">{item.symbol}</Tag>
+                      </span>
+                      <span className="shrink-0">{unlikeButton}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                      {changeNode}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+          {likesHasNext && (
+            <button
+              type="button"
+              onClick={loadMoreLikes}
+              disabled={likesLoadingMore}
+              className="mt-2.5 w-full cursor-pointer rounded-xl py-2.5 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--card)", color: "var(--ink)" }}
+            >
+              {likesLoadingMore ? "불러오는 중…" : "더 보기"}
             </button>
           )}
         </>
