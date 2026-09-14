@@ -619,17 +619,20 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         </div>
 
         <div className="mb-1.5">
-          <div className="text-[20px] font-bold" style={{ color: "var(--ink)" }}>
+          <div
+            className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[20px] font-bold"
+            style={{ color: "var(--ink)" }}
+          >
             {detail.name} <Tag weightClassName="font-bold">{detail.symbol}</Tag>{" "}
             <Tag weightClassName="font-bold">{detail.market}</Tag>{" "}
             <span
-              className="inline-block rounded-md px-1.5 py-0.5 align-middle text-[11.5px] font-bold"
+              className="inline-block rounded-md px-1.5 py-0.5 text-[11.5px] font-bold"
               style={CATEGORY_BADGE_STYLE[categoryLabelValue]}
             >
               {categoryLabelValue}
             </span>
+            <StockStatusBadges badges={statusBadges} />
           </div>
-          <StockStatusBadges badges={statusBadges} />
           <div className="mt-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="text-[30px] font-extrabold" style={{ color: "var(--ink)" }}>
               {priceLabel}
