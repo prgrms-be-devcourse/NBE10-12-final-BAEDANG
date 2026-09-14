@@ -118,6 +118,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 8),
                   TextButton(
+                    onPressed: () => context.push('/forgot-password'),
+                    child: const Text('비밀번호를 잊으셨나요?'),
+                  ),
+                  TextButton(
                     onPressed: () => context.go('/'),
                     child: const Text('로그인 없이 둘러보기'),
                   ),

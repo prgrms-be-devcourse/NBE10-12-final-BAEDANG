@@ -6,8 +6,6 @@ import 'api_client.dart';
 import 'auth_requirement.dart';
 
 /// 인증·프로필 API.
-///
-/// 비밀번호 재설정은 서버 계약이 아직 확정되지 않아 넣지 않았다.
 class AuthApi {
   AuthApi(this._client);
 
@@ -15,6 +13,8 @@ class AuthApi {
   static const String _logIn = 'auth/login';
   static const String _logOut = 'auth/logout';
   static const String _me = 'users/me';
+  static const String _passwordForgot = 'auth/password/forgot';
+  static const String _passwordReset = 'auth/password/reset';
 
   final ApiClient _client;
 
@@ -61,5 +61,22 @@ class AuthApi {
     _logOut,
     auth: AuthRequirement.required,
     bearerToken: accessToken,
+  );
+
+  /// 비밀번호 재설정 메일 요청. 계정 존재 여부와 무관하게 200을 돌려준다.
+  Future<void> forgotPassword({required String email}) => _client.postVoid(
+    _passwordForgot,
+    body: {'email': email},
+    auth: AuthRequirement.public,
+  );
+
+  /// 재설정 토큰으로 새 비밀번호를 등록한다.
+  Future<void> resetPassword({
+    required String token,
+    required String newPassword,
+  }) => _client.postVoid(
+    _passwordReset,
+    body: {'token': token, 'newPassword': newPassword},
+    auth: AuthRequirement.public,
   );
 }
