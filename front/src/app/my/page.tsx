@@ -825,10 +825,10 @@ export default function MyPage() {
                 w-full(부모 폭 320px에 꽉 참) 대신 고정 폭(w-[168px])을
                 줘서 가로로 늘어놓아도 한 칸씩 적당한 크기를 유지한다.
                 화면이 좁아지면 flex-wrap으로 다음 줄로 넘어간다.
-                간격을 gap-2 → gap-4 → gap-8까지 넓혔다가, 이번엔 다시
-                좁혀달라는 요청으로 gap-1.5(6px)로 되돌렸다 — 처음
-                gap-2(8px)보다도 살짝 더 좁다. */}
-            <div className="flex flex-wrap items-start gap-1.5">
+                간격을 gap-2 → gap-4 → gap-8까지 넓혔다가 gap-1.5(6px)로
+                좁혔는데, "조금만 더" 넓혀달라는 요청으로 gap-2.5(10px)로
+                살짝만 올렸다. */}
+            <div className="flex flex-wrap items-start gap-2.5">
               <input
                 type="password"
                 required
