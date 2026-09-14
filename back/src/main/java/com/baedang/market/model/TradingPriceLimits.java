@@ -18,12 +18,14 @@ public record TradingPriceLimits(LocalDate date, BigDecimal lower, BigDecimal up
 
     /** 정규장 여부는 호출자가 세션 근거로 별도 검사합니다. 이 메서드는 외부 조회를 하지 않습니다. */
     public boolean usable(MarketCountry country, Instant now) {
+        if (country == null || now == null) return false;
         return country == MarketCountry.US || (date != null
                 && date.equals(now.atZone(country.zoneId()).toLocalDate())
                 && validPrice(lower) && validPrice(upper) && lower.compareTo(upper) <= 0);
     }
 
     public boolean contains(MarketCountry country, BigDecimal price) {
+        if (country == null) return false;
         return price != null && price.signum() > 0 && (country == MarketCountry.US
                 || (lower != null && upper != null && price.compareTo(lower) >= 0 && price.compareTo(upper) <= 0));
     }
