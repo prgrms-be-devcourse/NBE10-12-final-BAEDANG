@@ -63,6 +63,10 @@ set, not arbitrary SQL or broker URLs. Fixtures call `reset`, `clear`, `publish`
 `advance`, `expire`, `limits`, `upper`, `liquidity`, and `halt`.
 
 KR starts at 2026-09-14 10:00 KST; US starts at 2026-09-14 10:00 New York time.
+The shared local start date/time is defined only in `E2eClock`. Quote seed dates derive
+from that clock separately for each market: KR bounds use the local date, and previous
+close dates use `MarketTradingDayPolicy.previousTradingDay` with the scenario calendar.
+The scenario calendar currently treats weekdays as open; it does not model real holidays.
 Clock, JWT and JPA auditing share the scenario clock. `advance` refreshes quote/FX evidence,
 so session-expiry tests are not accidentally testing stale quotes. The database's native
 `now()` and browser timers are separate: assertions target application timestamps and

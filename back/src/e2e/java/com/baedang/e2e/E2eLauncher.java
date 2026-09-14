@@ -4,6 +4,7 @@ import com.baedang.market.event.entity.KrMarket;
 import com.baedang.market.event.entity.MarketEvent;
 import com.baedang.market.event.entity.MarketEventSource;
 import com.baedang.market.event.repository.MarketEventRepository;
+import com.baedang.market.service.MarketTradingDayPolicy;
 import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.trading.scheduler.LimitOrderExecutionWorker;
@@ -22,6 +23,7 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Base64;
@@ -75,12 +77,19 @@ public final class E2eLauncher {
                 "--spring.main.banner-mode=off");
         clearData();
         E2eClock clock = app.getBean(E2eClock.class);
-        clock.set(Instant.parse("US".equals(market) ? "2026-09-14T14:00:00Z" : "2026-09-14T01:00:00Z"));
+        clock.reset("US".equals(market) ? MarketCountry.US : MarketCountry.KR);
         JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
         jdbc.update("INSERT INTO stock(symbol,market_country,market,name,currency,security_type,is_ranked,rank_no) VALUES ('005930','KR','KOSPI','테스트전자','KRW','STOCK',true,1),('AAPL','US','NASDAQ','테스트애플','USD','STOCK',true,1)");
         jdbc.update("UPDATE stock SET trading_amount=100000000");
-        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at,prev_close,prev_close_date,lower_limit,upper_limit,price_limit_date) SELECT stock_id,CASE WHEN market_country='KR' THEN 10000 ELSE 100 END,currency,?,?,CASE WHEN market_country='KR' THEN 9900 ELSE 99 END,?::date,CASE WHEN market_country='KR' THEN 9000 END,CASE WHEN market_country='KR' THEN 11000 END,CASE WHEN market_country='KR' THEN ?::date END FROM stock",
-                clock.instant().atOffset(ZoneOffset.UTC), clock.instant().atOffset(ZoneOffset.UTC), "2026-09-11", "2026-09-14");
+        Instant now = clock.instant();
+        MarketTradingDayPolicy tradingDays = app.getBean(MarketTradingDayPolicy.class);
+        for (MarketCountry country : MarketCountry.values()) {
+            LocalDate tradeDate = now.atZone(country.zoneId()).toLocalDate();
+            LocalDate prevCloseDate = tradingDays.previousTradingDay(country, tradeDate)
+                    .orElseThrow(() -> new IllegalStateException("E2E 전일 종가 거래일을 찾을 수 없습니다: " + country));
+            jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at,prev_close,prev_close_date,lower_limit,upper_limit,price_limit_date) SELECT stock_id,CASE WHEN market_country='KR' THEN 10000 ELSE 100 END,currency,?,?,CASE WHEN market_country='KR' THEN 9900 ELSE 99 END,?::date,CASE WHEN market_country='KR' THEN 9000 END,CASE WHEN market_country='KR' THEN 11000 END,CASE WHEN market_country='KR' THEN ?::date END FROM stock WHERE market_country=?",
+                    now.atOffset(ZoneOffset.UTC), now.atOffset(ZoneOffset.UTC), prevCloseDate, tradeDate, country.name());
+        }
         refreshEvidence();
     }
 
