@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:investup_app/app.dart';
+import 'package:investup_app/features/guide/wiki_terms_source.dart';
 
 import 'core/fakes/fake_http_adapter.dart';
 import 'core/fakes/fixtures.dart';
@@ -16,10 +17,12 @@ void main() {
     await tester.pumpWidget(
       InvestUpApp(
         session: harness.session,
+        auth: harness.auth,
         market: harness.market,
         stocks: harness.stocks,
         account: harness.account,
         orders: harness.orders,
+        wiki: const BundledWikiTermsSource(),
       ),
     );
     await tester.pumpAndSettle();

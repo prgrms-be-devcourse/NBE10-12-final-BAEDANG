@@ -3,14 +3,17 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:go_router/go_router.dart';
 
 import 'core/api/account_api.dart';
+import 'core/api/auth_api.dart';
 import 'core/api/market_api.dart';
 import 'core/api/order_api.dart';
 import 'core/api/stock_api.dart';
 import 'core/auth/auth_session.dart';
 import 'core/models/market_country.dart';
+import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
 import 'features/guide/guide_screen.dart';
+import 'features/guide/wiki_terms_source.dart';
 import 'features/home/home_screen.dart';
 import 'features/my/my_screen.dart';
 import 'features/rankings/rankings_screen.dart';
@@ -25,17 +28,21 @@ class InvestUpApp extends StatefulWidget {
   const InvestUpApp({
     super.key,
     required this.session,
+    required this.auth,
     required this.market,
     required this.stocks,
     required this.account,
     required this.orders,
+    required this.wiki,
   });
 
   final AuthSession session;
+  final AuthApi auth;
   final MarketApi market;
   final StockApi stocks;
   final AccountApi account;
   final OrderApi orders;
+  final WikiTermsSource wiki;
 
   @override
   State<InvestUpApp> createState() => _InvestUpAppState();
@@ -60,7 +67,10 @@ class _InvestUpAppState extends State<InvestUpApp> {
         // 인증이 필요한 기능을 쓸 때만 로그인으로 유도한다.
         // 복원이 끝났으면 스플래시에서 빠져나와 홈으로 간다.
         if (location == '/splash') return '/';
-        final onAuthPage = location == '/login' || location == '/signup';
+        final onAuthPage =
+            location == '/login' ||
+            location == '/signup' ||
+            location == '/forgot-password';
         if (status == AuthStatus.authenticated && onAuthPage) {
           final from = state.uri.queryParameters['from'];
           return from != null && from.startsWith('/') ? from : '/';
@@ -79,6 +89,11 @@ class _InvestUpAppState extends State<InvestUpApp> {
         GoRoute(
           path: '/signup',
           builder: (context, state) => SignupScreen(session: session),
+        ),
+        GoRoute(
+          path: '/forgot-password',
+          builder: (context, state) =>
+              ForgotPasswordScreen(auth: widget.auth),
         ),
         GoRoute(
           path: '/stocks/:symbol',
@@ -114,13 +129,20 @@ class _InvestUpAppState extends State<InvestUpApp> {
             ),
             GoRoute(
               path: '/guide',
-              pageBuilder: (context, state) =>
-                  const NoTransitionPage(child: GuideScreen()),
+              pageBuilder: (context, state) => NoTransitionPage(
+                child: GuideScreen(termsSource: widget.wiki),
+              ),
             ),
             GoRoute(
               path: '/my',
-              pageBuilder: (context, state) =>
-                  NoTransitionPage(child: MyScreen(session: session)),
+              pageBuilder: (context, state) => NoTransitionPage(
+                child: MyScreen(
+                  session: session,
+                  stocks: widget.stocks,
+                  account: widget.account,
+                  orders: widget.orders,
+                ),
+              ),
             ),
           ],
         ),
