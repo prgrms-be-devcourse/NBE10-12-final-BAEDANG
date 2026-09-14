@@ -146,8 +146,8 @@ class OrderApi {
       'orders/$orderId/executions',
       auth: AuthRequirement.required,
       query: {
-        if (cursor != null) 'cursor': cursor,
-        if (size != null) 'size': '$size',
+        'cursor': ?cursor,
+        'size': ?size?.toString(),
       },
       cancelToken: cancelToken,
     );

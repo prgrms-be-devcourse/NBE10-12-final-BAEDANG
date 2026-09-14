@@ -35,7 +35,7 @@ class OrderDetailSheet extends StatefulWidget {
 }
 
 class _OrderDetailSheetState extends State<OrderDetailSheet> {
-  late OrderDetail _order = widget.order;
+  OrderDetail get _order => widget.order;
 
   List<ExecutionItem> _executions = const [];
   String? _execCursor;

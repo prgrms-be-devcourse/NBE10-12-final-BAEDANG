@@ -7,7 +7,6 @@ import '../../core/api/order_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/models/candle.dart';
-import '../../core/models/holding.dart';
 import '../../core/models/market_country.dart';
 import '../../core/models/order_book.dart';
 import '../../core/models/stock_detail.dart';
