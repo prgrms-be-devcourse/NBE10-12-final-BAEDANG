@@ -27,8 +27,12 @@ export function Nav() {
   const { isLoggedIn, user, logout } = useAuth();
   const { theme, setTheme } = useTheme();
 
-  // 로그인/회원가입 화면은 페이지 그라데이션이 헤더까지 이어져야 해서 배경을 투명하게 둔다.
-  const transparentHeader = pathname === "/login" || pathname === "/signup";
+  // 로그인/회원가입/비밀번호 찾기 화면은 페이지 그라데이션이 헤더까지 이어져야
+  // 해서 배경을 투명하게 둔다(PageBackground.tsx와 같은 기준이어야 한다 —
+  // 비밀번호 찾기가 빠져 있어서 그 화면만 헤더 아래에서 그라데이션이 끊겨
+  // 보이는 오류가 있었다).
+  const transparentHeader =
+    pathname === "/login" || pathname === "/signup" || pathname === "/forgot-password";
 
   return (
     <header
