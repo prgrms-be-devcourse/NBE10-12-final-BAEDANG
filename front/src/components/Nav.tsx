@@ -99,27 +99,22 @@ export function Nav() {
             background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
             borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
           }}
-          // 라이트 모드일 때의 필박스(="라이트" 버튼) 배경을 첨부받은 참고
-          // 이미지(위쪽은 부드러운 하늘색, 아래로 갈수록 흰색으로 옅어지는
-          // 세로 그라데이션)와 같은 색감으로 맞춰달라는 요청. 파란 톤 자체는
-          // 히어로 카드에서 쓰던 색(rgba(150,196,255))과 같아서 재사용하되,
-          // 히어로 카드의 방사형(radial) 그라데이션 대신 사진처럼 위→아래로
-          // 옅어지는 세로형(linear) 그라데이션으로 방향만 바꿨다.
-          pillColor={
-            theme === "dark"
-              ? "rgba(42,46,51,.5)"
-              : "linear-gradient(180deg, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), #ffffff"
-          }
+          // 라이트 모드 필박스(="라이트" 버튼) 배경을 여러 파란 계열로
+          // 시도해본 끝에, 메인 화면과 가장 잘 어우러지는 색을 골라달라는
+          // 요청 — 사이트 전체(로그인/회원가입 필박스, 상단 메인/랭킹/가이드
+          // 탭, "모의 투자금 받고 시작하기" 등 CTA 버튼)에서 이미 일관되게
+          // 쓰고 있는 브랜드 색 var(--accent)(진한 남색)를 그대로 채택했다 —
+          // 새 색을 만드는 대신 이미 검증된 사이트 대표색을 재사용해 통일감을
+          // 유지한다. PillTabs의 기본 pillColor 값도 var(--accent)라
+          // 사실상 다른 탭들과 동일한 방식으로 돌아온 것이다.
+          pillColor={theme === "dark" ? "rgba(42,46,51,.5)" : "var(--accent)"}
           // "라이트/다크" 글자 크기를 키워달라는 요청 — 12px → 13.5px.
           buttonClassName="rounded-full px-0 py-1.5 text-[13.5px] font-bold"
           inactiveTextStyle={{ color: theme === "dark" ? "oklch(75% 0.02 258)" : "rgba(15,56,104,.75)" }}
-          // 필박스 배경을 히어로 카드와 같은 옅은 하늘색으로 바꾸면서, 기존
-          // activeTextClassName="text-white"를 라이트 모드에도 그대로 두면 밝은
-          // 배경 위에 흰 글자가 묻혀 안 보인다 — 히어로 문구가 라이트 모드에서
-          // var(--heroText)(짙은 남색)를 쓰는 것과 같은 이유로, 라이트 모드
-          // 활성 글자만 짙은 남색(var(--ink))으로 바꿨다. 다크 모드는 배경이
-          // 그대로 어두운 회색이라 흰 글자를 유지한다.
-          activeTextStyle={{ color: theme === "dark" ? "#ffffff" : "var(--ink)" }}
+          // 필박스 배경이 다시 진한 남색(var(--accent))이 되면서, 사이트의
+          // 다른 필박스(메인 네비, 로그인/회원가입)와 마찬가지로 흰 글자가
+          // 잘 어울려 activeTextClassName="text-white" 기본값을 그대로 둔다
+          // (별도 activeTextStyle 오버라이드 없음).
         />
 
         {isLoggedIn && user ? (
