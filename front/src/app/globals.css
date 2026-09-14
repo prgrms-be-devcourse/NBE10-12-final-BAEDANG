@@ -69,6 +69,12 @@
   --pillTrackBg: rgba(15, 56, 104, 0.06);
   --pillTrackBorder: rgba(15, 56, 104, 0.12);
   --pillTrackBgHover: rgba(15, 56, 104, 0.1);
+  /* "차트 크게보기" 버튼 배경을 라이트/다크 모드 설정 버튼(헤더의 라이트·다크
+     PillTabs) 뒤 트랙과 같은 밝기로 맞춰달라는 요청 — --pillTrackBg는
+     캔들 기간 필박스 등 다른 곳과 공유하는 값이라 그대로 두고, 이 버튼
+     전용 토큰에 라이트/다크 토글의 trackStyle과 동일한 값(Nav.tsx)을 쓴다. */
+  --chartExpandBtnBg: rgba(15, 56, 104, 0.03);
+  --chartExpandBtnBorder: rgba(15, 56, 104, 0.06);
 }
 
 :root[data-theme="dark"] {
@@ -139,6 +145,8 @@
   --pillTrackBg: rgba(255, 255, 255, 0.03);
   --pillTrackBorder: rgba(255, 255, 255, 0.06);
   --pillTrackBgHover: rgba(255, 255, 255, 0.07);
+  --chartExpandBtnBg: rgba(255, 255, 255, 0.015);
+  --chartExpandBtnBorder: rgba(255, 255, 255, 0.03);
 }
 
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
@@ -201,6 +209,8 @@
     --pillTrackBg: rgba(255, 255, 255, 0.03);
     --pillTrackBorder: rgba(255, 255, 255, 0.06);
     --pillTrackBgHover: rgba(255, 255, 255, 0.07);
+    --chartExpandBtnBg: rgba(255, 255, 255, 0.015);
+    --chartExpandBtnBorder: rgba(255, 255, 255, 0.03);
   }
 }
 
@@ -305,8 +315,8 @@ input:-webkit-autofill:active {
 
   /* 종목 상세 "차트 크게보기" 버튼 호버 효과. */
   .chart-expand-btn {
-    background: var(--pillTrackBg);
-    border: 1px solid var(--pillTrackBorder);
+    background: var(--chartExpandBtnBg);
+    border: 1px solid var(--chartExpandBtnBorder);
   }
   .chart-expand-btn:hover {
     background: var(--pillTrackBgHover);
