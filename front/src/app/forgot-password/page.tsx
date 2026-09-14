@@ -40,8 +40,8 @@ export default function ForgotPasswordPage() {
       >
         {sent ? (
           <>
-            <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>메일함을 확인해주세요</h1>
-            <p className="mb-6 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)", whiteSpace: "pre-line" }}>
+            <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>메일함을 확인해주세요</h1>
+            <p className="mb-6 text-center text-[13.5px] leading-relaxed" style={{ color: "var(--mut)", whiteSpace: "pre-line" }}>
               {"비밀번호 재설정 안내를 보내드렸어요.\n메일이 안 보이면 스팸함도 확인해주세요."}
             </p>
             <Link
