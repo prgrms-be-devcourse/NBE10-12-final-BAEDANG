@@ -95,9 +95,13 @@ export function Nav() {
           value={theme}
           onChange={(v) => setTheme(v as "light" | "dark")}
           trackClassName="w-[132px] box-border gap-0.5 rounded-full border p-[3px] backdrop-blur-[4px]"
+          // 라이트/다크 버튼 뒤에 있는 둥근 사각형(트랙)의 배경 불투명도를
+          // 낮춰 반투명하게 보이게 해달라는 요청 — 기존 alpha 값(다크
+          // .03·라이트 .06)을 절반으로 낮췄다. 테두리도 같은 비율로
+          // 낮춰 트랙 전체가 함께 옅어지도록 했다.
           trackStyle={{
-            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-            borderColor: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.12)",
+            background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+            borderColor: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
           }}
           // 라이트 모드 필박스(="라이트" 버튼) 배경을 여러 파란 계열로
           // 시도해본 끝에, 메인 화면과 가장 잘 어우러지는 색을 골라달라는
