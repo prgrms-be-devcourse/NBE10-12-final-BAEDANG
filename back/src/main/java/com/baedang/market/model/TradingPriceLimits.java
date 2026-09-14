@@ -9,6 +9,8 @@ import java.time.LocalDate;
 
 /** 거래용 당일 가격 범위. 미국의 제한 없음과 국내 데이터 미확보를 구분합니다. */
 public record TradingPriceLimits(LocalDate date, BigDecimal lower, BigDecimal upper) {
+    private static final BigDecimal MAX_PRICE_EXCLUSIVE = new BigDecimal("1000000000000000");
+
     public static TradingPriceLimits from(QuoteSnapshot quote) {
         return quote == null ? new TradingPriceLimits(null, null, null)
                 : new TradingPriceLimits(quote.getPriceLimitDate(), quote.getLowerLimit(), quote.getUpperLimit());
@@ -28,6 +30,6 @@ public record TradingPriceLimits(LocalDate date, BigDecimal lower, BigDecimal up
 
     private static boolean validPrice(BigDecimal price) {
         return price != null && price.signum() > 0 && price.stripTrailingZeros().scale() <= 4
-                && price.compareTo(new BigDecimal("1000000000000000")) < 0;
+                && price.compareTo(MAX_PRICE_EXCLUSIVE) < 0;
     }
 }
