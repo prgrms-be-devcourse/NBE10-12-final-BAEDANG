@@ -84,8 +84,8 @@ function ResetPasswordForm() {
           </>
         ) : (
           <>
-            <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>새 비밀번호 설정</h1>
-            <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+            <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>새 비밀번호 설정</h1>
+            <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
               새로 사용할 비밀번호를 입력해주세요
             </p>
 

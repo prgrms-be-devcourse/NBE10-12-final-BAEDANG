@@ -45,12 +45,12 @@ export function Nav() {
     setMobileMenuOpen((prev) => (prev ? false : prev));
   }, [pathname]);
 
-  // 로그인/회원가입/비밀번호 찾기 화면은 페이지 그라데이션이 헤더까지 이어져야
-  // 해서 배경을 투명하게 둔다(PageBackground.tsx와 같은 기준이어야 한다 —
-  // 비밀번호 찾기가 빠져 있어서 그 화면만 헤더 아래에서 그라데이션이 끊겨
-  // 보이는 오류가 있었다).
+  // 로그인/회원가입/비밀번호 찾기/재설정 화면은 페이지 그라데이션이 헤더까지
+  // 이어져야 해서 배경을 투명하게 둔다(PageBackground.tsx와 같은 기준이어야
+  // 한다 — 비밀번호 찾기가 빠져 있어서 그 화면만 헤더 아래에서 그라데이션이
+  // 끊겨 보이는 오류가 있었다. 재설정 화면도 같은 흐름이라 함께 넣는다).
   const transparentHeader =
-    pathname === "/login" || pathname === "/signup" || pathname === "/forgot-password";
+    pathname === "/login" || pathname === "/signup" || pathname === "/forgot-password" || pathname === "/reset-password";
 
   return (
     // mb-6(헤더 아래 여백)을 헤더 자체가 아니라 이 바깥 wrapper로 옮겼다 —
