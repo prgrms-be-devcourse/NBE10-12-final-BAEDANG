@@ -155,17 +155,20 @@ export default function GuidePage() {
           </div>
 
           <Reveal delay={0.5} className="mt-4.5">
-            {/* "참고" 안내 박스의 배경색을 메인 화면 히어로 사각형("실전처럼
-                경험하고, 나만의 투자 감각을 키워요" 문구가 놓인 카드)의 배경과
-                똑같이 맞춰달라는 요청 — page.tsx 히어로 div에 쓴 background 값
-                (토스임팩트 스타일 radial-gradient + var(--heroBg))을 그대로
-                가져왔다. 글자색(var(--onAccentSoftText))은 라이트/다크 모두
-                이 새 배경 위에서도 대비가 충분해 그대로 유지했다. */}
+            {/* "참고" 안내 박스 배경을 히어로 카드와 똑같은 값으로 맞췄더니
+                막상 적용해보니 너무 진하다는 피드백 — 특히 다크 모드는
+                var(--heroBg)가 꽤 채도 높은 남색(#114f8c)이라 튀어 보였다.
+                같은 방향(히어로의 하늘색 radial-gradient)은 유지하되, 훨씬
+                연하게 보이도록 두 가지를 낮췄다: ① 그라데이션 알파를
+                0.55→0.18로 낮추고, ② 바탕색을 var(--heroBg) 대신 이 페이지의
+                다른 박스들과 같은 var(--card)(라이트 흰색·다크 무채색에
+                가까운 짙은 회색)로 바꿔, 다크 모드에서도 배경 자체가 채도
+                높은 남색이 되지 않게 했다. */}
             <div
               className="rounded-2xl px-5 py-4"
               style={{
                 background:
-                  "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), var(--heroBg)",
+                  "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.18) 0%, rgba(150,196,255,0) 70%), var(--card)",
               }}
             >
               <RevealText
