@@ -24,7 +24,11 @@ function LoginForm() {
     try {
       const user = await login({ email, password });
       setUser(user);
-      router.push(next ?? "/");
+      // "/"는 이제 방문할 때마다 무조건 서비스 소개 화면으로 돌려보내므로
+      // (proxy.ts), next 파라미터가 없을 때의 기본 목적지는 실제 메인
+      // 화면("/main")이어야 한다 — 그래야 로그인 직후 다시 소개 화면을
+      // 보게 되지 않는다.
+      router.push(next ?? "/main");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "로그인에 실패했어요.");
     } finally {

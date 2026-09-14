@@ -8,18 +8,18 @@ import { useTheme } from "./ThemeProvider";
 import { PillTabs } from "./PillTabs";
 
 const MENU = [
-  { value: "/", label: "메인" },
+  { value: "/main", label: "메인" },
   { value: "/rankings", label: "랭킹" },
   { value: "/guide", label: "가이드" },
   { value: "/my", label: "마이페이지" },
 ];
 
 function activeNavValue(pathname: string): string {
-  if (pathname === "/") return "/";
+  if (pathname === "/main") return "/main";
   if (pathname.startsWith("/rankings") || pathname.startsWith("/stocks")) return "/rankings";
   if (pathname.startsWith("/guide")) return "/guide";
   if (pathname.startsWith("/my")) return "/my";
-  return "/";
+  return "/main";
 }
 
 export function Nav() {
@@ -70,8 +70,10 @@ export function Nav() {
           렌더링한다 — 별도의 다크 모드 로고 파일 없이도 텍스트였을 때와 동일하게
           라이트=남색/다크=흰색으로 보인다.
           로고를 클릭하면 서비스 소개 화면("/intro")으로 이동하게 해달라는
-          요청 — 홈("/")은 첫 방문자만 자동으로 리다이렉트되므로(proxy.ts),
-          로고 클릭은 그 소개 화면을 언제든 다시 보고 싶을 때 쓰는 통로다. */}
+          요청 — 이제 "/"는 방문할 때마다 무조건 그 화면으로 돌려보내므로
+          (proxy.ts) 사실상 로고와 같은 목적지지만, 앱 안에서 이동 중일 때도
+          언제든 소개 화면을 다시 보고 싶으면 "/intro"로 바로 갈 수 있게
+          로고는 그대로 둔다. */}
       <Link href="/intro" className="mr-1.5 inline-flex items-center whitespace-nowrap" aria-label="InvestUP">
         {/* eslint-disable-next-line @next/next/no-img-element -- 헤더 로고 이미지 하나뿐이라 next/image 최적화 이점이 없다 */}
         <img
