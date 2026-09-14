@@ -342,7 +342,11 @@ function FinancialProfitabilityChart({ periods, large = false, onExpand }: { per
     .filter((value): value is number => value !== null);
   if (values.length === 0) return <ChartCard title="수익성 추이" subtitle="이익을 남기는 힘의 흐름" onExpand={onExpand}><EmptyChart /></ChartCard>;
 
+  // 음수(적자)도 축에 포함한다 — Math.max(0, value)로 클램핑하면 -50%와 0%가
+  // 같은 좌표에 찍혀 적자와 흑자 전환을 구분할 수 없다.
   const maxValue = Math.max(100, ...values);
+  const minValue = Math.min(0, ...values);
+  const range = maxValue - minValue;
   const left = large ? 38 : 32;
   const right = 726;
   const top = large ? 26 : 22;
@@ -351,21 +355,28 @@ function FinancialProfitabilityChart({ periods, large = false, onExpand }: { per
   const groupWidth = chartWidth / Math.max(periods.length - 1, 1);
   const labelSize = large ? 13 : 12;
   const height = large ? 300 : 250;
+  const zeroY = bottom - ((0 - minValue) / range) * (bottom - top);
 
   return (
     <ChartCard title="수익성 추이" subtitle="이익을 남기는 힘의 흐름을 비교해요" onExpand={onExpand} large={large}>
       <svg className={large ? "h-[300px] w-full" : "h-[250px] w-full"} viewBox={`0 0 760 ${height}`} role="img" aria-label="최근 영업이익률과 순이익률과 ROE 추이 선그래프">
         <line x1={left} y1={top} x2={right} y2={top} stroke="var(--line2)" strokeWidth="1" strokeDasharray="4 5" />
         <line x1={left} y1={bottom} x2={right} y2={bottom} stroke="var(--line2)" strokeWidth="1" />
+        {minValue < 0 && (
+          <line x1={left} y1={zeroY} x2={right} y2={zeroY} stroke="var(--mut2)" strokeWidth="1" strokeDasharray="3 4" />
+        )}
         <text x="4" y={top + 5} fontSize={labelSize} fill="var(--mut2)">{`${Math.round(maxValue)}%`}</text>
-        <text x="12" y={bottom + 5} fontSize={labelSize} fill="var(--mut2)">0%</text>
+        <text x="4" y={zeroY + 4} fontSize={labelSize} fill="var(--mut2)">0%</text>
+        {minValue < 0 && (
+          <text x="4" y={bottom + 4} fontSize={labelSize} fill="var(--mut2)">{`${Math.round(minValue)}%`}</text>
+        )}
         {PROFITABILITY_SERIES.map((item) => {
           const points = periods
             .map((period, index) => {
               const value = toNumber(item.getValue(period));
               if (value === null) return null;
               const x = periods.length === 1 ? (left + right) / 2 : left + groupWidth * index;
-              const y = bottom - (Math.max(0, value) / maxValue) * (bottom - top);
+              const y = bottom - ((value - minValue) / range) * (bottom - top);
               return `${x},${y}`;
             })
             .filter((point): point is string => point !== null)
