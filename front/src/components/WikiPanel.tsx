@@ -44,7 +44,12 @@ function TermPill({ term, onOpen }: { term: WikiTerm; onOpen: (t: WikiTerm) => v
       onClick={() => onOpen(term)}
       className="flex-none cursor-pointer whitespace-nowrap rounded-full px-[26px] py-[15px] text-[18px] font-normal transition-shadow duration-150"
       style={{ background: "var(--card)", color: "var(--ink)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 14px rgba(15,56,104,.12)")}
+      // 타원(알약형) 용어 버튼에 마우스를 올렸을 때 나타나는 그림자 색을
+      // #b6d7fd로 바꿔달라는 요청 — 기존 짙은 남색 그림자(rgba(15,56,104,.12))
+      // 대신 이 하늘색을 썼다. 밝은 색이라 기존과 같은 12% 알파로는 거의 안
+      // 보여서, 옅은 하늘색 계열에 이미 쓰던 것과 같은 55% 알파로 올려 그림자가
+      // 실제로 보이게 했다.
+      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 14px rgba(182,215,253,.55)")}
       onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
     >
       {term.name}
