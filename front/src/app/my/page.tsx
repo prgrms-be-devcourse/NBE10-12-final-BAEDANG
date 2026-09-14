@@ -821,9 +821,10 @@ export default function MyPage() {
                 줘서 가로로 늘어놓아도 한 칸씩 적당한 크기를 유지한다.
                 화면이 좁아지면 flex-wrap으로 다음 줄로 넘어간다.
                 변경 버튼과 입력칸 사이 간격을 넓혀달라는 요청 —
-                gap-2(8px) → gap-4(16px). flex-wrap이라 줄이 어떻게
-                꺾이든 모든 요소 사이 간격이 함께 넓어진다. */}
-            <div className="flex flex-wrap items-start gap-4">
+                gap-2(8px) → gap-4(16px) → gap-8(32px, "많이 넓게"
+                후속 요청). flex-wrap이라 줄이 어떻게 꺾이든 모든
+                요소 사이 간격이 함께 넓어진다. */}
+            <div className="flex flex-wrap items-start gap-8">
               <input
                 type="password"
                 required
