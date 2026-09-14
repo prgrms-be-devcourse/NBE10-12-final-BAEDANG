@@ -3,17 +3,22 @@ package com.baedang.auth.service;
 import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.PasswordResetConfirmRequest;
+import com.baedang.auth.dto.PasswordResetRequestRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
+import com.baedang.auth.mail.PasswordResetMailSender;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
+import com.baedang.user.entity.PasswordResetToken;
 import com.baedang.user.entity.User;
 import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
+import com.baedang.user.repository.PasswordResetTokenRepository;
 import com.baedang.user.repository.UserRepository;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -21,6 +26,7 @@ import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -29,6 +35,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -42,8 +49,10 @@ import static org.mockito.Mockito.*;
 class AuthServiceTest {
     private UserRepository userRepository;
     private AccountRepository accountRepository;
+    private PasswordResetTokenRepository passwordResetTokenRepository;
     private LedgerService ledgerService;
     private JwtTokenProvider jwtTokenProvider;
+    private PasswordResetMailSender passwordResetMailSender;
     private PasswordEncoder passwordEncoder;
     private Clock clock;
     private AuthService authService;
@@ -55,18 +64,24 @@ class AuthServiceTest {
     void setUp() {
         userRepository = mock(UserRepository.class);
         accountRepository = mock(AccountRepository.class);
+        passwordResetTokenRepository = mock(PasswordResetTokenRepository.class);
         ledgerService = mock(LedgerService.class);
         jwtTokenProvider = mock(JwtTokenProvider.class);
+        passwordResetMailSender = mock(PasswordResetMailSender.class);
         passwordEncoder = new BCryptPasswordEncoder();
         clock = Clock.fixed(now, ZoneOffset.UTC);
 
         authService = new AuthService(
                 userRepository,
                 accountRepository,
+                passwordResetTokenRepository,
                 ledgerService,
                 passwordEncoder,
                 jwtTokenProvider,
+                passwordResetMailSender,
                 initialCash,
+                "http://localhost:3000",
+                Duration.ofMinutes(30),
                 clock
         );
     }
@@ -180,10 +195,14 @@ class AuthServiceTest {
         AuthService service = new AuthService(
                 userRepository,
                 accountRepository,
+                passwordResetTokenRepository,
                 ledgerService,
                 encoder,
                 jwtTokenProvider,
+                passwordResetMailSender,
                 initialCash,
+                "http://localhost:3000",
+                Duration.ofMinutes(30),
                 clock);
         when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
 
@@ -356,5 +375,107 @@ class AuthServiceTest {
                                 == ErrorCode.INVALID_TOKEN);
 
         verify(jwtTokenProvider, never()).createAccessToken(anyLong());
+    }
+
+    @Test
+    @DisplayName("비밀번호 찾기 요청은 ACTIVE 회원이면 이전 토큰을 무효화하고 새 토큰을 발급해 메일을 보낸다")
+    void 비밀번호_찾기_요청은_ACTIVE_회원에게_메일을_보낸다() {
+        User user = User.create("test@example.com", "encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        authService.requestPasswordReset(new PasswordResetRequestRequest("test@example.com"));
+
+        OffsetDateTime expectedNow = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
+        verify(passwordResetTokenRepository).invalidateUnusedByUserId(1L, expectedNow);
+
+        ArgumentCaptor<PasswordResetToken> tokenCaptor = ArgumentCaptor.forClass(PasswordResetToken.class);
+        verify(passwordResetTokenRepository).save(tokenCaptor.capture());
+        assertThat(tokenCaptor.getValue().getUserId()).isEqualTo(1L);
+        assertThat(tokenCaptor.getValue().getExpiresAt()).isEqualTo(expectedNow.plusMinutes(30));
+
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetMailSender).sendResetLink(eq("test@example.com"), urlCaptor.capture());
+        assertThat(urlCaptor.getValue()).startsWith("http://localhost:3000/reset-password?token=");
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 이메일로 비밀번호 찾기를 요청해도 예외 없이 조용히 끝나고 메일을 보내지 않는다")
+    void 존재하지_않는_이메일은_조용히_무시한다() {
+        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+
+        authService.requestPasswordReset(new PasswordResetRequestRequest("none@example.com"));
+
+        verify(passwordResetTokenRepository, never()).save(any());
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+    }
+
+    @Test
+    @DisplayName("WITHDRAWN 회원으로 비밀번호 찾기를 요청해도 메일을 보내지 않는다")
+    void 비활성_회원은_비밀번호_찾기_메일을_받지_않는다() {
+        User user = User.create("test@example.com", "encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+
+        authService.requestPasswordReset(new PasswordResetRequestRequest("test@example.com"));
+
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+        verify(passwordResetTokenRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("유효한 토큰으로 비밀번호를 재설정하면 새 비밀번호로 바뀌고 토큰이 무효화된다")
+    void 유효한_토큰으로_비밀번호를_재설정한다() {
+        User user = User.create("test@example.com", "old-encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        PasswordResetToken token = PasswordResetToken.issue(
+                1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
+
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
+        when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE)).thenReturn(Optional.of(user));
+
+        authService.resetPassword(new PasswordResetConfirmRequest("raw-token", "NewPassword123!"));
+
+        assertThat(passwordEncoder.matches("NewPassword123!", user.getPasswordHash())).isTrue();
+        verify(passwordResetTokenRepository).invalidateUnusedByUserId(eq(1L), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_INVALID")
+    void 존재하지_않는_토큰은_거절한다() {
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                authService.resetPassword(new PasswordResetConfirmRequest("bad-token", "NewPassword123!")))
+                .isInstanceOf(BusinessException.class)
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.PASSWORD_RESET_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("이미 사용된 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_INVALID")
+    void 이미_사용된_토큰은_거절한다() {
+        PasswordResetToken token = PasswordResetToken.issue(
+                1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
+        token.markUsed(OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
+
+        assertThatThrownBy(() ->
+                authService.resetPassword(new PasswordResetConfirmRequest("used-token", "NewPassword123!")))
+                .isInstanceOf(BusinessException.class)
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.PASSWORD_RESET_TOKEN_INVALID);
+    }
+
+    @Test
+    @DisplayName("만료된 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_EXPIRED")
+    void 만료된_토큰은_거절한다() {
+        PasswordResetToken token = PasswordResetToken.issue(
+                1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusMinutes(1));
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
+
+        assertThatThrownBy(() ->
+                authService.resetPassword(new PasswordResetConfirmRequest("expired-token", "NewPassword123!")))
+                .isInstanceOf(BusinessException.class)
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.PASSWORD_RESET_TOKEN_EXPIRED);
     }
 }

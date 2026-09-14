@@ -3,6 +3,8 @@ package com.baedang.auth.controller;
 import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.PasswordResetConfirmRequest;
+import com.baedang.auth.dto.PasswordResetRequestRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.service.AuthService;
@@ -43,6 +45,23 @@ public class AuthController {
 
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@AuthenticationPrincipal Long userId) {
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * 비밀번호 찾기 메일 발송. 가입 여부와 무관하게 항상 200을 돌려준다 — 계정 열거
+     * 공격 방지(AuthService.requestPasswordReset 문서 참고).
+     */
+    @PostMapping("/password/forgot")
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody PasswordResetRequestRequest request) {
+        authService.requestPasswordReset(request);
+        return ResponseEntity.ok().build();
+    }
+
+    /** 이메일 링크의 토큰으로 새 비밀번호를 확정한다. */
+    @PostMapping("/password/reset")
+    public ResponseEntity<Void> resetPassword(@Valid @RequestBody PasswordResetConfirmRequest request) {
+        authService.resetPassword(request);
         return ResponseEntity.ok().build();
     }
 
