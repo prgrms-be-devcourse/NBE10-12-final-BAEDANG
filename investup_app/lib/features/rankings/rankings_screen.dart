@@ -198,19 +198,18 @@ class _RankingsScreenState extends State<RankingsScreen> {
                 ),
                 if (!searching) ...[
                   const SizedBox(height: 8),
-                  SegmentedButton<MarketCountry>(
-                    segments: const [
-                      ButtonSegment(
-                        value: MarketCountry.kr,
-                        label: Text('국내 주식'),
+                  Center(
+                    child: SizedBox(
+                      width: 220,
+                      child: PillTabs<MarketCountry>(
+                        options: const [
+                          (value: MarketCountry.kr, label: '국내 주식'),
+                          (value: MarketCountry.us, label: '해외 주식'),
+                        ],
+                        value: _market,
+                        onChanged: _select,
                       ),
-                      ButtonSegment(
-                        value: MarketCountry.us,
-                        label: Text('해외 주식'),
-                      ),
-                    ],
-                    selected: {_market},
-                    onSelectionChanged: (set) => _select(set.first),
+                    ),
                   ),
                 ],
               ],

@@ -64,14 +64,16 @@ class _GuideScreenState extends State<GuideScreen> {
           child: Center(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: SegmentedButton<String>(
-                segments: const [
-                  ButtonSegment(value: 'guide', label: Text('이용가이드')),
-                  ButtonSegment(value: 'wiki', label: Text('금융 용어 위키')),
-                ],
-                selected: {_tab},
-                showSelectedIcon: false,
-                onSelectionChanged: (set) => setState(() => _tab = set.first),
+              child: SizedBox(
+                width: 220,
+                child: PillTabs<String>(
+                  options: const [
+                    (value: 'guide', label: '이용가이드'),
+                    (value: 'wiki', label: '금융 용어 위키'),
+                  ],
+                  value: _tab,
+                  onChanged: (v) => setState(() => _tab = v),
+                ),
               ),
             ),
           ),
