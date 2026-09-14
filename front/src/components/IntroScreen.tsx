@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { InvestupIntro } from "./InvestupIntro";
+import { SwapText } from "./SwapText";
 
 /**
  * `/intro` 페이지 본문 — 방문할 때마다(재방문 포함) 무조건 보여주는 서비스 소개
@@ -11,7 +12,14 @@ import { InvestupIntro } from "./InvestupIntro";
  *
  * <p>SKIP 버튼은 `InvestupIntro`(팀원이 전달한 디자인 패키지 — 로직·수치·마크업을
  * 임의로 바꾸지 않기로 한 컴포넌트) 내부를 건드리지 않고, 그 위에 고정 위치로
- * 얹은 오버레이다.
+ * 얹은 오버레이다. 스타일·호버 애니메이션은 하단 "시작하기" CTA 버튼과 똑같이
+ * 맞춰달라는 요청 — 그 버튼이 쓰는 iv-cta-btn(반투명 흰 배경 알약, 호버 시 더
+ * 밝아짐)과 iv-hover-swap + SwapText(호버 시 글자가 아래→위로 스치듯 바뀜)를
+ * 그대로 재사용했다. 둘 다 investup-intro.css에 "특정 버튼에 종속되지 않는"
+ * 범용 클래스로 이미 있어 그대로 가져다 쓸 수 있었다(메인 화면 CTA 버튼도 같은
+ * 방식으로 재사용 중). "시작하기" 버튼에만 있는 스크롤 등장 애니메이션
+ * (opacity/blur/translateY, ctaBtnRevealed)은 옮기지 않았다 — SKIP은 스크롤과
+ * 무관하게 화면에 고정돼 처음부터 계속 보여야 하는 버튼이라 적용 대상이 아니다.
  */
 export function IntroScreen() {
   return (
@@ -19,7 +27,7 @@ export function IntroScreen() {
       <InvestupIntro ctaHref="/main" />
       <Link
         href="/main"
-        className="iv-skip-btn"
+        className="iv-cta-btn iv-hover-swap"
         style={{
           position: "fixed",
           right: "clamp(16px, 4vw, 40px)",
@@ -27,25 +35,20 @@ export function IntroScreen() {
           zIndex: 100,
           display: "inline-flex",
           alignItems: "center",
-          gap: 8,
-          padding: "10px 22px",
+          minHeight: 54,
+          padding: "0 44px",
           borderRadius: 999,
-          background: "rgba(255,255,255,.92)",
-          color: "#0f3868",
-          fontSize: 13,
-          fontWeight: 800,
-          letterSpacing: ".08em",
+          background: "rgba(255,255,255,.06)",
+          color: "#ffffff",
+          fontSize: 19,
+          fontWeight: 700,
+          letterSpacing: "-.01em",
           textDecoration: "none",
-          transition: "background-color 150ms ease-out",
+          boxShadow: "0 2px 8px rgba(15,23,32,.08)",
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.background = "#ffffff")}
-        onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(255,255,255,.92)")}
         aria-label="소개 건너뛰고 메인 화면으로 이동"
       >
-        SKIP
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M9 6l6 6-6 6" />
-        </svg>
+        <SwapText>SKIP</SwapText>
       </Link>
     </>
   );
