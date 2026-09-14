@@ -321,7 +321,7 @@ function OpenCard({
                 className="flex aspect-square flex-col items-center justify-center gap-2 rounded-[20px] px-4 text-center"
                 style={{ background: "var(--accentSoft)" }}
               >
-                <span className="font-mono text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
+                <span className="text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
                   {report.typeCode}
                 </span>
                 <span className="text-[13px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
@@ -330,7 +330,7 @@ function OpenCard({
               </div>
             )}
             <div className="flex items-center gap-2.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--accent)" }}>
-              <span className="font-mono text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
+              <span className="text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
               {/* 라이트 모드에서 이 문구(유형 4글자 요약, 예: "분산·해외·개별주·안정형")가
                   안 보인다는 제보 — var(--accentText)가 라이트 모드에서는 이 배경과
                   똑같은 var(--accent)(#0f3868)라 글자가 배경에 완전히 묻혔다(다크
@@ -630,7 +630,7 @@ function PersonalityImageModal({ typeCode, onClose }: { typeCode: string; onClos
       >
         <div className="mb-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-mono text-[18px] font-extrabold tracking-[.04em]" style={{ color: "var(--ink)" }}>
+            <h3 className="text-[18px] font-extrabold tracking-[.04em]" style={{ color: "var(--ink)" }}>
               {typeCode}
             </h3>
             <p className="mt-0.5 truncate text-[13px] font-bold" style={{ color: "var(--mut2)" }}>
@@ -951,7 +951,7 @@ function TypeComparisonRow({ rank, row, isMyType }: { rank: number; row: Leaderb
       <span className="overflow-hidden text-[14.5px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
         {personaType?.nickname ?? row.typeLabel}
       </span>
-      <span className="font-mono text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
+      <span className="text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
       {isMyType && (
         <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
           내 유형
