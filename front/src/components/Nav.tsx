@@ -134,15 +134,14 @@ export function Nav() {
             {/* 회원가입 버튼(비로그인 상태의 PillTabs 활성 필박스)과 같은 디자인 —
                 rounded-lg, var(--accent) 배경, 흰색 굵은 글자로 맞췄다. 글자 크기를
                 키워달라는 요청으로 13px → 14.5px(닉네임과 같은 크기)로 올렸다.
-                메인 화면 국내장/해외장 배지에 다크 모드 전용으로 적용한 세련된
-                남색(#114f8c, var(--heroBg) 다크 값)을 이 버튼에도 똑같이
-                적용해달라는 요청 — 같은 이유(var(--accent)는 전역 변수라 다른
-                곳까지 영향)로 다크 모드일 때만 로컬로 바꿨다. 라이트 모드는
-                기존 그대로다. */}
+                한때 다크 모드 accent(#5fa0d6)가 가볍다는 이유로 이 버튼만
+                로컬로 #114f8c를 썼는데, 이후 dark accent 자체가 #114f8c로
+                통일되면서(globals.css) var(--accent) 하나만 써도 같은 색이라
+                로컬 오버라이드를 정리했다. */}
             <button
               onClick={logout}
               className="cursor-pointer whitespace-nowrap rounded-lg px-3 py-[7px] text-[14.5px] font-bold text-white"
-              style={{ background: theme === "dark" ? "#114f8c" : "var(--accent)" }}
+              style={{ background: "var(--accent)" }}
             >
               로그아웃
             </button>

@@ -82,7 +82,14 @@
   --mut: #969696;
   --mut2: #6e6e6e;
   --disabledText: #4f4f4f;
-  --accent: #5fa0d6;
+  /* 다크 모드 accent를 밝은 하늘색(#5fa0d6)에서 국내장/해외장 배지·로그아웃
+     버튼에 먼저 적용했던 더 세련된 남색(#114f8c, 바로 아래 --heroBg와
+     같은 값)으로 통일해달라는 요청 — var(--accent)를 쓰는 모든 버튼·
+     컴포넌트(회원가입/로그인 필박스, 상단 탭, 매수 버튼 등)에 한 번에
+     적용된다. 배지·로그아웃 버튼에 남아 있던 로컬 오버라이드
+     (theme === "dark" ? "#114f8c" : "var(--accent)")는 이제 결과가
+     같아져 중복이라 var(--accent)만 쓰도록 정리했다. */
+  --accent: #114f8c;
   --accentText: #a3d2ef;
   --accentSoft: #1b2a38;
   --onAccentSoftText: #acd5ef;
@@ -147,7 +154,7 @@
     --mut: #969696;
     --mut2: #6e6e6e;
     --disabledText: #4f4f4f;
-    --accent: #5fa0d6;
+    --accent: #114f8c;
     --accentText: #a3d2ef;
     --accentSoft: #1b2a38;
     --onAccentSoftText: #acd5ef;

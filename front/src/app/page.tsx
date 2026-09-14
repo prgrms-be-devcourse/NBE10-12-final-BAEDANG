@@ -172,15 +172,14 @@ export default function MainPage() {
                 {marketStatus.markets.map((m, i) => (
                   <span
                     key={m.marketCountry}
-                    // 원래는 회원가입 버튼과 동일한 배경(var(--accent))을 썼는데,
-                    // 다크 모드에서 accent가 밝은 하늘색(#5fa0d6)이라 배지가 다소
-                    // 가벼워 보인다는 요청 — 다크 모드일 때만 히어로 배경에 이미
-                    // 쓰던 짙은 남색(#114f8c, var(--heroBg) 다크 값)으로 바꿔 좀 더
-                    // 세련된 톤을 냈다. 배경이 짙어졌으니 라이트 모드와 같은 흰
-                    // 글자·옅은 흰색 점(마감 상태)으로 맞춘다. 라이트 모드는 기존
-                    // 그대로(accent 짙은 네이비 배경 + 흰 글자) 유지한다.
+                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다. 원래
+                    // 다크 모드의 accent가 밝은 하늘색(#5fa0d6)이라 이 배지만
+                    // 로컬로 짙은 남색(#114f8c)으로 바꿨었는데, 이후 dark
+                    // accent 자체가 #114f8c로 통일되면서(globals.css) 이제
+                    // var(--accent) 하나만 써도 같은 색이라 로컬 오버라이드를
+                    // 정리했다.
                     className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
-                    style={{ background: theme === "dark" ? "#114f8c" : "var(--accent)", color: "#ffffff" }}
+                    style={{ background: "var(--accent)", color: "#ffffff" }}
                   >
                     <span
                       className="h-1.5 w-1.5 rounded-full"
