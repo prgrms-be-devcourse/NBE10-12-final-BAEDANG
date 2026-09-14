@@ -546,8 +546,12 @@ export default function MyPage() {
         ) : (
           <>
             <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+              {/* 반응형 웹 적용 — 랭킹 화면 테이블과 같은 문제(고정 80px 칸 +
+                  fr 6칸짜리 그리드가 모바일 폭에서는 남는 공간이 없어 뒤쪽
+                  칸들이 카드 밖으로 잘려 보이지 않음)라 같은 방식으로
+                  고쳤다. md 미만에서는 헤더를 숨기고 행을 카드형으로 쌓는다. */}
               <div
-                className="grid px-5 py-2.5 text-[12px] font-bold"
+                className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
                 style={{
                   gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px",
                   borderBottom: "1px solid var(--line2)",
@@ -568,46 +572,86 @@ export default function MyPage() {
                 const lastPriceKrw = toKrw(h.lastPrice, h.currency, rate);
                 const pnl = toDecimal(h.unrealizedPnl);
                 const isPnlUp = !pnl || pnl.greaterThanOrEqualTo(0);
-                return (
-                  <div
-                    key={h.symbol}
-                    className="grid items-center px-5 py-3 text-[15px]"
-                    style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px", borderBottom: "1px solid var(--line2)" }}
+                const tradeLink = (
+                  <Link
+                    href={`/stocks/${h.symbol}?marketCountry=${isUsd ? "US" : "KR"}`}
+                    className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
+                    style={{ background: "var(--fill)", color: "var(--ink)" }}
                   >
-                    <span className="font-bold" style={{ color: "var(--ink)" }}>
-                      {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
-                    </span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(h.quantity)}</span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                      {formatNumber(avgBuyKrw)}
-                      {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.avgBuyPrice)}</div>}
-                    </span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                      {h.lastPrice ? (
-                        <>
-                          {formatNumber(lastPriceKrw)}
-                          {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.lastPrice)}</div>}
-                        </>
-                      ) : (
-                        "-"
-                      )}
-                    </span>
-                    <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(h.evaluationAmount)}</span>
-                    <span
-                      className="text-right tabular-nums font-semibold"
-                      style={{ color: isPnlUp ? "var(--up)" : "var(--down)" }}
+                    거래
+                  </Link>
+                );
+                const pnlNode = (
+                  <span
+                    className="tabular-nums font-semibold"
+                    style={{ color: isPnlUp ? "var(--up)" : "var(--down)" }}
+                  >
+                    {formatSigned(h.unrealizedPnl)} <span className="text-[11.5px]">({formatPercent(h.unrealizedPnlRate)})</span>
+                  </span>
+                );
+                return (
+                  <div key={h.symbol} style={{ borderBottom: "1px solid var(--line2)" }}>
+                    {/* 데스크톱(md 이상) — 기존 7칸 그리드 그대로. */}
+                    <div
+                      className="hidden items-center px-5 py-3 text-[15px] md:grid"
+                      style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px" }}
                     >
-                      {formatSigned(h.unrealizedPnl)} <span className="text-[11.5px]">({formatPercent(h.unrealizedPnlRate)})</span>
-                    </span>
-                    <span className="text-right">
-                      <Link
-                        href={`/stocks/${h.symbol}?marketCountry=${isUsd ? "US" : "KR"}`}
-                        className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
-                        style={{ background: "var(--fill)", color: "var(--ink)" }}
-                      >
-                        거래
-                      </Link>
-                    </span>
+                      <span className="font-bold" style={{ color: "var(--ink)" }}>
+                        {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
+                      </span>
+                      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(h.quantity)}</span>
+                      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                        {formatNumber(avgBuyKrw)}
+                        {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.avgBuyPrice)}</div>}
+                      </span>
+                      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                        {h.lastPrice ? (
+                          <>
+                            {formatNumber(lastPriceKrw)}
+                            {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.lastPrice)}</div>}
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </span>
+                      <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(h.evaluationAmount)}</span>
+                      <span className="text-right">{pnlNode}</span>
+                      <span className="text-right">{tradeLink}</span>
+                    </div>
+
+                    {/* 모바일(md 미만) — 2~3줄 카드형. */}
+                    <div className="flex flex-col gap-1.5 px-5 py-3 text-[15px] md:hidden">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 flex-1 truncate font-bold" style={{ color: "var(--ink)" }}>
+                          {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
+                        </span>
+                        <span className="shrink-0">{tradeLink}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[12.5px]" style={{ color: "var(--mut2)" }}>
+                        <span>보유수량 {formatNumber(h.quantity)}</span>
+                        <span>
+                          평균단가 {formatNumber(avgBuyKrw)}
+                          {isUsd && ` (${formatUsd(h.avgBuyPrice)})`}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="tabular-nums" style={{ color: "var(--ink)" }}>
+                          현재가{" "}
+                          {h.lastPrice ? (
+                            <>
+                              {formatNumber(lastPriceKrw)}
+                              {isUsd && <span className="text-[10.5px]" style={{ color: "var(--mut2)" }}> ({formatUsd(h.lastPrice)})</span>}
+                            </>
+                          ) : (
+                            "-"
+                          )}
+                        </span>
+                        {pnlNode}
+                      </div>
+                      <div className="text-right text-[12.5px] tabular-nums" style={{ color: "var(--mut2)" }}>
+                        평가금액 {formatNumber(h.evaluationAmount)}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -626,8 +670,10 @@ export default function MyPage() {
       ) : (
         <>
           <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 보유 종목 테이블과 같은 이유로 md 미만에서는
+                헤더를 숨기고 행을 카드형으로 쌓는다. */}
             <div
-              className="grid px-5 py-2.5 text-[12px] font-bold"
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
               style={{
                 gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px",
                 columnGap: "12px",
@@ -642,57 +688,95 @@ export default function MyPage() {
               <span className="text-right">주문시각</span>
               <span />
             </div>
-            {orders.map((order) => (
-              <div
-                key={order.orderId}
-                className="grid items-center px-5 py-3 text-[15px]"
-                style={{ gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px", columnGap: "12px", borderBottom: "1px solid var(--line2)" }}
-              >
-                <span className="font-bold" style={{ color: "var(--ink)" }}>
-                  {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
-                  <div className="mt-1 flex gap-1">
-                    <OrderSideBadge side={order.side} />
-                    <span
-                      className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
-                      style={{ background: "var(--fill)", color: "var(--mut2)" }}
-                    >
-                      {order.orderType === "LIMIT" ? "지정가" : "시장가"}
-                    </span>
-                  </div>
-                </span>
-                <span>
-                  <OrderStatusBadge status={order.status} />
-                </span>
-                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                  {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
-                  {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
-                    <div className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}>
-                      미체결 {formatNumber(order.activeRemainingQuantity)}
-                    </div>
-                  )}
-                </span>
-                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                  {order.orderType === "LIMIT"
-                    ? order.requestedLimitCurrency === "USD"
-                      ? formatUsd(order.requestedLimitPrice)
-                      : `${formatNumber(order.requestedLimitPrice)}원`
-                    : "-"}
-                </span>
-                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
-                  {new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                </span>
-                <span className="text-right">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedOrder(order)}
-                    className="cursor-pointer rounded-md px-3.5 py-2 text-[13px] font-semibold"
-                    style={{ background: "var(--fill)", color: "var(--ink)" }}
+            {orders.map((order) => {
+              const orderedAtText = new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+              const priceText =
+                order.orderType === "LIMIT"
+                  ? order.requestedLimitCurrency === "USD"
+                    ? formatUsd(order.requestedLimitPrice)
+                    : `${formatNumber(order.requestedLimitPrice)}원`
+                  : "-";
+              const detailButton = (
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrder(order)}
+                  className="cursor-pointer rounded-md px-3.5 py-2 text-[13px] font-semibold"
+                  style={{ background: "var(--fill)", color: "var(--ink)" }}
+                >
+                  상세
+                </button>
+              );
+              return (
+                <div key={order.orderId} style={{ borderBottom: "1px solid var(--line2)" }}>
+                  {/* 데스크톱(md 이상) — 기존 6칸 그리드 그대로. */}
+                  <div
+                    className="hidden items-center px-5 py-3 text-[15px] md:grid"
+                    style={{ gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px", columnGap: "12px" }}
                   >
-                    상세
-                  </button>
-                </span>
-              </div>
-            ))}
+                    <span className="font-bold" style={{ color: "var(--ink)" }}>
+                      {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
+                      <div className="mt-1 flex gap-1">
+                        <OrderSideBadge side={order.side} />
+                        <span
+                          className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
+                          style={{ background: "var(--fill)", color: "var(--mut2)" }}
+                        >
+                          {order.orderType === "LIMIT" ? "지정가" : "시장가"}
+                        </span>
+                      </div>
+                    </span>
+                    <span>
+                      <OrderStatusBadge status={order.status} />
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                      {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
+                      {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
+                        <div className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}>
+                          미체결 {formatNumber(order.activeRemainingQuantity)}
+                        </div>
+                      )}
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{orderedAtText}</span>
+                    <span className="text-right">{detailButton}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 px-5 py-3 text-[15px] md:hidden">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 flex-1 truncate font-bold" style={{ color: "var(--ink)" }}>
+                        {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
+                      </span>
+                      <span className="shrink-0">
+                        <OrderStatusBadge status={order.status} />
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      <OrderSideBadge side={order.side} />
+                      <span
+                        className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
+                        style={{ background: "var(--fill)", color: "var(--mut2)" }}
+                      >
+                        {order.orderType === "LIMIT" ? "지정가" : "시장가"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[13px]">
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>
+                        수량 {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
+                        {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
+                          <span className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}> · 미체결 {formatNumber(order.activeRemainingQuantity)}</span>
+                        )}
+                      </span>
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{orderedAtText}</span>
+                      {detailButton}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
           {ordersHasNext && (
             <button
@@ -714,8 +798,10 @@ export default function MyPage() {
       ) : (
         <>
           <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 위 두 테이블과 같은 이유로 md 미만에서는
+                헤더를 숨기고 행을 카드형으로 쌓는다. */}
             <div
-              className="grid px-5 py-2.5 text-[12px] font-bold"
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
               style={{
                 gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
                 columnGap: "20px",
@@ -732,30 +818,43 @@ export default function MyPage() {
             {ledger.map((entry) => {
               const amount = toDecimal(entry.amount);
               const isPositive = !amount || amount.greaterThanOrEqualTo(0);
-              return (
-                <div
-                  key={entry.entryId}
-                  className="grid items-center px-5 py-3 text-[15px]"
-                  style={{
-                    gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
-                    columnGap: "20px",
-                    borderBottom: "1px solid var(--line2)",
-                  }}
+              const occurredAtText = new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+              const amountNode = (
+                <span
+                  className="tabular-nums font-semibold"
+                  style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
                 >
-                  <span>
-                    <LedgerBadge type={entry.entryType} />
-                  </span>
-                  <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
-                  <span
-                    className="text-right tabular-nums font-semibold"
-                    style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
+                  {formatSigned(entry.amount)}
+                </span>
+              );
+              return (
+                <div key={entry.entryId} style={{ borderBottom: "1px solid var(--line2)" }}>
+                  {/* 데스크톱(md 이상) — 기존 5칸 그리드 그대로. */}
+                  <div
+                    className="hidden items-center px-5 py-3 text-[15px] md:grid"
+                    style={{ gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr", columnGap: "20px" }}
                   >
-                    {formatSigned(entry.amount)}
-                  </span>
-                  <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                  <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
-                    {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                  </span>
+                    <span>
+                      <LedgerBadge type={entry.entryType} />
+                    </span>
+                    <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                    <span className="text-right">{amountNode}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
+                    <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{occurredAtText}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 px-5 py-3 text-[15px] md:hidden">
+                    <div className="flex items-center gap-2">
+                      <LedgerBadge type={entry.entryType} />
+                      <span className="min-w-0 flex-1 truncate" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[13px]">
+                      {amountNode}
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>잔액 {formatNumber(entry.balanceAfter)}</span>
+                    </div>
+                    <div className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{occurredAtText}</div>
+                  </div>
                 </div>
               );
             })}

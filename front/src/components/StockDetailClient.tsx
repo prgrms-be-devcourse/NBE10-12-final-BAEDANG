@@ -514,8 +514,13 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
         side: side === "매수" ? "BUY" : "SELL",
         quantity: quantityInput,
       });
+      // "종목명 N주 매수 체결" 뒤에 (체결가·총 차감/입금액) 상세를 줄바꿈해서
+      // 보여달라는 요청 — 이후 등장하는 어떤 종목이어도 항상 이 형식(첫 줄:
+      // 종목·수량·체결, 둘째 줄: 괄호 안 금액 상세)을 따른다. \n을 넣고
+      // 렌더링 쪽(아래 배너·팝업 둘 다)에 whiteSpace: "pre-line"을 줬다.
       setOrderResult(
-        `${detail.name} ${response.quantity}주 시장가 ${side} 체결 (체결가 ${response.executedPrice}` +
+        `${detail.name} ${response.quantity}주 시장가 ${side} 체결\n` +
+          `(체결가 ${response.executedPrice}` +
           `${detail.currency === "USD" ? "$" : "원"} · 총 ${side === "매수" ? "차감" : "입금"}액 ` +
           `${formatNumber(response.netAmount)}원)`
       );
@@ -1139,7 +1144,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
           {orderResult && (
             <div
               className="mt-3 rounded-xl px-3.5 py-3 text-[13.5px]"
-              style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
+              style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)", whiteSpace: "pre-line" }}
             >
               {orderResult}
             </div>
@@ -1169,7 +1174,7 @@ export function StockDetailClient({ detail }: { detail: StockDetail }) {
             <h3 className="mb-1.5 text-[18px] font-bold" style={{ color: "var(--ink)" }}>
               {orderType === "시장가" ? "거래가 체결됐어요" : "주문이 접수됐어요"}
             </h3>
-            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
+            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)", whiteSpace: "pre-line" }}>
               {orderResult}
             </p>
             <button
