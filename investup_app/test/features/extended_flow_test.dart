@@ -396,6 +396,41 @@ void main() {
       await _settle(tester);
       expect(find.text('배당 상세 설명 본문입니다.'), findsOneWidget);
     });
+
+    testWidgets('별칭으로만 걸린 결과는 매칭된 별칭을 보여준다', (tester) async {
+      const source = _FakeTermsSource([
+        WikiTerm(
+          name: '결제일',
+          summary: '돈이 오가는 날',
+          aliases: ['T+2', '보통거래', '결제'],
+          body: '결제일 본문.',
+          chosung: 'ㄱㅈㅇ',
+          aliasChosungs: ['T+2', 'ㅂㅌㄱㄹ', 'ㄱㅈ'],
+        ),
+        WikiTerm(
+          name: '시가총액',
+          summary: '회사의 전체 가치',
+          aliases: [],
+          body: '시가총액 본문.',
+          chosung: 'ㅅㄱㅊㅇ',
+          aliasChosungs: [],
+        ),
+      ]);
+      await tester.pumpWidget(
+        const MaterialApp(home: Scaffold(body: GuideScreen(termsSource: source))),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('금융 용어 위키'));
+      await _settle(tester);
+
+      // '보'는 별칭 '보통거래'에만 포함 → 결제일이 별칭 이유와 함께 나와야 한다.
+      await tester.enterText(find.byType(TextField), '보');
+      await _settle(tester);
+      expect(find.text('결제일'), findsOneWidget);
+      expect(find.text('별칭: 보통거래'), findsOneWidget);
+      expect(find.text('시가총액'), findsNothing);
+    });
   });
 
   group('비밀번호 찾기', () {

@@ -165,6 +165,29 @@ class _WikiPanelState extends State<_WikiPanel> {
         .toList(growable: false);
   }
 
+  /// 별칭으로만 맞았을 때 어떤 별칭이 걸렸는지 돌려준다(이름·초성 매칭이면 null).
+  /// '보' 검색에 '결제일'이 뜨는 이유처럼, 결과 이유가 보이지 않으면 버그처럼 느껴진다.
+  String? _matchedAlias(WikiTerm term) {
+    final query = _query.toLowerCase();
+    if (query.isEmpty) return null;
+    final compact = query.replaceAll(' ', '');
+    if (RegExp(r'^[ㄱ-ㅎ]+$').hasMatch(compact)) {
+      if (term.chosung.contains(compact)) return null;
+      for (var i = 0; i < term.aliases.length; i++) {
+        if (i < term.aliasChosungs.length &&
+            term.aliasChosungs[i].contains(compact)) {
+          return term.aliases[i];
+        }
+      }
+      return null;
+    }
+    if (term.name.toLowerCase().contains(query)) return null;
+    for (final alias in term.aliases) {
+      if (alias.toLowerCase().contains(query)) return alias;
+    }
+    return null;
+  }
+
   void _openTerm(WikiTerm term) {
     showDialog<void>(
       context: context,
@@ -252,6 +275,7 @@ class _WikiPanelState extends State<_WikiPanel> {
                         for (final term in results)
                           _TermPill(
                             term: term,
+                            matchedAlias: _matchedAlias(term),
                             onTap: () => _openTerm(term),
                           ),
                       ],
@@ -385,10 +409,13 @@ class _MarqueeRowState extends State<_MarqueeRow>
 }
 
 class _TermPill extends StatelessWidget {
-  const _TermPill({required this.term, required this.onTap});
+  const _TermPill({required this.term, required this.onTap, this.matchedAlias});
 
   final WikiTerm term;
   final VoidCallback onTap;
+
+  /// 별칭으로만 걸린 검색 결과에서 매칭된 별칭(이유 표시용).
+  final String? matchedAlias;
 
   @override
   Widget build(BuildContext context) {
@@ -401,7 +428,20 @@ class _TermPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-          child: Text(term.name, style: theme.textTheme.bodyLarge),
+          child: matchedAlias == null
+              ? Text(term.name, style: theme.textTheme.bodyLarge)
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(term.name, style: theme.textTheme.bodyLarge),
+                    Text(
+                      '별칭: $matchedAlias',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
         ),
       ),
     );
