@@ -63,6 +63,17 @@ export default function MyPage() {
   const dangerBg = theme === "light" ? "oklch(94% 0.035 30)" : "var(--dangerBg)";
   const dangerText = theme === "light" ? "oklch(40% 0.16 28)" : "var(--dangerText)";
   const dangerTextSoft = theme === "light" ? "oklch(46% 0.06 28)" : "var(--dangerTextSoft)";
+  // "초기화할게요"/"탈퇴할게요" 확인 버튼 배경을 다크 모드에서만 좀 더 세련된
+  // 레드로 바꿔달라는 요청(이번엔 반대로 다크 모드 한정 — 라이트 모드는 기존
+  // var(--dangerText) 원본 그대로 둔다). 이 두 버튼은 위 danger* 로컬 변수를
+  // 쓰지 않고 var(--dangerText)를 직접 참조하고 있었다 — 전역 변수라 여기서
+  // 바꾸면 StockDetailClient·OrderDetailModal의 에러 문구 색까지 같이
+  // 바뀌므로, 이번에도 전역 변수 대신 이 페이지 로컬 값을 새로 둔다. 다크
+  // 모드 원본(oklch 76%/0.15/22)은 텍스트용으로 밝게 잡은 값이라 버튼
+  // 배경으로 쓰면 옅고 밋밋해 보인다 — 라이트 모드 때와 같은 방향(채도를
+  // 낮추고 hue를 순빨강 쪽인 28로)으로, 명도만 버튼 배경에 맞게 낮춰
+  // 와인빛이 도는 차분한 레드로 만들었다.
+  const dangerButtonBg = theme === "dark" ? "oklch(46% 0.15 28)" : "var(--dangerText)";
   const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -1097,7 +1108,7 @@ export default function MyPage() {
             )}
             <button
               className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerText)" }}
+              style={{ background: dangerButtonBg }}
               onClick={handleWithdraw}
               disabled={withdrawing || !withdrawPassword}
             >
@@ -1146,7 +1157,7 @@ export default function MyPage() {
                 중일 때는 여전히 금지 커서로 보인다. */}
             <button
               className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerText)" }}
+              style={{ background: dangerButtonBg }}
               onClick={handleReset}
               disabled={resetting}
             >
