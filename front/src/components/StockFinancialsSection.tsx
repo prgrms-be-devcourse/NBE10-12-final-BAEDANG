@@ -28,9 +28,11 @@ function toNumber(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+type ChartKind = "performance" | "profitability" | "position";
+
 /**
- * 종목 상세의 재무제표 섹션 — 초보 투자자가 먼저 흐름을 읽도록 최근 기간 그래프와
- * 핵심 계산 PER을 위에 배치하고, 상세 표는 최근 기간만 기본 노출한다.
+ * 종목 상세의 재무제표 섹션 — 종목 분류 배지는 제목 옆에 유지하고, 계산 PER은 보조 지표로
+ * 줄였다. 차트는 Toss처럼 콘텐츠 폭을 넓게 쓰며, 필요할 때 개별 차트를 크게 연다.
  */
 export function StockFinancialsSection({ symbol, marketCountry }: { symbol: string; marketCountry: MarketCountry }) {
   const { theme } = useTheme();
@@ -40,6 +42,7 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<FinancialRange>("annual");
   const [expanded, setExpanded] = useState(false);
+  const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +51,7 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
     setLoadError(false);
     setUnsupported(false);
     setExpanded(false);
+    setExpandedChart(null);
     getStockFinancials(symbol, marketCountry)
       .then((res) => {
         if (cancelled) return;
@@ -69,6 +73,15 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
       cancelled = true;
     };
   }, [symbol, marketCountry]);
+
+  useEffect(() => {
+    if (expandedChart === null) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpandedChart(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [expandedChart]);
 
   if (unsupported) return null;
 
@@ -135,9 +148,10 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
             </div>
           ) : (
             <>
-              <div className="grid gap-3 lg:grid-cols-2">
-                <FinancialAmountChart periods={graphPeriods} />
-                <FinancialRatioChart periods={graphPeriods} />
+              <div className="space-y-3">
+                <FinancialAmountChart periods={graphPeriods} onExpand={() => setExpandedChart("performance")} />
+                <FinancialProfitabilityChart periods={graphPeriods} onExpand={() => setExpandedChart("profitability")} />
+                <FinancialPositionChart periods={graphPeriods} onExpand={() => setExpandedChart("position")} />
               </div>
 
               <div className="mt-4 overflow-x-auto">
@@ -174,6 +188,14 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
           )}
         </>
       )}
+
+      {expandedChart && financials && (
+        <FinancialChartModal title={chartTitle(expandedChart)} onClose={() => setExpandedChart(null)}>
+          {expandedChart === "performance" && <FinancialAmountChart periods={graphPeriods} large />}
+          {expandedChart === "profitability" && <FinancialProfitabilityChart periods={graphPeriods} large />}
+          {expandedChart === "position" && <FinancialPositionChart periods={graphPeriods} large />}
+        </FinancialChartModal>
+      )}
     </div>
   );
 }
@@ -183,20 +205,14 @@ function ValuationSummary({ financials }: { financials: StockFinancials }) {
   const calculatedPer = formatCalculatedPer(financials.valuation.calculatedPer, latestAnnual?.ratios.eps);
 
   return (
-    <div className="mb-4 rounded-[16px] px-4 py-3.5" style={{ background: "var(--accentSoft)" }}>
-      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
-        <div>
-          <div className="text-[12px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
-            계산 PER
-          </div>
-          <div className="mt-1 text-[25px] font-extrabold tabular-nums" style={{ color: "var(--accentText)" }}>
-            {calculatedPer}
-          </div>
-        </div>
-        <div className="text-right text-[12px] leading-relaxed" style={{ color: "var(--onAccentSoftText)" }}>
-          <div className="font-semibold">최근 연간 EPS 기준</div>
-          <div>현재가를 최근 연간 EPS로 나눈 참고용 계산값이에요.</div>
-        </div>
+    <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-[14px] px-3.5 py-2.5" style={{ background: "var(--accentSoft)" }}>
+      <div className="flex items-baseline gap-2.5">
+        <span className="text-[12px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>계산 PER</span>
+        <strong className="text-[20px] font-extrabold tabular-nums" style={{ color: "var(--accentText)" }}>{calculatedPer}</strong>
+      </div>
+      <div className="ml-auto text-right text-[11.5px] leading-relaxed" style={{ color: "var(--onAccentSoftText)" }}>
+        <span className="font-semibold">최근 연간 EPS 기준</span>
+        <span className="ml-2 hidden sm:inline">현재가를 최근 연간 EPS로 나눈 참고용 계산값이에요.</span>
       </div>
     </div>
   );
@@ -214,50 +230,11 @@ const AMOUNT_SERIES: AmountSeries[] = [
   { label: "순이익", color: "var(--down)", getValue: (period) => period.incomeStatement.netIncome },
 ];
 
-function FinancialAmountChart({ periods }: { periods: StockFinancialPeriod[] }) {
-  const values = AMOUNT_SERIES.flatMap((series) => periods.map((period) => toNumber(series.getValue(period))))
-    .filter((value): value is number => value !== null);
-  if (values.length === 0) return <ChartCard title="실적 추이"><EmptyChart /></ChartCard>;
-
-  const maxAbs = Math.max(1, ...values.map((value) => Math.abs(value)));
-  const baseline = 132;
-  const plotHeight = 92;
-  const left = 22;
-  const right = 618;
-  const groupWidth = (right - left) / Math.max(periods.length, 1);
-  const barWidth = Math.min(18, Math.max(7, groupWidth / (AMOUNT_SERIES.length + 2)));
-
-  return (
-    <ChartCard title="실적 추이" subtitle="최근 기간의 매출과 이익 흐름">
-      <svg className="h-auto w-full" viewBox="0 0 640 212" role="img" aria-label="최근 매출액과 이익 추이 막대그래프">
-        <line x1={left} y1={baseline} x2={right} y2={baseline} stroke="var(--line2)" strokeWidth="1" />
-        {periods.map((period, periodIndex) => {
-          const center = left + groupWidth * (periodIndex + 0.5);
-          return (
-            <g key={period.statementYearMonth}>
-              {AMOUNT_SERIES.map((series, seriesIndex) => {
-                const value = toNumber(series.getValue(period));
-                if (value === null) return null;
-                const height = Math.max(2, (Math.abs(value) / maxAbs) * plotHeight);
-                const x = center + (seriesIndex - (AMOUNT_SERIES.length - 1) / 2) * (barWidth + 2) - barWidth / 2;
-                const y = value >= 0 ? baseline - height : baseline;
-                return (
-                  <rect key={series.label} x={x} y={y} width={barWidth} height={height} rx="3" fill={series.color} opacity=".9">
-                    <title>{`${series.label} ${formatWon(String(value))}`}</title>
-                  </rect>
-                );
-              })}
-              <text x={center} y="193" textAnchor="middle" fontSize="10" fill="var(--mut2)">
-                {formatStatementMonth(period.statementYearMonth)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-      <ChartLegend items={AMOUNT_SERIES} />
-    </ChartCard>
-  );
-}
+const POSITION_SERIES: AmountSeries[] = [
+  { label: "총자산", color: "var(--accent)", getValue: (period) => period.balanceSheet.totalAssets },
+  { label: "총부채", color: "var(--down)", getValue: (period) => period.balanceSheet.totalLiabilities },
+  { label: "총자본", color: "var(--up)", getValue: (period) => period.balanceSheet.totalEquity },
+];
 
 type RatioSeries = {
   label: string;
@@ -265,35 +242,130 @@ type RatioSeries = {
   getValue: (period: StockFinancialPeriod) => string | null;
 };
 
-const RATIO_SERIES: RatioSeries[] = [
+const PROFITABILITY_SERIES: RatioSeries[] = [
   { label: "영업이익률", color: "var(--accent)", getValue: (period) => period.ratios.operatingProfitMargin },
+  { label: "순이익률", color: "var(--down)", getValue: (period) => period.ratios.netProfitMargin },
   { label: "ROE", color: "var(--up)", getValue: (period) => period.ratios.roe },
-  { label: "부채비율", color: "var(--warnText)", getValue: (period) => period.ratios.debtRatio },
 ];
 
-function FinancialRatioChart({ periods }: { periods: StockFinancialPeriod[] }) {
-  const values = RATIO_SERIES.flatMap((series) => periods.map((period) => toNumber(series.getValue(period))))
-    .filter((value): value is number => value !== null);
-  if (values.length === 0) return <ChartCard title="수익성·안정성"><EmptyChart /></ChartCard>;
+function FinancialAmountChart({ periods, large = false, onExpand }: { periods: StockFinancialPeriod[]; large?: boolean; onExpand?: () => void }) {
+  return (
+    <FinancialBarChart
+      title="실적 추이"
+      subtitle="매출과 이익이 어떻게 변했는지 봐요"
+      periods={periods}
+      series={AMOUNT_SERIES}
+      large={large}
+      onExpand={onExpand}
+      ariaLabel="최근 매출액과 이익 추이 막대그래프"
+    />
+  );
+}
 
-  const maxValue = Math.max(100, ...values);
-  const left = 28;
-  const right = 618;
-  const top = 18;
-  const bottom = 154;
-  const groupWidth = (right - left) / Math.max(periods.length - 1, 1);
+function FinancialPositionChart({ periods, large = false, onExpand }: { periods: StockFinancialPeriod[]; large?: boolean; onExpand?: () => void }) {
+  return (
+    <FinancialBarChart
+      title="재무상태 추이"
+      subtitle="자산·부채·자본의 흐름을 비교해요"
+      periods={periods}
+      series={POSITION_SERIES}
+      large={large}
+      onExpand={onExpand}
+      ariaLabel="최근 총자산과 총부채와 총자본 추이 막대그래프"
+    />
+  );
+}
+
+function FinancialBarChart({
+  title,
+  subtitle,
+  periods,
+  series,
+  large,
+  onExpand,
+  ariaLabel,
+}: {
+  title: string;
+  subtitle: string;
+  periods: StockFinancialPeriod[];
+  series: AmountSeries[];
+  large: boolean;
+  onExpand?: () => void;
+  ariaLabel: string;
+}) {
+  const values = series.flatMap((item) => periods.map((period) => toNumber(item.getValue(period))))
+    .filter((value): value is number => value !== null);
+  if (values.length === 0) return <ChartCard title={title} subtitle={subtitle} onExpand={onExpand}><EmptyChart /></ChartCard>;
+
+  const maxAbs = Math.max(1, ...values.map((value) => Math.abs(value)));
+  const baseline = large ? 180 : 154;
+  const plotHeight = large ? 128 : 108;
+  const left = large ? 34 : 28;
+  const right = 726;
+  const chartWidth = right - left;
+  const groupWidth = chartWidth / Math.max(periods.length, 1);
+  const barWidth = Math.min(28, Math.max(10, groupWidth / (series.length + 2)));
+  const labelSize = large ? 13 : 12;
+  const height = large ? 300 : 250;
 
   return (
-    <ChartCard title="수익성·안정성" subtitle="비율은 높고 낮음보다 흐름을 먼저 봐요">
-      <svg className="h-auto w-full" viewBox="0 0 640 212" role="img" aria-label="최근 수익성 및 부채비율 추이 선그래프">
-        <line x1={left} y1={top} x2={right} y2={top} stroke="var(--line2)" strokeWidth="1" strokeDasharray="3 4" />
+    <ChartCard title={title} subtitle={subtitle} onExpand={onExpand} large={large}>
+      <svg className={large ? "h-[300px] w-full" : "h-[250px] w-full"} viewBox={`0 0 760 ${height}`} role="img" aria-label={ariaLabel}>
+        <line x1={left} y1={baseline} x2={right} y2={baseline} stroke="var(--line2)" strokeWidth="1" />
+        {periods.map((period, periodIndex) => {
+          const center = left + groupWidth * (periodIndex + 0.5);
+          return (
+            <g key={period.statementYearMonth}>
+              {series.map((item, seriesIndex) => {
+                const value = toNumber(item.getValue(period));
+                if (value === null) return null;
+                const barHeight = Math.max(3, (Math.abs(value) / maxAbs) * plotHeight);
+                const x = center + (seriesIndex - (series.length - 1) / 2) * (barWidth + 3) - barWidth / 2;
+                const y = value >= 0 ? baseline - barHeight : baseline;
+                return (
+                  <rect key={item.label} x={x} y={y} width={barWidth} height={barHeight} rx="4" fill={item.color} opacity=".9">
+                    <title>{`${item.label} ${formatWon(String(value))}`}</title>
+                  </rect>
+                );
+              })}
+              <text x={center} y={large ? 232 : 207} textAnchor="middle" fontSize={labelSize} fill="var(--mut2)">
+                {formatStatementMonth(period.statementYearMonth)}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <ChartLegend items={series} large={large} />
+    </ChartCard>
+  );
+}
+
+function FinancialProfitabilityChart({ periods, large = false, onExpand }: { periods: StockFinancialPeriod[]; large?: boolean; onExpand?: () => void }) {
+  const values = PROFITABILITY_SERIES.flatMap((item) => periods.map((period) => toNumber(item.getValue(period))))
+    .filter((value): value is number => value !== null);
+  if (values.length === 0) return <ChartCard title="수익성 추이" subtitle="이익을 남기는 힘의 흐름" onExpand={onExpand}><EmptyChart /></ChartCard>;
+
+  const maxValue = Math.max(100, ...values);
+  const left = large ? 38 : 32;
+  const right = 726;
+  const top = large ? 26 : 22;
+  const bottom = large ? 190 : 160;
+  const chartWidth = right - left;
+  const groupWidth = chartWidth / Math.max(periods.length - 1, 1);
+  const labelSize = large ? 13 : 12;
+  const height = large ? 300 : 250;
+
+  return (
+    <ChartCard title="수익성 추이" subtitle="이익을 남기는 힘의 흐름을 비교해요" onExpand={onExpand} large={large}>
+      <svg className={large ? "h-[300px] w-full" : "h-[250px] w-full"} viewBox={`0 0 760 ${height}`} role="img" aria-label="최근 영업이익률과 순이익률과 ROE 추이 선그래프">
+        <line x1={left} y1={top} x2={right} y2={top} stroke="var(--line2)" strokeWidth="1" strokeDasharray="4 5" />
         <line x1={left} y1={bottom} x2={right} y2={bottom} stroke="var(--line2)" strokeWidth="1" />
-        <text x="4" y={top + 4} fontSize="10" fill="var(--mut2)">{`${Math.round(maxValue)}%`}</text>
-        <text x="10" y={bottom + 4} fontSize="10" fill="var(--mut2)">0%</text>
-        {RATIO_SERIES.map((series) => {
+        <text x="4" y={top + 5} fontSize={labelSize} fill="var(--mut2)">{`${Math.round(maxValue)}%`}</text>
+        <text x="12" y={bottom + 5} fontSize={labelSize} fill="var(--mut2)">0%</text>
+        {PROFITABILITY_SERIES.map((item) => {
           const points = periods
             .map((period, index) => {
-              const value = toNumber(series.getValue(period));
+              const value = toNumber(item.getValue(period));
               if (value === null) return null;
               const x = periods.length === 1 ? (left + right) / 2 : left + groupWidth * index;
               const y = bottom - (Math.max(0, value) / maxValue) * (bottom - top);
@@ -302,28 +374,41 @@ function FinancialRatioChart({ periods }: { periods: StockFinancialPeriod[] }) {
             .filter((point): point is string => point !== null)
             .join(" ");
           if (!points) return null;
-          return <polyline key={series.label} points={points} fill="none" stroke={series.color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />;
+          return <polyline key={item.label} points={points} fill="none" stroke={item.color} strokeWidth={large ? 3 : 2.5} strokeLinecap="round" strokeLinejoin="round" />;
         })}
         {periods.map((period, index) => {
           const x = periods.length === 1 ? (left + right) / 2 : left + groupWidth * index;
           return (
-            <text key={period.statementYearMonth} x={x} y="193" textAnchor="middle" fontSize="10" fill="var(--mut2)">
+            <text key={period.statementYearMonth} x={x} y={large ? 232 : 207} textAnchor="middle" fontSize={labelSize} fill="var(--mut2)">
               {formatStatementMonth(period.statementYearMonth)}
             </text>
           );
         })}
       </svg>
-      <ChartLegend items={RATIO_SERIES} />
+      <ChartLegend items={PROFITABILITY_SERIES} large={large} />
     </ChartCard>
   );
 }
 
-function ChartCard({ title, subtitle, children }: { title: string; subtitle?: string; children: ReactNode }) {
+function ChartCard({ title, subtitle, children, onExpand, large = false }: { title: string; subtitle?: string; children: ReactNode; onExpand?: () => void; large?: boolean }) {
   return (
-    <div className="rounded-[16px] px-3.5 py-3" style={{ background: "var(--bg)", border: "1px solid var(--line2)" }}>
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <h5 className="text-[13.5px] font-bold" style={{ color: "var(--ink)" }}>{title}</h5>
-        {subtitle && <span className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{subtitle}</span>}
+    <div className={large ? "rounded-[18px] px-4 py-4" : "rounded-[18px] px-4 py-3.5"} style={{ background: "var(--bg)", border: "1px solid var(--line2)" }}>
+      <div className="mb-1.5 flex items-center gap-3">
+        <div className="min-w-0">
+          <h5 className={large ? "text-[16px] font-bold" : "text-[15px] font-bold"} style={{ color: "var(--ink)" }}>{title}</h5>
+          {subtitle && <p className={large ? "mt-0.5 text-[12px]" : "mt-0.5 text-[11.5px]"} style={{ color: "var(--mut2)" }}>{subtitle}</p>}
+        </div>
+        {onExpand && (
+          <button
+            type="button"
+            className="ml-auto shrink-0 cursor-pointer rounded-lg px-2.5 py-1.5 text-[11.5px] font-bold"
+            style={{ background: "var(--fill)", color: "var(--accentText)" }}
+            onClick={onExpand}
+            aria-label={`${title} 크게 보기`}
+          >
+            크게 보기
+          </button>
+        )}
       </div>
       {children}
     </div>
@@ -331,18 +416,55 @@ function ChartCard({ title, subtitle, children }: { title: string; subtitle?: st
 }
 
 function EmptyChart() {
-  return <div className="flex h-[164px] items-center justify-center text-[12px]" style={{ color: "var(--mut2)" }}>그래프로 볼 수 있는 데이터가 아직 없어요.</div>;
+  return <div className="flex h-[190px] items-center justify-center text-[13px]" style={{ color: "var(--mut2)" }}>그래프로 볼 수 있는 데이터가 아직 없어요.</div>;
 }
 
-function ChartLegend({ items }: { items: Array<{ label: string; color: string }> }) {
+function ChartLegend({ items, large = false }: { items: Array<{ label: string; color: string }>; large?: boolean }) {
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 text-[10.5px]" style={{ color: "var(--mut2)" }}>
+    <div className={large ? "flex flex-wrap gap-x-4 gap-y-1 px-1 text-[12px]" : "flex flex-wrap gap-x-4 gap-y-1 px-1 text-[11.5px]"} style={{ color: "var(--mut2)" }}>
       {items.map((item) => (
-        <span key={item.label} className="inline-flex items-center gap-1">
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: item.color }} />
+        <span key={item.label} className="inline-flex items-center gap-1.5">
+          <span className={large ? "h-2 w-2 rounded-full" : "h-1.5 w-1.5 rounded-full"} style={{ background: item.color }} />
           {item.label}
         </span>
       ))}
+    </div>
+  );
+}
+
+function chartTitle(kind: ChartKind): string {
+  if (kind === "performance") return "실적 추이";
+  if (kind === "profitability") return "수익성 추이";
+  return "재무상태 추이";
+}
+
+function FinancialChartModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/45 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onMouseDown={onClose}
+    >
+      <div
+        className="max-h-[90vh] w-full max-w-[900px] overflow-y-auto rounded-[22px] p-4 sm:p-5"
+        style={{ background: "var(--card)" }}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="mb-2 flex justify-end">
+          <button
+            type="button"
+            className="ml-auto cursor-pointer rounded-full px-3 py-1.5 text-[12px] font-bold"
+            style={{ background: "var(--fill)", color: "var(--mut)" }}
+            onClick={onClose}
+            aria-label="차트 닫기"
+          >
+            닫기
+          </button>
+        </div>
+        {children}
+      </div>
     </div>
   );
 }
