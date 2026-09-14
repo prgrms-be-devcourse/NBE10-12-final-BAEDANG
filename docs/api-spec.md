@@ -980,7 +980,7 @@ Market-order replay selects a normal ledger entry matching the order side with a
 ④ SELECT the exact account by accountId and userId FOR UPDATE; reject a CLOSED account instead of carrying the order to a new round
 ⑤ Recheck clientOrderId; if the same order completed while waiting for the lock, return the stored result
 ⑥ For a new order only, reject an expired market context, read the quote, validate its currency, and lock holding for a sell (lock order: account → holding)
-⑦ Validate — universe → suspension → liquidation → session → quote time → settlement → cash/quantity
+⑦ After the sell holding lock, recheck active CB at the current clock instant before context freshness; a new halt stores REJECTED with its event even if the context expired while waiting. Then validate — universe → suspension → liquidation → session → quote time → settlement → cash/quantity
 ⑧ INSERT trade_order FILLED (or REJECTED for a business rejection confirmed in the transaction)
 ⑨ UPDATE account.cash_balance and lock/upsert holding
 ⑩ INSERT ledger_entry (append only; FILLED only)

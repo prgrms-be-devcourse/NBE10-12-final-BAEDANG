@@ -183,6 +183,14 @@ public class LimitOrderTransactionService {
         // 매도 보유 행 잠금까지 기다린 뒤 세션·시세 검증 시각을 확정합니다.
         Instant now = clock.instant();
         at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        // 보유 잠금 대기 중 시작된 CB도 만료된 검증 정보보다 먼저 처리합니다.
+        if (t.side() == OrderSide.SELL) {
+            Optional<ActiveMarketHalt> haltAfterHoldingLock = marketTradingHaltPolicy.activeFor(stock, now);
+            if (haltAfterHoldingLock.isPresent()) {
+                return rejectByHalt(account, stock, c, price.limitPrice(), context.executionRate(),
+                        haltAfterHoldingLock.get(), at);
+            }
+        }
         policy.validateExecutionContextFresh(context, now);
         ErrorCode reason = policy.determineStaticRejection(stock);
         if (reason == null && !context.isMarketOpenAt(now)) {

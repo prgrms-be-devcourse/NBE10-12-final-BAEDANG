@@ -989,7 +989,7 @@ US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ④ 요청의 accountId와 userId로 정확한 계좌를 SELECT ... FOR UPDATE, CLOSED이면 새 회차로 넘기지 않고 거절
 ⑤ clientOrderId 재확인 — 락 대기 중 동일 주문이 확정됐으면 저장 결과 반환
 ⑥ 신규 주문만 시장 컨텍스트 만료 검사 후 시세 조회 및 통화 일치 검증, 매도 시 holding FOR UPDATE (락 순서: account → holding)
-⑦ 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
+⑦ 매도 holding 잠금 뒤 현재 Clock 시각으로 활성 CB를 컨텍스트 신선도보다 먼저 재검사한다. 대기 중 컨텍스트가 만료돼도 새 CB는 해당 이벤트와 함께 REJECTED로 저장한다. 이후 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
 ⑧ INSERT trade_order FILLED (트랜잭션 내부의 유효한 업무 거절은 REJECTED)
 ⑨ UPDATE account.cash_balance 및 holding 잠금·UPSERT
 ⑩ INSERT ledger_entry (append only, FILLED만 기록)

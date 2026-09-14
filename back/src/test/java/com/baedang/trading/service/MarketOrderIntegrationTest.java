@@ -17,6 +17,7 @@ import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.service.PriceLimitLoadService;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
@@ -132,6 +133,8 @@ class MarketOrderIntegrationTest {
     // 개발용 대역(Fake) 구현체가 없어졌으므로, 이 테스트가 관심 없는 MarketCalendarPort
     // 의존을 목(mock)으로 채워 넣어야 컨텍스트가 뜬다(다른 서비스가 직접 주입받는다).
     @MockitoBean MarketCalendarPort marketCalendarPort;
+    // 주문 경로의 외부 호출 검증에 백그라운드 호가 발행이 섞이지 않게 합니다.
+    @MockitoBean OrderBookRefreshScheduler orderBookRefreshScheduler;
 
     @Autowired MarketOrderService marketOrderService;
     @Autowired OrderReadService orderReadService;
