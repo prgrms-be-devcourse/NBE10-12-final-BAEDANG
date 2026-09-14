@@ -4,7 +4,7 @@ import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.PasswordResetConfirmRequest;
-import com.baedang.auth.dto.PasswordResetRequestRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
@@ -151,7 +151,7 @@ class AuthControllerTest {
     @Test
     @DisplayName("비밀번호 찾기 요청은 인증 없이도 200을 반환한다")
     void 비밀번호_찾기_요청은_200을_반환한다() throws Exception {
-        PasswordResetRequestRequest request = new PasswordResetRequestRequest("user@example.com");
+        PasswordForgotRequest request = new PasswordForgotRequest("user@example.com");
 
         mockMvc.perform(post("/api/auth/password/forgot")
                         .contentType(MediaType.APPLICATION_JSON)

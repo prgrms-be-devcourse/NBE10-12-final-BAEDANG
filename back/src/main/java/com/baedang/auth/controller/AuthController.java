@@ -4,7 +4,7 @@ import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.PasswordResetConfirmRequest;
-import com.baedang.auth.dto.PasswordResetRequestRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.service.AuthService;
@@ -53,7 +53,7 @@ public class AuthController {
      * 공격 방지(AuthService.requestPasswordReset 문서 참고).
      */
     @PostMapping("/password/forgot")
-    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody PasswordResetRequestRequest request) {
+    public ResponseEntity<Void> forgotPassword(@Valid @RequestBody PasswordForgotRequest request) {
         authService.requestPasswordReset(request);
         return ResponseEntity.ok().build();
     }
