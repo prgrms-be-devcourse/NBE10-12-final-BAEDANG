@@ -4,7 +4,7 @@ import { ExchangeRateProvider } from "@/components/ExchangeRateProvider";
 import { MarketStatusProvider } from "@/components/MarketStatusProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { PageBackground } from "@/components/PageBackground";
-import { Nav } from "@/components/Nav";
+import { SiteChrome } from "@/components/SiteChrome";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -36,8 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <ExchangeRateProvider>
               <MarketStatusProvider>
                 <PageBackground>
-                  <Nav />
-                  <main className="mx-auto max-w-[1180px] px-6 pb-16">{children}</main>
+                  <SiteChrome>{children}</SiteChrome>
                 </PageBackground>
               </MarketStatusProvider>
             </ExchangeRateProvider>

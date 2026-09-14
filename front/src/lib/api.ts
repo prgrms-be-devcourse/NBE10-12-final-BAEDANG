@@ -99,8 +99,14 @@ type RequestInput = {
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   headers?: Record<string, string>;
   body?: unknown;
-  /** true면 tokenStore의 accessToken을 Authorization 헤더로 실어 보낸다. */
+  /** true면 tokenStore의 accessToken을 Authorization 헤더로 실어 보낸다. 토큰이 없으면 에러. */
   auth?: boolean;
+  /**
+   * 공개(비로그인도 호출 가능) API인데, 로그인돼 있으면 그 사용자 맞춤 부가 정보를
+   * 함께 받고 싶을 때 쓴다(예: 랭킹 응답의 `stockLikeId` — 로그인 시에만 채워진다).
+   * 토큰이 있으면 실어 보내되 없어도 에러 내지 않고 그냥 헤더 없이 보낸다.
+   */
+  authOptional?: boolean;
 };
 
 async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
@@ -109,6 +115,8 @@ async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
     if (!tokenStore.accessToken) {
       throw new ApiError("UNAUTHENTICATED", "로그인이 필요해요.");
     }
+    headers.Authorization = `Bearer ${tokenStore.accessToken}`;
+  } else if (init.authOptional && tokenStore.accessToken) {
     headers.Authorization = `Bearer ${tokenStore.accessToken}`;
   }
 
@@ -147,12 +155,20 @@ async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
  * 안전망으로, 요청이 TOKEN_EXPIRED로 실패하면 여기서 한 번 더 재발급 후 재시도한다.
  * refreshToken마저 무효하면(만료·탈퇴 등) 재로그인이 필요하므로 `onAuthExpired`로
  * 알리고, 사용자에게는 원래의 만료 에러를 그대로 보여준다.
+ *
+ * <p>`authOptional`도 같은 재발급 로직을 탄다 — `JwtAuthenticationFilter`는 공개
+ * 엔드포인트라도 Authorization 헤더가 실려 있으면 검사하므로(백엔드 참고), 만료된
+ * 토큰을 실어 보내면 공개 API도 TOKEN_EXPIRED로 실패한다. 다만 재발급마저 실패하면
+ * `auth: true`처럼 에러를 던지지 않고, 헤더 없이(로그인 안 한 것처럼) 한 번 더
+ * 조용히 재시도한다 — 애초에 로그인 없이도 되는 화면이라 부가 정보만 못 받을 뿐
+ * 화면 자체를 에러로 덮을 이유가 없다.
  */
 async function request<T>(path: string, init: RequestInput): Promise<T> {
   try {
     return await fetchOnce<T>(path, init);
   } catch (err) {
-    if (init.auth && err instanceof ApiError && err.code === "TOKEN_EXPIRED" && tokenStore.refreshToken) {
+    const sentAuthHeader = init.auth || (init.authOptional && !!tokenStore.accessToken);
+    if (sentAuthHeader && err instanceof ApiError && err.code === "TOKEN_EXPIRED" && tokenStore.refreshToken) {
       try {
         const refreshed = await fetchOnce<{ accessToken: string }>("/api/auth/refresh", {
           method: "POST",
@@ -163,7 +179,8 @@ async function request<T>(path: string, init: RequestInput): Promise<T> {
       } catch {
         tokenStore = { accessToken: null, refreshToken: null };
         onAuthExpired?.();
-        throw err;
+        if (init.auth) throw err;
+        return await fetchOnce<T>(path, { ...init, authOptional: false });
       }
       return await fetchOnce<T>(path, init);
     }
@@ -540,6 +557,78 @@ export function getStockDetail(symbol: string, marketCountry: MarketCountry): Pr
   );
 }
 
+// ── 재무제표 ──────────────────────────────────────────────────────────────────
+
+export type StockFinancialClassification = { code: string; name: string };
+
+export type StockFinancialPeriod = {
+  statementYearMonth: string;
+  balanceSheet: {
+    currentAssets: string;
+    fixedAssets: string;
+    totalAssets: string;
+    currentLiabilities: string;
+    fixedLiabilities: string;
+    totalLiabilities: string;
+    capitalStock: string;
+    capitalSurplus: string;
+    retainedEarnings: string;
+    totalEquity: string;
+  };
+  incomeStatement: {
+    sales: string;
+    operatingProfit: string;
+    netIncome: string;
+  };
+  ratios: {
+    salesGrowthRate: string | null;
+    operatingProfitGrowthRate: string | null;
+    netIncomeGrowthRate: string | null;
+    roe: string | null;
+    eps: string | null;
+    salesPerShare: string | null;
+    bps: string | null;
+    reserveRatio: string | null;
+    debtRatio: string | null;
+    netProfitMargin: string | null;
+    operatingProfitMargin: string | null;
+  };
+};
+
+/**
+ * `GET /api/stocks/{symbol}/financials` 응답 — 국내 종목 업종 분류·재무제표. `GET
+ * /api/stocks/{symbol}`과 달리 KIS 외부 호출을 하므로 별도 엔드포인트로 분리돼 있다.
+ *
+ * <p>US 종목·ETF/ETN·6자리가 아닌 국내 심볼은 `FINANCIALS_NOT_SUPPORTED`(422)로
+ * 아예 이 정보가 없다 — 호출부가 그 에러를 "이 종목엔 탭을 보여주지 않음"으로 다룬다.
+ */
+export type StockFinancials = {
+  symbol: string;
+  marketCountry: MarketCountry;
+  dataStatus: "FRESH" | "STALE";
+  industry: {
+    standard: StockFinancialClassification;
+    large: StockFinancialClassification;
+    medium: StockFinancialClassification;
+    small: StockFinancialClassification;
+  } | null;
+  annual: StockFinancialPeriod[];
+  quarterly: StockFinancialPeriod[];
+  syncedAt: {
+    industry: string | null;
+    annual: string | null;
+    quarterly: string | null;
+  };
+};
+
+/** `GET /api/stocks/{symbol}/financials?marketCountry=KR` — 업종 분류 + 연간/분기 재무제표. */
+export function getStockFinancials(symbol: string, marketCountry: MarketCountry): Promise<StockFinancials> {
+  return request<StockFinancials>(
+    `/api/stocks/${encodeURIComponent(symbol)}/financials?marketCountry=${encodeURIComponent(marketCountry)}`,
+    { method: "GET" }
+  );
+}
+
 export type StockSearchItem = {
   symbol: string;
   name: string;
@@ -559,6 +648,9 @@ export function searchStocks(query: string, size = 10): Promise<{ items: StockSe
 
 export type RankingItem = {
   rank: number;
+  // 관심 종목 등록/해제(POST·DELETE /api/stocks/likes)에 필요한 종목 PK — symbol은
+  // 시장별로 겹칠 수 있어 식별자로 못 쓴다(docs/api-spec.md).
+  stockId: number;
   symbol: string;
   name: string;
   market: string;
@@ -575,6 +667,9 @@ export type RankingItem = {
   quoteAt?: string;
   tradingAmount: string;
   realtime: boolean;
+  // 로그인 상태로 조회했고 이 종목을 찜해뒀을 때만 채워진다(관심 없음/비로그인이면
+  // 필드 자체가 응답에서 빠진다) — DELETE /api/stocks/likes/{id}에 이 값을 쓴다.
+  stockLikeId?: number;
 };
 
 export type RankingPage = {
@@ -583,11 +678,56 @@ export type RankingPage = {
   hasNext: boolean;
 };
 
-/** `GET /api/stocks/rankings` — 거래대금 상위 100개, 20개씩 커서 페이지네이션. */
+/**
+ * `GET /api/stocks/rankings` — 거래대금 상위 100개, 20개씩 커서 페이지네이션.
+ *
+ * <p>공개 API지만 로그인돼 있으면 `authOptional`로 토큰을 함께 보내 각 종목의
+ * `stockLikeId`(내가 찜했는지)까지 받는다 — 비로그인 사용자에게는 헤더가 아예
+ * 안 실리니 이전과 동일하게 동작한다.
+ */
 export function getRankings(market: MarketCountry, size = 20, cursor?: string): Promise<RankingPage> {
   const params = new URLSearchParams({ market, size: String(size) });
   if (cursor) params.set("cursor", cursor);
-  return request<RankingPage>(`/api/stocks/rankings?${params.toString()}`, { method: "GET" });
+  return request<RankingPage>(`/api/stocks/rankings?${params.toString()}`, { method: "GET", authOptional: true });
+}
+
+// ── 관심 종목(찜) ────────────────────────────────────────────────────────────
+
+/** `POST /api/stocks/likes` — 관심 종목 등록. 이미 찜해둔 종목이면 같은 stockLikeId를 그대로 돌려준다. */
+export function likeStock(stockId: number): Promise<{ stockLikeId: number }> {
+  return request<{ stockLikeId: number }>("/api/stocks/likes", { method: "POST", auth: true, body: { stockId } });
+}
+
+/** `DELETE /api/stocks/likes/{id}` — 관심 종목 해제. id는 등록 응답·랭킹의 stockLikeId. */
+export function unlikeStock(stockLikeId: number): Promise<void> {
+  return request<void>(`/api/stocks/likes/${stockLikeId}`, { method: "DELETE", auth: true });
+}
+
+export type StockLikeItem = {
+  stockLikeId: number;
+  stockId: number;
+  symbol: string;
+  name: string;
+  marketCountry: MarketCountry;
+  // 시세가 아직 없거나 조회에 실패하면 통째로 빠진다(non_null 직렬화).
+  prevClose?: string;
+  lastPrice?: string;
+  changeRate?: string;
+};
+
+export type StockLikePage = {
+  items: StockLikeItem[];
+  nextCursor: string | null;
+  hasNext: boolean;
+};
+
+/** `GET /api/stocks/likes` — 내가 찜한 종목 목록(최신 등록순), stockLikeId 기준 커서 페이지네이션. */
+export function getStockLikes(params?: { cursor?: string; size?: number }): Promise<StockLikePage> {
+  const query = new URLSearchParams();
+  if (params?.cursor) query.set("cursor", params.cursor);
+  if (params?.size) query.set("size", String(params.size));
+  const qs = query.toString();
+  return request<StockLikePage>(`/api/stocks/likes${qs ? `?${qs}` : ""}`, { method: "GET", auth: true });
 }
 
 export type CandleInterval = "1m" | "5m" | "10m" | "1d" | "1w";
@@ -743,6 +883,127 @@ export function resetAccount(accountId: number): Promise<AccountReset> {
   return request<AccountReset>("/api/accounts/me/reset", { method: "POST", auth: true, body: { accountId } });
 }
 
+// ── 투자 성향 리포트 ──────────────────────────────────────────────────────────
+
+export type PersonalityReportShares = {
+  concentration: string;
+  domestic: string;
+  individual: string;
+  aggressive: string;
+};
+
+export type LongHeldStock = {
+  symbol: string;
+  name: string;
+  currency: string;
+  avgBuyPrice: string;
+  lastPrice: string;
+  /** 시세가 없으면 null(마이페이지 보유 종목과 같은 사정). */
+  returnRate: string | null;
+  heldSince: string;
+};
+
+/**
+ * `GET /api/reports/me` 응답 — 투자 성향 리포트(현재 활성 계좌=라운드 기준).
+ *
+ * <p>`locked`가 true면 계좌 개설 후 아직 `unlockAt`(개설 + N주)에 못 미친 상태라
+ * `initialCash`~`longHeldStocks`가 전부 null/빈 값이다. 잠금이 풀린 뒤에도
+ * "고정된 스냅샷"이 아니라 열 때마다 다시 계산된다 — `asOf`가 매번 최신 계산
+ * 시각이다(백엔드 주석: "발급(열림) 후에는 열 때마다 재계산한다").
+ *
+ * <p>`classified`는 보유 종목이 2개 이상이어야 true다 — 미만이면 유형을 정하지
+ * 않는 "미분류/신규" 상태로, `typeCode`/`typeLabel`이 null이어도 `shares`는
+ * 계산된 값(평가액이 아예 없으면 전부 "0")을 그대로 담는다.
+ */
+export type PersonalityReport = {
+  accountId: number;
+  roundNo: number;
+  locked: boolean;
+  unlockAt: string;
+  initialCash: string | null;
+  cashBalance: string | null;
+  stockValue: string | null;
+  totalAsset: string | null;
+  totalPnl: string | null;
+  /** 초기자본 대비 총손익 — 0~1 소수 문자열(마이페이지의 unrealizedPnlRate와는 다른 지표). */
+  returnRate: string | null;
+  classified: boolean;
+  /** 4글자 유형 코드(예: "CKSB") — 분산·시장·유형·공격성 순. 미분류/잠김이면 null. */
+  typeCode: string | null;
+  typeLabel: string | null;
+  shares: PersonalityReportShares | null;
+  holdingCount: number;
+  holdingPeriodWeeks: number;
+  longHeldStocks: LongHeldStock[];
+  asOf: string;
+};
+
+/** `GET /api/reports/me` — 내 투자 성향 리포트. */
+export function getPersonalityReport(): Promise<PersonalityReport> {
+  return request<PersonalityReport>("/api/reports/me", { method: "GET", auth: true });
+}
+
+export type LeaderboardEntry = {
+  rank: number;
+  /** 백엔드가 이미 가운데 글자를 마스킹해서 내려준다 — 프론트에서 다시 가릴 필요 없음. */
+  nickname: string;
+  returnRate: string;
+};
+
+export type LeaderboardMe = {
+  rank: number;
+  returnRate: string;
+  /** 1/5/10/25/50/75 중 하나, 하위권이면 null. */
+  topPercent: number | null;
+  neighbors: LeaderboardEntry[];
+  // 유형(#153 Phase 3) — 내 투자 유형 안에서의 순위다. 미분류(유형 없음)면 다섯 필드 모두 null.
+  typeCode: string | null;
+  typeLabel: string | null;
+  typeRank: number | null;
+  typeParticipants: number | null;
+  /** 1/5/10/25/50/75 중 하나, 하위권이면 null(topPercent와 같은 브래킷 규칙, 유형 코호트 기준). */
+  typePercent: number | null;
+};
+
+/**
+ * `GET /api/reports/leaderboard` 응답 — 아침 배치 스냅샷 기준(라이브 리포트와 값이 다를 수 있어
+ * `asOf`를 함께 내려준다). 스냅샷이 아직 없거나 참가자가 0명이면 `asOf: null · top: [] · me: null`.
+ */
+export type Leaderboard = {
+  asOf: string | null;
+  participants: number;
+  top: LeaderboardEntry[];
+  me: LeaderboardMe | null;
+};
+
+/** `GET /api/reports/leaderboard` — 수익률 리더보드. */
+export function getLeaderboard(): Promise<Leaderboard> {
+  return request<Leaderboard>("/api/reports/leaderboard", { method: "GET", auth: true });
+}
+
+export type LeaderboardTypeEntry = {
+  typeCode: string;
+  typeLabel: string;
+  count: number;
+  /** 0~1 소수 문자열 — 같은 코호트(같은 라운드·최신 배치)의 유형별 평균 수익률. */
+  avgReturnRate: string;
+};
+
+/**
+ * `GET /api/reports/leaderboard/types` 응답 — 유형별 성과 비교(#153 Phase 3). 아침 배치의
+ * 같은 라운드 코호트에서 유형별 평균 수익률을 비교한다. 미분류(유형 없음)는 애초에 집계에서
+ * 빠진다. 스냅샷이 없으면 `asOf: null · types: []`.
+ */
+export type LeaderboardTypes = {
+  asOf: string | null;
+  types: LeaderboardTypeEntry[];
+};
+
+/** `GET /api/reports/leaderboard/types` — 유형별(16종) 평균 수익률 비교. */
+export function getLeaderboardTypes(): Promise<LeaderboardTypes> {
+  return request<LeaderboardTypes>("/api/reports/leaderboard/types", { method: "GET", auth: true });
+}
+
 // ── 시장 운영 상태 ───────────────────────────────────────────────────────────
 
 export type MarketStatusItem = {
@@ -763,6 +1024,44 @@ export type MarketStatus = {
 /** `GET /api/market/status` — 국내/해외 시장 개장 여부·다음 개장 시각. 파라미터 없이 둘 다 내려온다. */
 export function getMarketStatus(): Promise<MarketStatus> {
   return request<MarketStatus>("/api/market/status", { method: "GET" });
+}
+
+// ── 시장조치(서킷브레이커·사이드카) ───────────────────────────────────────────
+
+export type KrMarket = "KOSPI" | "KOSDAQ";
+
+export type MarketEventItem = {
+  eventId: number;
+  eventType: "CIRCUIT_BREAKER" | "SIDECAR";
+  /** CIRCUIT_BREAKER에서만: 1~3단계. */
+  stage?: number;
+  /** SIDECAR에서만: 매수/매도 방향. */
+  direction?: "BUY" | "SELL";
+  triggeredAt: string;
+  haltUntil: string;
+  publishedAt: string;
+  receivedAt: string;
+  /** `triggeredAt <= 지금 < haltUntil` 여부 — 서버가 조회 시점에 판정해서 내려준다. */
+  active: boolean;
+  title: string;
+  sourceUrl: string;
+};
+
+export type MarketEvents = {
+  market: KrMarket;
+  date: string;
+  items: MarketEventItem[];
+};
+
+/**
+ * `GET /api/market/events` — KRX 서킷브레이커·사이드카 발동 이력(공개, 로그인 불필요).
+ * `date`는 `yyyy-MM-dd`(KST 기준 하루)이고 국내(KOSPI/KOSDAQ)만 지원한다.
+ */
+export function getMarketEvents(market: KrMarket, date: string): Promise<MarketEvents> {
+  return request<MarketEvents>(
+    `/api/market/events?market=${encodeURIComponent(market)}&date=${encodeURIComponent(date)}`,
+    { method: "GET" }
+  );
 }
 
 // ── 환율 ──────────────────────────────────────────────────────────────────────

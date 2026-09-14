@@ -165,6 +165,9 @@ public class SchedulingConfig {
         ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
         scheduler.setPoolSize(1);
         scheduler.setThreadNamePrefix("leaderboard-");
+        // 다음 배치 예약은 종료 시 폐기하고, 이미 실행 중인 배치만 완료를 기다린다.
+        scheduler.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        scheduler.setRemoveOnCancelPolicy(true);
         scheduler.setWaitForTasksToCompleteOnShutdown(true);
         scheduler.setAwaitTerminationSeconds(30);
         return scheduler;
