@@ -48,8 +48,10 @@ function TermPill({ term, onOpen }: { term: WikiTerm; onOpen: (t: WikiTerm) => v
       // #b6d7fd로 바꿔달라는 요청 — 기존 짙은 남색 그림자(rgba(15,56,104,.12))
       // 대신 이 하늘색을 썼다. 밝은 색이라 기존과 같은 12% 알파로는 거의 안
       // 보여서, 옅은 하늘색 계열에 이미 쓰던 것과 같은 55% 알파로 올려 그림자가
-      // 실제로 보이게 했다.
-      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 14px rgba(182,215,253,.55)")}
+      // 실제로 보이게 했다. 이 그림자(블러)가 더 넓게 퍼지게 해달라는 후속
+      // 요청으로 blur 반경을 14px → 32px로 키우고, spread를 4px 줘서 퍼지는
+      // 느낌을 더했다.
+      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = "0 4px 32px 4px rgba(182,215,253,.55)")}
       onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
     >
       {term.name}
