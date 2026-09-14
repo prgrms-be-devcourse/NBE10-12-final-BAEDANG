@@ -429,7 +429,8 @@ class _TermDialog extends StatelessWidget {
       } else {
         for (final p in parts[i].split(RegExp(r'\n\s*\n'))) {
           final t = clean(p);
-          if (t.isNotEmpty) out.add((text: t, code: false));
+          // terms.md 의 '---' 는 용어 사이 구분선이라 본문 노출 대상이 아니다.
+          if (t.isNotEmpty && t != '---') out.add((text: t, code: false));
         }
       }
     }
