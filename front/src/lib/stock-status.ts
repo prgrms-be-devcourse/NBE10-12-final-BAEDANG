@@ -54,6 +54,10 @@ export function buildStatusBadges(
     for (const label of new Set(detail.warnings.map((warning) => warning.label))) {
       badges.push({ key: `warning-${label}`, label, tone: "warn" });
     }
+  } else {
+    // UNAVAILABLE은 "유의사항 없음"이 아니라 "확인 실패"다 — 아무것도 안 보여주면
+    // 깨끗한 종목과 구별할 수 없다. 경고가 있다는 뜻이 아니므로 warn이 아닌 중립 톤.
+    badges.push({ key: "warning-unavailable", label: "유의사항 확인 중", tone: "neutral" });
   }
 
   const now = new Date();

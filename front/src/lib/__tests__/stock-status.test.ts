@@ -59,9 +59,14 @@ describe("buildStatusBadges — 주문을 막지 않는 상태만 종목명 옆�
     expect(badges).toHaveLength(1);
   });
 
-  it("유의사항 조회가 실패했으면 배지를 만들지 않는다", () => {
+  it("유의사항 조회가 실패했으면 확인 중 배지로 구분한다", () => {
     // 확인하지 못한 것을 "유의사항 없음"으로도, 없는 경고로도 만들면 안 된다.
-    expect(buildStatusBadges(unknownWarnings, EMPTY_STOCK_MARKET_EVENT_STATE)).toEqual([]);
+    // 깨끗한 종목과 구별되도록 중립 톤의 확인 중 배지를 단다.
+    const badges = buildStatusBadges(unknownWarnings, EMPTY_STOCK_MARKET_EVENT_STATE);
+
+    expect(badges).toHaveLength(1);
+    expect(badges[0].label).toBe("유의사항 확인 중");
+    expect(badges[0].tone).toBe("neutral");
   });
 
   it("유의사항이 없으면 배지를 만들지 않는다", () => {
