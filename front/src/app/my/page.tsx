@@ -449,12 +449,17 @@ export default function MyPage() {
           baseDelayMs={45}
           lines={["보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요."]}
         />
+        {/* 문구뿐 아니라 컴포넌트(버튼)에도 같은 효과를 적용해달라는 요청 —
+            메인 화면 CTA 버튼(page.tsx)과 같은 방식으로 버튼 라벨을
+            RevealText(as="span" display="inline-block")로 감쌌다. 위
+            제목(0ms)·설명(45ms)에 이어서 자연스럽게 90ms·135ms에
+            시작하도록 이어 붙였다. */}
         <div className="flex justify-center gap-2.5">
           <Link href="/login" className="rounded-xl px-5 py-2.5 text-[14px] font-bold" style={{ background: "var(--fill)", color: "var(--ink)" }}>
-            로그인
+            <RevealText as="span" display="inline-block" baseDelayMs={90} lines={["로그인"]} />
           </Link>
           <Link href="/signup" className="rounded-xl px-5 py-2.5 text-[14px] font-bold text-white" style={{ background: "var(--accent)" }}>
-            회원가입
+            <RevealText as="span" display="inline-block" baseDelayMs={135} lines={["회원가입"]} />
           </Link>
         </div>
       </Reveal>
