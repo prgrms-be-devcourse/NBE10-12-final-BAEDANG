@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
+import { TiltCard } from "@/components/TiltCard";
 import { WikiPanel } from "@/components/WikiPanel";
 import { useTheme } from "@/components/ThemeProvider";
 
@@ -84,9 +86,11 @@ export default function GuidePage() {
           value={tab}
           onChange={(v) => setTab(v as "guide" | "wiki")}
           trackClassName="mb-4.5 w-[200px] gap-0.5 rounded-full p-[3px]"
+          // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+          // 기존 alpha 값을 절반으로 낮췄다.
           trackStyle={{
-            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-            border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+            background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+            border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
           }}
           buttonClassName="rounded-full px-0 py-2 text-[13px] font-bold"
           inactiveTextStyle={{ color: "var(--mut)" }}
@@ -97,15 +101,29 @@ export default function GuidePage() {
         <WikiPanel />
       ) : (
         <>
+          {/* 랭킹 화면 문구에 이미 적용한 토스인슈어런스(pd-recruit.tossinsu.com)
+              스타일 Line Reveal(아래→위 마스크 등장)을 이용가이드 탭의 문구·
+              컴포넌트에도 적용해달라는 요청 — 제목/부제, 카드 6개의 제목·본문,
+              하단 안내 문구까지 모두 RevealText로 바꿨다. 각 요소를 감싸던
+              Reveal(카드 전체가 살짝 떠오르는 기존 애니메이션)은 그대로 두고,
+              그 안의 텍스트만 RevealText로 한 줄씩 마스크 안에서 올라오게
+              했다 — RevealText는 자체 IntersectionObserver로 각 카드가 실제로
+              스크롤에 걸릴 때 개별적으로 반응한다. */}
           <Reveal delay={0.02}>
-            <h2 className="text-[26px] font-extrabold" style={{ color: "var(--ink)" }}>
-              이용가이드
-            </h2>
+            <RevealText
+              as="h2"
+              className="text-[26px] font-extrabold"
+              style={{ color: "var(--ink)" }}
+              lines={["이용가이드"]}
+            />
           </Reveal>
           <Reveal delay={0.08} className="mt-2.5 mb-6">
-            <p className="text-[15px]" style={{ color: "var(--mut)" }}>
-              이 서비스에서 거래가 어떻게 이루어지는지 안내해 드려요
-            </p>
+            <RevealText
+              as="p"
+              className="text-[15px]"
+              style={{ color: "var(--mut)" }}
+              lines={["이 서비스에서 거래가 어떻게 이루어지는지 안내해 드려요"]}
+            />
           </Reveal>
 
           {/* 왼쪽 열(1·2·3)과 오른쪽 열(4·5·6)이 같은 줄끼리 카드 높이를 맞춰야 해서
@@ -115,24 +133,58 @@ export default function GuidePage() {
           <div className="grid grid-cols-2 gap-4 gap-y-3.5 max-md:grid-cols-1">
             {[SECTIONS[0], SECTIONS[3], SECTIONS[1], SECTIONS[4], SECTIONS[2], SECTIONS[5]].map((s, i) => (
               <Reveal key={s.title} delay={0.14 + i * 0.06}>
-                <div
+                {/* 서비스 소개 화면의 STEP 카드에 쓰던 마우스 방향 반응형
+                    3D 틸트 효과(TiltCard)를 이 카드들에도 적용해달라는
+                    요청 — 카드를 감싸던 평범한 div를 TiltCard로 바꿨다.
+                    className·style(배경·라운드·패딩)은 그대로 넘겨서
+                    기존 디자인은 바뀌지 않는다. */}
+                <TiltCard
                   className="h-full"
                   style={{ background: "var(--card)", borderRadius: 20, padding: "22px 24px" }}
                 >
-                  <h4 className="mb-1.5 text-[15px] font-bold" style={{ color: "var(--ink)" }}>{s.title}</h4>
-                  <p className="text-[13.5px] leading-relaxed" style={{ color: "var(--body)" }}>{s.body}</p>
-                </div>
+                  <RevealText
+                    as="h4"
+                    className="mb-1.5 text-[15px] font-bold"
+                    style={{ color: "var(--ink)" }}
+                    lines={[s.title]}
+                  />
+                  <RevealText
+                    as="p"
+                    className="text-[13.5px] leading-relaxed"
+                    style={{ color: "var(--body)" }}
+                    baseDelayMs={45}
+                    lines={[s.body]}
+                  />
+                </TiltCard>
               </Reveal>
             ))}
           </div>
 
           <Reveal delay={0.5} className="mt-4.5">
+            {/* "참고" 안내 박스 배경을 여러 파란 계열로 시도해본 끝에 라이트/
+                다크 공통 고정값(#dceefa 배경·#0f3868 글자)으로 정했었는데,
+                다크 모드로 보면 이 고정값이 그대로 남아 있어 옅은 하늘색
+                박스가 어두운 화면 안에서 튀어 보인다는 문제가 있었다 —
+                첨부받은 참고 사진(다크 배경 위 밝은 하늘색 글자, 위키 용어
+                요약 박스와 같은 스타일)처럼 다크 모드에서는 어두운 톤이어야
+                한다. 마침 var(--accentSoft)의 라이트 모드 값이 정확히
+                #dceefa, var(--onAccentSoftText)의 라이트 모드 값이 정확히
+                #0f3868이라 — 고정값 대신 이 테마 변수로 되돌리면 라이트
+                모드는 지금 모습 그대로 유지되면서, 다크 모드는 자동으로
+                #1b2a38 배경·#acd5ef 글자(첨부 사진과 같은 톤)가 된다. */}
             <div className="rounded-2xl px-5 py-4" style={{ background: "var(--accentSoft)" }}>
-              <p className="text-[12.5px] leading-relaxed" style={{ color: "var(--onAccentSoftText)" }}>
-                <b>참고</b> — 이 서비스의 시세는 실제 시장 데이터를 사용하지만 수 초의 지연이 있으며, 회원의
-                매수·매도는 실제 시장 가격에 영향을 주지 않아요. 모의 투자 결과가 실제 투자 성과를 보장하지
-                않아요.
-              </p>
+              <RevealText
+                as="p"
+                className="text-[12.5px] leading-relaxed"
+                style={{ color: "var(--onAccentSoftText)" }}
+                lines={[
+                  <>
+                    <b>참고</b> — 이 서비스의 시세는 실제 시장 데이터를 사용하지만 수 초의 지연이 있으며, 회원의
+                    매수·매도는 실제 시장 가격에 영향을 주지 않아요. 모의 투자 결과가 실제 투자 성과를 보장하지
+                    않아요.
+                  </>,
+                ]}
+              />
             </div>
           </Reveal>
         </>

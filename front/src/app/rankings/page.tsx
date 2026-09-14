@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
 import { SignupModal } from "@/components/SignupModal";
@@ -312,13 +313,25 @@ export default function RankingsPage() {
 
   return (
     <div>
+      {/* 메인 화면 히어로 문구와 같은 토스인슈어런스(pd-recruit.tossinsu.com)
+          스타일 Line Reveal(아래→위 마스크 등장)을 랭킹 화면 문구에도
+          적용해달라는 요청 — 기존 h2/p를 RevealText로 바꿨다. 감싸는
+          Reveal(delay=0)은 그대로 둬서, 카드 전체는 기존처럼 살짝
+          떠오르고 그 안의 텍스트는 한 줄씩 마스크 안에서 올라온다. */}
       <Reveal delay={0}>
-        <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
-          주식 종목 랭킹
-        </h2>
-        <p className="mt-2 mb-4.5 text-[15px]" style={{ color: "var(--mut)" }}>
-          거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
-        </p>
+        <RevealText
+          as="h2"
+          className="text-[28px] font-extrabold"
+          style={{ color: "var(--ink)" }}
+          lines={["주식 종목 랭킹"]}
+        />
+        <RevealText
+          as="p"
+          className="mt-2 mb-4.5 text-[15px]"
+          style={{ color: "var(--mut)" }}
+          baseDelayMs={45}
+          lines={["거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요"]}
+        />
       </Reveal>
 
       {/* 환율 배너 — 정책상 거래는 원화로만 제공되어, 미국 종목 표시는 이 환율로 환산합니다 */}
@@ -485,9 +498,11 @@ export default function RankingsPage() {
         value={market}
         onChange={switchMarket}
         trackClassName="mb-3 w-[200px] gap-0.5 rounded-full p-[3px]"
+        // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+        // 기존 alpha 값을 절반으로 낮췄다.
         trackStyle={{
-          background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-          border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+          background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+          border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
         }}
         buttonClassName="rounded-full py-2 text-[13px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}

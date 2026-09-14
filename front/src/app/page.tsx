@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { useAuth } from "@/components/AuthProvider";
 import { Reveal } from "@/components/Reveal";
 import { RevealText } from "@/components/RevealText";
 // 서비스 소개 화면의 "시작하기" 버튼과 같은 텍스트 스왑 호버 효과를 메인
@@ -22,7 +24,21 @@ function formatMarketTime(iso: string): string {
 
 export default function MainPage() {
   const { theme } = useTheme();
+  const { isLoggedIn } = useAuth();
+  const router = useRouter();
   const [marketStatus, setMarketStatus] = useState<MarketStatus | null>(null);
+  // "모의 투자금 받고 시작하기" 버튼 — 비로그인이면 회원가입으로 보내고,
+  // 이미 로그인(=이미 가입 시 모의 투자금을 받은 상태)한 사용자에게는
+  // 이미 받았다는 안내 팝업만 띄운다(중복 지급 오해 방지).
+  const [alreadyFundedOpen, setAlreadyFundedOpen] = useState(false);
+
+  function handleStartClick() {
+    if (isLoggedIn) {
+      setAlreadyFundedOpen(true);
+    } else {
+      router.push("/signup");
+    }
+  }
 
   // 인트로 화면 "시작하기" 버튼의 반투명 알약형 배경(흰색, 불투명도
   // .06 → 호버 시 .24)을 라이트/다크 모두에 그대로 적용했었는데, 배경의
@@ -106,12 +122,21 @@ export default function MainPage() {
                 텍스트가 아래→위로 스치듯 바뀌는 SwapText 효과까지 그대로
                 가져왔다. 원래 두 버튼이 갖고 있던 강조(accent 색 채움)/
                 보조(흰색·어두운 배경) 구분은 이 요청에 따라 사라지고,
-                이제 둘 다 똑같은 알약형 버튼이 된다. */}
+                이제 둘 다 똑같은 알약형 버튼이 된다.
+                이후 버튼 뒤에 깔려 있던 그림자 효과(boxShadow: 0 2px 8px
+                rgba(15,23,32,.08))를 제거해달라는 요청으로, 두 버튼의
+                style에서 boxShadow를 지웠다. */}
             <div className="mt-5 flex gap-2.5">
-              <Link
-                href="/rankings"
+              {/* "모의 투자금 받고 시작하기"는 더 이상 항상 같은 곳으로 가는
+                  링크가 아니다 — 비로그인이면 회원가입 화면으로 보내고(가입과
+                  동시에 모의 투자금이 지급되므로), 이미 로그인한 사용자는
+                  이미 지급받은 상태이니 랭킹으로 보내는 대신 안내 팝업만
+                  띄운다. 그래서 Link가 아니라 버튼 + router.push다. */}
+              <button
+                type="button"
+                onClick={handleStartClick}
                 className="iv-hover-swap inline-flex min-h-[54px] items-center gap-2.5 whitespace-nowrap rounded-full px-11 text-[19px] font-bold tracking-[-0.01em] transition-[background-color] duration-[280ms] ease-out"
-                style={{ background: pillBtnBg, color: pillBtnText, boxShadow: "0 2px 8px rgba(15,23,32,.08)" }}
+                style={{ background: pillBtnBg, color: pillBtnText, cursor: "pointer" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
@@ -121,38 +146,45 @@ export default function MainPage() {
                     독립적으로 동작한다(스크롤 진입 시 1회 등장은 RevealText,
                     마우스 호버 때마다 반복되는 텍스트 교체는 SwapText). */}
                 <RevealText as="span" display="inline-block" lines={[<SwapText key="label">모의 투자금 받고 시작하기</SwapText>]} />
-              </Link>
+              </button>
               <Link
                 href="/guide"
                 className="iv-hover-swap inline-flex min-h-[54px] items-center gap-2.5 whitespace-nowrap rounded-full px-11 text-[19px] font-bold tracking-[-0.01em] transition-[background-color] duration-[280ms] ease-out"
-                style={{ background: pillBtnBg, color: pillBtnText, boxShadow: "0 2px 8px rgba(15,23,32,.08)" }}
+                style={{ background: pillBtnBg, color: pillBtnText }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
                 <RevealText as="span" display="inline-block" baseDelayMs={45} lines={[<SwapText key="label">가이드 보기</SwapText>]} />
               </Link>
             </div>
+            {/* 버튼 두 개(모의 투자금 받고 시작하기·가이드 보기)와 이 문구 사이
+                간격을 띄워달라는 요청 — mt-3.5(14px) → mt-6(24px). */}
             <RevealText
               as="div"
-              className="mt-3.5 text-[14px]"
+              className="mt-6 text-[14px]"
               style={{ color: "var(--heroSub)" }}
               lines={["실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요"]}
             />
+            {/* 위 안내 문구와 국내장/해외장 개장 시간 컴포넌트 사이 간격을
+                띄워달라는 요청 — mt-3(12px) → mt-5(20px). */}
             {marketStatus && (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-5 flex flex-wrap gap-2">
                 {marketStatus.markets.map((m, i) => (
                   <span
                     key={m.marketCountry}
-                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다. 라이트 모드는
-                    // accent가 짙은 네이비라 흰 글자가 맞고, 다크 모드는 accent가 밝은
-                    // 하늘색이라 요청대로 검정 글자가 대비가 더 좋다.
+                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다. 원래
+                    // 다크 모드의 accent가 밝은 하늘색(#5fa0d6)이라 이 배지만
+                    // 로컬로 짙은 남색(#114f8c)으로 바꿨었는데, 이후 dark
+                    // accent 자체가 #114f8c로 통일되면서(globals.css) 이제
+                    // var(--accent) 하나만 써도 같은 색이라 로컬 오버라이드를
+                    // 정리했다.
                     className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
-                    style={{ background: "var(--accent)", color: theme === "dark" ? "#000000" : "#ffffff" }}
+                    style={{ background: "var(--accent)", color: "#ffffff" }}
                   >
                     <span
                       className="h-1.5 w-1.5 rounded-full"
                       style={{
-                        background: m.open ? "var(--up)" : theme === "dark" ? "rgba(0,0,0,.45)" : "rgba(255,255,255,.55)",
+                        background: m.open ? "var(--up)" : "rgba(255,255,255,.55)",
                       }}
                     />
                     {/* 배지 두 개(국내장/해외장)가 나란히 있으므로 배열 인덱스만큼
@@ -219,6 +251,38 @@ export default function MainPage() {
           시세는 토스증권 Open API를 통해 제공되며 실시간과 수 초의 차이가 있을 수 있어요.
         </p>
       </Reveal>
+
+      {/* 로그인 상태로 "모의 투자금 받고 시작하기"를 눌렀을 때 뜨는 안내
+          팝업 — 마이페이지 초기화/탈퇴 확인 모달과 같은 스타일(modalFade·
+          modalPop 애니메이션, rounded-[24px] 카드)을 그대로 따랐다. */}
+      {alreadyFundedOpen && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+          style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+          onClick={() => setAlreadyFundedOpen(false)}
+        >
+          <div
+            className="w-full max-w-[380px] rounded-[24px] px-7.5 pt-8 pb-6.5 text-center"
+            style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-1.5 text-[18px] font-bold" style={{ color: "var(--ink)" }}>
+              이미 모의 투자금을 지급 받으셨습니다.
+            </h3>
+            <p className="mb-4.5 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
+              마이페이지에서 보유 종목과 투자 현황을 확인해보세요.
+            </p>
+            <button
+              type="button"
+              onClick={() => setAlreadyFundedOpen(false)}
+              className="w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white"
+              style={{ background: "var(--accent)" }}
+            >
+              확인
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

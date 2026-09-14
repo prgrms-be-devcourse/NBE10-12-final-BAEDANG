@@ -23,6 +23,17 @@ type Props = {
 export function Reveal({ children, delay = 0, duration = 0.6, className = "", style, as = "div" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
+  // riseIn 애니메이션은 transform(translateY)을 쓰는데, animation의
+  // fill-mode가 forwards라 애니메이션이 끝난 뒤에도 마지막 키프레임의
+  // transform: translateY(0)이 계산값으로 계속 남는다. transform이 none이
+  // 아닌 요소는 그 자손의 position: fixed를 뷰포트가 아니라 자기 자신
+  // 기준으로 가두는 containing block이 되어버려서, 이 Reveal 안에 있는
+  // 모달(예: 마이페이지 투자 성향 리포트의 "?" 도움말 모달)의
+  // "fixed inset-0" 어두운 배경이 화면 전체가 아니라 이 Reveal 박스
+  // 크기로만 좁게 나타나는 문제가 있었다. 애니메이션이 끝나면
+  // animation·transform을 아예 지워서(settled) 더 이상 containing
+  // block이 되지 않게 한다.
+  const [settled, setSettled] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -60,10 +71,13 @@ export function Reveal({ children, delay = 0, duration = 0.6, className = "", st
       ref={ref as never}
       className={className}
       style={
-        visible
-          ? { ...style, opacity: 0, animation: `riseIn ${duration}s cubic-bezier(.22,1,.36,1) ${delay}s forwards` }
-          : { ...style, opacity: 0, transform: "translateY(18px)" }
+        settled
+          ? { ...style, opacity: 1 }
+          : visible
+            ? { ...style, opacity: 0, animation: `riseIn ${duration}s cubic-bezier(.22,1,.36,1) ${delay}s forwards` }
+            : { ...style, opacity: 0, transform: "translateY(18px)" }
       }
+      onAnimationEnd={() => setSettled(true)}
     >
       {children}
     </Tag>

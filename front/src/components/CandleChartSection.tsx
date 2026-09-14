@@ -61,9 +61,12 @@ export function CandleChartSection({
    * 확대보기 모달에서는 넘기지 않아 투어 대상에서 제외된다. */
   tourIds?: { toggle?: string; chart?: string; expandButton?: string };
 }) {
+  // 라이트/다크 토글 뒤 트랙을 반투명하게 낮춘 것과 동일한 스타일을 다른
+  // 화면의 필박스 토글(1분봉/일봉/주봉/월봉, 1일/1주/1개월/3개월/1년 등)
+  // 에도 똑같이 적용해달라는 요청 — 기존 alpha 값을 절반으로 낮췄다.
   const trackStyle = {
-    background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-    border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+    background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+    border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
   };
   const lastCandleDateLabel = lastCandleAt ? formatLastCandleDate(lastCandleAt) : null;
   const availablePeriods = CANDLE_UNIT_PERIODS[candleUnit];
