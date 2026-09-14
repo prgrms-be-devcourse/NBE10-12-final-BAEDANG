@@ -18,6 +18,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,12 +32,20 @@ class StockDetailServiceTest {
     private final QuoteRealtimePolicy quoteRealtimePolicy = mock(QuoteRealtimePolicy.class);
     private final StockOnDemandQuoteService stockOnDemandQuoteService = mock(StockOnDemandQuoteService.class);
     private final PriceLimitLoadService priceLimits = mock(PriceLimitLoadService.class);
+    private final StockWarningQueryService stockWarningQueryService = mock(StockWarningQueryService.class);
     private final StockDetailService service =
-            new StockDetailService(stockRepository, quoteSnapshotRepository, quoteRealtimePolicy, stockOnDemandQuoteService, priceLimits);
+            new StockDetailService(stockRepository, quoteSnapshotRepository, quoteRealtimePolicy,
+                    stockOnDemandQuoteService, priceLimits, stockWarningQueryService);
     private Stock stock;
 
     @BeforeEach
     void setUp() {
+        // 유의사항 조회는 StockWarningQueryServiceTest에서 검증한다 — 여기서는
+        // "확인했고 유의사항이 없다"로 고정해 주문 가능 여부 판정만 본다.
+        when(stockWarningQueryService.currentWarnings(any()))
+                .thenReturn(new StockWarningQueryService.WarningSnapshot(
+                        List.of(), StockDetailResponse.WarningStatus.AVAILABLE));
+
         // 온디맨드 갱신은 별도 StockOnDemandQuoteServiceTest에서 검증한다 — 여기서는
         // "넘겨받은 시세를 그대로 돌려준다"로 고정해 기존 시나리오에 영향이 없게 한다.
         when(stockOnDemandQuoteService.ensureQuote(any(), any()))
@@ -144,15 +153,35 @@ class StockDetailServiceTest {
     }
 
     @Test
-    void 경고종목은_범용_투자경고를_반환한다() {
-        when(stock.getIsWarned()).thenReturn(true);
+    void 유의사항_조회_실패는_경고없음이_아니라_UNAVAILABLE로_내려간다() {
+        when(stockWarningQueryService.currentWarnings(any()))
+                .thenReturn(new StockWarningQueryService.WarningSnapshot(
+                        List.of(), StockDetailResponse.WarningStatus.UNAVAILABLE));
         when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.empty());
         when(quoteRealtimePolicy.isMarketOpen(MarketCountry.KR)).thenReturn(true);
 
         StockDetailResponse result = service.getDetail("abc", "KR");
 
+        assertThat(result.warnings()).isEmpty();
+        assertThat(result.warningsStatus()).isEqualTo(StockDetailResponse.WarningStatus.UNAVAILABLE);
+    }
+
+    @Test
+    void 유의사항은_원천_타입을_보존한_채_정보성으로만_반환하고_주문가능여부는_바꾸지_않는다() {
+        when(stockWarningQueryService.currentWarnings(any()))
+                .thenReturn(new StockWarningQueryService.WarningSnapshot(
+                        List.of(new StockDetailResponse.Warning("OVERHEATED", "과열종목")),
+                        StockDetailResponse.WarningStatus.AVAILABLE));
+        QuoteSnapshot quote = quote("120", "100");
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(quote));
+        when(quoteRealtimePolicy.isMarketOpen(MarketCountry.KR)).thenReturn(true);
+
+        StockDetailResponse result = service.getDetail("abc", "KR");
+
         assertThat(result.warnings()).containsExactly(
-                new StockDetailResponse.Warning("INVESTMENT_WARNING", "투자경고"));
+                new StockDetailResponse.Warning("OVERHEATED", "과열종목"));
+        assertThat(result.tradable()).isTrue();
+        assertThat(result.tradableReason()).isNull();
     }
 
     @Test

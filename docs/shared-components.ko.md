@@ -495,6 +495,16 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 
 시도 맵과 내부 가변 필드는 동일한 `synchronized` claim/finish 메서드로 보호합니다. 만료 제거, 중복·용량 확인, 등록은 원자적으로 수행하고 외부 API 호출은 모니터 잠금 밖에서 유지합니다.
 
+### 종목 상세의 표시 상태
+
+- `StockWarningQueryService.currentWarnings(stock)`: 토스 유의사항 API를 `SymbolInfoPort.fetchStockWarnings`로 읽고 종목별 TTL 캐시(`trading.stock-warning-cache-ttl`, 기본 5분)를 둔다. **원본 유의사항**을 캐시하고 활성 구간은 읽는 시점 날짜로 다시 판정한다 — `endDate`가 자정에 지난 유의사항은 캐시가 살아 있어도 사라져야 한다.
+- `warningsStatus`를 함께 반환한다. `UNAVAILABLE`은 조회 실패이고 이전에 확인한 값도 없다는 뜻이다. 이를 "유의사항 없음"으로 취급하지 않고 `tradable`에 접지 않는다 — 유의사항은 정보성이며 주문 자격을 바꾸지 않는다.
+- `StockDetailService`가 `warnings`/`warningsStatus`를 내려준다. 거래정지·정리매매는 여전히 `Stock`의 상태 컬럼과 `listingStatus`에서 오며 유의사항과 무관하다.
+- 유의사항 문구는 종류별로 백엔드가 `tools/terms.md` 표기로 정한다(`OVERHEATED` → `과열종목`, `INVESTMENT_WARNING` → `투자경고`, `VI_STATIC` → `변동성완화장치`, 미지정 코드 → `거래유의종목`). 원천 코드는 `type`에 남는다. 프론트는 서버 `label`을 그대로 표시한다 — 같은 사실을 두 곳에서 번역하면 한쪽만 바뀌었을 때 어긋난다.
+- 프론트 `front/src/lib/stock-status.ts`가 종목 상세 화면의 표시를 결정한다. `buildStatusBadges`는 **차단하지 않는** 배지만 만든다(종류별 유의사항 문구, 활성 사이드카는 방향 포함). `resolveBlockReason`은 버튼 사유 하나를 `SUSPENDED → LIQUIDATION → 활성 CB → 기타 tradable 사유 → 금액·수량` 순서로 만든다. 시장가·지정가가 같은 함수를 호출하므로 두 주문 유형이 다른 말을 할 수 없다.
+- 프론트 `front/src/lib/stock-market-events.ts`가 한 시장의 당일 이벤트를 분류한다. KOSPI/KOSDAQ만 조회한다 — 미국과 `KR_ETC`에는 KIND 이벤트가 없다. 조회가 실패했거나 아직 도착하지 않았으면 화면이 그것으로 **막지 않는다**. 서버 거래 트랜잭션이 권위이고 기존 `MARKET_TRADING_HALTED` 응답이 최종 방어선이다.
+- `MarketEventsBanner`(랭킹 국내 탭)는 이력 의미를 유지한다. 활성 서킷브레이커(`지금 매매거래 일시중단 중이에요`)와 활성 사이드카(`현재 시장조치가 발동 중이에요`)만 제목에서 구분한다 — 사이드카는 프로그램 호가만 정지시킨다.
+
 ## 거래 범위와 V2 가격 배열 (#178)
 
 `TradingPriceLimits`는 기존 시세 컬럼으로 만든 불변 값이며 별도 저장하지 않습니다. 국내 거래소 현지 당일을 검증하고 미국 NULL은 제한 없음으로 처리합니다. `OrderPolicy.validateTradingPrice`를 예상 조회·접수·체결이 공유하고 지정가 단위는 기존 `TickSizePolicy`를 사용합니다. 장외 상세 표시 정책을 거래 폴백으로 사용하지 않습니다.

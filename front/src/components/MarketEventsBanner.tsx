@@ -53,16 +53,23 @@ export function MarketEventsBanner() {
 
   if (!loaded || rows.length === 0) return null;
 
-  const hasActive = rows.some((r) => r.active);
+  // 사이드카는 프로그램 매매 호가만 멈추고 일반 주문은 계속된다 — 활성 이벤트가
+  // 하나라도 있으면 "매매거래 일시중단"이라고 쓰면 사이드카만 발동된 날에도
+  // 전체 거래가 멈춘 것처럼 읽힌다. 서킷브레이커일 때만 그 문구를 쓴다.
+  const hasActiveCircuitBreaker = rows.some((r) => r.active && r.eventType === "CIRCUIT_BREAKER");
+  const hasActiveSidecar = rows.some((r) => r.active && r.eventType === "SIDECAR");
+  const heading = hasActiveCircuitBreaker
+    ? "지금 매매거래 일시중단 중이에요"
+    : hasActiveSidecar
+      ? "현재 시장조치가 발동 중이에요"
+      : "오늘의 시장조치 이력";
 
   return (
     <div
       className="mb-4 rounded-[14px] px-4.5 py-3.5 text-[13.5px]"
       style={{ background: "var(--warnBg)", border: `1px solid var(--warnBorder)`, color: "var(--warnText)" }}
     >
-      <div className="mb-2 font-bold">
-        {hasActive ? "지금 매매거래 일시중단 중이에요" : "오늘의 시장조치 이력"}
-      </div>
+      <div className="mb-2 font-bold">{heading}</div>
       <div className="flex flex-col gap-1.5">
         {rows.map((row) => (
           <MarketEventRow key={`${row.market}-${row.eventId}`} row={row} />

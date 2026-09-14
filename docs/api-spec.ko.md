@@ -534,6 +534,7 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
   "warnings": [
     { "type": "INVESTMENT_WARNING", "label": "투자경고" }
   ],
+  "warningsStatus": "AVAILABLE",
   "tradable": true,
   "tradableReason": null
 }
@@ -542,8 +543,12 @@ DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30
 **핵심 필드**
 | 필드 | 의미 |
 |---|---|
+| `warnings` | 토스에서 받은 활성 매수 유의사항. `type`은 원천 코드(`OVERHEATED` · `INVESTMENT_WARNING` · `VI_STATIC` · 미지정 코드)를 그대로 보존하고, `label`은 그 종류의 화면 문구 — `과열종목` · `투자경고` · `변동성완화장치`이고 아직 매핑하지 않은 코드는 `거래유의종목`으로 폴백 |
+| `warningsStatus` | 유의사항 조회 성공 여부. 실패하면 `UNAVAILABLE`. **`UNAVAILABLE`은 "유의사항 없음"이 아니다** — 화면이 깨끗한 종목인 것처럼 배지를 감추면 안 된다 |
 | `tradable` | 지금 이 종목을 거래할 수 있는가 |
 | `tradableReason` | `tradable=false` 일 때의 사유 코드 |
+
+**유의사항은 정보성이며 거래를 막지 않는다.** `warnings`는 토스 유의사항 API를 종목별 짧은 TTL 캐시로 읽으므로, 상세 화면의 폴링이 갱신마다 외부 호출을 한 번씩 쓰지 않는다. `[startDate, endDate]` 구간에 오늘이 포함된 유의사항만 반환합니다. 조회가 실패해도 `tradable`/`tradableReason`은 바뀌지 않습니다. **문구는 백엔드가 정하고**(`tools/terms.md` 표기) 프론트는 `label`을 그대로 표시합니다 — 같은 사실을 두 곳에서 번역하지 않습니다.
 
 **`tradableReason` 값**
 | 코드 | 화면 문구 |
