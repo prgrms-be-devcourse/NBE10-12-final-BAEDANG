@@ -56,8 +56,8 @@ export default function ForgotPasswordPage() {
           </>
         ) : (
           <>
-            <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>비밀번호 찾기</h1>
-            <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+            <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>비밀번호 찾기</h1>
+            <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
               가입하신 이메일로 비밀번호 재설정 안내를 보내드려요
             </p>
 

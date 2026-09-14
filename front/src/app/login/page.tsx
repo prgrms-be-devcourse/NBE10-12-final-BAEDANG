@@ -38,8 +38,8 @@ function LoginForm() {
         className="w-full max-w-[400px] rounded-[24px] px-8 pt-9 pb-7.5 opacity-0"
         style={{ background: "var(--card)", animation: "modalPop .55s cubic-bezier(.2,.9,.3,1.05) .05s forwards" }}
       >
-        <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>로그인</h1>
-        <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>모의 투자금으로 다시 시작해볼까요?</p>
+        <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>로그인</h1>
+        <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>모의 투자금으로 다시 시작해볼까요?</p>
 
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>

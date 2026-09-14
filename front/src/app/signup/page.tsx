@@ -78,8 +78,8 @@ function SignupForm() {
         }
         onAnimationEnd={() => setCardSettled(true)}
       >
-        <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>회원가입</h1>
-        <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+        <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>회원가입</h1>
+        <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
           가입하면 <b style={{ color: "var(--ink)" }}>모의 투자금 5,000만원</b>을 바로 드려요
         </p>
 
