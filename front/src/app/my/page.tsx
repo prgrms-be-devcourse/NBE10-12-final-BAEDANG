@@ -87,6 +87,13 @@ export default function MyPage() {
   // 낮추고 hue를 순빨강 쪽인 28로)으로, 명도만 버튼 배경에 맞게 낮춰
   // 와인빛이 도는 차분한 레드로 만들었다.
   const dangerButtonBg = theme === "dark" ? "oklch(46% 0.15 28)" : "var(--dangerText)";
+  // 관심 종목 탭의 전일대비 배지 배경(var(--upBg)/--downBg)이 다크 모드에서
+  // 너무 진하다는 요청 — 이 두 변수는 랭킹·보유종목 등 다른 화면과도 공유하는
+  // 전역 값이라 그대로 두고, 이 페이지 로컬로만 다크 모드에서 명도를 올리고
+  // 채도를 낮춘 더 은은한 색을 쓴다(라이트 모드는 기존 var(--upBg)/--downBg
+  // 그대로 — 요청이 다크 모드로 한정됨).
+  const changeUpBg = theme === "dark" ? "oklch(37% 0.06 28)" : "var(--upBg)";
+  const changeDownBg = theme === "dark" ? "oklch(37% 0.055 255)" : "var(--downBg)";
   const [tab, setTab] = useState<"holdings" | "ledger" | "orders" | "likes">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
@@ -986,7 +993,7 @@ export default function MyPage() {
               ) : (
                 <span
                   className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
-                  style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
+                  style={{ background: isUp ? changeUpBg : changeDownBg, color: isUp ? "var(--up)" : "var(--down)" }}
                 >
                   {isUp ? "▲" : "▼"} {formatPercent(item.changeRate)}
                 </span>
@@ -996,18 +1003,28 @@ export default function MyPage() {
                   type="button"
                   onClick={() => handleUnlike(item)}
                   disabled={likeRemoving.has(item.stockLikeId)}
-                  className="cursor-pointer text-[16px] leading-none disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{ color: "var(--heartActive)", WebkitTextStroke: "1.3px" }}
+                  className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ color: "var(--heartActive)" }}
                   aria-label="찜 해제하기"
                 >
-                  ♥
+                  {/* 유니코드 하트(♥)는 폰트마다 모양이 들쭉날쭉하고 이 프로젝트
+                      폰트(Pretendard)엔 아예 없어 시스템 이모지 폰트로 대체되어
+                      보였다 — 매끈한 SVG 하트(Heroicons solid heart)로 바꿔서
+                      항상 같은 모양으로 보이게 했다. */}
+                  <svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M9.653 16.915l-.005-.003-.019-.01a20.759 20.759 0 01-1.162-.682 22.045 22.045 0 01-2.582-1.9C4.045 12.733 2 10.352 2 7.5 2 5.015 3.98 3 6.5 3c1.376 0 2.6.611 3.5 1.518A4.987 4.987 0 0113.5 3C16.02 3 18 5.015 18 7.5c0 2.852-2.044 5.233-3.885 6.82a22.049 22.049 0 01-3.744 2.582l-.019.01-.005.003h-.002a.739.739 0 01-.69.001l-.002-.001z" />
+                  </svg>
                 </button>
               );
               return (
                 <Link
                   key={item.stockLikeId}
                   href={`/stocks/${item.symbol}?marketCountry=${item.marketCountry}`}
-                  className="block px-5 py-3 text-[15px] transition-[background] duration-150"
+                  // 목록 전체(이름·가격·배지)의 글꼴을 프리텐다드로 명시적으로
+                  // 통일해달라는 요청 — body에 이미 Pretendard가 걸려 있어 보통은
+                  // 상속만으로 충분하지만, 하트 버튼처럼 상속이 어긋나기 쉬운
+                  // 자리가 있었으니 이 행 전체에 폰트를 명시적으로 고정해둔다.
+                  className="font-sans block px-5 py-3 text-[15px] transition-[background] duration-150"
                   style={{ borderBottom: "1px solid var(--line2)" }}
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
