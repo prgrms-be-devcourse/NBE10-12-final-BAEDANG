@@ -172,16 +172,20 @@ export default function MainPage() {
                 {marketStatus.markets.map((m, i) => (
                   <span
                     key={m.marketCountry}
-                    // 회원가입 버튼과 동일한 배경(var(--accent))을 쓴다. 라이트 모드는
-                    // accent가 짙은 네이비라 흰 글자가 맞고, 다크 모드는 accent가 밝은
-                    // 하늘색이라 요청대로 검정 글자가 대비가 더 좋다.
+                    // 원래는 회원가입 버튼과 동일한 배경(var(--accent))을 썼는데,
+                    // 다크 모드에서 accent가 밝은 하늘색(#5fa0d6)이라 배지가 다소
+                    // 가벼워 보인다는 요청 — 다크 모드일 때만 히어로 배경에 이미
+                    // 쓰던 짙은 남색(#114f8c, var(--heroBg) 다크 값)으로 바꿔 좀 더
+                    // 세련된 톤을 냈다. 배경이 짙어졌으니 라이트 모드와 같은 흰
+                    // 글자·옅은 흰색 점(마감 상태)으로 맞춘다. 라이트 모드는 기존
+                    // 그대로(accent 짙은 네이비 배경 + 흰 글자) 유지한다.
                     className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-semibold"
-                    style={{ background: "var(--accent)", color: theme === "dark" ? "#000000" : "#ffffff" }}
+                    style={{ background: theme === "dark" ? "#114f8c" : "var(--accent)", color: "#ffffff" }}
                   >
                     <span
                       className="h-1.5 w-1.5 rounded-full"
                       style={{
-                        background: m.open ? "var(--up)" : theme === "dark" ? "rgba(0,0,0,.45)" : "rgba(255,255,255,.55)",
+                        background: m.open ? "var(--up)" : "rgba(255,255,255,.55)",
                       }}
                     />
                     {/* 배지 두 개(국내장/해외장)가 나란히 있으므로 배열 인덱스만큼
