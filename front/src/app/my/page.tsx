@@ -55,9 +55,14 @@ export default function MyPage() {
   // 참조해 단 하나도 안 바뀐다). 기존 값(oklch 96%/0.02/25 배경,
   // 50%/0.18/25 글자 — 채도 높은 경고색 느낌)보다 채도를 낮추고 톤을
   // 와인·버건디 쪽으로 옮겨 더 차분하고 고급스러운 인상을 준다.
-  const dangerBg = theme === "light" ? "oklch(95% 0.03 15)" : "var(--dangerBg)";
-  const dangerText = theme === "light" ? "oklch(38% 0.13 10)" : "var(--dangerText)";
-  const dangerTextSoft = theme === "light" ? "oklch(44% 0.045 10)" : "var(--dangerTextSoft)";
+  // 처음엔 hue를 25→10으로 낮췄는데, oklch에서는 hue가 낮을수록(0에 가까울수록)
+  // 오히려 핑크·마젠타 쪽에 가까워진다 — "묘하게 핑크빛이 돈다"는 피드백이 정확히
+  // 이 때문이었다. hue를 원래의 순수한 빨강 쪽(28, 기존 25와 거의 같은 톤)으로
+  // 되돌리고 채도만 낮게 유지해서, 핑크로 새지 않으면서도 기존보다 차분한
+  // "레드"를 만들었다.
+  const dangerBg = theme === "light" ? "oklch(94% 0.035 30)" : "var(--dangerBg)";
+  const dangerText = theme === "light" ? "oklch(40% 0.16 28)" : "var(--dangerText)";
+  const dangerTextSoft = theme === "light" ? "oklch(46% 0.06 28)" : "var(--dangerTextSoft)";
   const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
