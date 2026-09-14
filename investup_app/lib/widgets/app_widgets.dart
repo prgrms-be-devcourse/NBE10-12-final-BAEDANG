@@ -48,15 +48,21 @@ class PageList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final list = ListView(
+      // padding을 명시하면 상태바 인셋이 자동으로 더해지지 않으므로 SafeArea로 감싼다.
       padding: AppTheme.pagePadding,
       physics: const AlwaysScrollableScrollPhysics(),
       children: children,
     );
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: AppTheme.contentWidth),
-        child: onRefresh == null ? list : RefreshIndicator(onRefresh: onRefresh!, child: list),
+    return SafeArea(
+      bottom: false,
+      child: Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppTheme.contentWidth),
+          child: onRefresh == null
+              ? list
+              : RefreshIndicator(onRefresh: onRefresh!, child: list),
+        ),
       ),
     );
   }
