@@ -170,7 +170,7 @@ class StockDetailServiceTest {
     void 유의사항은_원천_타입을_보존한_채_정보성으로만_반환하고_주문가능여부는_바꾸지_않는다() {
         when(stockWarningQueryService.currentWarnings(any()))
                 .thenReturn(new StockWarningQueryService.WarningSnapshot(
-                        List.of(new StockDetailResponse.Warning("OVERHEATED", "거래유의종목")),
+                        List.of(new StockDetailResponse.Warning("OVERHEATED", "과열종목")),
                         StockDetailResponse.WarningStatus.AVAILABLE));
         QuoteSnapshot quote = quote("120", "100");
         when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(quote));
@@ -179,7 +179,7 @@ class StockDetailServiceTest {
         StockDetailResponse result = service.getDetail("abc", "KR");
 
         assertThat(result.warnings()).containsExactly(
-                new StockDetailResponse.Warning("OVERHEATED", "거래유의종목"));
+                new StockDetailResponse.Warning("OVERHEATED", "과열종목"));
         assertThat(result.tradable()).isTrue();
         assertThat(result.tradableReason()).isNull();
     }

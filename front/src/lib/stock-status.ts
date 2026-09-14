@@ -24,6 +24,10 @@ export type StatusBadge = {
  * "유의사항 없음"으로 오인해 경고를 조용히 감추면 안 되지만, 실패했다고 없는 경고를
  * 만들어낼 수도 없다.
  *
+ * <p>문구는 서버가 내려준 `label`을 그대로 쓴다 — 종류별 표기(과열종목·투자경고·
+ * 변동성완화장치)는 백엔드가 `tools/terms.md` 기준으로 정하고, 화면은 그걸 표시만 한다.
+ * 같은 사실을 두 곳에서 따로 번역하면 한쪽만 바뀌었을 때 어긋난다.
+ *
  * <p>서킷브레이커는 배지로 만들지 않는다. 버튼이 이미 `서킷브레이커 발동 중이에요`로
  * 막혀 있어서, 배지까지 붙이면 같은 사실이 두 번 보인다.
  */
@@ -33,10 +37,11 @@ export function buildStatusBadges(
 ): StatusBadge[] {
   const badges: StatusBadge[] = [];
 
-  if (detail.warningsStatus === "AVAILABLE" && detail.warnings.length > 0) {
-    // 원천 경고 코드(OVERHEATED·INVESTMENT_WARNING·VI_STATIC 등)는 서로 다른 유형이지만
-    // 초보 투자자 화면에서는 구분이 의미를 만들지 않아 하나로 보여준다.
-    badges.push({ key: "warnings", label: "거래유의종목", tone: "warn" });
+  if (detail.warningsStatus === "AVAILABLE") {
+    // 같은 문구가 두 번 붙지 않게 접는다 — 서버가 같은 종류를 중복으로 내려줄 수 있다.
+    for (const label of new Set(detail.warnings.map((warning) => warning.label))) {
+      badges.push({ key: `warning-${label}`, label, tone: "warn" });
+    }
   }
 
   for (const sidecar of events.activeSidecars) {

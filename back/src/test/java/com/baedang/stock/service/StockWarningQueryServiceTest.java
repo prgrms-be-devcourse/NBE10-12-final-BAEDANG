@@ -65,9 +65,31 @@ class StockWarningQueryServiceTest {
         assertThat(snapshot.warnings())
                 .extracting(StockDetailResponse.Warning::type)
                 .containsExactly("START_TODAY", "END_TODAY", "NO_PERIOD");
+        // 미지정 코드는 일반 문구로 폴백한다 — 토스가 코드를 추가해도 배지가 비지 않는다.
         assertThat(snapshot.warnings())
                 .extracting(StockDetailResponse.Warning::label)
                 .containsOnly("거래유의종목");
+    }
+
+    @Test
+    void 유의사항_종류마다_다른_문구를_내려준다() {
+        // 통합 문구 하나로 뭉치면 사용자가 왜 유의종목인지 알 수 없다 —
+        // 과열종목과 투자경고는 제약이 다르므로 구분되어야 한다.
+        when(port.fetchStockWarnings("005930")).thenReturn(new StockWarnings("005930", List.of(
+                warning("OVERHEATED", null, null),
+                warning("INVESTMENT_WARNING", null, null),
+                warning("VI_STATIC", null, null),
+                warning("SOMETHING_NEW", null, null))));
+
+        StockWarningQueryService.WarningSnapshot snapshot = service.currentWarnings(stock);
+
+        assertThat(snapshot.warnings())
+                .extracting(StockDetailResponse.Warning::label)
+                .containsExactly("과열종목", "투자경고", "변동성완화장치", "거래유의종목");
+        // 원천 코드는 그대로 보존한다 — 나중에 매핑을 채울 수 있어야 한다.
+        assertThat(snapshot.warnings())
+                .extracting(StockDetailResponse.Warning::type)
+                .containsExactly("OVERHEATED", "INVESTMENT_WARNING", "VI_STATIC", "SOMETHING_NEW");
     }
 
     @Test

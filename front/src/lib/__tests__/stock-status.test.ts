@@ -18,17 +18,45 @@ function event(overrides: Partial<MarketEventItem>): MarketEventItem {
   };
 }
 
-const available = { warnings: [{ type: "OVERHEATED", label: "거래유의종목" }], warningsStatus: "AVAILABLE" } as const;
+const available = { warnings: [{ type: "OVERHEATED", label: "과열종목" }], warningsStatus: "AVAILABLE" } as const;
 const noWarnings = { warnings: [], warningsStatus: "AVAILABLE" } as const;
 const unknownWarnings = { warnings: [], warningsStatus: "UNAVAILABLE" } as const;
 
 describe("buildStatusBadges — 주문을 막지 않는 상태만 종목명 옆에 붙인다", () => {
-  it("유의사항이 있으면 거래유의종목 배지를 만든다", () => {
+  it("유의사항 배지는 서버가 내려준 종류별 문구를 그대로 쓴다", () => {
     const badges = buildStatusBadges(available, EMPTY_STOCK_MARKET_EVENT_STATE);
 
     expect(badges).toHaveLength(1);
-    expect(badges[0].label).toBe("거래유의종목");
+    expect(badges[0].label).toBe("과열종목");
     expect(badges[0].tone).toBe("warn");
+  });
+
+  it("서로 다른 종류가 섞이면 각각의 문구로 배지를 만든다", () => {
+    const mixed = {
+      warnings: [
+        { type: "OVERHEATED", label: "과열종목" },
+        { type: "INVESTMENT_WARNING", label: "투자경고" },
+      ],
+      warningsStatus: "AVAILABLE",
+    } as const;
+
+    const badges = buildStatusBadges(mixed, EMPTY_STOCK_MARKET_EVENT_STATE);
+
+    expect(badges.map((badge) => badge.label)).toEqual(["과열종목", "투자경고"]);
+  });
+
+  it("같은 문구가 중복으로 내려와도 배지는 한 번만 만든다", () => {
+    const dup = {
+      warnings: [
+        { type: "OVERHEATED", label: "과열종목" },
+        { type: "OVERHEATED", label: "과열종목" },
+      ],
+      warningsStatus: "AVAILABLE",
+    } as const;
+
+    const badges = buildStatusBadges(dup, EMPTY_STOCK_MARKET_EVENT_STATE);
+
+    expect(badges).toHaveLength(1);
   });
 
   it("유의사항 조회가 실패했으면 배지를 만들지 않는다", () => {
@@ -61,7 +89,7 @@ describe("buildStatusBadges — 주문을 막지 않는 상태만 종목명 옆�
 
     const badges = buildStatusBadges(available, events);
 
-    expect(badges.map((badge) => badge.label)).toEqual(["거래유의종목", "사이드카 매수 발동 중"]);
+    expect(badges.map((badge) => badge.label)).toEqual(["과열종목", "사이드카 매수 발동 중"]);
   });
 });
 

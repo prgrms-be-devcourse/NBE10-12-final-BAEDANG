@@ -35,11 +35,21 @@ public class StockWarningQueryService {
     private static final Logger log = LoggerFactory.getLogger(StockWarningQueryService.class);
 
     /**
-     * 화면에 노출하는 유의사항 문구. 원천 경고 코드(OVERHEATED·INVESTMENT_WARNING·
-     * VI_STATIC 등)는 {@code type}에 그대로 보존하지만, 초보 투자자용 화면에서는 세분류가
-     * 의미를 만들지 않아 통합 배지 하나로 보여준다.
+     * 유의사항 종류별 화면 문구.
+     *
+     * <p>통합 문구 하나로 뭉치면 <b>왜 유의종목인지</b> 알 수 없다 — 과열종목과 투자경고는
+     * 제약이 서로 다르므로(투자경고는 신용거래 제한·현금 전액 예치) 사용자가 구분할 수
+     * 있어야 한다. 표기는 `tools/terms.md`의 사용자 용어를 따른다.
+     *
+     * <p>토스가 새 코드를 추가할 수 있으므로 미지정 코드는 일반 문구로 폴백한다 —
+     * 원천 코드는 {@code type}에 그대로 남아 나중에 매핑을 채울 수 있다.
      */
-    private static final String WARNING_LABEL = "거래유의종목";
+    private static final Map<String, String> LABEL_BY_TYPE = Map.of(
+            "OVERHEATED", "과열종목",
+            "INVESTMENT_WARNING", "투자경고",
+            "VI_STATIC", "변동성완화장치");
+
+    private static final String FALLBACK_LABEL = "거래유의종목";
 
     /** 종목별 캐시 상한. 계속 늘어나면 오래된 종목부터 밀어낸다. */
     private static final int MAX_CACHE_SIZE = 1000;
@@ -102,7 +112,9 @@ public class StockWarningQueryService {
         return warnings.stream()
                 .filter(warning -> warning.warningType() != null && !warning.warningType().isBlank())
                 .filter(warning -> isActive(warning, today))
-                .map(warning -> new StockDetailResponse.Warning(warning.warningType(), WARNING_LABEL))
+                .map(warning -> new StockDetailResponse.Warning(
+                        warning.warningType(),
+                        LABEL_BY_TYPE.getOrDefault(warning.warningType(), FALLBACK_LABEL)))
                 .toList();
     }
 
