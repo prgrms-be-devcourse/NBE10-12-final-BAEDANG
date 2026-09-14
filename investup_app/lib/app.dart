@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'core/api/account_api.dart';
 import 'core/api/auth_api.dart';
+import 'core/api/exchange_rate_api.dart';
 import 'core/api/market_api.dart';
 import 'core/api/order_api.dart';
 import 'core/api/stock_api.dart';
@@ -33,6 +34,7 @@ class InvestUpApp extends StatefulWidget {
     required this.stocks,
     required this.account,
     required this.orders,
+    required this.exchangeRates,
     required this.wiki,
   });
 
@@ -42,6 +44,7 @@ class InvestUpApp extends StatefulWidget {
   final StockApi stocks;
   final AccountApi account;
   final OrderApi orders;
+  final ExchangeRateApi exchangeRates;
   final WikiTermsSource wiki;
 
   @override
@@ -124,7 +127,11 @@ class _InvestUpAppState extends State<InvestUpApp> {
             GoRoute(
               path: '/rankings',
               pageBuilder: (context, state) => NoTransitionPage(
-                child: RankingsScreen(stocks: widget.stocks, session: session),
+                child: RankingsScreen(
+                stocks: widget.stocks,
+                session: session,
+                exchangeRates: widget.exchangeRates,
+              ),
               ),
             ),
             GoRoute(

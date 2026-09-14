@@ -75,6 +75,15 @@ Map<String, Object?> rankingJson() => <String, Object?>{
   'hasNext': true,
 };
 
+Map<String, Object?> exchangeRateJson() => <String, Object?>{
+  'baseCurrency': 'USD',
+  'quoteCurrency': 'KRW',
+  'rate': '1398.50',
+  'changeAmount': '2.30',
+  'changeRate': '0.0016',
+  'validFrom': '2026-09-15T15:00:00+09:00',
+};
+
 Map<String, Object?> marketStatusJson() => <String, Object?>{
   'markets': <Map<String, Object?>>[
     <String, Object?>{

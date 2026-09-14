@@ -22,6 +22,7 @@ void main() {
         stocks: harness.stocks,
         account: harness.account,
         orders: harness.orders,
+        exchangeRates: harness.exchangeRates,
         wiki: const BundledWikiTermsSource(),
       ),
     );

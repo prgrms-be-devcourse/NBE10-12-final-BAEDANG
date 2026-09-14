@@ -135,11 +135,59 @@ Map<String, Object?> _ordersJson() => <String, Object?>{
   'hasNext': false,
 };
 
+Map<String, Object?> _usRankingJson() => <String, Object?>{
+  'items': <Map<String, Object?>>[
+    <String, Object?>{
+      'rank': 1,
+      'stockId': 201,
+      'symbol': 'NVDA',
+      'name': '엔비디아',
+      'market': 'NASDAQ',
+      'category': 'INDIVIDUAL',
+      'isDividend': false,
+      'leverageFactor': null,
+      'currency': 'USD',
+      'lastPrice': '182.40',
+      'prevClose': '180.00',
+      'changeAmount': '2.40',
+      'changeRate': '0.013333',
+      'tradingAmount': '987654321',
+      'quoteAt': '2026-09-15T09:30:00+09:00',
+      'realtime': true,
+      'stockLikeId': null,
+    },
+  ],
+  'nextCursor': null,
+  'hasNext': false,
+};
+
 TestHarness _harness({bool signedIn = false}) => TestHarness(
   storage: signedIn ? FakeTokenStorage(initialRefreshToken: 'rt') : null,
   adapter: FakeHttpAdapter((options) async {
     final path = options.uri.path;
-    if (path == '/api/stocks/rankings') return FakeResponse.ok(rankingJson());
+    if (path == '/api/stocks/rankings') {
+      final market = options.uri.queryParameters['market'];
+      return FakeResponse.ok(
+        market == 'US' ? _usRankingJson() : rankingJson(),
+      );
+    }
+    if (path == '/api/exchange-rates/latest') {
+      return FakeResponse.ok(exchangeRateJson());
+    }
+    if (path == '/api/exchange-rates/history') {
+      return FakeResponse.ok(<String, Object?>{
+        'items': <Map<String, Object?>>[
+          <String, Object?>{
+            'validFrom': '2026-08-15T00:00:00+09:00',
+            'rate': '1390.0',
+          },
+          <String, Object?>{
+            'validFrom': '2026-09-15T00:00:00+09:00',
+            'rate': '1398.5',
+          },
+        ],
+      });
+    }
     if (path == '/api/stocks/005930') return FakeResponse.ok(_detailJson());
     if (path == '/api/stocks/005930/candles') {
       return FakeResponse.ok(_candlesJson());
@@ -185,7 +233,11 @@ GoRouter _router(TestHarness harness) => GoRouter(
     GoRoute(
       path: '/',
       builder: (context, state) => Scaffold(
-        body: RankingsScreen(stocks: harness.stocks, session: harness.session),
+        body: RankingsScreen(
+          stocks: harness.stocks,
+          session: harness.session,
+          exchangeRates: harness.exchangeRates,
+        ),
       ),
     ),
     GoRoute(
@@ -430,6 +482,46 @@ void main() {
       expect(find.text('결제일'), findsOneWidget);
       expect(find.text('별칭: 보통거래'), findsOneWidget);
       expect(find.text('시가총액'), findsNothing);
+    });
+  });
+
+  group('환율', () {
+    testWidgets('배너에 USD/KRW가 나오고 해외 종목은 원화 환산을 보여준다', (
+      tester,
+    ) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      // 배너에 최신 환율이 표시된다.
+      expect(find.text('USD / KRW'), findsOneWidget);
+      expect(find.textContaining('1,399'), findsWidgets);
+
+      // 해외 주식 탭으로 전환하면 USD 종목이 원화 환산으로 나온다.
+      await tester.tap(find.text('해외 주식'));
+      await _settle(tester);
+      // 1398.5 × 182.40 ≈ 255,086원
+      expect(find.textContaining('255,08'), findsWidgets);
+    });
+
+    testWidgets('배너를 누르면 환율 추이 그래프가 열린다', (tester) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('USD / KRW'));
+      await _settle(tester);
+      expect(find.text('USD / KRW 환율 추이'), findsOneWidget);
+      expect(find.text('1일'), findsWidgets);
+      expect(find.text('1년'), findsWidgets);
+      expect(
+        harness.countTo('/api/exchange-rates/history'),
+        greaterThanOrEqualTo(1),
+      );
     });
   });
 

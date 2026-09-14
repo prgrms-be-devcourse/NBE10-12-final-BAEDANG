@@ -45,3 +45,37 @@ Color changeColor(String? raw, ColorScheme scheme) {
   if (value == null || value == 0) return scheme.onSurfaceVariant;
   return value > 0 ? const Color(0xFFEF4444) : const Color(0xFF3B82F6);
 }
+
+/// 통화 기호 없는 천 단위 숫자(환율·거래대금 등).
+String formatNumber(Object? raw) {
+  final value = raw is num ? raw : double.tryParse('$raw');
+  if (value == null) return '-';
+  return _grouping.format(value.round());
+}
+
+/// USD 값을 환율로 원화 환산한다. 환율이 없거나 0 이하면 환산 불가라 null.
+/// 웹 toKrw와 같은 규칙 — 환율을 1로 대체해 $100를 100원처럼 왜곡하지 않는다.
+double? toKrw(String? nativeValue, String? currency, String? exchangeRate) {
+  final value = double.tryParse(nativeValue ?? '');
+  if (value == null) return null;
+  if (currency != 'USD') return value;
+  final rate = double.tryParse(exchangeRate ?? '');
+  if (rate == null || rate <= 0) return null;
+  return value * rate;
+}
+
+/// 큰 금액의 한국식 축약. 1,240,000,000,000 → "1.2조", 10,000,000,000 → "100억".
+String formatKoreanAmount(String? raw) {
+  final value = double.tryParse(raw ?? '');
+  if (value == null) return '-';
+  final abs = value.abs();
+  String trimmed(num v) {
+    final s = v.toStringAsFixed(1);
+    return s.endsWith('.0') ? s.substring(0, s.length - 2) : s;
+  }
+
+  if (abs >= 1e12) return '${trimmed(value / 1e12)}조';
+  if (abs >= 1e8) return '${trimmed(value / 1e8)}억';
+  if (abs >= 1e4) return '${trimmed(value / 1e4)}만';
+  return _grouping.format(value.round());
+}

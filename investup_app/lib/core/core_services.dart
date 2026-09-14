@@ -4,6 +4,7 @@ import 'api/account_api.dart';
 import 'api/api_client.dart';
 import 'api/api_config.dart';
 import 'api/auth_api.dart';
+import 'api/exchange_rate_api.dart';
 import 'api/market_api.dart';
 import 'api/order_api.dart';
 import 'api/stock_api.dart';
@@ -40,6 +41,7 @@ class CoreServices {
       stocks: StockApi(client),
       account: AccountApi(client),
       orders: OrderApi(client),
+      exchangeRates: ExchangeRateApi(client),
     );
   }
 
@@ -51,6 +53,7 @@ class CoreServices {
     required this.stocks,
     required this.account,
     required this.orders,
+    required this.exchangeRates,
   });
 
   final TokenManager tokens;
@@ -60,6 +63,7 @@ class CoreServices {
   final StockApi stocks;
   final AccountApi account;
   final OrderApi orders;
+  final ExchangeRateApi exchangeRates;
 
   AuthSession createAuthSession() =>
       AuthSession(client: client, authApi: auth, accountApi: account);

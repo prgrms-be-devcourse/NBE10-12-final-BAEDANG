@@ -20,6 +20,7 @@ void main() {
       stocks: core.stocks,
       account: core.account,
       orders: core.orders,
+      exchangeRates: core.exchangeRates,
       // terms.md 원문을 우선 가져오고, 실패하면 생성된 스냅샷으로 폴백한다.
       wiki: FallbackWikiTermsSource(
         RemoteWikiTermsSource(),

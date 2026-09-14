@@ -133,6 +133,9 @@ TestHarness _harness({bool tradable = true, bool signedIn = false}) =>
     if (path == '/api/stocks/rankings') {
       return FakeResponse.ok(rankingJson());
     }
+    if (path == '/api/exchange-rates/latest') {
+      return FakeResponse.ok(exchangeRateJson());
+    }
     if (path == '/api/stocks/search') return FakeResponse.ok(_searchJson());
     if (path == '/api/stocks/005930') {
       return FakeResponse.ok(tradable ? _detailJson() : _closedDetailJson());
@@ -174,6 +177,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
         body: RankingsScreen(
           stocks: harness.stocks,
           session: harness.session,
+          exchangeRates: harness.exchangeRates,
         ),
       ),
     ),

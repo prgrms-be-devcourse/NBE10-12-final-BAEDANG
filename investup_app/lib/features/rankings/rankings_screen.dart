@@ -5,20 +5,29 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/api/api_error.dart';
+import '../../core/api/exchange_rate_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
+import '../../core/models/exchange_rate.dart';
 import '../../core/models/market_country.dart';
 import '../../core/models/ranking.dart';
 import '../../core/models/stock_search.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
+import 'exchange_rate_widgets.dart';
 
 /// 랭킹 탭. 국내/해외 상위 종목과 종목 검색을 보여준다.
 class RankingsScreen extends StatefulWidget {
-  const RankingsScreen({super.key, required this.stocks, required this.session});
+  const RankingsScreen({
+    super.key,
+    required this.stocks,
+    required this.session,
+    required this.exchangeRates,
+  });
 
   final StockApi stocks;
   final AuthSession session;
+  final ExchangeRateApi exchangeRates;
 
   @override
   State<RankingsScreen> createState() => _RankingsScreenState();
@@ -27,6 +36,8 @@ class RankingsScreen extends StatefulWidget {
 class _RankingsScreenState extends State<RankingsScreen> {
   MarketCountry _market = MarketCountry.kr;
   Future<RankingPage>? _future;
+  Future<ExchangeRateLatest>? _rateFuture;
+  String? _usdKrwRate;
 
   final _searchController = TextEditingController();
   Timer? _debounce;
@@ -56,13 +67,23 @@ class _RankingsScreenState extends State<RankingsScreen> {
 
   void _load() {
     _future = widget.stocks.getRankings(market: _market, size: 50);
+    // 환율은 해외 종목 원화 환산 표시에도 쓰므로 화면이 들고 있는다.
+    _rateFuture = widget.exchangeRates.getLatest().then((r) {
+      if (mounted) setState(() => _usdKrwRate = r.rate);
+      return r;
+    });
   }
 
   Future<void> _reload() async {
     final future = widget.stocks.getRankings(market: _market, size: 50);
+    final rateFuture = widget.exchangeRates.getLatest().then((r) {
+      if (mounted) setState(() => _usdKrwRate = r.rate);
+      return r;
+    });
     setState(() {
       _likeOverrides.clear();
       _future = future;
+      _rateFuture = rateFuture;
     });
     try {
       await future;
@@ -328,12 +349,20 @@ class _RankingsScreenState extends State<RankingsScreen> {
           child: ListView.separated(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-            itemCount: page.items.length,
+            // index 0은 환율 배너, 나머지가 종목 행이다.
+            itemCount: page.items.length + 1,
             separatorBuilder: (_, _) => const SizedBox(height: 8),
             itemBuilder: (context, index) {
-              final item = page.items[index];
+              if (index == 0) {
+                return ExchangeRateBanner(
+                  future: _rateFuture,
+                  api: widget.exchangeRates,
+                );
+              }
+              final item = page.items[index - 1];
               return _RankingRow(
                 item: item,
+                usdKrwRate: _usdKrwRate,
                 likeId: _likeIdOf(item),
                 busy: _likeBusy.contains(item.stockId),
                 onTap: () => _openDetail(item),
@@ -350,6 +379,7 @@ class _RankingsScreenState extends State<RankingsScreen> {
 class _RankingRow extends StatelessWidget {
   const _RankingRow({
     required this.item,
+    required this.usdKrwRate,
     required this.likeId,
     required this.busy,
     required this.onTap,
@@ -357,6 +387,9 @@ class _RankingRow extends StatelessWidget {
   });
 
   final RankingItem item;
+
+  /// USD/KRW 최신 환율. 있으면 해외 종목은 원화 환산가를 주 표시로 쓴다.
+  final String? usdKrwRate;
   final int? likeId;
   final bool busy;
   final VoidCallback onTap;
@@ -400,10 +433,24 @@ class _RankingRow extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  formatMoney(item.lastPrice, item.currency),
-                  style: theme.textTheme.bodyLarge,
-                ),
+                if (item.currency == 'USD') ...[
+                  // 정책상 거래는 원화라 USD 종목은 환산 원화를 주 표시로 둔다.
+                  Text(
+                    '${formatNumber(toKrw(item.lastPrice, item.currency, usdKrwRate))}원',
+                    style: theme.textTheme.bodyLarge,
+                  ),
+                  Text(
+                    formatMoney(item.lastPrice, item.currency),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ] else
+                  Text(
+                    formatMoney(item.lastPrice, item.currency),
+                    style: theme.textTheme.bodyLarge,
+                  ),
                 Text(
                   formatRate(item.changeRate),
                   style: TextStyle(
