@@ -14,6 +14,7 @@ import {
 import { formatNumber, formatPercent, formatUsd, toDecimal } from "@/lib/format";
 import { PERSONALITY_AXES, PERSONALITY_TYPES } from "@/lib/personality-types";
 import { Tag } from "./Tag";
+import { useTheme } from "./ThemeProvider";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -117,6 +118,7 @@ function CardHeader({
   badge: React.ReactNode;
   onHelp: () => void;
 }) {
+  const { theme } = useTheme();
   return (
     <div
       className="flex items-center justify-between gap-4 px-6 py-5"
@@ -142,7 +144,11 @@ function CardHeader({
           type="button"
           onClick={onHelp}
           className="cursor-pointer rounded-md px-0.5 py-1 text-[12.5px] font-bold"
-          style={{ color: "var(--mut)" }}
+          // 다크 모드에서 헤더 "로그아웃" 버튼과 같은 색으로 맞춰달라는 요청 —
+          // 그 버튼도 var(--accent)를 배경으로 쓰므로 같은 변수를 그대로
+          // 참조한다(값이 나중에 바뀌어도 항상 같이 맞는다). 라이트 모드는
+          // 기존 var(--mut) 그대로 둔다(요청이 다크 모드로 한정됨).
+          style={{ color: theme === "dark" ? "var(--accent)" : "var(--mut)" }}
         >
           성향 판정 기준
         </button>
@@ -510,6 +516,8 @@ const HELP_ITEMS = [
 ];
 
 function HelpModal({ onClose }: { onClose: () => void }) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   return (
     <div
       className="fixed inset-0 z-[150] flex items-center justify-center px-4"
@@ -559,12 +567,27 @@ function HelpModal({ onClose }: { onClose: () => void }) {
             외부 스타일시트 규칙보다도 우선이라 호버 자체가 아예 안
             먹혔다("닫기" 버튼들은 애초에 배경을 인라인으로 주지 않아서
             클래스가 base·hover 배경을 전부 제어한다) — 그래서 인라인
-            background를 지우고 클래스에게 완전히 맡겼다. */}
+            background를 지우고 클래스에게 완전히 맡겼다.
+
+            다크 모드에서는 배경을 검정으로, 호버 시 살짝 밝아지게
+            해달라는 요청 — 검정(#000)은 RGB 채널이 전부 0이라
+            filter: brightness()로는(곱셈이라 0에 뭘 곱해도 0) 절대
+            밝아지지 않는다. 그래서 report-modal-close-btn 클래스(라이트
+            모드 전용으로 남겨둠) 대신, 위에서 이미 겪은 "인라인 style이
+            :hover보다 우선한다" 문제를 피해 onMouseEnter/onMouseLeave로
+            배경색 자체를 직접 두 값 사이로 바꾼다(히어로 CTA 버튼 등
+            이 앱 곳곳의 hover 배경 전환과 같은 방식). */}
         <button
           type="button"
           onClick={onClose}
-          className="report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
-          style={{ color: "var(--ink)" }}
+          className={
+            isDark
+              ? "mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold transition-[background-color] duration-150"
+              : "report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
+          }
+          style={isDark ? { background: "#000000", color: "#ffffff" } : { color: "var(--ink)" }}
+          onMouseEnter={isDark ? (e) => (e.currentTarget.style.background = "#262626") : undefined}
+          onMouseLeave={isDark ? (e) => (e.currentTarget.style.background = "#000000") : undefined}
         >
           확인했어요
         </button>
