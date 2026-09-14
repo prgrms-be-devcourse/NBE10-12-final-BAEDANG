@@ -7,8 +7,8 @@ function event(overrides: Partial<MarketEventItem>): MarketEventItem {
   return {
     eventId: 1,
     eventType: "CIRCUIT_BREAKER",
-    triggeredAt: "2026-09-14T13:28:32+09:00",
-    haltUntil: "2026-09-14T13:48:32+09:00",
+    triggeredAt: new Date(Date.now() - 20 * 60_000).toISOString(),
+    haltUntil: new Date(Date.now() + 10 * 60_000).toISOString(),
     publishedAt: "2026-09-14T13:29:00+09:00",
     receivedAt: "2026-09-14T13:29:07+09:00",
     active: true,
@@ -124,6 +124,19 @@ describe("resolveBlockReason — 거래를 막는 상태만 버튼 사유가 된
     const events = classifyActiveEvents([event({ eventType: "CIRCUIT_BREAKER", stage: 1 })]);
 
     expect(resolveBlockReason({ detail: tradable, events, amountReason: null })).toBe("서킷브레이커 발동 중이에요");
+  });
+
+  it("종료 시각이 지난 서킷브레이커는 조회 실패 잔여 상태일 뿐 막지 않는다", () => {
+    const events = classifyActiveEvents([
+      event({
+        eventType: "CIRCUIT_BREAKER",
+        stage: 1,
+        triggeredAt: new Date(Date.now() - 40 * 60_000).toISOString(),
+        haltUntil: new Date(Date.now() - 10 * 60_000).toISOString(),
+      }),
+    ]);
+
+    expect(resolveBlockReason({ detail: tradable, events, amountReason: null })).toBeNull();
   });
 
   it("종목 고유 사유가 시장 전체 사유보다 먼저다", () => {

@@ -1,4 +1,4 @@
-import type { StockDetail } from "./api";
+import type { MarketEventItem, StockDetail } from "./api";
 import { sidecarLabel, toKrMarket, type StockMarketEventState } from "./stock-market-events";
 
 /**
@@ -16,6 +16,18 @@ export type StatusBadge = {
   /** 경고 계열(거래유의)인지 중립 계열(시장조치)인지 — 색 토큰 선택에만 쓴다. */
   tone: "warn" | "neutral";
 };
+
+/**
+ * 저장된 시장조치가 지금도 유효한지 `haltUntil`로 판정한다.
+ *
+ * 조회가 실패하면 이전 상태를 유지하는데, 종료 시각이 지난 CB를 계속 들고 있으면
+ * 화면이 서버보다 보수적으로 주문을 막는다 — "화면이 먼저 막지 않는다"는 원칙에
+ * 어긋난다. `haltUntil`을 읽을 수 없으면 만료를 단정할 수 없으므로 활성으로 본다.
+ */
+function isHaltActive(item: MarketEventItem, now: Date): boolean {
+  const haltUntil = Date.parse(item.haltUntil);
+  return Number.isNaN(haltUntil) || haltUntil > now.getTime();
+}
 
 /**
  * 배지 목록을 만든다.
@@ -44,7 +56,8 @@ export function buildStatusBadges(
     }
   }
 
-  for (const sidecar of events.activeSidecars) {
+  const now = new Date();
+  for (const sidecar of events.activeSidecars.filter((item) => isHaltActive(item, now))) {
     badges.push({
       key: `sidecar-${sidecar.eventId}`,
       label: sidecarLabel(sidecar),
@@ -77,7 +90,8 @@ export function resolveBlockReason(params: {
   if (detail.tradableReason === "LIQUIDATION") return "정리매매 종목이에요";
 
   // KOSPI/KOSDAQ만 시장조치 대상이다 — 미국 종목에 국내 CB를 들이대지 않는다.
-  if (events.activeCircuitBreaker && toKrMarket(detail.market)) {
+  // 종료 시각이 지난 CB는 조회 실패로 남은 잔여 상태일 뿐이므로 막지 않는다.
+  if (events.activeCircuitBreaker && isHaltActive(events.activeCircuitBreaker, new Date()) && toKrMarket(detail.market)) {
     return "서킷브레이커 발동 중이에요";
   }
 
