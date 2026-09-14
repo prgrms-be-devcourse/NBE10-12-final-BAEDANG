@@ -382,6 +382,10 @@ void main() {
       );
       await _settle(tester);
 
+      // 위키 패널로 전환한다.
+      await tester.tap(find.text('금융 용어 위키'));
+      await _settle(tester);
+
       // 초성 검색: ㅂㄷ → 배당만.
       await tester.enterText(find.byType(TextField), 'ㅂㄷ');
       await _settle(tester);

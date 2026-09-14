@@ -4,7 +4,7 @@ import '../../widgets/app_widgets.dart';
 import 'wiki_terms.dart';
 import 'wiki_terms_source.dart';
 
-/// 가이드 탭. 이용 안내와 금융 용어 사전 검색을 제공한다.
+/// 가이드 탭. 이용가이드와 금융 용어 위키 두 패널로 나뉜다.
 /// 용어는 [WikiTermsSource]를 통해 가져온다 — 원문(terms.md)이
 /// 바뀌면 리모트 어댑터가 최신 내용을 주고, 실패 시 스냅샷으로 폴백한다.
 class GuideScreen extends StatefulWidget {
@@ -43,7 +43,7 @@ class _GuideScreenState extends State<GuideScreen> {
     ),
   ];
 
-  final _searchController = TextEditingController();
+  String _tab = 'guide'; // guide | wiki
   List<WikiTerm> _terms = const [];
 
   @override
@@ -55,129 +55,37 @@ class _GuideScreenState extends State<GuideScreen> {
   }
 
   @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  String get _query => _searchController.text.trim();
-
-  /// 웹 위키 패널과 같은 규칙: 초성만 치면 초성 키로, 아니면 이름·별칭 포함 검색.
-  List<WikiTerm> get _results {
-    final query = _query.toLowerCase();
-    if (query.isEmpty) return _terms;
-    final isChosung = RegExp(r'^[ㄱ-ㅎ]+$').hasMatch(query.replaceAll(' ', ''));
-    if (isChosung) {
-      final cq = query.replaceAll(' ', '');
-      return _terms
-          .where(
-            (t) =>
-                t.chosung.contains(cq) ||
-                t.aliasChosungs.any((a) => a.contains(cq)),
-          )
-          .toList(growable: false);
-    }
-    return _terms
-        .where(
-          (t) =>
-              t.name.toLowerCase().contains(query) ||
-              t.aliases.any((a) => a.toLowerCase().contains(query)),
-        )
-        .toList(growable: false);
-  }
-
-  void _openTerm(WikiTerm term) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        builder: (context, scrollController) => SafeArea(
-          child: ListView(
-            controller: scrollController,
-            padding: const EdgeInsets.all(24),
-            children: [
-              Text(term.name, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(
-                term.summary,
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(term.body, style: Theme.of(context).textTheme.bodyLarge),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final searching = _query.isNotEmpty;
-    final results = _results;
     return Column(
       children: [
         SafeArea(
           bottom: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (_) => setState(() {}),
-              decoration: InputDecoration(
-                hintText: '용어·별칭·초성(ㅅㄱ)으로 검색',
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: searching
-                    ? IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() {});
-                        },
-                      )
-                    : null,
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(value: 'guide', label: Text('이용가이드')),
+                  ButtonSegment(value: 'wiki', label: Text('금융 용어 위키')),
+                ],
+                selected: {_tab},
+                showSelectedIcon: false,
+                onSelectionChanged: (set) => setState(() => _tab = set.first),
               ),
             ),
           ),
         ),
         Expanded(
-          child: searching ? _buildResults(theme, results) : _buildGuide(theme),
+          child: _tab == 'guide'
+              ? _buildGuidePanel(theme)
+              : _WikiPanel(terms: _terms),
         ),
       ],
     );
   }
 
-  Widget _buildResults(ThemeData theme, List<WikiTerm> results) {
-    if (results.isEmpty) {
-      return PageList(
-        children: [
-          AppCard(
-            child: Text(
-              '검색 결과가 없어요. 다른 말로 검색해 보세요.',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ),
-        ],
-      );
-    }
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-      itemCount: results.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, index) => _TermCard(
-        term: results[index],
-        onTap: () => _openTerm(results[index]),
-      ),
-    );
-  }
-
-  Widget _buildGuide(ThemeData theme) {
+  Widget _buildGuidePanel(ThemeData theme) {
     return PageList(
       children: [
         Text('처음이어도 괜찮아요', style: theme.textTheme.headlineMedium),
@@ -206,32 +114,278 @@ class _GuideScreenState extends State<GuideScreen> {
           ),
           const SizedBox(height: 16),
         ],
-        if (_terms.isNotEmpty) ...[
-          Text('용어 사전', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 4),
-          Text(
-            '모르는 단어를 위에서 검색해보세요.',
-            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 12),
-          for (final term in _terms.take(5)) ...[
-            _TermCard(term: term, onTap: () => _openTerm(term)),
-            const SizedBox(height: 8),
-          ],
-          AppCard(
-            child: Text(
-              '총 ${_terms.length}개 용어를 검색할 수 있어요',
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ),
-        ],
       ],
     );
   }
 }
 
-class _TermCard extends StatelessWidget {
-  const _TermCard({required this.term, required this.onTap});
+/// 웹 WikiPanel의 모바일 판. 검색 전에는 용어 pill이 두 줄로 흐르고,
+/// 검색 중에는 결과 pill만 모아 보여준다. pill을 누르면 모달이 열린다.
+class _WikiPanel extends StatefulWidget {
+  const _WikiPanel({required this.terms});
+
+  final List<WikiTerm> terms;
+
+  @override
+  State<_WikiPanel> createState() => _WikiPanelState();
+}
+
+class _WikiPanelState extends State<_WikiPanel> {
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  String get _query => _searchController.text.trim();
+
+  /// 웹과 같은 규칙: 초성만 치면 초성 키로, 아니면 이름·별칭 포함 검색.
+  List<WikiTerm> get _results {
+    final query = _query.toLowerCase();
+    if (query.isEmpty) return const [];
+    final isChosung = RegExp(r'^[ㄱ-ㅎ]+$').hasMatch(query.replaceAll(' ', ''));
+    if (isChosung) {
+      final cq = query.replaceAll(' ', '');
+      return widget.terms
+          .where(
+            (t) =>
+                t.chosung.contains(cq) ||
+                t.aliasChosungs.any((a) => a.contains(cq)),
+          )
+          .toList(growable: false);
+    }
+    return widget.terms
+        .where(
+          (t) =>
+              t.name.toLowerCase().contains(query) ||
+              t.aliases.any((a) => a.toLowerCase().contains(query)),
+        )
+        .toList(growable: false);
+  }
+
+  void _openTerm(WikiTerm term) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => _TermDialog(term: term),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final searching = _query.isNotEmpty;
+    final results = _results;
+
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 0),
+            child: Column(
+              children: [
+                Text(
+                  '모르는 용어가 있다면?\n검색해보세요.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '거래 화면에 실제로 등장하는 용어만 쉬운 말로 풀어 두었어요',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: _searchController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: '용어·별칭·초성(ㅅㄱ)으로 검색',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: searching
+                        ? IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() {});
+                            },
+                          )
+                        : null,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  searching
+                      ? '"$_query" 검색 결과 ${results.length}개'
+                      : '전체 ${widget.terms.length}개',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (searching)
+          SliverToBoxAdapter(
+            child: results.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Text(
+                      '검색 결과가 없어요. 다른 말로 검색해 보세요.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
+                  )
+                : Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        for (final term in results)
+                          _TermPill(
+                            term: term,
+                            onTap: () => _openTerm(term),
+                          ),
+                      ],
+                    ),
+                  ),
+          )
+        else if (widget.terms.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _IdleMarquee(terms: widget.terms, onOpen: _openTerm),
+          ),
+      ],
+    );
+  }
+}
+
+/// 유휴 상태의 흐르는 마퀴. 두 줄이 서로 다른 속도로 좌로 흐른다.
+class _IdleMarquee extends StatelessWidget {
+  const _IdleMarquee({required this.terms, required this.onOpen});
+
+  final List<WikiTerm> terms;
+  final ValueChanged<WikiTerm> onOpen;
+
+  /// 웹과 같은 결정적 샘플링 — 전체에서 n개를 고르게 솎아낸다.
+  static List<WikiTerm> _spread(List<WikiTerm> terms, int n) {
+    final step = terms.length / n < 1 ? 1 : (terms.length / n).floor();
+    return [for (var i = 0; i < terms.length; i += step) terms[i]].take(n).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final marquee = _spread(terms, 24);
+    final half = (marquee.length / 2).ceil();
+    return Padding(
+      padding: const EdgeInsets.only(top: 28),
+      child: ShaderMask(
+        shaderCallback: (rect) => const LinearGradient(
+          colors: [
+            Colors.transparent,
+            Colors.black,
+            Colors.black,
+            Colors.transparent,
+          ],
+          stops: [0, 0.08, 0.92, 1],
+        ).createShader(rect),
+        blendMode: BlendMode.dstIn,
+        child: Column(
+          children: [
+            _MarqueeRow(
+              terms: marquee.sublist(0, half),
+              seconds: 44,
+              onOpen: onOpen,
+            ),
+            const SizedBox(height: 12),
+            _MarqueeRow(
+              terms: marquee.sublist(half),
+              seconds: 33,
+              onOpen: onOpen,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 한 줄의 무한 스크롤 pill 행. 콘텐츠를 두 번 이어 붙여 절반 지점에서
+/// 오프셋을 감췄다 다시 시작해 이음매 없이 반복된다.
+class _MarqueeRow extends StatefulWidget {
+  const _MarqueeRow({
+    required this.terms,
+    required this.seconds,
+    required this.onOpen,
+  });
+
+  final List<WikiTerm> terms;
+  final int seconds;
+  final ValueChanged<WikiTerm> onOpen;
+
+  @override
+  State<_MarqueeRow> createState() => _MarqueeRowState();
+}
+
+class _MarqueeRowState extends State<_MarqueeRow>
+    with SingleTickerProviderStateMixin {
+  final _scroll = ScrollController();
+  late final AnimationController _ticker = AnimationController(
+    vsync: this,
+    duration: Duration(seconds: widget.seconds),
+  )..repeat();
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker.addListener(_drive);
+  }
+
+  void _drive() {
+    if (!_scroll.hasClients) return;
+    final pos = _scroll.position;
+    if (!pos.hasContentDimensions) return;
+    final half = (pos.maxScrollExtent + pos.viewportDimension) / 2;
+    if (half <= 0) return;
+    _scroll.jumpTo(_ticker.value * half);
+  }
+
+  @override
+  void dispose() {
+    _ticker.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      controller: _scroll,
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      child: Row(
+        children: [
+          for (var copy = 0; copy < 2; copy++)
+            for (final term in widget.terms)
+              Padding(
+                padding: const EdgeInsets.only(right: 10),
+                child: _TermPill(term: term, onTap: () => widget.onOpen(term)),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TermPill extends StatelessWidget {
+  const _TermPill({required this.term, required this.onTap});
 
   final WikiTerm term;
   final VoidCallback onTap;
@@ -239,31 +393,176 @@ class _TermCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AppCard(
+    return Material(
+      color: theme.cardColor,
+      borderRadius: BorderRadius.circular(999),
       child: InkWell(
         onTap: onTap,
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
+        borderRadius: BorderRadius.circular(999),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+          child: Text(term.name, style: theme.textTheme.bodyLarge),
+        ),
+      ),
+    );
+  }
+}
+
+/// 용어 모달 — 웹 TermModal과 같은 구성: 이름+닫기, 별칭 칩,
+/// 강조 요약 상자, 본문 문단(``` 코드블록은 고정폭).
+class _TermDialog extends StatelessWidget {
+  const _TermDialog({required this.term});
+
+  final WikiTerm term;
+
+  /// 본문을 문단/코드로 쪼갠다. ``` 로 코드펜스를 가르고 나머지는 빈 줄 기준.
+  /// 표 렌더링은 하지 않으므로 **·` 표식만 벗긴다.
+  static List<({String text, bool code})> _toParas(String body) {
+    String clean(String s) =>
+        s.replaceAll('**', '').replaceAll('`', '').trim();
+    final out = <({String text, bool code})>[];
+    final parts = body.split('```');
+    for (var i = 0; i < parts.length; i++) {
+      if (i.isOdd) {
+        final t = parts[i].trim();
+        if (t.isNotEmpty) out.add((text: t, code: true));
+      } else {
+        for (final p in parts[i].split(RegExp(r'\n\s*\n'))) {
+          final t = clean(p);
+          if (t.isNotEmpty) out.add((text: t, code: false));
+        }
+      }
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final chips = term.aliases.isEmpty ? ['별칭 없음'] : term.aliases;
+    final paras = _toParas(term.body);
+
+    return Dialog(
+      insetPadding: const EdgeInsets.all(20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 620,
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(term.name, style: theme.textTheme.bodyLarge),
-                  const SizedBox(height: 2),
-                  Text(
-                    term.summary,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onSurfaceVariant,
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          term.name,
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            for (final alias in chips)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: scheme.primaryContainer,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  alias,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: scheme.onPrimaryContainer,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
                     ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: const Text('닫기'),
                   ),
                 ],
               ),
-            ),
-            const Icon(Icons.chevron_right),
-          ],
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 14,
+                ),
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  term.summary,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    height: 1.7,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final p in paras)
+                      p.code
+                          ? Container(
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: scheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                p.text,
+                                style: const TextStyle(
+                                  fontFamily: 'monospace',
+                                  fontSize: 12.5,
+                                  height: 1.7,
+                                ),
+                              ),
+                            )
+                          : Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: Text(
+                                p.text,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  height: 1.78,
+                                ),
+                              ),
+                            ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
