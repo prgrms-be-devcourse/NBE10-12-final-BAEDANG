@@ -1036,8 +1036,12 @@ export default function MyPage() {
                 {resetError}
               </p>
             )}
+            {/* 두 버튼 모두 cursor-pointer가 빠져 있어서, 마우스를 올려도
+                기본 커서(화살표)만 보이던 문제 — 손가락 커서가 나타나게
+                추가했다. disabled:cursor-not-allowed는 그대로 둬서, 처리
+                중일 때는 여전히 금지 커서로 보인다. */}
             <button
-              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--dangerText)" }}
               onClick={handleReset}
               disabled={resetting}
@@ -1045,7 +1049,7 @@ export default function MyPage() {
               {resetting ? "초기화하는 중…" : "초기화할게요"}
             </button>
             <button
-              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               onClick={() => setResetModalOpen(false)}
               disabled={resetting}
