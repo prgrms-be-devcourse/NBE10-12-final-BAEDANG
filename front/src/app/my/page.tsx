@@ -773,102 +773,106 @@ export default function MyPage() {
       <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
         <RevealText as="div" className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["계정 설정"]} />
 
-        <form onSubmit={handleChangeNickname} className="mb-6">
-          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
-          <div className="flex max-w-[360px] gap-2">
-            <input
-              type="text"
-              required
-              minLength={2}
-              maxLength={20}
-              value={nicknameInput}
-              onChange={(e) => {
-                setNicknameInput(e.target.value);
-                setNicknameError(null);
-                setNicknameSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <button
-              type="submit"
-              disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
-              className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--accent)" }}
-            >
-              {nicknameSaving ? "변경 중…" : "변경"}
-            </button>
-          </div>
-          {nicknameError && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
-          )}
-          {nicknameSaved && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
-          )}
-        </form>
+        {/* 닉네임 아래에 세로로 쌓여 있던 비밀번호 변경을 닉네임 옆으로
+            배치해달라는 요청 — 구분선(divider)으로 나누던 두 폼을 가로
+            flex로 나란히 놓았다. 좁은 화면(max-md)에서는 겹치지 않도록
+            다시 세로로 쌓이게 했다. */}
+        <div className="flex flex-wrap gap-8 max-md:flex-col">
+          <form onSubmit={handleChangeNickname}>
+            <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
+            <div className="flex max-w-[360px] gap-2">
+              <input
+                type="text"
+                required
+                minLength={2}
+                maxLength={20}
+                value={nicknameInput}
+                onChange={(e) => {
+                  setNicknameInput(e.target.value);
+                  setNicknameError(null);
+                  setNicknameSaved(false);
+                }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
+                className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+              >
+                {nicknameSaving ? "변경 중…" : "변경"}
+              </button>
+            </div>
+            {nicknameError && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
+            )}
+            {nicknameSaved && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
+            )}
+          </form>
 
-        <div className="mb-5 h-px" style={{ background: "var(--line)" }} />
-
-        <form onSubmit={handleChangePassword}>
-          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
-          <div className="flex max-w-[320px] flex-col gap-2">
-            <input
-              type="password"
-              required
-              placeholder="현재 비밀번호"
-              value={currentPassword}
-              onChange={(e) => {
-                setCurrentPassword(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <input
-              type="password"
-              required
-              minLength={8}
-              maxLength={64}
-              placeholder="새 비밀번호 (8자 이상)"
-              value={newPassword}
-              onChange={(e) => {
-                setNewPassword(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <input
-              type="password"
-              required
-              placeholder="새 비밀번호 확인"
-              value={newPasswordConfirm}
-              onChange={(e) => {
-                setNewPasswordConfirm(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <button
-              type="submit"
-              disabled={passwordSaving}
-              className="cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--accent)" }}
-            >
-              {passwordSaving ? "변경 중…" : "비밀번호 변경"}
-            </button>
-          </div>
-          {passwordError && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
-          )}
-          {passwordSaved && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
-          )}
-        </form>
+          <form onSubmit={handleChangePassword}>
+            <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
+            <div className="flex max-w-[320px] flex-col gap-2">
+              <input
+                type="password"
+                required
+                placeholder="현재 비밀번호"
+                value={currentPassword}
+                onChange={(e) => {
+                  setCurrentPassword(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <input
+                type="password"
+                required
+                minLength={8}
+                maxLength={64}
+                placeholder="새 비밀번호 (8자 이상)"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <input
+                type="password"
+                required
+                placeholder="새 비밀번호 확인"
+                value={newPasswordConfirm}
+                onChange={(e) => {
+                  setNewPasswordConfirm(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={passwordSaving}
+                className="cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+              >
+                {passwordSaving ? "변경 중…" : "비밀번호 변경"}
+              </button>
+            </div>
+            {passwordError && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
+            )}
+            {passwordSaved && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
+            )}
+          </form>
+        </div>
       </Reveal>
 
       <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
