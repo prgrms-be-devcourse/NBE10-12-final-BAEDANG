@@ -59,9 +59,18 @@ type CmpState = { phase: 0 | 1 | 2; open: boolean };
 export function InvestupIntro({
   logoSrc = '/investup-wordmark-light.png',
   ctaHref = '#hero',
+  onStepsRevealed,
 }: {
   logoSrc?: string;
   ctaHref?: string;
+  /**
+   * "GET STARTED"/"투자의 첫걸음, 이렇게 시작해요"(stepsRevealed)가 처음
+   * 나타나는 시점에 정확히 한 번 호출된다 — 원본 디자인엔 없던, 통합용으로만
+   * 추가한 훅이다(logoSrc/ctaHref와 같은 성격). 이 컴포넌트 자체의 로직·수치·
+   * 마크업은 그대로 두고, 그 바깥(IntroScreen)에서 SKIP 버튼을 같은 시점에
+   * 등장시키는 데 쓴다.
+   */
+  onStepsRevealed?: () => void;
 }) {
   const [heroIn, setHeroIn] = useState(false);
   const [step, setStep] = useState(3);
@@ -85,6 +94,14 @@ export function InvestupIntro({
   const gapRef = useRef<HTMLSpanElement | null>(null);
   const ctaRef = useRef<HTMLDivElement | null>(null);
   const ctaBtnRef = useRef<HTMLAnchorElement | null>(null);
+  // onStepsRevealed를 스크롤 tick effect(마운트 시 한 번만 만들어짐) 안에서
+  // 안전하게 호출하기 위한 최신값 보관용 ref — 이 ref 하나만 최신화하면 그
+  // effect의 의존성 배열은 건드리지 않아도 된다(그 effect는 손대지 않기로
+  // 한 원본 스크롤 로직이다).
+  const onStepsRevealedRef = useRef(onStepsRevealed);
+  useEffect(() => {
+    onStepsRevealedRef.current = onStepsRevealed;
+  }, [onStepsRevealed]);
 
   /** 리렌더와 무관하게 유지되는 애니메이션 상태 */
   const A = useRef({
@@ -455,6 +472,7 @@ export function InvestupIntro({
       if (stepsTitleEl && !a.stepsShown && stepsTitleEl.getBoundingClientRect().top < window.innerHeight * 0.92) {
         a.stepsShown = true;
         setStepsRevealed(true);
+        onStepsRevealedRef.current?.();
         // STEP 1~3 카드는 제목이 다 나타난 다음에 등장해야 한다(요청) — 제목
         // 단어 트랜지션(.6s) + 최대 시차(3 × WORD_STAGGER_S ≈ .21s)보다 넉넉하게
         // 900ms 뒤에 카드를 연다.
