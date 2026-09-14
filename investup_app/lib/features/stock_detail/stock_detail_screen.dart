@@ -166,7 +166,11 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.symbol),
+        title: FutureBuilder<StockDetail>(
+          future: _detailFuture,
+          builder: (context, snapshot) =>
+              Text(snapshot.data?.name ?? widget.symbol),
+        ),
         actions: [
           if (widget.stockId != null)
             IconButton(
