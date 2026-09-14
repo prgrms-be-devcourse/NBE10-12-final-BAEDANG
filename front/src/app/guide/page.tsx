@@ -155,7 +155,19 @@ export default function GuidePage() {
           </div>
 
           <Reveal delay={0.5} className="mt-4.5">
-            <div className="rounded-2xl px-5 py-4" style={{ background: "var(--accentSoft)" }}>
+            {/* "참고" 안내 박스의 배경색을 메인 화면 히어로 사각형("실전처럼
+                경험하고, 나만의 투자 감각을 키워요" 문구가 놓인 카드)의 배경과
+                똑같이 맞춰달라는 요청 — page.tsx 히어로 div에 쓴 background 값
+                (토스임팩트 스타일 radial-gradient + var(--heroBg))을 그대로
+                가져왔다. 글자색(var(--onAccentSoftText))은 라이트/다크 모두
+                이 새 배경 위에서도 대비가 충분해 그대로 유지했다. */}
+            <div
+              className="rounded-2xl px-5 py-4"
+              style={{
+                background:
+                  "radial-gradient(120% 100% at 42% 55%, rgba(150,196,255,0.55) 0%, rgba(150,196,255,0) 70%), var(--heroBg)",
+              }}
+            >
               <RevealText
                 as="p"
                 className="text-[12.5px] leading-relaxed"
