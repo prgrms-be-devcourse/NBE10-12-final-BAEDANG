@@ -112,6 +112,95 @@ Map<String, Object?> _bookJson() => <String, Object?>{
   'bids': <Object?>[],
 };
 
+Map<String, Object?> _nvdaDetailJson() => <String, Object?>{
+  'symbol': 'NVDA',
+  'name': '엔비디아',
+  'market': 'NASDAQ',
+  'marketCountry': 'US',
+  'currency': 'USD',
+  'category': 'INDIVIDUAL',
+  'price': <String, Object?>{
+    'lastPrice': '182.40',
+    'prevClose': '180.00',
+    'changeAmount': '2.40',
+    'changeRate': '0.013333',
+    'realtime': true,
+  },
+  'info': <String, Object?>{},
+  'warnings': <Object?>[],
+  'warningsStatus': 'AVAILABLE',
+  'tradable': true,
+  'tradableReason': null,
+};
+
+Map<String, Object?> _financialsJson() => <String, Object?>{
+  'symbol': '005930',
+  'marketCountry': 'KR',
+  'dataStatus': 'FRESH',
+  'industry': <String, Object?>{
+    'standard': <String, Object?>{'code': 'C26', 'name': '전기·전자'},
+    'large': <String, Object?>{'code': 'C2', 'name': '제조업'},
+    'medium': <String, Object?>{'code': 'C26', 'name': '전기·전자'},
+    'small': <String, Object?>{'code': 'C264', 'name': '반도체'},
+  },
+  'valuation': <String, Object?>{
+    'calculatedPer': '12.34',
+    'basis': 'LATEST_ANNUAL_EPS',
+  },
+  'annual': <Object?>[
+    _periodJson('202412', sales: '300000000000000', eps: '3000'),
+    _periodJson('202312', sales: '250000000000000', eps: '2000'),
+    _periodJson('202212', sales: '230000000000000', eps: '1800'),
+  ],
+  'quarterly': <Object?>[
+    _periodJson('202506', sales: '80000000000000', eps: '700'),
+    _periodJson('202503', sales: '75000000000000', eps: '650'),
+  ],
+  'syncedAt': <String, Object?>{
+    'industry': null,
+    'annual': null,
+    'quarterly': null,
+  },
+};
+
+Map<String, Object?> _periodJson(
+  String ym, {
+  required String sales,
+  required String eps,
+}) => <String, Object?>{
+  'statementYearMonth': ym,
+  'balanceSheet': <String, Object?>{
+    'currentAssets': '1000000',
+    'fixedAssets': '2000000',
+    'totalAssets': '500000000000000',
+    'currentLiabilities': '500000',
+    'fixedLiabilities': '500000',
+    'totalLiabilities': '150000000000000',
+    'capitalStock': '100000',
+    'capitalSurplus': '200000',
+    'retainedEarnings': '300000',
+    'totalEquity': '350000000000000',
+  },
+  'incomeStatement': <String, Object?>{
+    'sales': sales,
+    'operatingProfit': '30000000000000',
+    'netIncome': '25000000000000',
+  },
+  'ratios': <String, Object?>{
+    'salesGrowthRate': '5.0',
+    'operatingProfitGrowthRate': '4.0',
+    'netIncomeGrowthRate': '3.0',
+    'roe': '8.50',
+    'eps': eps,
+    'salesPerShare': '50000',
+    'bps': '60000',
+    'reserveRatio': '100',
+    'debtRatio': '42.86',
+    'netProfitMargin': '8.33',
+    'operatingProfitMargin': '10.00',
+  },
+};
+
 Map<String, Object?> _likesJson() => <String, Object?>{
   'items': <Object?>[
     <String, Object?>{
@@ -269,6 +358,22 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
       });
     }
     if (path == '/api/stocks/005930') return FakeResponse.ok(_detailJson());
+    if (path == '/api/stocks/005930/financials') {
+      return FakeResponse.ok(_financialsJson());
+    }
+    if (path == '/api/stocks/NVDA') return FakeResponse.ok(_nvdaDetailJson());
+    if (path == '/api/stocks/NVDA/candles') {
+      return FakeResponse.ok(_candlesJson());
+    }
+    if (path == '/api/stocks/NVDA/orderbook') {
+      return FakeResponse.ok(_bookJson());
+    }
+    if (path == '/api/stocks/NVDA/financials') {
+      return FakeResponse(422, const <String, Object?>{
+        'code': 'FINANCIALS_NOT_SUPPORTED',
+        'message': '이 종목은 재무 정보를 지원하지 않아요',
+      });
+    }
     if (path == '/api/stocks/005930/candles') {
       return FakeResponse.ok(_candlesJson());
     }
@@ -928,6 +1033,61 @@ void main() {
         'newPassword': 'newpassword1',
       });
       expect(find.text('비밀번호가 변경됐어요'), findsOneWidget);
+    });
+  });
+
+  group('재무제표', () {
+    testWidgets('국내 종목은 계산 PER·차트 3개·크게 보기 표를 보여준다', (
+      tester,
+    ) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('삼성전자'));
+      await _settle(tester);
+
+      await tester.scrollUntilVisible(
+        find.text('재무제표'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+
+      expect(find.text('재무제표'), findsOneWidget);
+      expect(find.text('반도체'), findsOneWidget);
+      expect(find.text('계산 PER'), findsOneWidget);
+      expect(find.text('12.34배'), findsOneWidget);
+      expect(find.text('실적 추이'), findsOneWidget);
+      expect(find.text('수익성 추이'), findsOneWidget);
+      expect(find.text('재무상태 추이'), findsOneWidget);
+
+      // 크게 보기 → 차트 + 전체 기간 표.
+      await tester.tap(find.text('크게 보기').first);
+      await _settle(tester);
+      expect(find.text('기준월'), findsOneWidget);
+      expect(find.text('2024.12'), findsWidgets);
+      expect(find.text('영업이익'), findsWidgets);
+      await tester.tap(find.byIcon(Icons.close));
+      await _settle(tester);
+    });
+
+    testWidgets('미지원 종목(NVDA)은 재무제표 섹션이 숨는다', (tester) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('해외 주식'));
+      await _settle(tester);
+      await tester.tap(find.text('엔비디아'));
+      await _settle(tester);
+
+      expect(find.text('엔비디아'), findsWidgets);
+      expect(find.text('재무제표'), findsNothing);
     });
   });
 }

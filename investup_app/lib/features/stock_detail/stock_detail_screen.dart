@@ -13,6 +13,7 @@ import '../../core/models/stock_detail.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
 import 'candle_chart.dart';
+import 'financials_section.dart';
 import 'trade_panel.dart';
 
 /// 종목 상세. 가격·차트·호가·기본정보를 보여주고, 거래하기에서
@@ -231,6 +232,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
           }
           return _DetailBody(
             detail: detail,
+            stocks: widget.stocks,
             candleFuture: _candleFuture,
             bookFuture: _bookFuture,
             rangeIndex: _rangeIndex,
@@ -269,6 +271,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
 class _DetailBody extends StatelessWidget {
   const _DetailBody({
     required this.detail,
+    required this.stocks,
     required this.candleFuture,
     required this.bookFuture,
     required this.rangeIndex,
@@ -279,6 +282,7 @@ class _DetailBody extends StatelessWidget {
   });
 
   final StockDetail detail;
+  final StockApi stocks;
   final Future<CandleSeries>? candleFuture;
   final Future<OrderBook>? bookFuture;
   final int rangeIndex;
@@ -450,6 +454,14 @@ class _DetailBody extends StatelessWidget {
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 16),
+
+        // 재무제표 (미지원 종목은 위젯이 스스로 숨는다)
+        FinancialsSection(
+          symbol: detail.symbol,
+          marketCountry: detail.marketCountry,
+          stocks: stocks,
         ),
         const SizedBox(height: 16),
 

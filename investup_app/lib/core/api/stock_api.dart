@@ -6,6 +6,7 @@ import '../models/market_country.dart';
 import '../models/order_book.dart';
 import '../models/ranking.dart';
 import '../models/stock_detail.dart';
+import '../models/stock_financials.dart';
 import '../models/stock_like.dart';
 import '../models/stock_search.dart';
 import 'api_client.dart';
@@ -54,6 +55,22 @@ class StockApi {
       cancelToken: cancelToken,
     );
     return _client.decode(() => StockDetail.fromJson(json));
+  }
+
+  /// 국내 종목 재무제표. 비로그인도 조회 가능하고, 로그인이면 토큰을 같이 보낸다.
+  /// US·ETF/ETN은 FINANCIALS_NOT_SUPPORTED(422)를 돌려준다.
+  Future<StockFinancials> getFinancials({
+    required String symbol,
+    required MarketCountry marketCountry,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.getObject(
+      'stocks/$symbol/financials',
+      auth: AuthRequirement.optional,
+      query: {'marketCountry': marketCountry.wireValue},
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => StockFinancials.fromJson(json));
   }
 
   /// 종목 검색. 비로그인도 조회 가능하다.
