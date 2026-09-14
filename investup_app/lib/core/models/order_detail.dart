@@ -81,6 +81,68 @@ class OrderDetail {
   );
 }
 
+/// 체결 한 건(부분 체결 포함). sequenceNo 오름차순.
+class ExecutionItem {
+  const ExecutionItem({
+    required this.executionId,
+    required this.sequenceNo,
+    required this.quantity,
+    this.price,
+    this.exchangeRate,
+    this.grossAmount,
+    this.fee,
+    this.tax,
+    this.netAmount,
+    this.balanceAfter,
+    this.executedAt,
+  });
+
+  final int executionId;
+  final int sequenceNo;
+  final String quantity;
+  final String? price;
+  final String? exchangeRate;
+  final String? grossAmount;
+  final String? fee;
+  final String? tax;
+  final String? netAmount;
+  final String? balanceAfter;
+  final DateTime? executedAt;
+
+  factory ExecutionItem.fromJson(Map<String, Object?> json) => ExecutionItem(
+    executionId: json.requireInt('executionId'),
+    sequenceNo: json.requireInt('sequenceNo'),
+    quantity: json.requireString('quantity'),
+    price: json.stringOrNull('price'),
+    exchangeRate: json.stringOrNull('exchangeRate'),
+    grossAmount: json.stringOrNull('grossAmount'),
+    fee: json.stringOrNull('fee'),
+    tax: json.stringOrNull('tax'),
+    netAmount: json.stringOrNull('netAmount'),
+    balanceAfter: json.stringOrNull('balanceAfter'),
+    executedAt: json.dateTimeOrNull('executedAt'),
+  );
+}
+
+/// GET /orders/{id}/executions 응답 페이지.
+class OrderExecutions {
+  const OrderExecutions({required this.items, this.nextCursor, this.hasNext = false});
+
+  final List<ExecutionItem> items;
+  final String? nextCursor;
+  final bool hasNext;
+
+  factory OrderExecutions.fromJson(Map<String, Object?> json) =>
+      OrderExecutions(
+        items: json
+            .requireObjectList('items')
+            .map(ExecutionItem.fromJson)
+            .toList(growable: false),
+        nextCursor: json.stringOrNull('nextCursor'),
+        hasNext: json.requireBool('hasNext'),
+      );
+}
+
 /// GET /accounts/me/orders 응답 페이지.
 class OrderPage {
   const OrderPage({required this.items, this.nextCursor, this.hasNext = false});

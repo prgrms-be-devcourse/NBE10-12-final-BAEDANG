@@ -11,6 +11,7 @@ import '../../core/models/order_detail.dart';
 import '../../core/models/stock_like.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
+import 'order_detail_sheet.dart';
 
 /// 마이 탭. 프로필·계좌 요약·관심 종목·주문 내역·로그아웃을 보여준다.
 class MyScreen extends StatefulWidget {
@@ -104,21 +105,16 @@ class _MyScreenState extends State<MyScreen> {
     }
   }
 
-  Future<void> _cancelOrder(OrderDetail order) async {
-    if (_busyIds.contains(order.orderId)) return;
-    setState(() => _busyIds.add(order.orderId));
-    try {
-      await widget.orders.cancelOrder(orderId: order.orderId);
+  Future<void> _openOrderDetail(OrderDetail order) async {
+    final updated = await OrderDetailSheet.show(
+      context,
+      order: order,
+      api: widget.orders,
+    );
+    // 취소·경합 재조회로 상태가 바뀌었으면 목록과 계좌(예약금 해제)를 갱신한다.
+    if (updated != null && mounted) {
       _loadLists();
       _refreshAccount();
-    } on ApiException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(e.message)));
-      }
-    } finally {
-      if (mounted) setState(() => _busyIds.remove(order.orderId));
     }
   }
 
@@ -259,8 +255,7 @@ class _MyScreenState extends State<MyScreen> {
             const SizedBox(height: 24),
             _OrdersSection(
               future: _ordersFuture,
-              busyIds: _busyIds,
-              onCancel: _cancelOrder,
+              onTapOrder: _openOrderDetail,
               onRetry: _loadLists,
             ),
             const SizedBox(height: 24),
@@ -438,14 +433,12 @@ class _LikeRow extends StatelessWidget {
 class _OrdersSection extends StatelessWidget {
   const _OrdersSection({
     required this.future,
-    required this.busyIds,
-    required this.onCancel,
+    required this.onTapOrder,
     required this.onRetry,
   });
 
   final Future<OrderPage>? future;
-  final Set<int> busyIds;
-  final ValueChanged<OrderDetail> onCancel;
+  final ValueChanged<OrderDetail> onTapOrder;
   final VoidCallback onRetry;
 
   @override
@@ -486,7 +479,7 @@ class _OrdersSection extends StatelessWidget {
               child: Column(
                 children: [
                   for (final order in page.items)
-                    _OrderRow(order, busyIds, onCancel),
+                    _OrderRow(order, onTapOrder),
                 ],
               ),
             );
@@ -498,11 +491,10 @@ class _OrdersSection extends StatelessWidget {
 }
 
 class _OrderRow extends StatelessWidget {
-  const _OrderRow(this.order, this.busyIds, this.onCancel);
+  const _OrderRow(this.order, this.onTap);
 
   final OrderDetail order;
-  final Set<int> busyIds;
-  final ValueChanged<OrderDetail> onCancel;
+  final ValueChanged<OrderDetail> onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -515,43 +507,34 @@ class _OrderRow extends StatelessWidget {
             order.requestedLimitCurrency,
           )
         : formatMoney(order.netAmount, 'KRW');
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${isBuy ? '매수' : '매도'} ${order.name}',
-                  style: theme.textTheme.bodyLarge,
-                ),
-                Text(
-                  '${order.orderType == 'LIMIT' ? '지정가' : '시장가'} · '
-                  '${order.quantity}주 · $price',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: scheme.onSurfaceVariant,
+    return InkWell(
+      onTap: () => onTap(order),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${isBuy ? '매수' : '매도'} ${order.name}',
+                    style: theme.textTheme.bodyLarge,
                   ),
-                ),
-              ],
+                  Text(
+                    '${order.orderType == 'LIMIT' ? '지정가' : '시장가'} · '
+                    '${order.quantity}주 · $price',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              _StatusChip(status: order.status),
-              if (order.cancellable)
-                TextButton(
-                  onPressed: busyIds.contains(order.orderId)
-                      ? null
-                      : () => onCancel(order),
-                  child: const Text('취소'),
-                ),
-            ],
-          ),
-        ],
+            _StatusChip(status: order.status),
+          ],
+        ),
       ),
     );
   }

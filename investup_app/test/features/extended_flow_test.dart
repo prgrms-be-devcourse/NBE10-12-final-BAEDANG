@@ -135,6 +135,32 @@ Map<String, Object?> _ordersJson() => <String, Object?>{
   'hasNext': false,
 };
 
+Map<String, Object?> _executionsJson() => <String, Object?>{
+  'orderId': 77,
+  'stock': <String, Object?>{
+    'symbol': '005930',
+    'name': '삼성전자',
+    'marketCountry': 'KR',
+  },
+  'items': <Map<String, Object?>>[
+    <String, Object?>{
+      'executionId': 501,
+      'sequenceNo': 1,
+      'quantity': '1',
+      'price': '74000',
+      'exchangeRate': '1',
+      'grossAmount': '74000',
+      'fee': '74',
+      'tax': '0',
+      'netAmount': '74074',
+      'balanceAfter': '4925926',
+      'executedAt': '2026-09-15T10:01:00+09:00',
+    },
+  ],
+  'nextCursor': null,
+  'hasNext': false,
+};
+
 Map<String, Object?> _rankingPage2Json() => <String, Object?>{
   'items': <Map<String, Object?>>[
     <String, Object?>{
@@ -267,6 +293,9 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
     }
     if (path == '/api/orders/limit' && options.method == 'POST') {
       return FakeResponse.ok(_limitOrderJson());
+    }
+    if (path == '/api/orders/77/executions') {
+      return FakeResponse.ok(_executionsJson());
     }
     if (path == '/api/orders/77' && options.method == 'PATCH') {
       return FakeResponse.ok(_limitOrderJson(status: 'CANCELED'));
@@ -426,8 +455,17 @@ void main() {
       expect(find.text('매수 삼성전자'), findsOneWidget);
       expect(find.text('미체결'), findsOneWidget);
 
-      // 주문 취소 → PATCH {status: CANCELED}
-      await tester.tap(find.text('취소'));
+      // 행을 탭하면 상세 시트가 열리고 체결 내역을 불러온다.
+      await tester.tap(find.text('매수 삼성전자'));
+      await _settle(tester);
+      expect(find.text('접수'), findsOneWidget);
+      expect(find.text('체결 내역'), findsOneWidget);
+      expect(find.text('#1'), findsOneWidget);
+      expect(find.textContaining('1주 @'), findsOneWidget);
+      expect(harness.countTo('/api/orders/77/executions'), 1);
+
+      // 시트 안에서 취소 → PATCH {status: CANCELED}
+      await tester.tap(find.text('주문 취소'));
       await _settle(tester);
       final cancels = harness.requestsTo('/api/orders/77');
       expect(cancels, hasLength(1));

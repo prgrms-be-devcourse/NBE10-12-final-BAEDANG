@@ -122,6 +122,38 @@ class OrderApi {
     return _client.decode(() => OrderDetail.fromJson(json));
   }
 
+  /// 주문 1건 상세 재조회 — 취소 경합(409) 시 최신 상태로 맞출 때 쓴다.
+  Future<OrderDetail> getOrderDetail({
+    required int orderId,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.getObject(
+      'orders/$orderId',
+      auth: AuthRequirement.required,
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => OrderDetail.fromJson(json));
+  }
+
+  /// 주문 1건의 체결 내역(부분 체결 포함). sequenceNo 오름차순, 커서 페이지네이션.
+  Future<OrderExecutions> getOrderExecutions({
+    required int orderId,
+    String? cursor,
+    int? size,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.getObject(
+      'orders/$orderId/executions',
+      auth: AuthRequirement.required,
+      query: {
+        if (cursor != null) 'cursor': cursor,
+        if (size != null) 'size': '$size',
+      },
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => OrderExecutions.fromJson(json));
+  }
+
   /// 미체결 지정가 주문 취소. 서버는 {status: "CANCELED"}만 받는다.
   Future<OrderDetail> cancelOrder({
     required int orderId,
