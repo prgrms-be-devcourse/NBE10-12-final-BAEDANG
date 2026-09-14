@@ -234,10 +234,10 @@ export function TourGuide({
             <button
               type="button"
               onClick={goNext}
-              className="cursor-pointer rounded-full px-4 py-1.5 text-[13px] font-bold text-white transition-[background] duration-150"
+              className="cursor-pointer rounded-full px-4 py-1.5 text-[13px] font-bold text-white transition-[filter] duration-150"
               style={{ background: "var(--accent)" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--buyHover)")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "var(--accent)")}
+              onMouseEnter={(e) => (e.currentTarget.style.filter = "brightness(.92)")}
+              onMouseLeave={(e) => (e.currentTarget.style.filter = "none")}
             >
               {stepIndex === steps.length - 1 ? "완료" : "다음"}
             </button>
