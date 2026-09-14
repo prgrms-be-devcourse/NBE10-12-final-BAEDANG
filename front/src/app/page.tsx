@@ -122,7 +122,10 @@ export default function MainPage() {
                 텍스트가 아래→위로 스치듯 바뀌는 SwapText 효과까지 그대로
                 가져왔다. 원래 두 버튼이 갖고 있던 강조(accent 색 채움)/
                 보조(흰색·어두운 배경) 구분은 이 요청에 따라 사라지고,
-                이제 둘 다 똑같은 알약형 버튼이 된다. */}
+                이제 둘 다 똑같은 알약형 버튼이 된다.
+                이후 버튼 뒤에 깔려 있던 그림자 효과(boxShadow: 0 2px 8px
+                rgba(15,23,32,.08))를 제거해달라는 요청으로, 두 버튼의
+                style에서 boxShadow를 지웠다. */}
             <div className="mt-5 flex gap-2.5">
               {/* "모의 투자금 받고 시작하기"는 더 이상 항상 같은 곳으로 가는
                   링크가 아니다 — 비로그인이면 회원가입 화면으로 보내고(가입과
@@ -133,7 +136,7 @@ export default function MainPage() {
                 type="button"
                 onClick={handleStartClick}
                 className="iv-hover-swap inline-flex min-h-[54px] items-center gap-2.5 whitespace-nowrap rounded-full px-11 text-[19px] font-bold tracking-[-0.01em] transition-[background-color] duration-[280ms] ease-out"
-                style={{ background: pillBtnBg, color: pillBtnText, boxShadow: "0 2px 8px rgba(15,23,32,.08)", cursor: "pointer" }}
+                style={{ background: pillBtnBg, color: pillBtnText, cursor: "pointer" }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
@@ -147,7 +150,7 @@ export default function MainPage() {
               <Link
                 href="/guide"
                 className="iv-hover-swap inline-flex min-h-[54px] items-center gap-2.5 whitespace-nowrap rounded-full px-11 text-[19px] font-bold tracking-[-0.01em] transition-[background-color] duration-[280ms] ease-out"
-                style={{ background: pillBtnBg, color: pillBtnText, boxShadow: "0 2px 8px rgba(15,23,32,.08)" }}
+                style={{ background: pillBtnBg, color: pillBtnText }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = pillBtnBgHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = pillBtnBg)}
               >
