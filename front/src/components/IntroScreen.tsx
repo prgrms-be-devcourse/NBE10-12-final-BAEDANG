@@ -20,6 +20,8 @@ import { SwapText } from "./SwapText";
  * 방식으로 재사용 중). "시작하기" 버튼에만 있는 스크롤 등장 애니메이션
  * (opacity/blur/translateY, ctaBtnRevealed)은 옮기지 않았다 — SKIP은 스크롤과
  * 무관하게 화면에 고정돼 처음부터 계속 보여야 하는 버튼이라 적용 대상이 아니다.
+ * 크기(minHeight/padding/fontSize)만은 그대로 가져오지 않았다 — "시작하기"는
+ * 화면의 주 CTA라 크게, SKIP은 보조 동작이라 작게 요청받아 셋 다 낮췄다.
  */
 export function IntroScreen() {
   return (
@@ -35,12 +37,12 @@ export function IntroScreen() {
           zIndex: 100,
           display: "inline-flex",
           alignItems: "center",
-          minHeight: 54,
-          padding: "0 44px",
+          minHeight: 36,
+          padding: "0 20px",
           borderRadius: 999,
           background: "rgba(255,255,255,.06)",
           color: "#ffffff",
-          fontSize: 19,
+          fontSize: 13,
           fontWeight: 700,
           letterSpacing: "-.01em",
           textDecoration: "none",
