@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { refreshAccessToken, setAuthEventListeners, syncAuthTokens, type AuthUser } from "@/lib/api";
+import { logoutUser, refreshAccessToken, setAuthEventListeners, syncAuthTokens, type AuthUser } from "@/lib/api";
 import { useVisiblePolling } from "@/lib/useVisiblePolling";
 
 const STORAGE_KEY = "trading-auth-user";
@@ -120,6 +120,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   function logout() {
+    // 연동 점검 중 발견된 미연동 API(POST /api/auth/logout) — 백엔드는 stateless
+    // JWT라 이 호출 없이도 로컬 토큰만 지우면 "로그아웃"은 이미 완성되지만, 문서화된
+    // 계약(docs/api-spec.md)대로 서버에도 알려준다. 로컬 로그아웃은 네트워크 상태와
+    // 무관하게 항상 즉시 성공해야 하므로, applyUser보다 먼저(토큰이 아직 살아있을
+    // 때) best-effort로 호출만 하고 응답은 기다리지 않는다 — 실패해도 무시한다.
+    logoutUser().catch(() => {});
     applyUser(setUserState, null);
   }
 
