@@ -187,8 +187,9 @@ export function TourGuide({
           // 다크 모드에서는 이 스포트라이트 바깥쪽이 카드(#1a1a1a) 등 어두운 회색
           // 배경과 겹치며 남색으로 보인다는 피드백 — rgba(4,10,20)의 R<G<B가
           // 만들어내는 미세한 파란기 때문이다(라이트 모드는 밝은 배경 위라 거의
-          // 안 보인다). 다크 모드에서만 R=G=B인 순수 검정으로 바꾼다.
-          boxShadow: theme === "dark" ? "0 0 0 9999px rgba(0,0,0,.6)" : "0 0 0 9999px rgba(4,10,20,.6)",
+          // 안 보인다). 다크 모드에서는 다른 화면의 모달 오버레이(--modalOverlay,
+          // 다크에서 rgba(0,0,0,.75))와 같은 색·투명도로 맞춘다(순수 검정).
+          boxShadow: theme === "dark" ? "0 0 0 9999px rgba(0,0,0,.75)" : "0 0 0 9999px rgba(4,10,20,.6)",
           pointerEvents: "none",
           zIndex: 140,
           transition: "top .25s ease, left .25s ease, width .25s ease, height .25s ease",
