@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { ApiError, getStockFinancials, type MarketCountry, type StockFinancialPeriod, type StockFinancials } from "@/lib/api";
-import { chartPeriods, formatCalculatedPer, recentPeriods, type FinancialRange } from "@/lib/financial-view";
+import { chartPeriods, formatCalculatedPer, type FinancialRange } from "@/lib/financial-view";
 import { formatNumber } from "@/lib/format";
 import { PillTabs } from "./PillTabs";
 import { useTheme } from "./ThemeProvider";
@@ -31,8 +31,8 @@ function toNumber(value: string | null | undefined): number | null {
 type ChartKind = "performance" | "profitability" | "position";
 
 /**
- * 종목 상세의 재무제표 섹션 — 종목 분류 배지는 제목 옆에 유지하고, 계산 PER은 보조 지표로
- * 줄였다. 차트는 Toss처럼 콘텐츠 폭을 넓게 쓰며, 필요할 때 개별 차트를 크게 연다.
+ * 종목 상세의 재무제표 섹션 — 기본 화면은 계산 PER과 그래프 3개만 보여준다.
+ * 상세 표는 각 그래프의 `크게 보기` 팝업 안에서 해당 지표만 전체 기간으로 보여준다.
  */
 export function StockFinancialsSection({ symbol, marketCountry }: { symbol: string; marketCountry: MarketCountry }) {
   const { theme } = useTheme();
@@ -41,7 +41,6 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
   const [loadError, setLoadError] = useState(false);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<FinancialRange>("annual");
-  const [expanded, setExpanded] = useState(false);
   const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
 
   useEffect(() => {
@@ -50,7 +49,6 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
     setLoading(true);
     setLoadError(false);
     setUnsupported(false);
-    setExpanded(false);
     setExpandedChart(null);
     getStockFinancials(symbol, marketCountry)
       .then((res) => {
@@ -86,8 +84,6 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
   if (unsupported) return null;
 
   const periods = financials ? (range === "annual" ? financials.annual : financials.quarterly) : [];
-  const previewPeriods = recentPeriods(periods, range);
-  const visiblePeriods = expanded ? periods : previewPeriods;
   const graphPeriods = chartPeriods(periods, range);
 
   return (
@@ -116,10 +112,7 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
               { value: "quarterly", label: "분기" },
             ]}
             value={range}
-            onChange={(value) => {
-              setRange(value as FinancialRange);
-              setExpanded(false);
-            }}
+            onChange={(value) => setRange(value as FinancialRange)}
             trackClassName="ml-auto w-[132px] gap-0.5 rounded-full p-[3px]"
             trackStyle={{
               background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
@@ -147,53 +140,57 @@ export function StockFinancialsSection({ symbol, marketCountry }: { symbol: stri
               {range === "annual" ? "연간" : "분기"} 재무 정보가 아직 없어요.
             </div>
           ) : (
-            <>
-              <div className="space-y-3">
-                <FinancialAmountChart periods={graphPeriods} onExpand={() => setExpandedChart("performance")} />
-                <FinancialProfitabilityChart periods={graphPeriods} onExpand={() => setExpandedChart("profitability")} />
-                <FinancialPositionChart periods={graphPeriods} onExpand={() => setExpandedChart("position")} />
-              </div>
-
-              <div className="mt-4 overflow-x-auto">
-                <div className="min-w-[560px]">
-                  <div
-                    className="grid gap-3 px-3 py-2 text-[12px] font-bold"
-                    style={{ gridTemplateColumns: "1fr 1.3fr 1.2fr 1.2fr 1fr 0.9fr 1fr", color: "var(--mut2)" }}
-                  >
-                    <span>기준월</span>
-                    <span className="text-right">매출액</span>
-                    <span className="text-right">영업이익</span>
-                    <span className="text-right">순이익</span>
-                    <span className="text-right">영업이익률</span>
-                    <span className="text-right">ROE</span>
-                    <span className="text-right">부채비율</span>
-                  </div>
-                  {visiblePeriods.map((period) => (
-                    <FinancialPeriodRow key={period.statementYearMonth} period={period} />
-                  ))}
-                </div>
-              </div>
-              {periods.length > previewPeriods.length && (
-                <button
-                  type="button"
-                  className="mt-3 w-full cursor-pointer rounded-xl py-2.5 text-[13px] font-bold"
-                  style={{ background: "var(--fill)", color: "var(--accentText)" }}
-                  onClick={() => setExpanded((current) => !current)}
-                  aria-label={expanded ? "최근 재무제표만 보기" : "전체 재무제표 더 보기"}
-                >
-                  {expanded ? "간단히 보기" : "더 보기"}
-                </button>
-              )}
-            </>
+            <div className="space-y-3">
+              <FinancialAmountChart periods={graphPeriods} onExpand={() => setExpandedChart("performance")} />
+              <FinancialProfitabilityChart periods={graphPeriods} onExpand={() => setExpandedChart("profitability")} />
+              <FinancialPositionChart periods={graphPeriods} onExpand={() => setExpandedChart("position")} />
+            </div>
           )}
         </>
       )}
 
       {expandedChart && financials && (
         <FinancialChartModal title={chartTitle(expandedChart)} onClose={() => setExpandedChart(null)}>
-          {expandedChart === "performance" && <FinancialAmountChart periods={graphPeriods} large />}
-          {expandedChart === "profitability" && <FinancialProfitabilityChart periods={graphPeriods} large />}
-          {expandedChart === "position" && <FinancialPositionChart periods={graphPeriods} large />}
+          {expandedChart === "performance" && (
+            <>
+              <FinancialAmountChart periods={graphPeriods} large />
+              <FinancialDetailTable
+                periods={periods}
+                columns={[
+                  { label: "매출액", getValue: (p) => formatWon(p.incomeStatement.sales) },
+                  { label: "영업이익", getValue: (p) => formatWon(p.incomeStatement.operatingProfit) },
+                  { label: "순이익", getValue: (p) => formatWon(p.incomeStatement.netIncome) },
+                ]}
+              />
+            </>
+          )}
+          {expandedChart === "profitability" && (
+            <>
+              <FinancialProfitabilityChart periods={graphPeriods} large />
+              <FinancialDetailTable
+                periods={periods}
+                columns={[
+                  { label: "영업이익률", getValue: (p) => formatRatioPercent(p.ratios.operatingProfitMargin) },
+                  { label: "순이익률", getValue: (p) => formatRatioPercent(p.ratios.netProfitMargin) },
+                  { label: "ROE", getValue: (p) => formatRatioPercent(p.ratios.roe) },
+                ]}
+              />
+            </>
+          )}
+          {expandedChart === "position" && (
+            <>
+              <FinancialPositionChart periods={graphPeriods} large />
+              <FinancialDetailTable
+                periods={periods}
+                columns={[
+                  { label: "총자산", getValue: (p) => formatWon(p.balanceSheet.totalAssets) },
+                  { label: "총부채", getValue: (p) => formatWon(p.balanceSheet.totalLiabilities) },
+                  { label: "총자본", getValue: (p) => formatWon(p.balanceSheet.totalEquity) },
+                  { label: "부채비율", getValue: (p) => formatRatioPercent(p.ratios.debtRatio) },
+                ]}
+              />
+            </>
+          )}
         </FinancialChartModal>
       )}
     </div>
@@ -438,6 +435,45 @@ function chartTitle(kind: ChartKind): string {
   return "재무상태 추이";
 }
 
+type DetailColumn = {
+  label: string;
+  getValue: (period: StockFinancialPeriod) => string;
+};
+
+/** 팝업 안의 상세 표 — 해당 그래프 지표만, 전체 기간을 최신순으로 보여준다. */
+function FinancialDetailTable({ periods, columns }: { periods: StockFinancialPeriod[]; columns: DetailColumn[] }) {
+  const gridTemplateColumns = `1fr ${columns.map(() => "1.2fr").join(" ")}`;
+  return (
+    <div className="mt-4 max-h-[320px] overflow-y-auto rounded-[14px]" style={{ border: "1px solid var(--line2)" }}>
+      <div className="min-w-[480px]">
+        <div
+          className="sticky top-0 grid gap-3 px-3 py-2 text-[12px] font-bold"
+          style={{ gridTemplateColumns, color: "var(--mut2)", background: "var(--card)" }}
+        >
+          <span>기준월</span>
+          {columns.map((column) => (
+            <span key={column.label} className="text-right">{column.label}</span>
+          ))}
+        </div>
+        {periods.map((period) => (
+          <div
+            key={period.statementYearMonth}
+            className="grid items-center gap-3 px-3 py-2.5 text-[13.5px]"
+            style={{ gridTemplateColumns, borderTop: "1px solid var(--line2)" }}
+          >
+            <span className="font-semibold" style={{ color: "var(--ink)" }}>{formatStatementMonth(period.statementYearMonth)}</span>
+            {columns.map((column) => (
+              <span key={column.label} className="text-right tabular-nums" style={{ color: "var(--mut)" }}>
+                {column.getValue(period)}
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FinancialChartModal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <div
@@ -455,7 +491,7 @@ function FinancialChartModal({ title, onClose, children }: { title: string; onCl
         <div className="mb-2 flex justify-end">
           <button
             type="button"
-            className="ml-auto cursor-pointer rounded-full px-3 py-1.5 text-[12px] font-bold"
+            className="cursor-pointer rounded-full px-3 py-1.5 text-[12px] font-bold"
             style={{ background: "var(--fill)", color: "var(--mut)" }}
             onClick={onClose}
             aria-label="차트 닫기"
@@ -465,23 +501,6 @@ function FinancialChartModal({ title, onClose, children }: { title: string; onCl
         </div>
         {children}
       </div>
-    </div>
-  );
-}
-
-function FinancialPeriodRow({ period }: { period: StockFinancialPeriod }) {
-  return (
-    <div
-      className="grid items-center gap-3 px-3 py-2.5 text-[13.5px]"
-      style={{ gridTemplateColumns: "1fr 1.3fr 1.2fr 1.2fr 1fr 0.9fr 1fr", borderTop: "1px solid var(--line2)" }}
-    >
-      <span className="font-semibold" style={{ color: "var(--ink)" }}>{formatStatementMonth(period.statementYearMonth)}</span>
-      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatWon(period.incomeStatement.sales)}</span>
-      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatWon(period.incomeStatement.operatingProfit)}</span>
-      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatWon(period.incomeStatement.netIncome)}</span>
-      <span className="text-right tabular-nums" style={{ color: "var(--mut)" }}>{formatRatioPercent(period.ratios.operatingProfitMargin)}</span>
-      <span className="text-right tabular-nums" style={{ color: "var(--mut)" }}>{formatRatioPercent(period.ratios.roe)}</span>
-      <span className="text-right tabular-nums" style={{ color: "var(--mut)" }}>{formatRatioPercent(period.ratios.debtRatio)}</span>
     </div>
   );
 }
