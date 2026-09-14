@@ -37,7 +37,6 @@ import { generateClientOrderId, nextClientOrderId } from "@/lib/order-retry-poli
 import {
   EMPTY_STOCK_MARKET_EVENT_STATE,
   fetchStockMarketEvents,
-  sidecarLabel,
   type StockMarketEventState,
 } from "@/lib/stock-market-events";
 import { buildStatusBadges, resolveBlockReason, TRADABLE_REASON_LABEL } from "@/lib/stock-status";
