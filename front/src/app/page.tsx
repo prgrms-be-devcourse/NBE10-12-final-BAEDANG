@@ -165,8 +165,10 @@ export default function MainPage() {
               style={{ color: "var(--heroSub)" }}
               lines={["실제 돈이 오가지 않아요 · 언제든 포트폴리오를 초기화할 수 있어요"]}
             />
+            {/* 위 안내 문구와 국내장/해외장 개장 시간 컴포넌트 사이 간격을
+                띄워달라는 요청 — mt-3(12px) → mt-5(20px). */}
             {marketStatus && (
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-5 flex flex-wrap gap-2">
                 {marketStatus.markets.map((m, i) => (
                   <span
                     key={m.marketCountry}
