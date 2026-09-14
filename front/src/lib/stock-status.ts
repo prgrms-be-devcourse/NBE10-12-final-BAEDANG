@@ -32,7 +32,7 @@ export type StatusBadge = {
  * 막혀 있어서, 배지까지 붙이면 같은 사실이 두 번 보인다.
  */
 export function buildStatusBadges(
-  detail: Pick<StockDetail, "warnings" | "warningsStatus">,
+  detail: Pick<StockDetail, "warningsStatus"> & { warnings: readonly { type: string; label: string }[] },
   events: StockMarketEventState,
 ): StatusBadge[] {
   const badges: StatusBadge[] = [];
