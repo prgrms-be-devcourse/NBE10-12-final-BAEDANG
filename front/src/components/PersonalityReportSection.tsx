@@ -258,9 +258,17 @@ function OpenCard({
   onOpenBoard: () => void;
   onOpenTypeBoard: () => void;
 }) {
+  const { theme } = useTheme();
   const shares = report.shares;
   const returnUp = (toDecimal(report.returnRate)?.greaterThanOrEqualTo(0)) ?? true;
   const personaType = report.typeCode ? PERSONALITY_TYPES[report.typeCode] : undefined;
+  // 4개 축 막대의 채워진 부분(var(--accentSoft))이 라이트 모드에서는 트랙
+  // 배경(var(--fill), #e4eff8)과 색이 거의 같아(#dceefa) 얼마나 채워졌는지
+  // 구분이 잘 안 된다는 제보 — 다크 모드는 두 값의 차이가 커서 문제없다고
+  // 하니 라이트 모드에서만 눈에 띄게 더 어두운 블루로 바꾼다. --accentSoft는
+  // 배지·카드 배경 등 다른 곳과 공유하는 전역 값이라 그대로 두고, 이 막대
+  // 전용 로컬 값만 새로 둔다.
+  const axisFillColor = theme === "light" ? "#9cc4ea" : "var(--accentSoft)";
 
   return (
     <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
@@ -349,7 +357,7 @@ function OpenCard({
                     <div className="relative h-[26px] overflow-hidden rounded-full" style={{ background: "var(--fill)" }}>
                       <div
                         className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
-                        style={{ background: "var(--accentSoft)", width: `${fillPercent}%` }}
+                        style={{ background: axisFillColor, width: `${fillPercent}%` }}
                       />
                       <div
                         className="absolute inset-y-0 w-1 rounded-sm transition-[left] duration-500 ease-out"
