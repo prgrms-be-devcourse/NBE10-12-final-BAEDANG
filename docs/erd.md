@@ -424,7 +424,7 @@ Internal `stock_id` is the canonical identifier; external symbols are separated 
 | `prev_close` | NUMERIC(19,4) | Verified daily close for the exact trading day immediately before the quote's exchange-local date derived from `quote_at`; recorded in `prev_close_date`. Missing verification returns null change, never a last-price or undated ranking fallback. |
 | `prev_close_date` | DATE | Reference trading day. Derive the quote trading day from quote_at and MarketCountry.zoneId(). Legacy rows retain a null date until refetched. |
 | `upper_limit` `lower_limit` | NUMERIC(19,4) | Provider price limits; displayed only with a matching verified date. Order and synthetic-book enforcement is a separate task. |
-| `price_limit_date` | DATE | KR source timestamp in Asia/Seoul, validated against the requested trading day. NULL for legacy/unverified values and US. Added by V13. |
+| `price_limit_date` | DATE | KR source timestamp in Asia/Seoul, validated against the requested trading day. NULL for legacy/unverified values and US. Added by V14. |
 | `currency` | VARCHAR(3) | price currency. Duplicated from `stock` for join-free quote reads. |
 | `quote_at` | TIMESTAMPTZ | **the Toss quote timestamp, or calendar regular close for a recovered finalized daily close.** Two uses — the "12:36:59" label, and **order freshness validation** (reject as `STALE_QUOTE` if >15s old). |
 | `collected_at` | TIMESTAMPTZ | when we collected it. Gap from `quote_at` monitors collection-latency. |
