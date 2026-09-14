@@ -545,6 +545,11 @@ export type StockDetail = {
     listDate: string | null;
   };
   warnings: { type: string; label: string }[];
+  /**
+   * 유의사항 조회 성공 여부. `UNAVAILABLE`은 "유의사항 없음"이 아니라 "확인 실패"다 —
+   * 화면이 배지를 조용히 감추지 않도록 구분한다.
+   */
+  warningsStatus: "AVAILABLE" | "UNAVAILABLE";
   tradable: boolean;
   tradableReason: string | null;
 };
