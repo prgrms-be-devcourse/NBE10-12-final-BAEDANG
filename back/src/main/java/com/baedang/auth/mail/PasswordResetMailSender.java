@@ -7,7 +7,10 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailException;
 import org.springframework.mail.MailSender;
 import org.springframework.mail.SimpleMailMessage;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
+
+import java.time.Duration;
 
 /**
  * 비밀번호 재설정 메일 발송.
@@ -27,6 +30,14 @@ import org.springframework.stereotype.Component;
  * <p>발송 실패(SMTP 인증 실패, 연결 오류 등)는 호출자에게 전파하지 않고 로그만
  * 남깁니다 — {@code POST /api/auth/password/forgot}는 가입 여부·메일 서버 상태와
  * 무관하게 항상 200을 돌려줘야 한다는 계약(계정 열거 공격 방지) 때문입니다.
+ *
+ * <p><b>비동기 발송(리뷰 지적, PR #207)</b> — 가입된 이메일은 UPDATE+INSERT 뒤
+ * SMTP 왕복(수백ms~수초)까지 거치지만, 미가입 이메일은 조회 한 번으로 즉시
+ * 반환됩니다. 응답 본문은 같아도 이 응답 시간 차이로 가입 여부가 새어나갈 수
+ * 있어({@code AuthService.requestPasswordReset} 참고), 메일 발송을 별도 스레드
+ * ({@code passwordResetMailExecutor}, AsyncConfig)로 떼어내 호출자가 그 왕복을
+ * 기다리지 않게 합니다 — 두 경우 모두 응답 시간이 DB 작업 수준으로 좁혀집니다
+ * (완전히 같아지진 않지만 표준적인 완화책입니다).
  */
 @Component
 public class PasswordResetMailSender {
@@ -36,17 +47,21 @@ public class PasswordResetMailSender {
     private final ObjectProvider<MailSender> mailSenderProvider;
     private final boolean enabled;
     private final String from;
+    private final Duration tokenTtl;
 
     public PasswordResetMailSender(
             ObjectProvider<MailSender> mailSenderProvider,
             @Value("${mail.enabled:false}") boolean enabled,
-            @Value("${mail.from:no-reply@investup.local}") String from
+            @Value("${mail.from:no-reply@investup.local}") String from,
+            @Value("${auth.password-reset.token-ttl:30m}") Duration tokenTtl
     ) {
         this.mailSenderProvider = mailSenderProvider;
         this.enabled = enabled;
         this.from = from;
+        this.tokenTtl = tokenTtl;
     }
 
+    @Async("passwordResetMailExecutor")
     public void sendResetLink(String toEmail, String resetUrl) {
         if (!enabled) {
             log.info("[password-reset] mail.enabled=false — 실제 메일 대신 링크만 로그에 남깁니다: to={}, url={}",
@@ -67,7 +82,7 @@ public class PasswordResetMailSender {
         message.setSubject("[InvestUP] 비밀번호 재설정 안내");
         message.setText(
                 "비밀번호 재설정을 요청하셨어요.\n\n" +
-                "아래 링크에서 새 비밀번호를 설정해주세요(30분 이내에만 유효):\n" +
+                "아래 링크에서 새 비밀번호를 설정해주세요(" + formatTtl(tokenTtl) + " 이내에만 유효):\n" +
                 resetUrl + "\n\n" +
                 "요청하지 않으셨다면 이 메일은 무시하셔도 괜찮아요."
         );
@@ -78,5 +93,24 @@ public class PasswordResetMailSender {
         } catch (MailException exception) {
             log.error("[password-reset] 재설정 메일 발송 실패 to={}", toEmail, exception);
         }
+    }
+
+    /**
+     * {@code auth.password-reset.token-ttl}을 "30분"·"1시간"·"1시간 30분" 같은
+     * 문구로 바꾼다 — 예전엔 본문에 "30분"을 그대로 박아둬서, 설정값을 바꾸면
+     * 메일 문구가 거짓말을 하는 문제가 있었다(리뷰 지적, PR #207).
+     */
+    private static String formatTtl(Duration ttl) {
+        long minutes = Math.max(ttl.toMinutes(), 0);
+        long hours = minutes / 60;
+        long remainingMinutes = minutes % 60;
+
+        if (hours == 0) {
+            return remainingMinutes + "분";
+        }
+        if (remainingMinutes == 0) {
+            return hours + "시간";
+        }
+        return hours + "시간 " + remainingMinutes + "분";
     }
 }
