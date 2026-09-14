@@ -850,6 +850,8 @@ Unlike a stock
 ### `GET /orders/quote/market` 🔒
 Fee & tax preview
 
+Market quotes keep a closed session observed at the start of the session lookup closed for that request; an opening during lookup is reflected in the next quote request. If the original FX snapshot expires before external lookups finish, `EXCHANGE_RATE_NOT_FOUND` takes precedence even when the quote is also stale. No estimate calculated with expired FX is returned.
+
 ```
 ?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```

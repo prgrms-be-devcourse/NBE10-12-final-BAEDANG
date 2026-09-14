@@ -84,9 +84,6 @@ public class MarketOrderQuoteService {
 
         ExecutionExchangeRateSnapshot snapshot = stock.getMarketCountry() == MarketCountry.KR
                 ? null : exchangeRateProvider.currentUsdKrwSnapshot();
-        if (stock.getMarketCountry() == MarketCountry.US && snapshot == null) {
-            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
-        }
         BigDecimal exchangeRate = snapshot == null ? BigDecimal.ONE : snapshot.rate();
         MarketOrderAmount amount = amountCalculator.calculate(
                 stock.getMarketCountry(),

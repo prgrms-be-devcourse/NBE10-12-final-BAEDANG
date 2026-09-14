@@ -859,6 +859,8 @@ GET 에러 응답은 주문 접수용 `retryPolicy`를 반환하지 않으며, �
 ### `GET /orders/quote/market` 🔒
 수수료 · 세금 미리보기
 
+시장가 견적은 세션 조회 시작 시 닫힌 시장을 같은 요청 안에서 개장으로 재판정하지 않습니다. 조회 중 개장하면 다음 견적 요청에 반영합니다. 외부 조회 완료 시 원본 환율이 만료되었으면 시세도 오래되었더라도 `EXCHANGE_RATE_NOT_FOUND` 오류가 우선하며, 만료 환율로 계산한 견적은 반환하지 않습니다.
+
 ```
 ?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
@@ -1280,9 +1282,9 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | `POST /orders/market` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
+| WebSocket | 실시간 시세 push (폴링 대체) |
 
 장기 보유 종목의 보유 시작 시각은 주문 접수 순서가 아닌 개별 `trade_execution`을 executedAt/executionId 순서로 재생하여 계산합니다. 부분 체결도 포함하며 전량 매도 시 보유 구간이 끝나고 재매수 시 새 구간이 시작됩니다.
-| WebSocket | 실시간 시세 push (폴링 대체) |
 
 **지금 만들지는 않지만 URL 설계가 충돌하지 않게 미리 자리를 잡아둔 것입니다.**
 

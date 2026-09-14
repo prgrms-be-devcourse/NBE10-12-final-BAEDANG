@@ -24,7 +24,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
@@ -149,15 +148,11 @@ class MarketOrderQuoteServiceTest {
         verifyNoInteractions(exchangeRateProvider, marketSessionProvider);
     }
 
-    @ParameterizedTest
-    @NullSource
-    @ValueSource(strings = {"0", "-1"})
-    void 미국_견적의_누락되거나_0이하인_환율은_거절한다(String rate) {
+    @Test
+    void 미국_견적은_환율_포트의_실패를_전달한다() {
         givenUsStock(new BigDecimal("100"));
-        if (rate == null) when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(null);
-        else when(exchangeRateProvider.currentUsdKrwSnapshot()).thenAnswer(invocation ->
-                new ExecutionExchangeRateSnapshot(new BigDecimal(rate), NOW.atOffset(ZoneOffset.UTC),
-                        NOW.atOffset(ZoneOffset.UTC), NOW.plusSeconds(60).atOffset(ZoneOffset.UTC)));
+        when(exchangeRateProvider.currentUsdKrwSnapshot())
+                .thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
 
         assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
                 .isInstanceOfSatisfying(BusinessException.class,
@@ -223,13 +218,28 @@ class MarketOrderQuoteServiceTest {
     }
 
     @Test
-    void 세션조회중_환율이_만료되면_외부복구없이_거절한다() {
+    void 세션조회중_개장하면_다음_견적부터_개장을_반영한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 0);
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenAnswer(invocation -> {
+            when(clock.instant()).thenReturn(NOW.plusSeconds(1));
+            return MarketSessionStatus.closed();
+        });
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW.plusSeconds(1)))
+                .thenReturn(new MarketSessionStatus(true, NOW.plusSeconds(3600)));
+        assertThat(service.getQuote(1L, "005930", "KR", "BUY", "1").reason())
+                .isEqualTo(ErrorCode.MARKET_CLOSED.name());
+        assertThat(service.getQuote(1L, "005930", "KR", "BUY", "1").executable()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 16})
+    void 세션조회중_환율이_만료되면_시세신선도보다_우선하여_거절한다(int delaySeconds) {
         givenUsStock(new BigDecimal("100"));
         when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(
                 new BigDecimal("1400"), NOW.atOffset(ZoneOffset.UTC), NOW.atOffset(ZoneOffset.UTC),
                 NOW.plusSeconds(2).atOffset(ZoneOffset.UTC)));
         when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenAnswer(invocation -> {
-            when(clock.instant()).thenReturn(NOW.plusSeconds(2));
+            when(clock.instant()).thenReturn(NOW.plusSeconds(delaySeconds));
             return new MarketSessionStatus(true, NOW.plusSeconds(3600));
         });
         assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
