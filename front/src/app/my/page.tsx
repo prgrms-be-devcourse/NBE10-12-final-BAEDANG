@@ -1001,7 +1001,13 @@ export default function MyPage() {
               const unlikeButton = (
                 <button
                   type="button"
-                  onClick={() => handleUnlike(item)}
+                  // 이 버튼이 행 전체를 감싸는 <Link>(아래) 안에 중첩돼 있어서,
+                  // preventDefault 없이는 찜 해제와 동시에 종목 상세로 이동해버린다
+                  // — 랭킹 화면의 같은 패턴(하트 버튼 in Link)과 동일하게 막는다.
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleUnlike(item);
+                  }}
                   disabled={likeRemoving.has(item.stockLikeId)}
                   className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ color: "var(--heartActive)" }}
