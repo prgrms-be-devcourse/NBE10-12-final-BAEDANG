@@ -156,17 +156,16 @@ export default function GuidePage() {
 
           <Reveal delay={0.5} className="mt-4.5">
             {/* "참고" 안내 박스 배경을 여러 파란 계열(히어로 카드와 같은
-                그라데이션 → 연한 버전 → rgb(150,196,255) 단색)로 시도해본
-                끝에, 직접 지정한 #dceefa(라이트 모드 히어로 배경과 같은
-                톤의 옅은 하늘색) 단색으로 정했다 — 라이트/다크 모드
-                공통으로 이 고정 값을 쓴다. 기존 var(--onAccentSoftText)와
-                var(--ink)는 둘 다 다크 모드에서 밝은 색(각각
-                #acd5ef·#f2f2f2)으로 뒤집히는 테마 변수라, 다크 모드에서도
-                항상 옅은 파란색으로 고정된 이 배경 위에서는 대비가
-                나빠진다 — 그래서 배경과 마찬가지로 테마와 무관한 고정
-                짙은 남색(#0f3868, 라이트 모드 accent와 같은 톤)을 직접
-                썼다. */}
-            <div className="rounded-2xl px-5 py-4" style={{ background: "#dceefa" }}>
+                그라데이션 → 연한 버전 → rgb(150,196,255) 단색 → #dceefa
+                단색)로 시도해본 끝에, 직접 지정한 #b6d7fd 단색으로
+                정했다 — 라이트/다크 모드 공통으로 이 고정 값을 쓴다. 기존
+                var(--onAccentSoftText)와 var(--ink)는 둘 다 다크 모드에서
+                밝은 색(각각 #acd5ef·#f2f2f2)으로 뒤집히는 테마 변수라,
+                다크 모드에서도 항상 옅은 파란색으로 고정된 이 배경
+                위에서는 대비가 나빠진다 — 그래서 배경과 마찬가지로 테마와
+                무관한 고정 짙은 남색(#0f3868, 라이트 모드 accent와 같은
+                톤)을 직접 썼다. */}
+            <div className="rounded-2xl px-5 py-4" style={{ background: "#b6d7fd" }}>
               <RevealText
                 as="p"
                 className="text-[12.5px] leading-relaxed"
