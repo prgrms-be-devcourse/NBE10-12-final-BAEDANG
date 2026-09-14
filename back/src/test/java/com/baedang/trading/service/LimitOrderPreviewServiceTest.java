@@ -1,5 +1,6 @@
 package com.baedang.trading.service;
 
+import com.baedang.orderbook.service.TickSizePolicy;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -10,6 +11,7 @@ import com.baedang.trading.model.LimitExecutionBook;
 import com.baedang.trading.model.LimitExecutionPlan;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -31,7 +33,7 @@ class LimitOrderPreviewServiceTest {
     private static final Instant NOW = Instant.parse("2026-09-09T01:00:00Z");
     private final MutableClock clock = new MutableClock(NOW);
     private final LimitExecutionBookReader books = mock(LimitExecutionBookReader.class);
-    private final OrderPolicy policy = new OrderPolicy(15, 15, new BigDecimal("1000000"));
+    private final OrderPolicy policy = new OrderPolicy(15, 15, new BigDecimal("1000000"), new TickSizePolicy());
     private final LimitOrderExecutionPlanner planner = new LimitOrderExecutionPlanner(new LimitOrderSettlementCalculator(
             new BigDecimal("0.0001"), new BigDecimal("0.002"), new BigDecimal("0.0000206"),
             new BigDecimal("0.01"), new BigDecimal("1000000")));

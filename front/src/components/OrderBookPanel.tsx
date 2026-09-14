@@ -75,7 +75,7 @@ export function OrderBookPanel({ symbol, marketCountry }: { symbol: string; mark
 
   useVisiblePolling(load, ORDER_BOOK_POLL_INTERVAL_MS, isMarketOpen(marketCountry));
 
-  const asksTopDown = book ? [...book.asks].reverse() : []; // ASK 10(고가) → ASK 1(최우선) 순으로 위에서 아래로.
+  const asksTopDown = book ? [...book.asks].reverse() : []; // 가장 높은 ASK → ASK 1(최우선) 순으로 위에서 아래로.
   const maxQuantity = book
     ? Math.max(1, ...book.asks.map((l) => Number(l.quantity)), ...book.bids.map((l) => Number(l.quantity)))
     : 1;
@@ -107,6 +107,9 @@ export function OrderBookPanel({ symbol, marketCountry }: { symbol: string; mark
         </div>
       ) : (
         <div>
+          {book.asks.length === 0 && (
+            <p className="py-4 text-center text-[12px]" style={{ color: "var(--mut2)" }}>매도 호가 없음 · 매수 체결 대기</p>
+          )}
           {asksTopDown.map((level) => (
             <OrderBookRow key={`ask-${level.level}`} level={level} side="ask" currency={book.currency} maxQuantity={maxQuantity} />
           ))}
@@ -121,8 +124,10 @@ export function OrderBookPanel({ symbol, marketCountry }: { symbol: string; mark
             </span>
           </div>
 
-          {/* 국내는 항상 10개, 미국 저가 종목은 1~10개까지 올 수 있어(최소 호가 단위
-              $0.01 근처) 배열 길이 그대로 렌더링한다 — 고정 인덱스로 접근하지 않는다. */}
+          {/* 상하한가·최소 가격 경계에서는 각 방향이 비거나 짧아질 수 있습니다. */}
+          {book.bids.length === 0 && (
+            <p className="py-4 text-center text-[12px]" style={{ color: "var(--mut2)" }}>매수 호가 없음 · 매도 체결 대기</p>
+          )}
           {book.bids.map((level) => (
             <OrderBookRow key={`bid-${level.level}`} level={level} side="bid" currency={book.currency} maxQuantity={maxQuantity} />
           ))}

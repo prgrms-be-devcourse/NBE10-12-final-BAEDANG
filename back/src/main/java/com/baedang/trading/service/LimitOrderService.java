@@ -24,6 +24,7 @@ import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderQuoteQueryContext;
 import com.baedang.trading.model.OrderTerms;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +32,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -159,9 +159,12 @@ public class LimitOrderService {
     private OrderDetailResponse unwrap(LimitOrderResult result) {
         if (result.rejected()) {
             // 커밋된 REJECTED는 새 ID로 재시도하도록 안내한다. CB 거절이면 이벤트 데이터를 함께 내보낸다.
-            throw new BusinessException(
-                    ErrorCode.valueOf(result.response().rejectReason()),
-                    rejectionResponse(result.rejectionData()));
+            ErrorCode reason = ErrorCode.valueOf(result.response().rejectReason());
+            Map<String, Object> data = rejectionResponse(result.rejectionData());
+            if (reason == ErrorCode.PRICE_OUT_OF_RANGE || reason == ErrorCode.INVALID_TICK_SIZE) {
+                data.put("field", "limitPrice");
+            }
+            throw new BusinessException(reason, data);
         }
         return result.response();
     }
@@ -211,6 +214,9 @@ public class LimitOrderService {
         }
         if (reason == null) {
             reason = policy.validateQuoteTime(db.quote(), now);
+        }
+        if (reason == null) {
+            reason = policy.validateTradingPrice(db.stock(), db.quote(), p.limitPrice(), now, true);
         }
         if (reason == null && terms.side() == OrderSide.BUY && db.account().availableCash().compareTo(p.reserve()) < 0) {
             reason = ErrorCode.INSUFFICIENT_CASH;

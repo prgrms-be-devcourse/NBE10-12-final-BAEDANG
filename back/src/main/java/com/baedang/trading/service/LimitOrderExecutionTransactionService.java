@@ -2,6 +2,8 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.market.event.service.MarketTradingHaltPolicy;
 import com.baedang.orderbook.entity.OrderBookLevel;
 import com.baedang.orderbook.entity.OrderBookSide;
@@ -25,14 +27,15 @@ import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
-import org.springframework.jdbc.core.JdbcTemplate;
+
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
-import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -61,18 +64,20 @@ public class LimitOrderExecutionTransactionService {
     private final JdbcTemplate jdbc;
     private final Clock clock;
     private final long lockTimeoutMillis;
+    private final QuoteSnapshotRepository quotes;
 
     public LimitOrderExecutionTransactionService(AccountRepository accounts, TradeOrderRepository orders,
             OrderBookExecutionStore books, HoldingRepository holdings, StockRepository stocks,
             TradeExecutionRepository executions, LedgerService ledger, LimitOrderExecutionPlanner planner,
             LimitExecutionBookReader bookReader, OrderPolicy policy, MarketTradingHaltPolicy marketTradingHaltPolicy,
             JdbcTemplate jdbc, Clock clock,
-            @Value("${trading.limit-execution.lock-timeout:2s}") Duration lockTimeout) {
+            @Value("${trading.limit-execution.lock-timeout:2s}") Duration lockTimeout, QuoteSnapshotRepository quotes) {
         if (lockTimeout == null || lockTimeout.toMillis() < 1 || lockTimeout.toMillis() > Integer.MAX_VALUE) {
             throw new IllegalArgumentException("체결 락 대기 제한은 양수 밀리초 범위여야 합니다");
         }
         this.lockTimeoutMillis = lockTimeout.toMillis();
         this.accounts = accounts;
+        this.quotes = quotes;
         this.orders = orders;
         this.books = books;
         this.holdings = holdings;
@@ -119,6 +124,14 @@ public class LimitOrderExecutionTransactionService {
         OrderBookVersion version = book.version();
         if (!bookReader.isFresh(stock, version.getCurrency(), version.getQuoteAt().toInstant(),
                 version.getGeneratedAt().toInstant(), now)) return deferred(STALE_BOOK);
+        QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElse(null);
+        if (quote == null) return deferred(PRICE_LIMIT_UNAVAILABLE);
+        ErrorCode priceRejection = policy.validateTradingPrice(stock, quote, order.getLimitPrice(), now, true);
+        if (priceRejection == ErrorCode.PRICE_LIMIT_UNAVAILABLE || priceRejection == ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT) {
+            return deferred(PRICE_LIMIT_UNAVAILABLE);
+        }
+        // 배포 전 접수된 범위·단위 오류는 해당 주문만 보류하여 후순위의 정상 주문을 막지 않습니다.
+        if (priceRejection != null) return deferred(PRICE_OR_LIQUIDITY);
         CumulativeSettlementState previous = executions.summarizeByOrderId(order.getOrderId());
         if (previous.quantity().compareTo(order.getFilledQuantity()) != 0
                 || previous.grossAmountKrw().compareTo(order.getGrossAmount()) != 0

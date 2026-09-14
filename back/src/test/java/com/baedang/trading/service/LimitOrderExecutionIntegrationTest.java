@@ -1,5 +1,6 @@
 package com.baedang.trading.service;
 
+import com.baedang.market.model.TradingPriceLimits;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.event.entity.KrMarket;
@@ -13,10 +14,13 @@ import com.baedang.market.port.MarketCalendarPort;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.orderbook.config.OrderBookProperties;
 import com.baedang.orderbook.entity.OrderBookSide;
-import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
 import com.baedang.orderbook.model.GeneratedOrderBook;
 import com.baedang.orderbook.model.GeneratedOrderBookLevel;
+import com.baedang.orderbook.model.StockDescriptor;
+import com.baedang.orderbook.scheduler.OrderBookRefreshScheduler;
+import com.baedang.orderbook.service.OrderBookGenerator;
 import com.baedang.orderbook.service.OrderBookPublicationService;
 import com.baedang.orderbook.support.MutableClock;
 import com.baedang.stock.entity.MarketCountry;
@@ -35,13 +39,13 @@ import com.baedang.trading.model.LimitExecutionPreparation;
 import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderTerms;
-import com.baedang.trading.repository.LimitExecutionCandidateRepository;
 import com.baedang.trading.repository.LimitExecutionCandidateRepository.Group;
+import com.baedang.trading.repository.LimitExecutionCandidateRepository;
 import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.trading.scheduler.LimitExecutionProgress;
 import com.baedang.trading.scheduler.LimitOrderExecutionWorker;
 import com.baedang.trading.scheduler.LimitOrderExpirationScheduler;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -67,6 +71,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
 import java.math.BigDecimal;
+import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -86,6 +91,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
@@ -98,6 +105,84 @@ class LimitOrderExecutionIntegrationTest {
     static final Instant NOW = Instant.parse("2026-09-09T01:00:00Z");
     @Container @ServiceConnection
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(DockerImageName.parse("timescale/timescaledb:latest-pg18").asCompatibleSubstituteFor("postgres"));
+    @Autowired OrderBookGenerator generator;
+    @Autowired OrderBookProperties bookProperties;
+
+    private void domesticBoundaryBook(String base) {
+        jdbc.update("UPDATE stock SET market_country='KR',market='KOSPI',currency='KRW' WHERE stock_id=?", stock);
+        jdbc.update("UPDATE quote_snapshot SET currency='KRW',last_price=?,lower_limit=90,upper_limit=100,price_limit_date=? WHERE stock_id=?",
+                new BigDecimal(base), NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate(), stock);
+        TradingPriceLimits limits = new TradingPriceLimits(NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate(), new BigDecimal("90"), new BigDecimal("100"));
+        GeneratedOrderBook generated = generator.generate(bookProperties, StockDescriptor.from(stocks.findById(stock).orElseThrow()),
+                new BigDecimal(base), NOW, NOW, 1L, limits);
+        GeneratedOrderBook oneShare = new GeneratedOrderBook(generated.stockId(), generated.basePrice(), generated.currency(), generated.quoteAt(),
+                generated.generatedAt(), generated.policyVersion(), generated.seed(), generated.levels().stream()
+                    .map(level -> new GeneratedOrderBookLevel(level.side(), level.levelDepth(), level.price(), BigDecimal.ONE)).toList());
+        version = publication.publish(oneShare, NOW.plusSeconds(3600)).orElseThrow();
+    }
+
+    @Test
+    void 배포전_범위밖_주문은_보류하되_후순위_정상주문은_체결한다() {
+        domesticBoundaryBook("99");
+        long invalid = admission.place(user, new LimitOrderRequest(account, UUID.randomUUID().toString(), symbol, "KR", "BUY", "1", "100", "KRW")).orderId();
+        long valid = admission.place(user, new LimitOrderRequest(account, UUID.randomUUID().toString(), symbol, "KR", "BUY", "1", "100", "KRW")).orderId();
+        // 상하한가 검증 도입 전에 범위 밖 지정가로 접수된 상태를 재현합니다.
+        jdbc.update("UPDATE trade_order SET limit_price=101,requested_limit_price=101 WHERE order_id=?", invalid);
+        LimitOrderExecutionWorker worker = scopedWorker();
+        worker.tick();
+        // 테스트 워커는 실행당 한 주문만 처리하므로 다음 실행에서 후순위 진행을 확인합니다.
+        worker.tick();
+        assertThat(orders.findById(invalid).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(orders.findById(valid).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?", invalid)).isZero();
+        assertCashConservation();
+    }
+
+    @Test
+    void 준비후_V1으로_바뀐_호가는_잠금후_소비하지_않는다() {
+        book("ASK", "100", 1, 1);
+        long id = place("BUY", "1", "100");
+        LimitExecutionAttempt prepared = attempt(id);
+        BigDecimal reserve = number("SELECT locked_cash FROM account WHERE account_id=?", account);
+        jdbc.update("UPDATE order_book_version SET policy_version='V1' WHERE book_version_id=?", version);
+        assertThat(transactions.execute(prepared).reason()).isEqualTo(LimitExecutionOutcome.Reason.BOOK_CHANGED);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?", id)).isZero();
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?", account)).isEqualByComparingTo(reserve);
+        assertCashConservation();
+    }
+
+    @Test
+    void 상한가에서_빈_매도호가는_정상_0주_미리보기와_체결대기로_처리한다() {
+        domesticBoundaryBook("100");
+        LimitExecutionPreviewResponse preview = admission.quote(user, symbol, "KR", "BUY", "1", "100", "KRW").executionPreview();
+        assertThat(preview.status()).isEqualTo(LimitExecutionPreviewResponse.Status.AVAILABLE);
+        assertThat(preview.expectedFilledQuantity()).isEqualTo("0");
+        long id = admission.place(user, new LimitOrderRequest(account, UUID.randomUUID().toString(), symbol, "KR", "BUY", "1", "100", "KRW")).orderId();
+        BigDecimal reserved = number("SELECT locked_cash FROM account WHERE account_id=?", account);
+        assertThat(execute(id).executionCount()).isZero();
+        assertThat(orders.findById(id).orElseThrow().getStatus()).isEqualTo(OrderStatus.PENDING);
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?", account)).isEqualByComparingTo(reserved);
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?", id)).isZero();
+        assertCashConservation();
+    }
+
+    @Test
+    void 경계의_짧은_호가를_부분체결한후_기준값이_없으면_보류하고_취소시_잔여만_해제한다() {
+        domesticBoundaryBook("99");
+        long id = admission.place(user, new LimitOrderRequest(account, UUID.randomUUID().toString(), symbol, "KR", "BUY", "2", "100", "KRW")).orderId();
+        assertThat(execute(id).executionCount()).isEqualTo(1);
+        assertThat(orders.findById(id).orElseThrow().getStatus()).isEqualTo(OrderStatus.PARTIALLY_FILLED);
+        BigDecimal reserved = number("SELECT locked_cash FROM account WHERE account_id=?", account);
+        jdbc.update("UPDATE quote_snapshot SET price_limit_date=NULL WHERE stock_id=?", stock);
+        assertThat(execute(id).executionCount()).isZero();
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?", account)).isEqualByComparingTo(reserved);
+        admission.cancel(user,id);
+        assertThat(number("SELECT locked_cash FROM account WHERE account_id=?", account)).isZero();
+        assertThat(number("SELECT quantity FROM holding WHERE account_id=? AND stock_id=?", account, stock)).isEqualByComparingTo("1");
+        assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=?", id)).isEqualByComparingTo("1");
+        assertCashConservation();
+    }
+
     @TestConfiguration
     static class Time {
         @Bean @Primary MutableClock executionTestClock() { return new MutableClock(NOW); }
@@ -154,18 +239,18 @@ class LimitOrderExecutionIntegrationTest {
         book("ASK", "99", 1, 2);
         LimitExecutionPreviewResponse preview = admission.quote(user,symbol,"US","BUY","3","100","USD").executionPreview();
         assertThat(preview.expectedFilledQuantity()).isEqualTo("3");
-        assertThat(preview.avgExecutionPrice()).isEqualTo("99.67");
+        assertThat(preview.avgExecutionPrice()).isEqualTo("99.01");
         assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isZero();
         long order = place("BUY","3","100");
         assertThat(execute(order).executionCount()).isEqualTo(2);
         assertThat(orders.findById(order).orElseThrow().getStatus()).isEqualTo(OrderStatus.FILLED);
         assertThat(number("SELECT locked_cash FROM account WHERE account_id=?",account)).isZero();
         assertThat(number("SELECT net_amount FROM trade_order WHERE order_id=?",order)).isEqualByComparingTo(preview.netAmountKrw());
-        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("49581358");
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("49584130");
         assertThat(jdbc.queryForList("SELECT balance_after FROM ledger_entry WHERE order_id=? ORDER BY entry_id",BigDecimal.class,order))
-                .usingElementComparator(BigDecimal::compareTo).containsExactly(new BigDecimal("49861386"),new BigDecimal("49581358"));
-        assertThat(number("SELECT usd_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("299");
-        assertThat(number("SELECT krw_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("418600");
+                .usingElementComparator(BigDecimal::compareTo).containsExactly(new BigDecimal("49861386"),new BigDecimal("49584130"));
+        assertThat(number("SELECT usd_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("297.02");
+        assertThat(number("SELECT krw_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("415828");
         assertThat(number("SELECT revision FROM order_book_version WHERE book_version_id=?",version)).isEqualByComparingTo("1");
         assertThat(number("SELECT count(*) FROM trade_execution WHERE order_id=? AND book_level_id IS NOT NULL",order)).isEqualByComparingTo("2");
         assertCashConservation();
@@ -197,9 +282,9 @@ class LimitOrderExecutionIntegrationTest {
         assertThat(number("SELECT locked_quantity FROM holding WHERE account_id=?",account)).isZero();
         assertThat(number("SELECT usd_purchase_amount FROM holding WHERE account_id=?",account)).isEqualByComparingTo("90");
         assertThat(number("SELECT sum(sec_fee_usd) FROM trade_execution WHERE order_id=?",order)).isEqualByComparingTo("0.01");
-        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("50278558");
+        assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account)).isEqualByComparingTo("50279944");
         assertThat(jdbc.queryForList("SELECT balance_after FROM ledger_entry WHERE order_id=? ORDER BY entry_id",BigDecimal.class,order))
-                .usingElementComparator(BigDecimal::compareTo).containsExactly(new BigDecimal("50139972"),new BigDecimal("50278558"));
+                .usingElementComparator(BigDecimal::compareTo).containsExactly(new BigDecimal("50139972"),new BigDecimal("50279944"));
         assertCashConservation();
         assertThat(number("SELECT locked_quantity FROM holding WHERE account_id=?",account))
                 .isEqualByComparingTo(number("SELECT coalesce(sum(quantity-filled_quantity),0) FROM trade_order WHERE account_id=? AND side='SELL' AND status IN ('PENDING','PARTIALLY_FILLED')",account));
@@ -360,7 +445,7 @@ class LimitOrderExecutionIntegrationTest {
                 levels.add(new GeneratedOrderBookLevel(side, depth, price, new BigDecimal("3")));
             }
         }
-        return new GeneratedOrderBook(stock, bestAsk.subtract(new BigDecimal("0.01")), "USD", NOW, NOW, "test", 2L, levels);
+        return new GeneratedOrderBook(stock, bestAsk.subtract(new BigDecimal("0.01")), "USD", NOW, NOW, "V2", 2L, levels);
     }
 
     /** 첫 서비스의 실제 트랜잭션을 유지하고, 두 번째 연결이 그 잠금을 기다린 것을 확인한 뒤 커밋합니다. */
@@ -443,7 +528,8 @@ class LimitOrderExecutionIntegrationTest {
     @Test
     void 국내는_환율포트없이_체결하고_상위트랜잭션은_거부한다() {
         jdbc.update("UPDATE stock SET market_country='KR',market='KOSPI',currency='KRW' WHERE stock_id=?",stock);
-        jdbc.update("UPDATE quote_snapshot SET currency='KRW' WHERE stock_id=?",stock);
+        jdbc.update("UPDATE quote_snapshot SET currency='KRW',lower_limit=1,upper_limit=1000000,price_limit_date=? WHERE stock_id=?",
+                NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate(),stock);
         book("ASK","99",1,2);
         jdbc.update("UPDATE order_book_version SET currency='KRW' WHERE book_version_id=?",version);
         clearInvocations(rates);
@@ -684,15 +770,28 @@ class LimitOrderExecutionIntegrationTest {
         return new LimitExecutionAttempt(order.getAccountId(),id,stock,order.getExecutionCount(),book.version(),book.revision(),
                 new OrderMarketContext(MarketCountry.US,true,NOW.plusSeconds(3600),ExecutionRateEvidence.from(rates.currentUsdKrwSnapshot()),NOW));
     }
+    private String liquiditySide;
     private void book(String side,String first,int firstQuantity,int secondQuantity) {
-        version = jdbc.queryForObject("INSERT INTO order_book_version(stock_id,base_price,currency,quote_at,generated_at,policy_version,seed) VALUES (?,100,'USD',?,?,'test',1) RETURNING book_version_id",Long.class,stock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
-        for (int depth=1;depth<=10;depth++) {
-            BigDecimal price = new BigDecimal(first).add(BigDecimal.valueOf((side.equals("ASK") ? 1 : -1) * (depth-1)));
-            int quantity = depth==1 ? firstQuantity : depth==2 ? secondQuantity : 5;
-            jdbc.update("INSERT INTO order_book_level(book_version_id,side,level_depth,price,initial_quantity,remaining_quantity) VALUES (?,?,?,?,?,?)",version,side,depth,price,quantity,quantity);
+        liquiditySide = side;
+        String currency = stocks.findById(stock).orElseThrow().getCurrency();
+        BigDecimal tick = "KRW".equals(currency) ? BigDecimal.ONE : new BigDecimal("0.01");
+        BigDecimal base = new BigDecimal(first).add(side.equals("ASK") ? tick.negate() : tick);
+        version = jdbc.queryForObject("INSERT INTO order_book_version(stock_id,base_price,currency,quote_at,generated_at,policy_version,seed) VALUES (?,?,?,?,?,'V2',1) RETURNING book_version_id",Long.class,stock,base,currency,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
+        for (String direction : List.of("ASK", "BID")) {
+            for (int depth=1;depth<=10;depth++) {
+                BigDecimal price = base.add(tick.multiply(BigDecimal.valueOf((direction.equals("ASK") ? 1 : -1) * depth)));
+                int quantity = direction.equals(side) ? (depth==1 ? firstQuantity : depth==2 ? secondQuantity : 5) : 0;
+                jdbc.update("INSERT INTO order_book_level(book_version_id,side,level_depth,price,initial_quantity,remaining_quantity) VALUES (?,?,?,?,?,?)",version,direction,depth,price,Math.max(1,quantity),quantity);
+            }
         }
     }
-    private BigDecimal number(String sql,Object...args) { return jdbc.queryForObject(sql,BigDecimal.class,args); }
+    private BigDecimal number(String sql,Object...args) {
+        // 양쪽 배열 중 이 테스트가 유동성을 제공한 방향만 확인합니다.
+        if (sql.contains("FROM order_book_level WHERE book_version_id=? AND level_depth=1")) {
+            sql += " AND side='" + liquiditySide + "'";
+        }
+        return jdbc.queryForObject(sql,BigDecimal.class,args);
+    }
 
     private void assertCashConservation() {
         assertThat(number("SELECT cash_balance FROM account WHERE account_id=?",account))
@@ -729,19 +828,21 @@ class LimitOrderExecutionIntegrationTest {
     // 서킷브레이커 기존 지정가 체결 중단 (#167) — 실제 PostgreSQL 통합
     // ==========================================
 
-    private static final java.net.URI CB_URL =
-            java.net.URI.create("https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
+    private static final URI CB_URL =
+            URI.create("https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
 
     private void prepareKrKospi() {
         krSymbol = "K" + UUID.randomUUID().toString().substring(0,7);
         krStock = jdbc.queryForObject("INSERT INTO stock(symbol,market_country,market,name,currency,security_type,is_ranked) VALUES (?,'KR','KOSPI','테스트','KRW','STOCK',true) RETURNING stock_id",Long.class,krSymbol);
-        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at) VALUES (?,1000,'KRW',?,?)",krStock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
+        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at,price_limit_date,lower_limit,upper_limit) VALUES (?,1000,'KRW',?,?,?,1,2000)",
+                krStock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate());
     }
 
     private void prepareKrKosdaq() {
         kqSymbol = "Q" + UUID.randomUUID().toString().substring(0,7);
         kqStock = jdbc.queryForObject("INSERT INTO stock(symbol,market_country,market,name,currency,security_type,is_ranked) VALUES (?,'KR','KOSDAQ','코스닥테스트','KRW','STOCK',true) RETURNING stock_id",Long.class,kqSymbol);
-        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at) VALUES (?,1000,'KRW',?,?)",kqStock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
+        jdbc.update("INSERT INTO quote_snapshot(stock_id,last_price,currency,quote_at,collected_at,price_limit_date,lower_limit,upper_limit) VALUES (?,1000,'KRW',?,?,?,1,2000)",
+                kqStock,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC),NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate());
     }
 
     private MarketEvent activeCb(String acptNo, KrMarket market, int stage, Instant haltUntil) {
@@ -750,15 +851,19 @@ class LimitOrderExecutionIntegrationTest {
                 "유가증권시장 매매거래 일시중단(" + stage + "단계 CB 발동)", CB_URL));
     }
 
-    /** 국내 지정가는 KRW 호가를 읽으므로 호가 통화와 최우선 매도를 함께 맞춘다. */
+    /** CB 시나리오의 체결 수량은 유지하면서 당일 범위와 양방향 V2 호가를 구성합니다. */
     private void krBook(long stockId, String firstAsk) {
-        version = jdbc.queryForObject("INSERT INTO order_book_version(stock_id,base_price,currency,quote_at,generated_at,policy_version,seed) VALUES (?,1000,'KRW',?,?,'test',1) RETURNING book_version_id",
-                Long.class,stockId,NOW.atOffset(ZoneOffset.UTC),NOW.atOffset(ZoneOffset.UTC));
-        for (int depth=1;depth<=10;depth++) {
-            int quantity = depth==1 ? 2 : 5;
-            jdbc.update("INSERT INTO order_book_level(book_version_id,side,level_depth,price,initial_quantity,remaining_quantity) VALUES (?,?,?,?,?,?)",
-                    version,"ASK",depth,new BigDecimal(firstAsk).add(BigDecimal.valueOf(depth-1)),quantity,quantity);
-        }
+        BigDecimal base = new BigDecimal(firstAsk).subtract(BigDecimal.ONE);
+        jdbc.update("UPDATE quote_snapshot SET last_price=? WHERE stock_id=?", base, stockId);
+        TradingPriceLimits limits = new TradingPriceLimits(NOW.atZone(MarketCountry.KR.zoneId()).toLocalDate(),
+                BigDecimal.ONE, new BigDecimal("2000"));
+        GeneratedOrderBook generated = generator.generate(bookProperties, StockDescriptor.from(stocks.findById(stockId).orElseThrow()),
+                base, NOW, NOW, 1L, limits);
+        GeneratedOrderBook sized = new GeneratedOrderBook(generated.stockId(), generated.basePrice(), generated.currency(),
+                generated.quoteAt(), generated.generatedAt(), generated.policyVersion(), generated.seed(),
+                generated.levels().stream().map(level -> new GeneratedOrderBookLevel(level.side(), level.levelDepth(),
+                        level.price(), BigDecimal.valueOf(level.levelDepth() == 1 ? 2 : 5))).toList());
+        version = publication.publish(sized, NOW.plusSeconds(3600)).orElseThrow();
     }
 
     private long krPlace(String krSymbol, String side, String quantity, String price) {

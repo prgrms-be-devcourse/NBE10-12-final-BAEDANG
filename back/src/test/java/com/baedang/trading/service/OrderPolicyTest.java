@@ -3,15 +3,19 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.orderbook.service.TickSizePolicy;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
+import com.baedang.support.PriceLimitFixtures;
 import com.baedang.trading.model.ExecutionRateEvidence;
 import com.baedang.trading.model.OrderMarketContext;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -23,6 +27,40 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class OrderPolicyTest {
+
+    @ParameterizedTest
+    @CsvSource({"69000,", "71000,", "68900,PRICE_OUT_OF_RANGE", "71100,PRICE_OUT_OF_RANGE", "70001,INVALID_TICK_SIZE"})
+    void 당일_범위의_양끝을_포함하고_호가단위를_검사한다(String price, ErrorCode expected) {
+        Stock stock = Stock.create("LIMIT", MarketCountry.KR, "KOSPI", "테스트", null, "KRW", "STOCK", true);
+        ReflectionTestUtils.setField(stock, "stockId", 1L);
+        QuoteSnapshot quote = PriceLimitFixtures.verified(new QuoteSnapshot(1L, new BigDecimal("70000"), "KRW", QUOTE_AT, QUOTE_AT));
+        quote.updateLimits(new BigDecimal("71000"), new BigDecimal("69000"));
+        assertThat(policy.validateTradingPrice(stock, quote, new BigDecimal(price), CHECKED_AT, true)).isEqualTo(expected);
+    }
+
+    @Test
+    void 전일_기준값과_범위밖_현재가를_거래에_사용하지_않는다() {
+        Stock stock = Stock.create("LIMIT", MarketCountry.KR, "KOSPI", "테스트", null, "KRW", "STOCK", true);
+        ReflectionTestUtils.setField(stock, "stockId", 1L);
+        QuoteSnapshot quote = PriceLimitFixtures.verified(new QuoteSnapshot(1L, new BigDecimal("70000"), "KRW", QUOTE_AT.minusDays(1), QUOTE_AT));
+        assertThat(policy.validateTradingPrice(stock, quote, new BigDecimal("70000"), CHECKED_AT, false))
+                .isEqualTo(ErrorCode.PRICE_LIMIT_UNAVAILABLE);
+        quote = PriceLimitFixtures.verified(new QuoteSnapshot(1L, new BigDecimal("70000"), "KRW", QUOTE_AT, QUOTE_AT));
+        quote.updateLimits(new BigDecimal("69000"), new BigDecimal("60000"));
+        assertThat(policy.validateTradingPrice(stock, quote, new BigDecimal("70000"), CHECKED_AT, false))
+                .isEqualTo(ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT);
+    }
+
+    @Test
+    void 미국_NULL은_제한없음이며_국내_NULL은_사용불가다() {
+        for (MarketCountry country : MarketCountry.values()) {
+            Stock stock = Stock.create("LIMIT", country, "TEST", "테스트", null, country.defaultCurrency(), "STOCK", true);
+            ReflectionTestUtils.setField(stock, "stockId", 1L);
+            QuoteSnapshot quote = new QuoteSnapshot(1L, new BigDecimal("100"), country.defaultCurrency(), QUOTE_AT, QUOTE_AT);
+            assertThat(policy.validateTradingPrice(stock, quote, new BigDecimal("100"), CHECKED_AT, true))
+                    .isEqualTo(country == MarketCountry.US ? null : ErrorCode.PRICE_LIMIT_UNAVAILABLE);
+        }
+    }
 
     @Test
     void accountId가_없으면_같은_요청을_재전송할_수_없다() {
@@ -42,7 +80,7 @@ class OrderPolicyTest {
             OffsetDateTime.ofInstant(CHECKED_AT, ZoneOffset.UTC);
 
     private final OrderPolicy policy =
-            new OrderPolicy(15, 15, new BigDecimal("1000000"));
+            new OrderPolicy(15, 15, new BigDecimal("1000000"), new TickSizePolicy());
 
     @ParameterizedTest
     @CsvSource({"0,-1,2,1,true", "0,-1,2,2,false", "-59,-100,3600,0,true",

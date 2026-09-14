@@ -1,6 +1,7 @@
 package com.baedang.orderbook.scheduler;
 
 import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.model.TradingPriceLimits;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.repository.QuoteSnapshotRepository;
@@ -15,9 +16,10 @@ import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import com.baedang.stock.repository.StockRepository;
 import com.baedang.stock.service.StockTradingStatusService;
-import org.springframework.data.domain.PageRequest;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -197,7 +199,7 @@ public class OrderBookRefreshScheduler {
         long seed = ThreadLocalRandom.current().nextLong();
         GeneratedOrderBook generated;
         try {
-            generated = generator.generate(properties, descriptor, quote.getLastPrice(), quoteAt, now, seed);
+            generated = generator.generate(properties, descriptor, quote.getLastPrice(), quoteAt, now, seed, TradingPriceLimits.from(quote));
         } catch (IllegalArgumentException exception) {
             log.warn("호가 생성 거절(유효 가격/BID 불가): {} ({}) - {}", stock.getSymbol(), stockId, exception.getMessage());
             publicationService.closeActive(stockId);

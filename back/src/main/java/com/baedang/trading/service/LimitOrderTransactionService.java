@@ -15,8 +15,8 @@ import com.baedang.trading.entity.OrderStatus;
 import com.baedang.trading.entity.OrderType;
 import com.baedang.trading.entity.TradeOrder;
 import com.baedang.trading.model.ClientOrderRetryPolicy;
-import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.LimitOrderAcceptedEvent;
+import com.baedang.trading.model.LimitOrderCommand;
 import com.baedang.trading.model.OrderClosureResult;
 import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.LimitOrderResult;
@@ -26,10 +26,12 @@ import com.baedang.trading.repository.TradeOrderRepository;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
 import com.baedang.user.repository.AccountRepository;
+
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
-import org.springframework.stereotype.Service;
+
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -155,21 +157,21 @@ public class LimitOrderTransactionService {
             return replay(existing.get(), c);
         }
         requireActive(account);
-        Instant now = clock.instant();
+        Instant checkedAt = clock.instant();
         OrderTerms t = c.terms();
         Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(t.symbol(), t.marketCountry())
                 .orElseThrow(() -> new BusinessException(ErrorCode.STOCK_NOT_FOUND));
 
         // CB 판정은 접수 트랜잭션 안에서만 한다. context 신선도·시세 검증보다 앞에 두어, 락 대기 중
         // 시작된 CB가 만료된 context나 stale quote로 가려지지 않게 한다.
-        OffsetDateTime at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
-        Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, now);
+        OffsetDateTime at = checkedAt.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        Optional<ActiveMarketHalt> halt = marketTradingHaltPolicy.activeFor(stock, checkedAt);
         if (halt.isPresent()) {
             return rejectByHalt(
                     account, stock, c, price.limitPrice(), context.executionRate(), halt.get(), at);
         }
 
-        policy.validateExecutionContextFresh(context, now);
+        policy.validateExecutionContextFresh(context, checkedAt);
         QuoteSnapshot quote = quotes.findById(stock.getStockId()).orElseThrow(() ->
                 new BusinessException(ErrorCode.QUOTE_NOT_FOUND, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
         if (!policy.hasValidCurrencyForMarket(stock, quote)) {
@@ -178,12 +180,30 @@ public class LimitOrderTransactionService {
         Holding holding = t.side() == OrderSide.SELL
                 ? holdings.findByAccountIdAndStockIdForUpdate(account.getAccountId(), stock.getStockId()).orElse(null)
                 : null;
+        // 매도 보유 행 잠금까지 기다린 뒤 세션·시세 검증 시각을 확정합니다.
+        Instant now = clock.instant();
+        at = now.truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
+        // 보유 잠금 대기 중 시작된 CB도 만료된 검증 정보보다 먼저 처리합니다.
+        if (t.side() == OrderSide.SELL) {
+            Optional<ActiveMarketHalt> haltAfterHoldingLock = marketTradingHaltPolicy.activeFor(stock, now);
+            if (haltAfterHoldingLock.isPresent()) {
+                return rejectByHalt(account, stock, c, price.limitPrice(), context.executionRate(),
+                        haltAfterHoldingLock.get(), at);
+            }
+        }
+        policy.validateExecutionContextFresh(context, now);
         ErrorCode reason = policy.determineStaticRejection(stock);
         if (reason == null && !context.isMarketOpenAt(now)) {
             reason = ErrorCode.MARKET_CLOSED;
         }
         if (reason == null) {
             reason = policy.validateQuoteTime(quote, now);
+        }
+        if (reason == null) {
+            reason = policy.validateTradingPrice(stock, quote, price.limitPrice(), now, true);
+            if (reason == ErrorCode.PRICE_LIMIT_UNAVAILABLE || reason == ErrorCode.QUOTE_OUT_OF_PRICE_LIMIT) {
+                throw new BusinessException(reason, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+            }
         }
         if (reason == null && t.side() == OrderSide.BUY && account.availableCash().compareTo(price.reserve()) < 0) {
             reason = ErrorCode.INSUFFICIENT_CASH;
