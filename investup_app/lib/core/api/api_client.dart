@@ -127,6 +127,23 @@ class ApiClient {
     return _objectOf(response);
   }
 
+  /// JSON 객체를 기대하는 PATCH(주문 취소 등).
+  Future<Map<String, Object?>> patchObject(
+    String path, {
+    Object? body,
+    AuthRequirement auth = AuthRequirement.public,
+    CancelToken? cancelToken,
+  }) async {
+    final response = await _request(
+      'PATCH',
+      path,
+      auth: auth,
+      body: body,
+      cancelToken: cancelToken,
+    );
+    return _objectOf(response);
+  }
+
   /// 성공 본문이 비어 있을 수 있는 POST(로그아웃 등).
   Future<void> postVoid(
     String path, {

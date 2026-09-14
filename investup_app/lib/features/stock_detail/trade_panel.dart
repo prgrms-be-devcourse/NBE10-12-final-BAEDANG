@@ -6,11 +6,12 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/order_api.dart';
 import '../../core/auth/auth_session.dart';
+import '../../core/models/order_detail.dart';
 import '../../core/models/order_quote.dart';
 import '../../core/models/stock_detail.dart';
 import '../../formatters.dart';
 
-/// 시장가 매수/매도 패널. 바텀시트로 연다.
+/// 시장가·지정가 매수/매도 패널. 바텀시트로 연다.
 ///
 /// - 주문 의도 하나에 clientOrderId를 고정한다. 같은 패널에서의 재시도는
 ///   같은 ID를 써서 서버가 저장된 결과를 그대로 돌려준다.
@@ -33,16 +34,20 @@ class TradePanel extends StatefulWidget {
 }
 
 class _TradePanelState extends State<TradePanel> {
+  String _orderType = 'MARKET'; // MARKET | LIMIT
   String _side = 'BUY';
   final _quantityController = TextEditingController();
+  final _priceController = TextEditingController();
   Timer? _debounce;
   CancelToken? _quoteToken;
 
-  MarketOrderQuote? _quote;
+  MarketOrderQuote? _marketQuote;
+  LimitOrderQuote? _limitQuote;
   String? _quoteError;
   bool _quoteLoading = false;
   bool _submitting = false;
-  MarketOrderResult? _result;
+  MarketOrderResult? _marketResult;
+  OrderDetail? _limitResult;
 
   /// 이 주문 의도의 ID. 패널을 여는 순간 한 번만 만든다.
   String _clientOrderId = newClientOrderId();
@@ -50,7 +55,8 @@ class _TradePanelState extends State<TradePanel> {
   @override
   void initState() {
     super.initState();
-    _quantityController.addListener(_onQuantityChanged);
+    _quantityController.addListener(_onInputChanged);
+    _priceController.addListener(_onInputChanged);
   }
 
   @override
@@ -58,30 +64,44 @@ class _TradePanelState extends State<TradePanel> {
     _debounce?.cancel();
     _quoteToken?.cancel();
     _quantityController.dispose();
+    _priceController.dispose();
     super.dispose();
   }
 
   String get _quantity => _quantityController.text.trim();
+
+  String get _limitPrice => _priceController.text.trim();
 
   bool get _quantityValid {
     final q = num.tryParse(_quantity);
     return q != null && q > 0;
   }
 
-  void _onQuantityChanged() {
+  bool get _priceValid {
+    final p = num.tryParse(_limitPrice);
+    return p != null && p > 0;
+  }
+
+  bool get _inputsValid =>
+      _quantityValid && (_orderType == 'MARKET' || _priceValid);
+
+  void _onInputChanged() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 400), _fetchQuote);
     setState(() {
-      _quote = null;
+      _marketQuote = null;
+      _limitQuote = null;
       _quoteError = null;
-      _result = null;
+      _marketResult = null;
+      _limitResult = null;
     });
   }
 
   Future<void> _fetchQuote() async {
-    if (!_quantityValid) {
+    if (!_inputsValid) {
       setState(() {
-        _quote = null;
+        _marketQuote = null;
+        _limitQuote = null;
         _quoteLoading = false;
       });
       return;
@@ -91,19 +111,39 @@ class _TradePanelState extends State<TradePanel> {
     _quoteToken = token;
     setState(() => _quoteLoading = true);
     try {
-      final quote = await widget.orders.getMarketQuote(
-        symbol: widget.detail.symbol,
-        marketCountry: widget.detail.marketCountry,
-        side: _side,
-        quantity: _quantity,
-        cancelToken: token,
-      );
-      if (!mounted || token.isCancelled) return;
-      setState(() {
-        _quote = quote;
-        _quoteError = null;
-        _quoteLoading = false;
-      });
+      if (_orderType == 'MARKET') {
+        final quote = await widget.orders.getMarketQuote(
+          symbol: widget.detail.symbol,
+          marketCountry: widget.detail.marketCountry,
+          side: _side,
+          quantity: _quantity,
+          cancelToken: token,
+        );
+        if (!mounted || token.isCancelled) return;
+        setState(() {
+          _marketQuote = quote;
+          _limitQuote = null;
+          _quoteError = null;
+          _quoteLoading = false;
+        });
+      } else {
+        final quote = await widget.orders.getLimitQuote(
+          symbol: widget.detail.symbol,
+          marketCountry: widget.detail.marketCountry,
+          side: _side,
+          quantity: _quantity,
+          limitPrice: _limitPrice,
+          limitCurrency: widget.detail.currency ?? 'KRW',
+          cancelToken: token,
+        );
+        if (!mounted || token.isCancelled) return;
+        setState(() {
+          _limitQuote = quote;
+          _marketQuote = null;
+          _quoteError = null;
+          _quoteLoading = false;
+        });
+      }
     } on DioException catch (e) {
       if (e.type == DioExceptionType.cancel) return;
       if (!mounted) return;
@@ -114,7 +154,8 @@ class _TradePanelState extends State<TradePanel> {
     } on ApiException catch (e) {
       if (!mounted || token.isCancelled) return;
       setState(() {
-        _quote = null;
+        _marketQuote = null;
+        _limitQuote = null;
         _quoteError = e.message;
         _quoteLoading = false;
       });
@@ -125,29 +166,43 @@ class _TradePanelState extends State<TradePanel> {
     if (side == _side) return;
     setState(() {
       _side = side;
-      _quote = null;
+      _marketQuote = null;
+      _limitQuote = null;
       _quoteError = null;
-      _result = null;
+      _marketResult = null;
+      _limitResult = null;
+    });
+    _fetchQuote();
+  }
+
+  void _selectOrderType(String type) {
+    if (type == _orderType) return;
+    setState(() {
+      _orderType = type;
+      _marketQuote = null;
+      _limitQuote = null;
+      _quoteError = null;
+      _marketResult = null;
+      _limitResult = null;
     });
     _fetchQuote();
   }
 
   Future<void> _submit() async {
-    final quote = _quote;
     final accountId = widget.session.account?.accountId;
-    if (quote == null || !quote.executable || accountId == null) return;
-    if (_submitting) return;
+    final executable = _orderType == 'MARKET'
+        ? _marketQuote?.executable == true
+        : _limitQuote?.acceptable == true;
+    if (!executable || accountId == null || _submitting) return;
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(_side == 'BUY' ? '매수 주문' : '매도 주문'),
-        content: Text(
-          '${widget.detail.name} $_quantity주\n'
-          '예상 체결가: ${formatMoney(quote.executedPrice, widget.detail.currency)}\n'
-          '${_side == 'BUY' ? '결제 예정' : '입금 예정'}: ${formatMoney(quote.netAmount, 'KRW')}\n\n'
-          '시장가로 주문할까요?',
+        title: Text(
+          '${_orderType == 'MARKET' ? '시장가' : '지정가'} '
+          '${_side == 'BUY' ? '매수' : '매도'} 주문',
         ),
+        content: Text(_confirmText()),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -164,20 +219,38 @@ class _TradePanelState extends State<TradePanel> {
 
     setState(() => _submitting = true);
     try {
-      final result = await widget.orders.placeMarketOrder(
-        accountId: accountId,
-        clientOrderId: _clientOrderId,
-        symbol: widget.detail.symbol,
-        marketCountry: widget.detail.marketCountry,
-        side: _side,
-        quantity: _quantity,
-      );
-      if (!mounted) return;
-      setState(() {
-        _result = result;
-        _submitting = false;
-      });
-      // 체결 뒤 계좌 잔고를 다시 불러온다.
+      if (_orderType == 'MARKET') {
+        final result = await widget.orders.placeMarketOrder(
+          accountId: accountId,
+          clientOrderId: _clientOrderId,
+          symbol: widget.detail.symbol,
+          marketCountry: widget.detail.marketCountry,
+          side: _side,
+          quantity: _quantity,
+        );
+        if (!mounted) return;
+        setState(() {
+          _marketResult = result;
+          _submitting = false;
+        });
+      } else {
+        final result = await widget.orders.placeLimitOrder(
+          accountId: accountId,
+          clientOrderId: _clientOrderId,
+          symbol: widget.detail.symbol,
+          marketCountry: widget.detail.marketCountry,
+          side: _side,
+          quantity: _quantity,
+          limitPrice: _limitPrice,
+          limitCurrency: widget.detail.currency ?? 'KRW',
+        );
+        if (!mounted) return;
+        setState(() {
+          _limitResult = result;
+          _submitting = false;
+        });
+      }
+      // 주문 뒤 계좌 잔고를 다시 불러온다.
       unawaited(widget.session.reloadAccount());
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -193,13 +266,56 @@ class _TradePanelState extends State<TradePanel> {
     }
   }
 
+  String _confirmText() {
+    final buffer = StringBuffer('${widget.detail.name} $_quantity주\n');
+    if (_orderType == 'MARKET') {
+      final quote = _marketQuote!;
+      buffer.writeln(
+        '예상 체결가: ${formatMoney(quote.executedPrice, widget.detail.currency)}',
+      );
+      buffer.writeln(
+        '${_side == 'BUY' ? '결제 예정' : '입금 예정'}: ${formatMoney(quote.netAmount, 'KRW')}',
+      );
+      buffer.write('\n시장가로 주문할까요?');
+    } else {
+      final quote = _limitQuote!;
+      buffer.writeln(
+        '지정가: ${formatMoney(quote.requestedLimitPrice, quote.requestedLimitCurrency)}',
+      );
+      buffer.writeln(
+        '예약 예정: ${formatMoney(quote.reservedCash ?? quote.netAmount, 'KRW')}',
+      );
+      buffer.write('\n지정가로 주문할까요?');
+    }
+    return buffer.toString();
+  }
+
   String get _submitLabel {
     if (_submitting) return '주문 중...';
-    final quote = _quote;
-    if (quote != null && !quote.executable) {
+    if (_orderType == 'MARKET') {
+      final quote = _marketQuote;
+      if (quote != null && !quote.executable) {
+        return tradableReasonLabel(quote.reason);
+      }
+      return '시장가 ${_side == 'BUY' ? '매수' : '매도'} 주문';
+    }
+    final quote = _limitQuote;
+    if (quote != null && !quote.acceptable) {
       return tradableReasonLabel(quote.reason);
     }
-    return '시장가 ${_side == 'BUY' ? '매수' : '매도'} 주문';
+    return '지정가 ${_side == 'BUY' ? '매수' : '매도'} 주문';
+  }
+
+  bool get _submitEnabled {
+    if (_submitting ||
+        _quoteLoading ||
+        !_inputsValid ||
+        _marketResult != null ||
+        _limitResult != null) {
+      return false;
+    }
+    if (_orderType == 'MARKET') return _marketQuote?.executable == true;
+    return _limitQuote?.acceptable == true;
   }
 
   @override
@@ -209,7 +325,7 @@ class _TradePanelState extends State<TradePanel> {
     final detail = widget.detail;
 
     return SafeArea(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: EdgeInsets.only(
           left: 20,
           right: 20,
@@ -220,11 +336,17 @@ class _TradePanelState extends State<TradePanel> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              '${detail.name} 시장가 주문',
-              style: theme.textTheme.titleLarge,
-            ),
+            Text('${detail.name} 주문', style: theme.textTheme.titleLarge),
             const SizedBox(height: 16),
+            SegmentedButton<String>(
+              segments: const [
+                ButtonSegment(value: 'MARKET', label: Text('시장가')),
+                ButtonSegment(value: 'LIMIT', label: Text('지정가')),
+              ],
+              selected: {_orderType},
+              onSelectionChanged: (set) => _selectOrderType(set.first),
+            ),
+            const SizedBox(height: 8),
             SegmentedButton<String>(
               segments: const [
                 ButtonSegment(value: 'BUY', label: Text('매수')),
@@ -234,9 +356,25 @@ class _TradePanelState extends State<TradePanel> {
               onSelectionChanged: (set) => _selectSide(set.first),
             ),
             const SizedBox(height: 12),
+            if (_orderType == 'LIMIT')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: TextField(
+                  controller: _priceController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: '지정가',
+                    suffixText: detail.currency ?? 'KRW',
+                  ),
+                ),
+              ),
             TextField(
               controller: _quantityController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: const InputDecoration(
                 labelText: '수량',
                 suffixText: '주',
@@ -250,25 +388,33 @@ class _TradePanelState extends State<TradePanel> {
                   child: CircularProgressIndicator(),
                 ),
               )
-            else if (_quote != null)
-              _QuoteSummary(quote: _quote!, currency: detail.currency)
+            else if (_marketQuote != null)
+              _QuoteRows(
+                rows: _marketRows(_marketQuote!),
+                reason: _marketQuote!.executable
+                    ? null
+                    : _marketQuote!.reason,
+              )
+            else if (_limitQuote != null)
+              _QuoteRows(
+                rows: _limitRows(_limitQuote!),
+                reason: _limitQuote!.acceptable
+                    ? null
+                    : _limitQuote!.reason,
+              )
             else if (_quoteError != null)
               Text(_quoteError!, style: TextStyle(color: scheme.error)),
-            if (_result != null) ...[
+            if (_marketResult != null) ...[
               const SizedBox(height: 12),
-              _OrderResultCard(result: _result!),
+              _MarketResultCard(result: _marketResult!),
+            ],
+            if (_limitResult != null) ...[
+              const SizedBox(height: 12),
+              _LimitResultCard(order: _limitResult!),
             ],
             const SizedBox(height: 16),
             FilledButton(
-              onPressed:
-                  _submitting ||
-                          _quoteLoading ||
-                          !_quantityValid ||
-                          _quote == null ||
-                          !_quote!.executable ||
-                          _result != null
-                      ? null
-                      : _submit,
+              onPressed: _submitEnabled ? _submit : null,
               child: Text(_submitLabel),
             ),
           ],
@@ -276,25 +422,44 @@ class _TradePanelState extends State<TradePanel> {
       ),
     );
   }
+
+  List<(String, String)> _marketRows(MarketOrderQuote quote) => [
+    ('예상 체결가', formatMoney(quote.executedPrice, widget.detail.currency)),
+    ('주문 금액', formatMoney(quote.grossAmount, 'KRW')),
+    ('수수료', formatMoney(quote.fee, 'KRW')),
+    ('세금', formatMoney(quote.tax, 'KRW')),
+    (
+      quote.side == 'BUY' ? '결제 예정' : '입금 예정',
+      formatMoney(quote.netAmount, 'KRW'),
+    ),
+    ('주문 가능 금액', formatMoney(quote.availableCash, 'KRW')),
+  ];
+
+  List<(String, String)> _limitRows(LimitOrderQuote quote) => [
+    (
+      '지정가',
+      formatMoney(quote.requestedLimitPrice, quote.requestedLimitCurrency),
+    ),
+    ('주문 금액', formatMoney(quote.grossAmount, 'KRW')),
+    ('수수료', formatMoney(quote.fee, 'KRW')),
+    ('세금', formatMoney(quote.tax, 'KRW')),
+    ('예약 예정', formatMoney(quote.reservedCash ?? quote.netAmount, 'KRW')),
+    ('주문 가능 금액', formatMoney(quote.availableCash, 'KRW')),
+    if (quote.availableQuantity != null) ('주문 가능 수량', quote.availableQuantity!),
+    if (quote.expiresAt != null)
+      ('만료', quote.expiresAt!.toLocal().toString().substring(0, 16)),
+  ];
 }
 
-class _QuoteSummary extends StatelessWidget {
-  const _QuoteSummary({required this.quote, required this.currency});
+class _QuoteRows extends StatelessWidget {
+  const _QuoteRows({required this.rows, this.reason});
 
-  final MarketOrderQuote quote;
-  final String? currency;
+  final List<(String, String)> rows;
+  final String? reason;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final rows = [
-      ('예상 체결가', formatMoney(quote.executedPrice, currency)),
-      ('주문 금액', formatMoney(quote.grossAmount, 'KRW')),
-      ('수수료', formatMoney(quote.fee, 'KRW')),
-      ('세금', formatMoney(quote.tax, 'KRW')),
-      (quote.side == 'BUY' ? '결제 예정' : '입금 예정', formatMoney(quote.netAmount, 'KRW')),
-      ('주문 가능 금액', formatMoney(quote.availableCash, 'KRW')),
-    ];
     return Column(
       children: [
         for (final (label, value) in rows)
@@ -313,11 +478,11 @@ class _QuoteSummary extends StatelessWidget {
               ],
             ),
           ),
-        if (!quote.executable && quote.reason != null)
+        if (reason != null)
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Text(
-              tradableReasonLabel(quote.reason),
+              tradableReasonLabel(reason),
               style: TextStyle(
                 fontSize: 13,
                 color: Theme.of(context).colorScheme.error,
@@ -329,8 +494,8 @@ class _QuoteSummary extends StatelessWidget {
   }
 }
 
-class _OrderResultCard extends StatelessWidget {
-  const _OrderResultCard({required this.result});
+class _MarketResultCard extends StatelessWidget {
+  const _MarketResultCard({required this.result});
 
   final MarketOrderResult result;
 
@@ -339,32 +504,86 @@ class _OrderResultCard extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final color = result.filled ? const Color(0xFF16A34A) : scheme.error;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            result.filled ? '체결 완료' : '주문 거절 (${result.status})',
-            style: TextStyle(fontWeight: FontWeight.w700, color: color),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '주문번호 ${result.orderId} · 체결가 ${formatMoney(result.executedPrice, null)}',
-            style: theme.textTheme.bodyMedium,
-          ),
-          if (result.cashBalanceAfter != null)
-            Text(
-              '남은 예수금 ${formatMoney(result.cashBalanceAfter, 'KRW')}',
-              style: theme.textTheme.bodyMedium,
-            ),
-        ],
-      ),
+    return _ResultCard(
+      color: color,
+      title: result.filled ? '체결 완료' : '주문 거절 (${result.status})',
+      lines: [
+        '주문번호 ${result.orderId} · 체결가 ${formatMoney(result.executedPrice, null)}',
+        if (result.cashBalanceAfter != null)
+          '남은 예수금 ${formatMoney(result.cashBalanceAfter, 'KRW')}',
+      ],
+      theme: theme,
     );
   }
+}
+
+class _LimitResultCard extends StatelessWidget {
+  const _LimitResultCard({required this.order});
+
+  final OrderDetail order;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final color = switch (order.status) {
+      'FILLED' || 'PENDING' || 'PARTIALLY_FILLED' => const Color(0xFF16A34A),
+      _ => scheme.error,
+    };
+    final title = switch (order.status) {
+      'PENDING' => '주문 접수 완료 (미체결)',
+      'PARTIALLY_FILLED' => '부분 체결됨',
+      'FILLED' => '체결 완료',
+      'REJECTED' => '주문 거절됨',
+      _ => '주문 ${order.status}',
+    };
+    return _ResultCard(
+      color: color,
+      title: title,
+      lines: [
+        '주문번호 ${order.orderId} · 지정가 '
+            '${formatMoney(order.requestedLimitPrice, order.requestedLimitCurrency)}',
+        if (order.rejectReason != null) '사유: ${order.rejectReason}',
+        if (order.expiresAt != null)
+          '만료 ${order.expiresAt!.toLocal().toString().substring(0, 16)}',
+      ],
+      theme: theme,
+    );
+  }
+}
+
+class _ResultCard extends StatelessWidget {
+  const _ResultCard({
+    required this.color,
+    required this.title,
+    required this.lines,
+    required this.theme,
+  });
+
+  final Color color;
+  final String title;
+  final List<String> lines;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: color.withValues(alpha: 0.4)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w700, color: color),
+        ),
+        const SizedBox(height: 4),
+        for (final line in lines)
+          Text(line, style: theme.textTheme.bodyMedium),
+      ],
+    ),
+  );
 }

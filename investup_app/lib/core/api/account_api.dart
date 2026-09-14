@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../models/account_summary.dart';
+import '../models/order_detail.dart';
 import 'api_client.dart';
 import 'auth_requirement.dart';
 
@@ -19,5 +20,20 @@ class AccountApi {
       cancelToken: cancelToken,
     );
     return _client.decode(() => AccountSummary.fromJson(json));
+  }
+
+  /// 현재 라운드 주문 내역. 최신순 커서 페이징.
+  Future<OrderPage> getOrders({
+    String? cursor,
+    int size = 20,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.getObject(
+      'accounts/me/orders',
+      auth: AuthRequirement.required,
+      query: <String, dynamic>{'size': size, 'cursor': ?cursor},
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => OrderPage.fromJson(json));
   }
 }

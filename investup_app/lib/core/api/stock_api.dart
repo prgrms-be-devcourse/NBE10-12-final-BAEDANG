@@ -6,6 +6,7 @@ import '../models/market_country.dart';
 import '../models/order_book.dart';
 import '../models/ranking.dart';
 import '../models/stock_detail.dart';
+import '../models/stock_like.dart';
 import '../models/stock_search.dart';
 import 'api_client.dart';
 import 'auth_requirement.dart';
@@ -132,5 +133,20 @@ class StockApi {
       auth: AuthRequirement.required,
       cancelToken: cancelToken,
     );
+  }
+
+  /// 내 찜 목록. 로그인이 필요하다.
+  Future<StockLikePage> getLikes({
+    String? cursor,
+    int size = 20,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.getObject(
+      'stocks/likes',
+      auth: AuthRequirement.required,
+      query: <String, dynamic>{'size': size, 'cursor': ?cursor},
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => StockLikePage.fromJson(json));
   }
 }

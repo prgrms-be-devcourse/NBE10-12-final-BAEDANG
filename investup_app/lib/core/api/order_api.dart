@@ -3,6 +3,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 
 import '../models/market_country.dart';
+import '../models/order_detail.dart';
 import '../models/order_quote.dart';
 import 'api_client.dart';
 import 'auth_requirement.dart';
@@ -63,6 +64,76 @@ class OrderApi {
       cancelToken: cancelToken,
     );
     return _client.decode(() => MarketOrderResult.fromJson(json));
+  }
+
+  /// 지정가 주문 견적. limitPrice는 종목 통화(KRW/USD)로 입력한다.
+  Future<LimitOrderQuote> getLimitQuote({
+    required String symbol,
+    required MarketCountry marketCountry,
+    required String side,
+    required String quantity,
+    required String limitPrice,
+    required String limitCurrency,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.getObject(
+      'orders/quote/limit',
+      auth: AuthRequirement.required,
+      query: {
+        'symbol': symbol,
+        'marketCountry': marketCountry.wireValue,
+        'side': side,
+        'quantity': quantity,
+        'limitPrice': limitPrice,
+        'limitCurrency': limitCurrency,
+      },
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => LimitOrderQuote.fromJson(json));
+  }
+
+  /// 지정가 주문 접수. [clientOrderId]는 이 주문 의도에 고정된 UUID다.
+  Future<OrderDetail> placeLimitOrder({
+    required int accountId,
+    required String clientOrderId,
+    required String symbol,
+    required MarketCountry marketCountry,
+    required String side,
+    required String quantity,
+    required String limitPrice,
+    required String limitCurrency,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.postObject(
+      'orders/limit',
+      auth: AuthRequirement.required,
+      body: {
+        'accountId': accountId,
+        'clientOrderId': clientOrderId,
+        'symbol': symbol,
+        'marketCountry': marketCountry.wireValue,
+        'side': side,
+        'quantity': quantity,
+        'limitPrice': limitPrice,
+        'limitCurrency': limitCurrency,
+      },
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => OrderDetail.fromJson(json));
+  }
+
+  /// 미체결 지정가 주문 취소. 서버는 {status: "CANCELED"}만 받는다.
+  Future<OrderDetail> cancelOrder({
+    required int orderId,
+    CancelToken? cancelToken,
+  }) async {
+    final json = await _client.patchObject(
+      'orders/$orderId',
+      auth: AuthRequirement.required,
+      body: const {'status': 'CANCELED'},
+      cancelToken: cancelToken,
+    );
+    return _client.decode(() => OrderDetail.fromJson(json));
   }
 }
 

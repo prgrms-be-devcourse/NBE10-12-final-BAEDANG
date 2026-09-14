@@ -56,6 +56,61 @@ class MarketOrderQuote {
       );
 }
 
+/// GET /orders/quote/limit 응답. 지정가 접수 가능 여부와 예약 예상액이다.
+class LimitOrderQuote {
+  const LimitOrderQuote({
+    required this.acceptable,
+    this.requestedLimitPrice,
+    this.requestedLimitCurrency,
+    this.limitPrice,
+    this.availableCash,
+    this.availableQuantity,
+    this.expiresAt,
+    this.reason,
+    this.grossAmount,
+    this.fee,
+    this.tax,
+    this.netAmount,
+    this.reservedCash,
+  });
+
+  /// false면 reason에 불가 사유 코드가 있다.
+  final bool acceptable;
+  final String? requestedLimitPrice;
+  final String? requestedLimitCurrency;
+  final String? limitPrice;
+  final String? availableCash;
+  final String? availableQuantity;
+  final DateTime? expiresAt;
+  final String? reason;
+
+  /// limitEstimate 블록.
+  final String? grossAmount;
+  final String? fee;
+  final String? tax;
+  final String? netAmount;
+  final String? reservedCash;
+
+  factory LimitOrderQuote.fromJson(Map<String, Object?> json) {
+    final estimate = json.objectOrNull('limitEstimate');
+    return LimitOrderQuote(
+      acceptable: json.requireBool('acceptable'),
+      requestedLimitPrice: json.stringOrNull('requestedLimitPrice'),
+      requestedLimitCurrency: json.stringOrNull('requestedLimitCurrency'),
+      limitPrice: json.stringOrNull('limitPrice'),
+      availableCash: json.stringOrNull('availableCash'),
+      availableQuantity: json.stringOrNull('availableQuantity'),
+      expiresAt: json.dateTimeOrNull('expiresAt'),
+      reason: json.stringOrNull('reason'),
+      grossAmount: estimate?.stringOrNull('grossAmount'),
+      fee: estimate?.stringOrNull('fee'),
+      tax: estimate?.stringOrNull('tax'),
+      netAmount: estimate?.stringOrNull('netAmount'),
+      reservedCash: estimate?.stringOrNull('reservedCash'),
+    );
+  }
+}
+
 /// POST /orders/market 응답. 시장가 주문은 PENDING 없이 FILLED/REJECTED로 끝난다.
 class MarketOrderResult {
   const MarketOrderResult({
