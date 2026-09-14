@@ -138,6 +138,15 @@ public class TradeOrder {
     @Column(name = "closed_at")
     private OffsetDateTime closedAt;
 
+    /**
+     * {@code MARKET_TRADING_HALTED} 거절에 사용한 {@code market_event}. 다른 주문은 {@code null}이다.
+     *
+     * <p>멱등 재생이 이 ID로 최초 판정 이벤트를 정확히 복원한다. 연관관계가 아니라 식별자만 보관한다 —
+     * 거래 aggregate가 시장 이벤트 aggregate를 소유하지 않으며, 이벤트는 append-only 감사 대상이다.
+     */
+    @Column(name = "market_event_id")
+    private Long marketEventId;
+
     protected TradeOrder() {
     }
 
@@ -190,6 +199,42 @@ public class TradeOrder {
         order.quoteAt = quoteAt;
         order.exchangeRate = exchangeRate;
         order.closedAt = orderedAt;
+        return order;
+    }
+
+    /**
+     * 시장 전체 CB로 거절된 시장가 주문.
+     *
+     * <p>CB 거절에는 시세가 필요 없으므로 {@code referencePrice}/{@code quoteAt}/{@code exchangeRate}
+     * 증거를 남기지 않는다. 대신 판정에 사용한 이벤트를 {@code market_event_id}로 고정해, 같은
+     * {@code clientOrderId} 재요청이 최초 오류 데이터를 그대로 복원할 수 있게 한다.
+     */
+    public static TradeOrder rejectedMarketOrderByHalt(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, Long marketEventId, OffsetDateTime orderedAt
+    ) {
+        if (marketEventId == null) {
+            throw new IllegalArgumentException("CB 거절에는 market_event_id가 필요합니다");
+        }
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, orderedAt);
+        order.rejectReason = "MARKET_TRADING_HALTED";
+        order.marketEventId = marketEventId;
+        order.closedAt = orderedAt;
+        return order;
+    }
+
+    /** 지정가 접수의 CB 거절. 동결하지 않으므로 {@code reservedCash}는 0이고 가격·환율 근거는 유지한다. */
+    public static TradeOrder rejectedLimitOrderByHalt(Long accountId, Long stockId, UUID clientOrderId,
+            OrderSide side, BigDecimal quantity, BigDecimal limitPrice, BigDecimal requestedPrice,
+            String requestedCurrency, BigDecimal rate, Long marketEventId, OffsetDateTime at) {
+        if (marketEventId == null) {
+            throw new IllegalArgumentException("CB 거절에는 market_event_id가 필요합니다");
+        }
+        TradeOrder order = rejectedLimitOrder(
+                accountId, stockId, clientOrderId, side, quantity, limitPrice,
+                requestedPrice, requestedCurrency, rate, "MARKET_TRADING_HALTED", at);
+        order.marketEventId = marketEventId;
         return order;
     }
 
@@ -256,6 +301,9 @@ public class TradeOrder {
     public BigDecimal getRequestedLimitPrice() { return requestedLimitPrice; }
     public String getRequestedLimitCurrency() { return requestedLimitCurrency; }
     public BigDecimal getAcceptanceExchangeRate() { return acceptanceExchangeRate; }
+
+    /** CB 거절에 사용한 {@code market_event}. 멱등 재생이 이 값으로 오류 데이터를 복원한다. */
+    public Long getMarketEventId() { return marketEventId; }
 
     public boolean isActive() {
         return status == OrderStatus.PENDING || status == OrderStatus.PARTIALLY_FILLED;

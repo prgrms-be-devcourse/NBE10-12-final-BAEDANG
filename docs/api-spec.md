@@ -408,8 +408,6 @@ Sidecar items carry `direction` (`BUY` · `SELL`) instead of `stage`; circuit br
 }
 ```
 
-**Planned enforcement:** blocking new orders during a circuit breaker belongs to the order path and ships in a later change (Part 4/#166). Sidecars suspend program trading quotes only, so ordinary orders stay allowed. This endpoint only reports what happened — it does not gate anything.
-
 ---
 
 ## Stocks
@@ -927,6 +925,27 @@ The failure response's `data.retryPolicy` defines how to handle `clientOrderId`.
 
 Clients must follow `data.retryPolicy` instead of inferring ID reuse from the HTTP status or error code alone. If malformed JSON or another failure has no `retryPolicy`, do not automatically resend the unchanged request.
 
+**Circuit-breaker rejection data.** When a new order is rejected because a circuit breaker is active in the order's market, `data` carries the rejecting event's public fields plus `retryPolicy`. All timestamps are `+09:00`.
+
+Gating applies to **KR stocks in KOSPI and KOSDAQ only**. US stocks and `KR_ETC` are never gated, and a sidecar never blocks an ordinary order — it suspends program trading quotes only. The check runs inside the trading transaction after the account lock, not as a transaction-external preflight.
+
+```json
+{
+  "code": "MARKET_TRADING_HALTED",
+  "message": "현재 해당 시장의 매매거래가 일시 중단됐어요",
+  "data": {
+    "market": "KOSPI",
+    "eventType": "CIRCUIT_BREAKER",
+    "stage": 1,
+    "triggeredAt": "2026-07-13T13:28:32+09:00",
+    "haltUntil": "2026-07-13T13:48:32+09:00",
+    "retryPolicy": "NEW_CLIENT_ORDER_ID"
+  }
+}
+```
+
+The rejected order row stores the `market_event_id` it was decided against. A retry with the same `clientOrderId` replays that exact event's data — including after the circuit breaker has expired or a later, longer circuit breaker was collected — so the terminal response never changes. A market rejection stores no quote/reference/rate evidence; a limit rejection retains the user's requested price/currency and the acceptance rate (needed for idempotent comparison) but no quote evidence and no reservation.
+
 **Response · 201**
 ```json
 {
@@ -957,7 +976,7 @@ Market-order replay selects a normal ledger entry matching the order side with a
 ```
 ① Verify accountId ownership and read clientOrderId; return the stored result on an exact retry even for a closed round
 ② Read the stock and preflight static rules — universe → suspension → liquidation
-③ Only after preflight passes, read market session and US execution FX (KR uses rate 1), then record checkedAt when external data preparation finishes
+③ Only after preflight passes, require a fresh quote, then read market session and US execution FX (KR uses rate 1) and record checkedAt. If quote preparation fails, an account-lock fallback checks only for an active CB; a halt is persisted, otherwise the original preparation error is returned
 ④ SELECT the exact account by accountId and userId FOR UPDATE; reject a CLOSED account instead of carrying the order to a new round
 ⑤ Recheck clientOrderId; if the same order completed while waiting for the lock, return the stored result
 ⑥ For a new order only, reject an expired market context, read the quote, validate its currency, and lock holding for a sell (lock order: account → holding)
@@ -967,11 +986,11 @@ Market-order replay selects a normal ledger entry matching the order side with a
 ⑩ INSERT ledger_entry (append only; FILLED only)
 ```
 
-Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Field validation failures after a valid `clientOrderId` is parsed, external-market-data failures, static preflight failures, an expired market context, and quote-currency mismatches create no order row and return `SAME_CLIENT_ORDER_ID`. Only failures confirmed inside the transaction store a final `REJECTED` row and return `NEW_CLIENT_ORDER_ID`. A stock state can change between preflight and lock acquisition, so clients must follow `data.retryPolicy` rather than infer retry behavior from the error code alone. Unreadable JSON and an invalid `clientOrderId` have no valid ID to reuse and are outside this rule.
+Market orders never write `PENDING` and never modify `locked_cash` or `locked_quantity`; those reservations belong to the future limit-order flow. A rejected market order changes no balance/holding and creates no ledger entry. Field validation failures after a valid `clientOrderId` is parsed, external-market-data failures, static preflight failures, an expired market context, and quote-currency mismatches normally create no order row and return `SAME_CLIENT_ORDER_ID`. The exception is a quote-preparation failure while a CB is active: a dedicated transaction locks the account, persists the CB rejection, and returns `NEW_CLIENT_ORDER_ID`; if no CB is active, the original preparation error remains unchanged. Other failures confirmed inside the transaction likewise store a final `REJECTED` row and return `NEW_CLIENT_ORDER_ID`. A stock state can change between preflight and lock acquisition, so clients must follow `data.retryPolicy` rather than infer retry behavior from the error code alone. Unreadable JSON and an invalid `clientOrderId` have no valid ID to reuse and are outside this rule.
 
 The market-order use case is a top-level transaction boundary. It must not be invoked inside another transaction; the application entry point enforces this with `Propagation.NEVER`, while the DB mutation service starts its own `REQUIRED` transaction. This keeps a committed `REJECTED` record from being rolled back by an unrelated outer workflow.
 
-**Trading eligibility** — market/limit orders and both quote APIs support non-ranked stocks. Before a new order, refresh listing status (and KR suspension/liquidation flags) through the shared status cache, and require a source quote no older than 15 seconds. Re-fetching a stale source price does not make it fresh. External preparation occurs before account locks; financial transactions revalidate database state and quote time. Idempotent completed requests return before external calls. Preparation failure stores no rejected order and permits the same clientOrderId retry; follow data.retryPolicy.
+**Trading eligibility** — market/limit orders and both quote APIs support non-ranked stocks. Before a new order, refresh listing status (and KR suspension/liquidation flags) through the shared status cache, and require a source quote no older than 15 seconds. Re-fetching a stale source price does not make it fresh. External preparation occurs before account locks; financial transactions revalidate database state and quote time. Idempotent completed requests return before external calls. A quote-preparation failure runs an external-call-free, account-lock transaction that records an active CB rejection; without an active CB it stores no order and preserves the same clientOrderId retry policy.
 
 One order may contain at most **1,000,000 shares**, configured by `trading.max-order-quantity`; scientific notation is not accepted.
 
@@ -979,6 +998,7 @@ One order may contain at most **1,000,000 shares**, configured by `trading.max-o
 | Code | HTTP | Default retry policy | Screen text |
 |---|---|---|---|
 | `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_TRADING_HALTED` | 422 | `NEW_CLIENT_ORDER_ID` | 현재 해당 시장의 매매거래가 일시 중단됐어요 |
 | `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
 | `STOCK_NOT_TRADABLE` | 422 | read `data.retryPolicy` for the actual path | 현재 거래를 지원하지 않는 종목이에요 |
 | `STOCK_SUSPENDED` | 422 | read `data.retryPolicy` for the actual path | 거래정지 종목이에요 |
