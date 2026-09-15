@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE rss [
+  <!ELEMENT rss ANY >
+  <!ENTITY xxe SYSTEM "file:///etc/passwd" >
+]>
+<rss version="2.0">
+  <channel>
+    <title>KIND 오늘의공시</title>
+    <link>https://kind.krx.co.kr</link>
+    <item>
+      <title>&xxe;</title>
+      <link>https://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptNo=20260713000658</link>
+      <pubDate>Mon, 13 Jul 2026 13:29:00 +0900</pubDate>
+    </item>
+  </channel>
+</rss>

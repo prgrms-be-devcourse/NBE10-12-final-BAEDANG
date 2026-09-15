@@ -1,0 +1,486 @@
+package com.baedang.market.event.repository;
+
+import com.baedang.market.event.entity.KrMarket;
+import com.baedang.market.event.entity.MarketEvent;
+import com.baedang.market.event.entity.MarketEventSource;
+import jakarta.persistence.EntityManager;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
+import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import java.net.URI;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+@Testcontainers
+@DataJpaTest(properties = {
+        "spring.jpa.hibernate.ddl-auto=validate",
+        "spring.sql.init.mode=never"
+})
+@AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+class MarketEventRepositoryIntegrationTest {
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
+
+    private static final Instant START = Instant.parse("2026-07-13T04:28:32Z");
+    private static final Instant END = Instant.parse("2026-07-13T04:48:32Z");
+    private static final Instant PUBLISHED_AT = Instant.parse("2026-07-13T04:29:00Z");
+    private static final Instant RECEIVED_AT = Instant.parse("2026-07-13T04:29:07Z");
+    private static final URI SOURCE_URL = URI.create(
+            "https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm");
+
+    @Autowired
+    private MarketEventRepository repository;
+
+    @Autowired
+    private JdbcTemplate jdbc;
+
+    @Autowired
+    private EntityManager entityManager;
+
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
+    @Test
+    void halt_until_is_exclusive() {
+        MarketEvent event = repository.saveAndFlush(circuitBreaker("20260713000658", START, END));
+
+        assertThat(repository.findActiveCircuitBreaker(
+                KrMarket.KOSPI, Instant.parse("2026-07-13T04:48:31Z")))
+                .contains(event);
+        assertThat(repository.findActiveCircuitBreaker(
+                KrMarket.KOSPI, END))
+                .isEmpty();
+    }
+
+    @Test
+    void source_and_source_event_id_are_unique() {
+        repository.saveAndFlush(circuitBreaker("20260713000658", START, END));
+
+        assertThatThrownBy(() -> repository.saveAndFlush(
+                circuitBreaker("20260713000658", START, END)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
+     * 수집기는 저장 전에 {@code existsBySourceAndSourceEventId}로 중복을 걸러내지만, 두 인스턴스가
+     * 동시에 조회하면 둘 다 통과할 수 있다. 그때 중복을 실제로 막는 것은 애플리케이션 선확인이 아니라
+     * DB의 UNIQUE 제약이다 — 이 테스트는 서로 다른 커넥션에서 동시에 INSERT해 그 사실을 고정한다.
+     */
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void concurrent_duplicate_insertion_is_rejected_by_the_database() throws Exception {
+        String sourceEventId = "20260713000999";
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch startTogether = new CountDownLatch(1);
+        AtomicInteger inserted = new AtomicInteger();
+        AtomicInteger rejected = new AtomicInteger();
+        List<Throwable> unexpected = Collections.synchronizedList(new ArrayList<>());
+
+        try {
+            try (var executor = Executors.newFixedThreadPool(2)) {
+                List<Future<?>> futures = new ArrayList<>();
+                for (int i = 0; i < 2; i++) {
+                    futures.add(executor.submit(() -> {
+                        ready.countDown();
+                        try {
+                            if (!startTogether.await(5, TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("동시 시작 대기 시간 초과");
+                            }
+                            transaction.execute(status ->
+                                    repository.saveAndFlush(circuitBreaker(sourceEventId, START, END)));
+                            inserted.incrementAndGet();
+                        } catch (DataIntegrityViolationException expected) {
+                            rejected.incrementAndGet();
+                        } catch (Exception e) {
+                            unexpected.add(e);
+                        }
+                        return null;
+                    }));
+                }
+
+                assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+                startTogether.countDown();
+                for (Future<?> future : futures) {
+                    future.get(10, TimeUnit.SECONDS);
+                }
+            }
+
+            assertThat(unexpected).isEmpty();
+            assertThat(inserted).hasValue(1);
+            assertThat(rejected).hasValue(1);
+            assertThat(jdbc.queryForObject(
+                    "SELECT count(*) FROM market_event WHERE source_event_id = ?",
+                    Integer.class, sourceEventId)).isEqualTo(1);
+        } finally {
+            jdbc.update("DELETE FROM market_event WHERE source_event_id = ?", sourceEventId);
+        }
+    }
+
+    @Test
+    void market_isolation_and_utc_round_trip_are_preserved() {
+        MarketEvent kosdaq = repository.saveAndFlush(
+                MarketEvent.circuitBreaker(MarketEventSource.KRX_KIND, "20260713000664", KrMarket.KOSDAQ,
+                        2, START, END, PUBLISHED_AT, RECEIVED_AT, "코스닥 CB", SOURCE_URL));
+
+        assertThat(repository.findActiveCircuitBreaker(KrMarket.KOSPI, START.plusSeconds(1))).isEmpty();
+        Long eventId = kosdaq.getMarketEventId();
+        entityManager.clear();
+
+        MarketEvent reloaded = repository.findById(eventId).orElseThrow();
+        assertThat(reloaded.getTriggeredAt().toInstant()).isEqualTo(START);
+        assertThat(reloaded.getHaltUntil().toInstant()).isEqualTo(END);
+        assertThat(reloaded.getPublishedAt().toInstant()).isEqualTo(PUBLISHED_AT);
+        assertThat(reloaded.getReceivedAt().toInstant()).isEqualTo(RECEIVED_AT);
+        assertThat(reloaded.getTriggeredAt().getOffset()).isEqualTo(ZoneOffset.UTC);
+        assertThat(reloaded.getHaltUntil().getOffset()).isEqualTo(ZoneOffset.UTC);
+        assertThat(reloaded.getPublishedAt().getOffset()).isEqualTo(ZoneOffset.UTC);
+        assertThat(reloaded.getReceivedAt().getOffset()).isEqualTo(ZoneOffset.UTC);
+    }
+
+    @Test
+    void history_is_newest_first_and_respects_limit() {
+        MarketEvent older = repository.saveAndFlush(circuitBreaker(
+                "20260713000665", START, END));
+        MarketEvent newer = repository.saveAndFlush(circuitBreaker(
+                "20260713000666", START.plusSeconds(60), END.plusSeconds(60)));
+
+        var history = repository.findHistory(
+                KrMarket.KOSPI,
+                START.minusSeconds(1).atOffset(java.time.ZoneOffset.UTC),
+                END.plusSeconds(61).atOffset(java.time.ZoneOffset.UTC),
+                org.springframework.data.domain.PageRequest.of(0, 1));
+
+        assertThat(history).containsExactly(newer);
+        assertThat(older.getMarketEventId()).isLessThan(newer.getMarketEventId());
+    }
+
+    /** 같은 발동시각에서는 최신 {@code marketEventId}가 먼저 나와야 응답 순서가 결정적이다. */
+    @Test
+    void history_orders_equal_trigger_times_by_id_descending() {
+        MarketEvent first = repository.saveAndFlush(circuitBreaker("20260713000680", START, END));
+        MarketEvent second = repository.saveAndFlush(circuitBreaker(
+                "20260713000681", START, END.plusSeconds(60)));
+
+        var history = repository.findHistory(
+                KrMarket.KOSPI,
+                START.minusSeconds(1).atOffset(java.time.ZoneOffset.UTC),
+                END.plusSeconds(61).atOffset(java.time.ZoneOffset.UTC),
+                org.springframework.data.domain.PageRequest.of(0, 100));
+
+        assertThat(history).containsExactly(second, first);
+        assertThat(second.getMarketEventId()).isGreaterThan(first.getMarketEventId());
+        assertThat(second.getTriggeredAt()).isEqualTo(first.getTriggeredAt());
+    }
+
+    @Test
+    void database_check_constraint_rejects_unknown_market() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO market_event
+                    (source, source_event_id, market, event_type, circuit_breaker_stage,
+                     triggered_at, halt_until, published_at, received_at, title, source_url)
+                VALUES ('KRX_KIND', '20260713000667', 'NYSE', 'CIRCUIT_BREAKER', 1,
+                        '2026-07-13T04:28:32Z', '2026-07-13T04:48:32Z',
+                        '2026-07-13T04:29:00Z', '2026-07-13T04:29:07Z',
+                        '잘못된 시장', 'https://kind.krx.co.kr/event')
+                """))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+    }
+
+
+    @Test
+    void database_has_all_market_event_check_constraints() {
+        assertThat(jdbc.queryForList("""
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'market_event'::regclass
+                  AND contype = 'c'
+                """, String.class))
+                .contains("ck_market_event_market", "ck_market_event_type",
+                        "ck_market_event_time", "ck_market_event_payload");
+    }
+
+    /**
+     * CB 거절 주문은 판정에 사용한 이벤트를 FK로 가리켜야 멱등 재생이 최초 이벤트를 복원할 수 있다.
+     * CHECK가 이 연결을 강제하고, 다른 거절·정상 주문에는 남지 않게 막는다.
+     */
+    @Test
+    void trade_order_requires_market_event_for_cb_rejection() {
+        assertThat(jdbc.queryForList("""
+                SELECT conname
+                FROM pg_constraint
+                WHERE conrelid = 'trade_order'::regclass
+                  AND contype = 'c'
+                """, String.class))
+                .contains("ck_trade_order_market_event_rejection");
+
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), NULL)
+                """, accountId(), stockId(), java.util.UUID.randomUUID()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** 다른 거절 사유에 CB 이벤트가 붙으면 감사 연결이 거짓이 된다. */
+    @Test
+    void trade_order_forbids_market_event_on_other_rejections() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'INSUFFICIENT_CASH', now(), now(), ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_forbids_market_event_when_reject_reason_is_null() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', NULL, now(), now(), ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_market_event_fk_rejects_unknown_event() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), 999999999)
+                """, accountId(), stockId(), java.util.UUID.randomUUID()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /**
+     * CB 거절은 REJECTED 확정 행에만 존재할 수 있다. 상태를 보지 않으면 활성 주문이 이 사유와
+     * 이벤트 ID를 들고 있어도 통과해 감사 연결이 거짓이 된다.
+     *
+     * <p>PENDING 지정가의 다른 제약(수량·동결·만료)을 모두 만족시켜, 이 테스트가 오직
+     * `ck_trade_order_market_event_rejection`만으로 거절되는지 확인한다.
+     */
+    @Test
+    void trade_order_rejects_market_event_on_pending_status() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, expires_at, limit_price, reserved_cash,
+                     requested_limit_price, requested_limit_currency, acceptance_exchange_rate,
+                     gross_amount, fee, tax, net_amount, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'LIMIT', 1,
+                        'PENDING', 'MARKET_TRADING_HALTED', now(), now() + interval '1 hour',
+                        1000, 1000, 1000, 'KRW', 1, 0, 0, 0, 0, ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void trade_order_rejects_market_event_on_filled_status() {
+        assertThatThrownBy(() -> jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, filled_quantity, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'FILLED', 'MARKET_TRADING_HALTED', now(), now(), 1, ?)
+                """, accountId(), stockId(), java.util.UUID.randomUUID(), eventId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** 제약을 모두 만족하는 CB 거절은 실제로 저장되고 이벤트 ID가 왕복한다. */
+    @Test
+    void trade_order_stores_valid_cb_rejection_with_event_id() {
+        Long account = accountId();
+        Long stock = stockId();
+        Long event = eventId();
+        java.util.UUID clientOrderId = java.util.UUID.randomUUID();
+
+        jdbc.update("""
+                INSERT INTO trade_order
+                    (account_id, stock_id, client_order_id, side, order_type, quantity,
+                     status, reject_reason, ordered_at, closed_at, market_event_id)
+                VALUES (?, ?, ?, 'BUY', 'MARKET', 1,
+                        'REJECTED', 'MARKET_TRADING_HALTED', now(), now(), ?)
+                """, account, stock, clientOrderId, event);
+
+        assertThat(jdbc.queryForObject(
+                "SELECT market_event_id FROM trade_order WHERE account_id = ? AND client_order_id = ?",
+                Long.class, account, clientOrderId)).isEqualTo(event);
+    }
+
+    private Long accountId() {
+        Long userId = jdbc.queryForObject("""
+                INSERT INTO users (email, password_hash, nickname, status, created_at)
+                VALUES (?, 'hash', ?, 'ACTIVE', now())
+                RETURNING user_id
+                """, Long.class, java.util.UUID.randomUUID() + "@example.com",
+                java.util.UUID.randomUUID().toString().substring(0, 8));
+        return jdbc.queryForObject("""
+                INSERT INTO account (user_id, round_no, initial_cash, cash_balance, locked_cash, status, opened_at)
+                VALUES (?, 1, 0, 0, 0, 'ACTIVE', now())
+                RETURNING account_id
+                """, Long.class, userId);
+    }
+
+    private Long stockId() {
+        return jdbc.queryForObject("""
+                INSERT INTO stock (symbol, market_country, market, name, currency, security_type,
+                                   listing_status, is_ranked, created_at, updated_at)
+                VALUES (?, 'KR', 'KOSPI', '테스트 종목', 'KRW', 'STOCK', 'ACTIVE', false, now(), now())
+                RETURNING stock_id
+                """, Long.class, java.util.UUID.randomUUID().toString().substring(0, 6));
+    }
+
+    private Long eventId() {
+        return repository.saveAndFlush(circuitBreaker("20260713000799", START, END)).getMarketEventId();
+    }
+
+    @Test
+    void database_rejects_unknown_event_type() {
+        assertRawInsertRejected("20260713000668", "KOSPI", "UNKNOWN", 1, null,
+                "2026-07-13T04:28:32Z", "2026-07-13T04:48:32Z");
+    }
+
+    @Test
+    void database_rejects_non_increasing_event_time() {
+        assertConstraintRejected("ck_market_event_time", "20260713000669", "KOSPI",
+                "CIRCUIT_BREAKER", 1, null,
+                "2026-07-13T04:48:32Z", "2026-07-13T04:48:32Z");
+    }
+
+    @Test
+    void database_rejects_circuit_breaker_without_stage() {
+        assertConstraintRejected("ck_market_event_payload", "20260713000670", "KOSPI",
+                "CIRCUIT_BREAKER", null, null,
+                "2026-07-13T04:28:32Z", "2026-07-13T04:48:32Z");
+    }
+
+    @Test
+    void database_rejects_circuit_breaker_with_sidecar_direction() {
+        assertConstraintRejected("ck_market_event_payload", "20260713000671", "KOSPI",
+                "CIRCUIT_BREAKER", 1, "BUY",
+                "2026-07-13T04:28:32Z", "2026-07-13T04:48:32Z");
+    }
+
+    @Test
+    void database_rejects_sidecar_with_circuit_breaker_stage() {
+        assertConstraintRejected("ck_market_event_payload", "20260713000672", "KOSDAQ",
+                "SIDECAR", 1, "SELL",
+                "2026-07-13T04:28:32Z", "2026-07-13T04:33:32Z");
+    }
+
+    @Test
+    void database_rejects_sidecar_without_direction() {
+        assertConstraintRejected("ck_market_event_payload", "20260713000673", "KOSDAQ",
+                "SIDECAR", null, null,
+                "2026-07-13T04:28:32Z", "2026-07-13T04:33:32Z");
+    }
+
+    @Test
+    void database_rejects_sidecar_with_unknown_direction() {
+        assertConstraintRejected("ck_market_event_payload", "20260713000674", "KOSDAQ",
+                "SIDECAR", null, "HOLD",
+                "2026-07-13T04:28:32Z", "2026-07-13T04:33:32Z");
+    }
+
+    private void assertConstraintRejected(
+            String constraint,
+            String sourceEventId,
+            String market,
+            String eventType,
+            Integer stage,
+            String direction,
+            String triggeredAt,
+            String haltUntil
+    ) {
+        assertThatThrownBy(() -> insertRaw(
+                sourceEventId, market, eventType, stage, direction, triggeredAt, haltUntil))
+                .isInstanceOfSatisfying(DataIntegrityViolationException.class, exception ->
+                        assertThat(exception.getMostSpecificCause().getMessage()).contains(constraint));
+    }
+
+    private void assertRawInsertRejected(
+            String sourceEventId,
+            String market,
+            String eventType,
+            Integer stage,
+            String direction,
+            String triggeredAt,
+            String haltUntil
+    ) {
+        assertThatThrownBy(() -> insertRaw(
+                sourceEventId, market, eventType, stage, direction, triggeredAt, haltUntil))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private void insertRaw(
+            String sourceEventId,
+            String market,
+            String eventType,
+            Integer stage,
+            String direction,
+            String triggeredAt,
+            String haltUntil
+    ) {
+        jdbc.update("""
+                INSERT INTO market_event
+                    (source, source_event_id, market, event_type, circuit_breaker_stage,
+                     sidecar_direction, triggered_at, halt_until, published_at, received_at,
+                     title, source_url)
+                VALUES ('KRX_KIND', ?, ?, ?, ?, ?, CAST(? AS TIMESTAMPTZ), CAST(? AS TIMESTAMPTZ),
+                        '2026-07-13T04:29:00Z', '2026-07-13T04:29:07Z',
+                        '제약 검증', 'https://kind.krx.co.kr/event')
+                """, sourceEventId, market, eventType, stage, direction, triggeredAt, haltUntil);
+    }
+    private MarketEvent circuitBreaker(String sourceEventId, Instant triggeredAt, Instant haltUntil) {
+        return MarketEvent.circuitBreaker(
+                MarketEventSource.KRX_KIND,
+                sourceEventId,
+                KrMarket.KOSPI,
+                1,
+                triggeredAt,
+                haltUntil,
+                PUBLISHED_AT,
+                RECEIVED_AT,
+                "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
+                SOURCE_URL);
+    }
+}

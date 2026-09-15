@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>오늘의 공시 - 코스닥시장</title>
+    <link>https://kind.krx.co.kr</link>
+    <description>KRX KIND 오늘의 공시 RSS 피드</description>
+    <item>
+      <title>코스닥시장 프로그램매수호가 일시효력정지(Sidecar 발동)</title>
+      <link>https://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptNo=20260805000214</link>
+      <pubDate>Wed, 05 Aug 2026 09:15:00 +0900</pubDate>
+    </item>
+    <item>
+      <title>[코]코스닥시장 매매거래 일시중단(2단계 CB 발동)</title>
+      <link>https://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptNo=20260805000300</link>
+      <pubDate>Wed, 05 Aug 2026 10:00:00 +0900</pubDate>
+    </item>
+    <item>
+      <title>[코]에코프로비엠 주식등의대량보유상황보고서</title>
+      <link>https://kind.krx.co.kr/common/disclsviewer.do?method=search&amp;acptNo=20260805000100</link>
+      <pubDate>Wed, 05 Aug 2026 09:00:00 +0900</pubDate>
+    </item>
+  </channel>
+</rss>

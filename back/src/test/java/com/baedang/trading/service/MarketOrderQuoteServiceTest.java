@@ -1,0 +1,307 @@
+package com.baedang.trading.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.orderbook.service.TickSizePolicy;
+import com.baedang.stock.entity.ListingStatus;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.repository.StockRepository;
+import com.baedang.support.PriceLimitFixtures;
+import com.baedang.trading.dto.MarketOrderQuoteResponse;
+import com.baedang.trading.repository.HoldingRepository;
+import com.baedang.user.entity.Account;
+import com.baedang.user.entity.AccountStatus;
+import com.baedang.user.repository.AccountRepository;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class MarketOrderQuoteServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-08-25T03:00:00Z");
+
+    @Mock AccountRepository accountRepository;
+    @Mock StockRepository stockRepository;
+    @Mock QuoteSnapshotRepository quoteSnapshotRepository;
+    @Mock HoldingRepository holdingRepository;
+    @Mock MarketSessionProvider marketSessionProvider;
+    @Mock ExecutionExchangeRateProvider exchangeRateProvider;
+    @Mock Account account;
+    @Mock Stock stock;
+    @Mock Clock clock;
+
+    private MarketOrderQuoteService service;
+
+    @BeforeEach
+    void setUp() {
+        Mockito.lenient().when(clock.instant()).thenReturn(NOW);
+        MarketOrderSettlementCalculator calculator = new MarketOrderSettlementCalculator(
+                new BigDecimal("0.0001"),
+                new BigDecimal("0.002"),
+                new BigDecimal("0.0000206"),
+                new BigDecimal("0.01")
+        );
+        OrderPolicy orderPolicy = new OrderPolicy(15, 15, new BigDecimal("1000000"), new TickSizePolicy());
+        service = new MarketOrderQuoteService(
+                new OrderQuoteQueryService(
+                        accountRepository,
+                        stockRepository,
+                        quoteSnapshotRepository,
+                        holdingRepository),
+                marketSessionProvider,
+                exchangeRateProvider,
+                calculator,
+                orderPolicy,
+                new MarketOrderPolicy(orderPolicy),
+                clock
+        , preparedMarketData());
+    }
+
+    @Test
+    void 시장가_매수_견적의_금액과_실행가능_결과를_반환한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "buy", "10");
+
+        assertThat(result.symbol()).isEqualTo("005930");
+        assertThat(result.marketCountry()).isEqualTo(MarketCountry.KR);
+        assertThat(result.side().name()).isEqualTo("BUY");
+        assertThat(result.quantity()).isEqualTo("10");
+        assertThat(result.grossAmount()).isEqualTo("2415000");
+        assertThat(result.fee()).isEqualTo("242");
+        assertThat(result.tax()).isEqualTo("0");
+        assertThat(result.netAmount()).isEqualTo("2415242");
+        assertThat(result.executable()).isTrue();
+        assertThat(result.reason()).isNull();
+    }
+
+    @Test
+    void 국내_종목_견적은_환율을_조회하지_않는다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+
+        assertThat(result.exchangeRate()).isEqualTo("1");
+        verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 시장구분이_없으면_종목을_조회하기_전에_거절한다() {
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", null, "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> {
+                            assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_INPUT);
+                            assertThat(exception.getData()).containsEntry("field", "marketCountry");
+                        });
+
+        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
+    }
+
+    @Test
+    void 종목과_시세의_통화가_다르면_금액을_계산하지_않는다() {
+        when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
+                .thenReturn(Optional.of(account));
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(stock.getStockId()).thenReturn(101L);
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+        when(stock.getCurrency()).thenReturn("USD");
+        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(PriceLimitFixtures.verified(new QuoteSnapshot(
+                101L,
+                new BigDecimal("241500"),
+                "KRW",
+                NOW.atOffset(ZoneOffset.UTC),
+                NOW.atOffset(ZoneOffset.UTC)))));
+
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH));
+
+        verifyNoInteractions(exchangeRateProvider, marketSessionProvider);
+    }
+
+    @Test
+    void 미국_견적은_환율_포트의_실패를_전달한다() {
+        givenUsStock(new BigDecimal("100"));
+        when(exchangeRateProvider.currentUsdKrwSnapshot())
+                .thenThrow(new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+
+        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode())
+                                .isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        verifyNoInteractions(marketSessionProvider);
+    }
+
+    @Test
+    void 주문가능금액이_부족하면_실행불가_사유를_반환한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+        when(account.availableCash()).thenReturn(new BigDecimal("1000000"));
+
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "10");
+
+        assertThat(result.executable()).isFalse();
+        assertThat(result.reason()).isEqualTo(ErrorCode.INSUFFICIENT_CASH.name());
+        assertThat(result.availableCash()).isEqualTo("1000000");
+    }
+
+    @Test
+    void 보유종목이_없으면_매도할_수_없다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+        when(account.getAccountId()).thenReturn(11L);
+        when(holdingRepository.findByAccountIdAndStockId(11L, 101L)).thenReturn(Optional.empty());
+
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "SELL", "1");
+
+        assertThat(result.executable()).isFalse();
+        assertThat(result.reason()).isEqualTo(ErrorCode.INSUFFICIENT_QUANTITY.name());
+    }
+
+    @Test
+    void 시세가_15초를_초과하면_오래된_시세로_판정한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 16);
+
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+
+        assertThat(result.executable()).isFalse();
+        assertThat(result.reason()).isEqualTo(ErrorCode.STALE_QUOTE.name());
+    }
+
+    @Test
+    void 비랭킹_종목도_시장가_견적을_허용한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+        assertThat(result.executable()).isTrue();
+        assertThat(result.reason()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void 세션조회_지연후_시세와_장마감을_최종시각으로_검증한다(boolean closes) {
+        givenTradableKrStock(new BigDecimal("241500"), 5);
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenAnswer(invocation -> {
+            when(clock.instant()).thenReturn(NOW.plusSeconds(11));
+            return new MarketSessionStatus(true, NOW.plusSeconds(closes ? 11 : 3600));
+        });
+        MarketOrderQuoteResponse result = service.getQuote(1L, "005930", "KR", "BUY", "1");
+        assertThat(result.executable()).isFalse();
+        assertThat(result.reason()).isEqualTo((closes ? ErrorCode.MARKET_CLOSED : ErrorCode.STALE_QUOTE).name());
+        verifyNoInteractions(exchangeRateProvider);
+    }
+
+    @Test
+    void 세션조회중_개장하면_다음_견적부터_개장을_반영한다() {
+        givenTradableKrStock(new BigDecimal("241500"), 0);
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenAnswer(invocation -> {
+            when(clock.instant()).thenReturn(NOW.plusSeconds(1));
+            return MarketSessionStatus.closed();
+        });
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW.plusSeconds(1)))
+                .thenReturn(new MarketSessionStatus(true, NOW.plusSeconds(3600)));
+        assertThat(service.getQuote(1L, "005930", "KR", "BUY", "1").reason())
+                .isEqualTo(ErrorCode.MARKET_CLOSED.name());
+        assertThat(service.getQuote(1L, "005930", "KR", "BUY", "1").executable()).isTrue();
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {2, 16})
+    void 세션조회중_환율이_만료되면_시세신선도보다_우선하여_거절한다(int delaySeconds) {
+        givenUsStock(new BigDecimal("100"));
+        when(exchangeRateProvider.currentUsdKrwSnapshot()).thenReturn(new ExecutionExchangeRateSnapshot(
+                new BigDecimal("1400"), NOW.atOffset(ZoneOffset.UTC), NOW.atOffset(ZoneOffset.UTC),
+                NOW.plusSeconds(2).atOffset(ZoneOffset.UTC)));
+        when(marketSessionProvider.currentSession(MarketCountry.US, NOW)).thenAnswer(invocation -> {
+            when(clock.instant()).thenReturn(NOW.plusSeconds(delaySeconds));
+            return new MarketSessionStatus(true, NOW.plusSeconds(3600));
+        });
+        assertThatThrownBy(() -> service.getQuote(1L, "INTC", "US", "BUY", "1"))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.EXCHANGE_RATE_NOT_FOUND));
+        Mockito.verify(exchangeRateProvider, Mockito.never()).refreshUnavailableForMarketOrder();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0.5", "1000001", "1e5000000"})
+    void 잘못된_수량은_조회전에_거절한다(String quantity) {
+        assertThatThrownBy(() -> service.getQuote(1L, "005930", "KR", "BUY", quantity))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        exception -> assertThat(exception.getErrorCode()).isEqualTo(ErrorCode.INVALID_QUANTITY));
+        verifyNoInteractions(accountRepository, stockRepository, quoteSnapshotRepository);
+    }
+
+    private void givenTradableKrStock(BigDecimal price, long quoteAgeSeconds) {
+        when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
+                .thenReturn(Optional.of(account));
+        when(account.availableCash()).thenReturn(new BigDecimal("50000000"));
+
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(stock.getStockId()).thenReturn(101L);
+        when(stock.getSymbol()).thenReturn("005930");
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+        when(stock.getCurrency()).thenReturn("KRW");
+        when(stock.getListingStatus()).thenReturn(ListingStatus.ACTIVE);
+        when(stock.getIsSuspended()).thenReturn(false);
+        when(stock.getIsLiquidation()).thenReturn(false);
+
+        OffsetDateTime quoteAt = NOW.minusSeconds(quoteAgeSeconds).atOffset(ZoneOffset.UTC);
+        QuoteSnapshot quote = PriceLimitFixtures.verified(new QuoteSnapshot(101L, price, "KRW", quoteAt, quoteAt));
+        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
+        when(marketSessionProvider.currentSession(MarketCountry.KR, NOW))
+                .thenReturn(new MarketSessionStatus(true, NOW.plusSeconds(3600)));
+    }
+
+    private void givenUsStock(BigDecimal price) {
+        when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE))
+                .thenReturn(Optional.of(account));
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("INTC", MarketCountry.US))
+                .thenReturn(Optional.of(stock));
+        when(stock.getStockId()).thenReturn(101L);
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.US);
+        when(stock.getCurrency()).thenReturn("USD");
+        QuoteSnapshot quote = PriceLimitFixtures.verified(new QuoteSnapshot(
+                101L,
+                price,
+                "USD",
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC),
+                NOW.minusSeconds(5).atOffset(ZoneOffset.UTC)));
+        when(quoteSnapshotRepository.findById(101L)).thenReturn(Optional.of(quote));
+    }
+
+    private OrderMarketDataService preparedMarketData() {
+        OrderMarketDataService service = Mockito.mock(OrderMarketDataService.class);
+        Mockito.lenient().when(service.refreshStatus(ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        Mockito.lenient().when(service.prepareEstimate(ArgumentMatchers.any()))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        return service;
+    }
+}

@@ -1,0 +1,52 @@
+package com.baedang.trading.dto;
+
+import com.baedang.trading.model.MarketOrderReceipt;
+import com.baedang.stock.entity.MarketCountry;
+import java.time.OffsetDateTime;
+
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
+
+public record MarketOrderResponse(
+        Long orderId,
+        String status,
+        String symbol,
+        MarketCountry marketCountry,
+        String side,
+        String quantity,
+        String executedPrice,
+        String exchangeRate,
+        String grossAmount,
+        String fee,
+        String tax,
+        String netAmount,
+        OffsetDateTime quoteAt,
+        OffsetDateTime orderedAt,
+        AccountSummary account
+) {
+
+    public static MarketOrderResponse from(MarketOrderReceipt receipt) {
+        return new MarketOrderResponse(
+                receipt.orderId(),
+                receipt.status(),
+                receipt.symbol(),
+                receipt.marketCountry(),
+                receipt.side(),
+                plain(receipt.quantity()),
+                currency(receipt.executedPrice(), receipt.marketCountry().defaultCurrency()),
+                rate(receipt.exchangeRate()),
+                krw(receipt.grossAmount()),
+                krw(receipt.fee()),
+                krw(receipt.tax()),
+                krw(receipt.netAmount()),
+                receipt.quoteAt(),
+                receipt.orderedAt(),
+                new AccountSummary(krw(receipt.cashBalanceAfter()))
+        );
+    }
+
+    public record AccountSummary(String cashBalanceAfter) {
+    }
+}

@@ -1,0 +1,199 @@
+package com.baedang.trading.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
+import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.repository.StockRepository;
+import com.baedang.trading.dto.MarketOrderRequest;
+import com.baedang.trading.dto.MarketOrderResponse;
+import com.baedang.trading.model.ClientOrderRetryPolicy;
+import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.MarketOrderCommand;
+import com.baedang.trading.model.MarketOrderResult;
+import com.baedang.trading.model.OrderInput;
+import com.baedang.trading.model.OrderMarketContext;
+import io.micrometer.core.instrument.Timer;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+/** 입력 검증과 트랜잭션 결과의 HTTP 오류 변환을 담당하는 시장가 주문 진입점입니다. */
+@Service
+public class MarketOrderService {
+
+    private final OrderPolicy orderPolicy;
+    private final MarketOrderTransactionService transactionService;
+    private final StockRepository stockRepository;
+    private final MarketSessionProvider marketSessionProvider;
+    private final ExecutionExchangeRateProvider exchangeRateProvider;
+    private final MarketOrderResponseAssembler responseAssembler;
+    private final Clock clock;
+    private final OrderMarketDataService marketData;
+    private final TradingMetrics metrics;
+
+    public MarketOrderService(
+            OrderPolicy orderPolicy,
+            MarketOrderTransactionService transactionService,
+            StockRepository stockRepository,
+            MarketSessionProvider marketSessionProvider,
+            ExecutionExchangeRateProvider exchangeRateProvider,
+            MarketOrderResponseAssembler responseAssembler,
+            Clock clock,
+            OrderMarketDataService marketData,
+            TradingMetrics metrics
+    ) {
+        this.orderPolicy = orderPolicy;
+        this.transactionService = transactionService;
+        this.stockRepository = stockRepository;
+        this.marketSessionProvider = marketSessionProvider;
+        this.exchangeRateProvider = exchangeRateProvider;
+        this.responseAssembler = responseAssembler;
+        this.clock = clock;
+        this.marketData = marketData;
+        this.metrics = metrics;
+    }
+
+    /** 주문은 다른 업무 트랜잭션에 참여하지 않고 반드시 최상위 유스케이스로 실행합니다. */
+    @Transactional(propagation = Propagation.NEVER)
+    public MarketOrderResponse place(Long userId, MarketOrderRequest request) {
+        // 사용자 체감 주문 지연을 측정한다. 거절(BusinessException)은 정상적인 업무 결과이므로
+        // REJECTED 로, 그 밖의 런타임 오류만 ERROR 로 나눠 "느린 건 어떤 결과인가"를 본다.
+        Timer.Sample sample = metrics.startOrderTimer();
+        String result = "SUCCESS";
+        try {
+            return doPlace(userId, request);
+        } catch (BusinessException e) {
+            result = "REJECTED";
+            throw e;
+        } catch (RuntimeException e) {
+            result = "ERROR";
+            throw e;
+        } finally {
+            metrics.stopOrderTimer(sample, result);
+        }
+    }
+
+    private MarketOrderResponse doPlace(Long userId, MarketOrderRequest request) {
+        if (request == null) {
+            throw new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", "request"));
+        }
+        OrderInput input = orderPolicy.parseInput(
+                request.accountId(), request.clientOrderId(), request.symbol(), request.marketCountry(),
+                request.side(), request.quantity());
+
+        MarketOrderCommand command = new MarketOrderCommand(input.accountId(), input.clientOrderId(), input.terms());
+
+        Optional<MarketOrderResult> existing = transactionService.findExisting(userId, command);
+        if (existing.isPresent()) {
+            return unwrap(existing.get());
+        }
+
+        Stock stock = prepareStock(command);
+        try {
+            marketData.requireQuote(stock);
+        } catch (BusinessException e) {
+            Optional<MarketOrderResult> halted = transactionService.rejectIfHalted(userId, command);
+            if (halted.isPresent()) {
+                return unwrap(halted.get());
+            }
+            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
+        }
+        OrderMarketContext executionContext = prepareExecutionContext(stock);
+        MarketOrderResult result = transactionService.execute(userId, command, executionContext);
+        return unwrap(result);
+    }
+
+    private MarketOrderResponse unwrap(MarketOrderResult result) {
+        if (result.rejected()) {
+            // 트랜잭션 서비스가 REJECTED 행을 커밋한 뒤 예외로 변환합니다. CB 거절이면 이벤트 데이터를
+            // 함께 내보내 클라이언트가 어느 시장·단계가 언제 끝나는지 알 수 있게 합니다.
+            Map<String, Object> response = new LinkedHashMap<>(result.rejectionData());
+            response.putAll(ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+            throw new BusinessException(result.rejectionReason(), response);
+        }
+        return responseAssembler.assemble(result.receipt());
+    }
+
+    private Stock prepareStock(MarketOrderCommand command) {
+        Stock stock = stockRepository
+                .findBySymbolIgnoreCaseAndMarketCountry(
+                        command.terms().symbol(), command.terms().marketCountry())
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.STOCK_NOT_FOUND,
+                        "symbol=" + command.terms().symbol(),
+                        ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData()));
+        try {
+            stock = marketData.refreshStatus(stock);
+        } catch (BusinessException e) {
+            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
+        }
+        ErrorCode staticRejection = orderPolicy.determineStaticRejection(stock);
+        if (staticRejection != null) {
+            // 외부 조회와 주문 저장 전이므로 조건이 바뀐 뒤 같은 clientOrderId로 재시도할 수 있습니다.
+            throw new BusinessException(
+                    staticRejection, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+        }
+        return stock;
+    }
+
+    private OrderMarketContext prepareExecutionContext(Stock stock) {
+        Instant sessionLookupAt = clock.instant();
+        MarketSessionStatus session;
+        ExecutionRateEvidence rateEvidence = null;
+        try {
+            session = marketSessionProvider.currentSession(stock.getMarketCountry(), sessionLookupAt);
+            if (stock.getMarketCountry() == MarketCountry.US) {
+                ExecutionExchangeRateSnapshot snapshot = marketOrderExchangeRate();
+                if (snapshot == null) {
+                    throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+                }
+                rateEvidence = ExecutionRateEvidence.from(snapshot);
+            }
+        } catch (BusinessException e) {
+            throw withRetryPolicy(e, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID);
+        }
+        Instant checkedAt = clock.instant();
+        if (stock.getMarketCountry() == MarketCountry.KR) {
+            rateEvidence = ExecutionRateEvidence.krw(checkedAt.atOffset(ZoneOffset.UTC));
+        }
+        return new OrderMarketContext(
+                stock.getMarketCountry(), session.open(), session.validUntil(), rateEvidence, checkedAt);
+    }
+
+    private ExecutionExchangeRateSnapshot marketOrderExchangeRate() {
+        try {
+            return exchangeRateProvider.currentUsdKrwSnapshot();
+        } catch (BusinessException exception) {
+            if (exception.getErrorCode() != ErrorCode.EXCHANGE_RATE_NOT_FOUND) throw exception;
+            exchangeRateProvider.refreshUnavailableForMarketOrder();
+            // 성공 응답 자체를 신뢰하지 않고 DB에 저장된 원본 유효기간을 다시 검증합니다.
+            return exchangeRateProvider.currentUsdKrwSnapshot();
+        }
+    }
+
+    private BusinessException withRetryPolicy(
+            BusinessException exception,
+            ClientOrderRetryPolicy retryPolicy
+    ) {
+        Map<String, Object> data = new LinkedHashMap<>();
+        if (exception.getData() != null) data.putAll(exception.getData());
+        data.putAll(retryPolicy.asData());
+        if (exception.getDetail() == null) {
+            return new BusinessException(exception.getErrorCode(), data);
+        }
+        return new BusinessException(exception.getErrorCode(), exception.getDetail(), data);
+    }
+}

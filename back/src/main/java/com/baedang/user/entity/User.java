@@ -6,10 +6,8 @@ import jakarta.persistence.*;
 /**
  * 회원. {@code users} 테이블 — {@code user} 는 PostgreSQL 예약어라 복수형입니다.
  *
- * <p>1주차에는 인증을 붙이지 않지만 테이블은 지금 만듭니다.
- * {@code account.user_id} 가 이걸 참조하기 때문에 나중에 추가하려면
- * FK 와 데이터를 함께 손봐야 합니다.
- *
+ * <p>JWT subject가 가리키는 회원 식별자를 보관하며, 탈퇴는 상태 전환으로 처리합니다.
+ * {@code account.user_id} 가 이 회원을 참조하므로 물리 삭제하지 않습니다.
  * <p><b>setter 가 없습니다.</b> 상태를 바꾸는 건 의미가 분명한 메서드
  * ({@link #changeNickname}, {@link #withdraw})로만 열어둡니다.
  * setter 를 열어두면 어디서 뭐가 바뀌는지 추적이 안 됩니다.
@@ -31,13 +29,17 @@ public class User extends BaseEntity {
     @Column(name = "password_hash", nullable = false, length = 255)
     private String passwordHash;
 
-    /** 화면에 노출되는 이름. 이메일 노출을 피하려고 둡니다. */
-    @Column(name = "nickname", nullable = false, length = 50)
+    /** 화면에 노출되는 이름. 다른 회원과 중복될 수 없습니다. */
+    @Column(name = "nickname", nullable = false, unique = true, length = 50)
     private String nickname;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private UserStatus status;
+
+    /** 개발/데모용 합성 회원 여부. 프로덕션 리더보드·리포트는 {@code false} 만 집계합니다(#152). */
+    @Column(name = "is_seed", nullable = false)
+    private boolean seed;
 
     /**
      * JPA 전용 기본 생성자.
@@ -49,11 +51,12 @@ public class User extends BaseEntity {
     protected User() {
     }
 
-    private User(String email, String passwordHash, String nickname) {
+    private User(String email, String passwordHash, String nickname, boolean seed) {
         this.email = email;
         this.passwordHash = passwordHash;
         this.nickname = nickname;
         this.status = UserStatus.ACTIVE;
+        this.seed = seed;
     }
 
     /**
@@ -64,11 +67,23 @@ public class User extends BaseEntity {
      * 안 부르고 {@code .build()} 해도 컴파일이 되지만, 이건 안 됩니다.
      */
     public static User create(String email, String passwordHash, String nickname) {
-        return new User(email, passwordHash, nickname);
+        return new User(email, passwordHash, nickname, false);
+    }
+
+    /** 개발/데모용 합성 회원. {@code is_seed=true} 로 실유저와 분리합니다(#152 시딩). */
+    public static User createSeed(String email, String passwordHash, String nickname) {
+        return new User(email, passwordHash, nickname, true);
     }
 
     public void changeNickname(String nickname) {
         this.nickname = nickname;
+    }
+
+    public void changePasswordHash(String passwordHash) {
+        if (passwordHash == null || passwordHash.isBlank()) {
+            throw new IllegalArgumentException("비밀번호 hash는 필수입니다");
+        }
+        this.passwordHash = passwordHash;
     }
 
     /** 탈퇴는 삭제가 아니라 상태 전환입니다. 원장이 이 회원을 참조하고 있습니다. */
@@ -95,4 +110,9 @@ public class User extends BaseEntity {
     public UserStatus getStatus() {
         return status;
     }
+
+    public boolean isSeed() {
+        return seed;
+    }
+
 }

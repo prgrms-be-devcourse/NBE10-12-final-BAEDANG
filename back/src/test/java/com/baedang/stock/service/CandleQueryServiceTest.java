@@ -1,0 +1,230 @@
+package com.baedang.stock.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.DailyCandle;
+import com.baedang.market.entity.MinuteCandle;
+import com.baedang.market.port.Candle;
+import com.baedang.market.port.CandleInterval;
+import com.baedang.market.port.MarketDataPort;
+import com.baedang.market.repository.CandleAggregateRepository;
+import com.baedang.market.repository.DailyCandleRepository;
+import com.baedang.market.repository.MinuteCandleRepository;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.model.CandleQueryInterval;
+import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class CandleQueryServiceTest {
+
+    private static final Instant NOW = Instant.parse("2026-08-28T01:00:00Z");
+
+    @Mock StockRepository stockRepository;
+    @Mock DailyCandleRepository dailyCandleRepository;
+    @Mock CandleAggregateRepository candleAggregateRepository;
+    @Mock MinuteCandleRepository minuteCandleRepository;
+    @Mock MarketDataPort marketDataPort;
+    @Mock MinuteCandlePersistenceService persistenceService;
+    @Mock StockOnDemandQuoteService stockOnDemandQuoteService;
+    @Mock Stock stock;
+
+    private CandleQueryService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new CandleQueryService(
+                new CandleQueryPolicy(),
+                stockRepository,
+                dailyCandleRepository,
+                candleAggregateRepository,
+                minuteCandleRepository,
+                marketDataPort,
+                persistenceService,
+                new MinuteCandleFetchCache(),
+                stockOnDemandQuoteService,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("005930", MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+        when(stock.getStockId()).thenReturn(10L);
+        when(stock.getSymbol()).thenReturn("005930");
+        Mockito.lenient().when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+        when(stock.getCurrency()).thenReturn("KRW");
+    }
+
+    @Test
+    void 일봉은_명세개수로_조회하고_과거부터_정렬해_문자열로_응답한다() {
+        DailyCandle recent = daily(LocalDate.of(2026, 8, 28), "110");
+        DailyCandle old = daily(LocalDate.of(2026, 8, 27), "100");
+        when(dailyCandleRepository.findByStockIdOrderByTradeDateDesc(
+                ArgumentMatchers.eq(10L), ArgumentMatchers.any()))
+                .thenReturn(List.of(recent, old));
+
+        var response = service.getCandles("005930", "KR", "1d", "6M");
+
+        assertThat(response.interval()).isEqualTo("1d");
+        assertThat(response.range()).isEqualTo("6M");
+        assertThat(response.currency()).isEqualTo("KRW");
+        assertThat(response.items()).extracting(item -> item.close())
+                .containsExactly("100", "110");
+        assertThat(response.items().get(0).at().getOffset()).isEqualTo(ZoneOffset.ofHours(9));
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(dailyCandleRepository).findByStockIdOrderByTradeDateDesc(
+                ArgumentMatchers.eq(10L), pageable.capture());
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(130);
+        verify(marketDataPort, never()).fetchCandles(
+                ArgumentMatchers.any(),
+                ArgumentMatchers.any(),
+                ArgumentMatchers.anyInt());
+        // 랭킹 밖 종목의 일봉 백필(이슈 #75)은 이 훅을 거쳐 이뤄진다 — 실제 채우는 로직
+        // 자체는 StockOnDemandQuoteServiceTest에서 검증한다.
+        verify(stockOnDemandQuoteService).ensureDailyCandles(stock);
+    }
+
+    @Test
+    void 신선한_분봉이_있으면_외부조회없이_최근_200개를_조회한다() {
+        MinuteCandle recent = minute(OffsetDateTime.ofInstant(NOW.minusSeconds(30), ZoneOffset.UTC), "110");
+        when(minuteCandleRepository.findTopByStockIdOrderByCandleAtDesc(10L))
+                .thenReturn(Optional.of(recent));
+        when(minuteCandleRepository.findByStockIdOrderByCandleAtDesc(
+                ArgumentMatchers.eq(10L), ArgumentMatchers.any()))
+                .thenReturn(List.of(recent));
+
+        var response = service.getCandles("005930", "KR", "1m", "1D");
+
+        assertThat(response.items()).hasSize(1);
+        verify(marketDataPort, never()).fetchCandles(
+                ArgumentMatchers.any(),
+                ArgumentMatchers.any(),
+                ArgumentMatchers.anyInt());
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(minuteCandleRepository).findByStockIdOrderByCandleAtDesc(
+                ArgumentMatchers.eq(10L), pageable.capture());
+        assertThat(pageable.getValue().getPageSize()).isEqualTo(200);
+    }
+
+    @Test
+    void 오래된_분봉은_기존_Port로_조회해_저장한_뒤_반환한다() {
+        MinuteCandle stale = minute(OffsetDateTime.ofInstant(NOW.minusSeconds(120), ZoneOffset.UTC), "90");
+        Candle fetched = new Candle(
+                OffsetDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC),
+                new BigDecimal("100"), new BigDecimal("110"), new BigDecimal("90"),
+                new BigDecimal("105"), new BigDecimal("1000"), "KRW");
+        when(minuteCandleRepository.findTopByStockIdOrderByCandleAtDesc(10L))
+                .thenReturn(Optional.of(stale));
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_MINUTE, 200))
+                .thenReturn(List.of(fetched));
+        when(minuteCandleRepository.findByStockIdOrderByCandleAtDesc(
+                ArgumentMatchers.eq(10L), ArgumentMatchers.any()))
+                .thenReturn(List.of(minute(fetched.candleAt(), "105")));
+
+        service.getCandles("005930", "KR", "1m", "1D");
+        service.getCandles("005930", "KR", "1m", "1D");
+
+        verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_MINUTE, 200);
+        verify(persistenceService, times(1)).upsert(10L, MarketCountry.KR, List.of(fetched));
+    }
+
+    @Test
+    void 외부_분봉_통화가_종목시장과_다르면_저장하지_않는다() {
+        Candle mismatched = new Candle(
+                OffsetDateTime.ofInstant(NOW.minusSeconds(10), ZoneOffset.UTC),
+                BigDecimal.ONE, BigDecimal.ONE, BigDecimal.ONE,
+                BigDecimal.ONE, BigDecimal.ONE, "USD");
+        when(minuteCandleRepository.findTopByStockIdOrderByCandleAtDesc(10L))
+                .thenReturn(Optional.empty());
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_MINUTE, 200))
+                .thenReturn(List.of(mismatched));
+
+        assertThatThrownBy(() -> service.getCandles("005930", "KR", "1m", "1D"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.QUOTE_CURRENCY_MISMATCH);
+
+        verify(persistenceService, never()).upsert(
+                ArgumentMatchers.any(), ArgumentMatchers.any(), ArgumentMatchers.any());
+    }
+
+
+    @Test
+    void 오분봉은_집계뷰에서_읽고_분봉_백필은_한_번만_한다() {
+        OffsetDateTime bucket = OffsetDateTime.ofInstant(NOW.minusSeconds(300), ZoneOffset.UTC);
+        when(minuteCandleRepository.findTopByStockIdOrderByCandleAtDesc(10L))
+                .thenReturn(Optional.empty());
+        when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_MINUTE, 200))
+                .thenReturn(List.of());
+        when(candleAggregateRepository.findLatest(CandleQueryInterval.FIVE_MINUTES, 10L, 78))
+                .thenReturn(List.of(aggregate(bucket, "105")));
+
+        var response = service.getCandles("005930", "KR", "5m", "1D");
+        service.getCandles("005930", "KR", "5m", "1D");
+
+        assertThat(response.interval()).isEqualTo("5m");
+        assertThat(response.items()).extracting(item -> item.close()).containsExactly("105");
+        // 뷰를 두 번 읽어도 원본 적재는 60초 캐시 덕에 한 번뿐이다.
+        verify(marketDataPort, times(1)).fetchCandles("005930", CandleInterval.ONE_MINUTE, 200);
+        verify(stockOnDemandQuoteService, never()).ensureDailyCandles(stock);
+    }
+
+    @Test
+    void 주봉은_일봉만_백필하고_토스_분봉은_부르지_않는다() {
+        OffsetDateTime bucket = OffsetDateTime.parse("2026-08-24T00:00:00+09:00");
+        when(candleAggregateRepository.findLatest(CandleQueryInterval.ONE_WEEK, 10L, 26))
+                .thenReturn(List.of(aggregate(bucket, "130")));
+
+        var response = service.getCandles("005930", "KR", "1w", "6M");
+
+        assertThat(response.interval()).isEqualTo("1w");
+        assertThat(response.items()).extracting(item -> item.close()).containsExactly("130");
+        verify(stockOnDemandQuoteService).ensureDailyCandles(stock);
+        verify(marketDataPort, never()).fetchCandles(
+                ArgumentMatchers.any(),
+                ArgumentMatchers.any(),
+                ArgumentMatchers.anyInt());
+    }
+
+    private CandleAggregateRepository.AggregateCandle aggregate(
+            OffsetDateTime bucket, String close) {
+        BigDecimal price = new BigDecimal(close);
+        return new CandleAggregateRepository.AggregateCandle(
+                bucket, price, price, price, price, new BigDecimal("1000"));
+    }
+
+    private DailyCandle daily(LocalDate date, String close) {
+        return new DailyCandle(
+                10L, date, new BigDecimal(close), new BigDecimal(close),
+                new BigDecimal(close), new BigDecimal(close), new BigDecimal("1000"));
+    }
+
+    private MinuteCandle minute(OffsetDateTime at, String close) {
+        return new MinuteCandle(
+                10L, at, new BigDecimal(close), new BigDecimal(close),
+                new BigDecimal(close), new BigDecimal(close), new BigDecimal("1000"));
+    }
+}

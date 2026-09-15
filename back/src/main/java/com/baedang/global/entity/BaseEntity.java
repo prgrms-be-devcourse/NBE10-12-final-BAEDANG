@@ -17,7 +17,8 @@ import java.time.OffsetDateTime;
  * 상속해야 합니다. 없는 테이블이 상속하면 Hibernate 가 컬럼을 찾다가
  * {@code ddl-auto: validate} 단계에서 기동을 거부합니다.
  *
- * <p>현재 이 클래스를 상속하는 테이블은 <b>{@code users}, {@code stock}</b> 둘뿐입니다.
+ * <p>이 클래스를 상속하는 테이블은 {@code users}, {@code stock},
+ * {@code stock_industry}, {@code stock_financial_period}, {@code stock_financial_sync}입니다.
  * 나머지는 시각 컬럼의 의미가 서로 달라서 각자 직접 들고 있습니다 —
  * {@code account} 는 {@code opened_at}/{@code closed_at}(회차의 시작·종료),
  * {@code ledger_entry} 는 {@code occurred_at}(사건 발생 시각),

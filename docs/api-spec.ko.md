@@ -1,14 +1,15 @@
-# 모의 주식 트레이딩 서비스 — API 명세서 (1주차 MVP)
+# 모의 주식 트레이딩 서비스 — API 명세서
 
-> **버전**: 1주차 MVP · 26.08.20 ~ 08.25 · ERD 와 와이어프레임에서 도출 · **인증은 1주차 미구현** — 서버는 시드 사용자 1명(`user_id = 1`)으로 동작 (`AUTH_ENABLED=false`)
+> **버전**: 3주차 MVP · 26.09.03 ~ 09.09 · ERD 와 와이어프레임에서 도출
 >
-> **배지**: 17 엔드포인트 · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
+> **배지**: 18 엔드포인트 · Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 + TimescaleDB · REST · JSON
 
 ## 목차
 - [공통 규칙](#공통-규칙)
 - [인증 · 회원](#인증--회원)
 - [시장](#시장)
 - [종목](#종목)
+- [관심 종목](#관심-종목)
 - [거래](#거래)
 - [계좌](#계좌)
 - [화면 ↔ API 매핑](#화면--api-매핑)
@@ -28,19 +29,20 @@
 
 ### 인증
 
-로그인 후 발급받은 토큰을 헤더에 담습니다.
-```
-Authorization: Bearer {accessToken}
+JWT와 PostgreSQL 로그인 세션을 요청마다 함께 검증합니다 ([Stateful/RTR 정책](authentication.ko.md)). 보호 엔드포인트는 헤더에 토큰을 담아야 합니다:
+```http
+Authorization: Bearer <accessToken>
 ```
 
-- **1주차에는 인증을 구현하지 않습니다.** 회원가입·로그인 화면은 **UX 설계만** 하고, 서버는 **시드 사용자 1명(`user_id = 1`)으로 고정**해 동작합니다 (`AUTH_ENABLED=false` in `.env`). 아래 **🔒 표시된 엔드포인트도 1주차에는 토큰 없이 호출**되며, 서버가 고정 사용자의 계좌를 씁니다.
-- **2주차에 인증 방식(JWT vs 세션 쿠키)을 정하세요.** Next.js 를 쓰신다면 **Route Handler 를 BFF 로 두고 httpOnly 쿠키에 토큰을 담는 방식**이 가장 안전합니다 — 토큰이 브라우저 JS 에 노출되지 않습니다.
+- Access Token 유효기간 기본값은 15분입니다 (`JWT_ACCESS_TTL: 15m`).
+- Refresh Token 유효기간 기본값은 7일입니다 (`JWT_REFRESH_TTL: 7d`).
+- `X-User-Id` 헤더는 더 이상 지원하지 않으며 401 `UNAUTHORIZED`로 거절됩니다.
+- 만료된 토큰은 401 `TOKEN_EXPIRED`, 변조·형식 오류 토큰은 401 `INVALID_TOKEN`을 반환합니다.
 
 | 구분 | 대상 |
 |---|---|
-| 비로그인 허용 | 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
-| 🔒 로그인 필수 | 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 |
-
+| Access 불필요 (갱신·로그아웃은 Refresh 필요) | 회원가입 · 로그인 · 토큰 갱신 · 로그아웃 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
+| 🔒 로그인 필수 | `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 · `/stocks/likes` (POST/GET/DELETE) |
 ### 응답 형식
 
 성공 시 데이터를 **그대로** 반환하고, 목록은 커서를 함께 내려줍니다.
@@ -56,11 +58,10 @@ Authorization: Bearer {accessToken}
 
 ```json
 {
-  "error": {
-    "code": "INSUFFICIENT_CASH",
-    "message": "주문가능금액이 부족합니다.",
-    "data": { "required": "2415242", "available": "1200000" }
-  }
+  "code": "INSUFFICIENT_CASH",
+  "message": "주문가능금액이 부족합니다.",
+  "timestamp": "2026-08-23T14:02:11+09:00",
+  "data": { "required": "2415242", "available": "1200000" }
 }
 ```
 `message` 는 **사용자에게 그대로 보여줄 수 있는 문장**으로 작성합니다.
@@ -76,6 +77,8 @@ Authorization: Bearer {accessToken}
 | 통화 | ISO 4217 | `"KRW"`, `"USD"` |
 
 **금액을 숫자로 내리지 마세요.** JavaScript 의 `number` 는 배정밀도 부동소수라 큰 금액이나 소수점 주문에서 오차가 생깁니다. 토스 API 가 가격을 문자열로 주는 것과 같은 이유입니다. 프론트에서는 **Decimal.js 를 쓰거나 문자열 그대로 표시**하세요.
+
+환율·비율은 계산값을 반올림하지 않고 불필요한 후행 0만 제거합니다. 따라서 DB의 `NUMERIC(19,6)`에서 읽은 `1.000000`도 API에서는 `"1"`이며, 최초 처리와 DB 재조회 응답의 문자열이 같습니다. `avgBuyPrice`는 통화 표시 단위로 미리 반올림하지 않고 이동평균의 저장 정밀도인 소수점 4자리까지 반환합니다. 원화 화면 표시는 프론트에서 마지막에 원 단위 `HALF_UP`으로 반올림합니다.
 
 ### 커서 페이지네이션
 
@@ -113,6 +116,11 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 ## 인증 · 회원
 
+인증 정책은 [Stateful 인증·RTR](authentication.ko.md)을 따릅니다. 백엔드는 토큰 JSON을 반환하지만
+브라우저에는 Next.js 중계가 Refresh를 HttpOnly 쿠키로만 전달합니다. 가입·로그인·갱신 응답의
+`expiresAt`은 세션 절대 만료이며, 갱신은 Access와 Refresh를 함께 교체합니다. 직전 Refresh에만
+고정 20초 유예를 적용합니다. `SESSION_REVOKED`, `REFRESH_TOKEN_REUSED`, `AUTH_UNAVAILABLE`을 구분합니다.
+
 ### `POST /auth/signup`
 회원가입 + 계좌 개설 + 모의 투자금 지급
 
@@ -120,7 +128,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 ```json
 {
   "email": "user@example.com",
-  "password": "********",
+  "password": "Password123!",
   "nickname": "홍길동"
 }
 ```
@@ -129,8 +137,11 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 ```json
 {
   "userId": 1,
+  "email": "user@example.com",
   "nickname": "홍길동",
   "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z",
   "account": {
     "accountId": 1,
     "roundNo": 1,
@@ -143,25 +154,140 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 | 에러 코드 | 상황 |
 |---|---|
-| `DUPLICATE_EMAIL` | 이미 가입된 이메일 |
-| `INVALID_PASSWORD` | 비밀번호 정책 미충족 |
+| `EMAIL_DUPLICATED` | 이미 가입된 이메일 |
+| `NICKNAME_DUPLICATED` | 이미 사용 중인 닉네임 |
+| `INVALID_INPUT` | 이메일/비밀번호/닉네임 형식 오류 |
 
 ### `POST /auth/login`
 **Request**
 ```json
-{ "email": "user@example.com", "password": "********" }
+{
+  "email": "user@example.com",
+  "password": "Password123!"
+}
 ```
-응답은 회원가입과 동일한 형태입니다.
+응답은 회원가입과 동일한 형태입니다 (200 OK).
 
 | 에러 코드 | 상황 |
 |---|---|
-| `LOGIN_FAILED` | 이메일 또는 비밀번호 불일치 |
+| `LOGIN_FAILED` | 이메일 또는 비밀번호 불일치, 또는 비활성(탈퇴/휴면) 회원 |
+
+### `POST /auth/refresh`
+유효한 Refresh Token으로 Access와 Refresh를 함께 교체합니다. 세션 절대 만료는 연장하지 않습니다.
+
+**Request**
+```json
+{
+  "refreshToken": "eyJhbGciOi..."
+}
+```
+
+**Response · 200**
+```json
+{
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z"
+}
+```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `TOKEN_EXPIRED` | 만료된 Refresh Token |
+| `INVALID_TOKEN` | 위조/형식 불일치 토큰이거나 탈퇴 회원 |
+
+### `POST /auth/logout`
+현재 로그인 세션과 해당 Access를 폐기합니다. 백엔드는 `{ "refreshToken": "..." }`를 받아 200 빈 응답을
+반환하고 Access를 요구하지 않습니다. 브라우저 중계는 HttpOnly 쿠키를 읽고 성공 또는 이미 무효인
+세션이면 쿠키를 삭제한 뒤 204를 반환합니다. 비밀번호 변경·탈퇴는 모든 세션을 폐기합니다.
 
 ### `GET /users/me` 🔒
-내 정보
+내 정보 조회
+
+**Response · 200**
 ```json
-{ "userId": 1, "email": "user@example.com", "nickname": "홍길동" }
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "홍길동"
+}
 ```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+
+### `PATCH /users/me` 🔒
+닉네임 변경
+
+**Request**
+```json
+{
+  "nickname": "새닉네임"
+}
+```
+
+**Response · 200**
+```json
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "새닉네임"
+}
+```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+| `NICKNAME_DUPLICATED` | 다른 회원이 이미 사용 중인 닉네임 |
+| `INVALID_INPUT` | 닉네임 길이 2~20자 미충족 |
+
+### `PUT /users/me/password` 🔒
+비밀번호 변경
+
+**Request**
+```json
+{
+  "currentPassword": "Password123!",
+  "newPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+```json
+{
+  "userId": 1,
+  "email": "user@example.com",
+  "nickname": "홍길동"
+}
+```
+
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+| `INVALID_PASSWORD` | 현재 비밀번호 불일치 |
+| `INVALID_INPUT` | 새 비밀번호 정책(8~64자) 미충족 |
+
+### `DELETE /users/me` 🔒
+회원 탈퇴 (Soft-delete: 회원 상태 `WITHDRAWN`, 활성 계좌 `CLOSED` 전환)
+
+**Request**
+```json
+{
+  "currentPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+| 에러 코드 | 상황 |
+|---|---|
+| `UNAUTHORIZED` | 인증 토큰 누락 또는 유효하지 않음 |
+| `USER_NOT_FOUND` | 회원을 찾을 수 없거나 비활성 상태 |
+| `INVALID_PASSWORD` | 현재 비밀번호 불일치 |
+| `ACCOUNT_NOT_FOUND` | 활성 계좌를 찾을 수 없음 |
 
 ---
 
@@ -206,13 +332,13 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 {
   "baseCurrency": "USD",
   "quoteCurrency": "KRW",
-  "rate": "1398.50",
+  "rate": "1398.5",
   "changeRate": "0.0016",
-  "rateAt": "2026-08-11T15:00:00+09:00"
+  "validFrom": "2026-08-11T15:00:00+09:00"
 }
 ```
-배너용 환율은 `exchange_rate` 테이블의 **최신 행**에서 응답합니다. **매시 정각 적재되므로 프론트 폴링도 1시간이면 충분** — 더 자주 불러도 같은 값입니다. 환율은 하루에 0.3~0.5% 정도만 움직입니다.
-**체결에 쓰는 환율은 이 경로가 아닙니다.** 주문 처리 시에는 별도의 **1분 TTL 메모리 캐시**에서 가져옵니다 — 최대 1시간 오래된 값으로 체결하면 안 되니까요.
+배너는 매분 적재하는 `exchange_rate` 최신 행을 조회하며 프론트도 1분마다 폴링합니다. `validFrom`은 수신 시각이 아닌 원본 유효 시작 시각입니다.
+**체결도 동일 DB를 사용**하되 표시용 `midRate` 대신 `rate`를 적용합니다. 사용 전·금융 잠금 후 원본 유효기간과 미래 수신 시각을 검증하며 메모리 TTL이나 요청 경로의 외부 폴백은 없습니다.
 
 ### `GET /exchange-rates/history`
 환율 추이 그래프
@@ -224,12 +350,63 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 ```json
 {
   "items": [
-    { "rateAt": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
-    { "rateAt": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
+    { "validFrom": "2026-07-11T00:00:00+09:00", "rate": "1385.20" },
+    { "validFrom": "2026-07-11T01:00:00+09:00", "rate": "1385.60" }
   ]
 }
 ```
-`exchange_rate` 테이블(매시 정각 적재)에서 집계합니다.
+DB에서 버킷별 마지막 원본만 선택합니다. `1d`는 1분, `1w`는 30분, `1m`은 2시간, `3m`은 6시간, `1y`는 1일 버킷이며 Asia/Seoul(KST) 자정에 정렬합니다. 요청 시작부터 현재까지 조회하고 빈 버킷은 생략합니다. 선택한 원본 `validFrom`과 반올림하지 않은 표시 환율을 보존하며 장기 조회에는 분 단위 원본 전체를 전송하지 않습니다. 시간축과 십자선 라벨은 KST 기준으로 표시하되 시간대 접미사는 붙이지 않습니다. 그래프 간격과 별개로 십자선은 `1d`만 `YYYY-MM-DD HH:mm`, 나머지는 `YYYY-MM-DD`로 표시합니다. 저장 시각은 UTC를 유지합니다.
+
+환율 이력 모달은 열린 상태에서 화면이 보일 때 1분마다 갱신합니다. 최신/이력 요청은 10초 시간 초과 또는 종료 시 취소합니다. 요청은 중복 실행하지 않으며 늦은 응답을 무시합니다. 최신 점이 보이던 경우만 확대 폭을 유지하며 새 데이터를 따라가고 과거 탐색 중이면 표시 시간 범위를 유지합니다. 실패하면 이전 그래프와 안내를 표시한 뒤 다음 주기에 재시도합니다. 최초 조회와 기간 변경 시에만 전체 데이터를 화면에 맞춥니다.
+
+### `GET /market/events`
+시장·KST 날짜별 KRX 시장조치(서킷브레이커 · 사이드카) 이력 — 공개, 로그인 불필요
+
+| 파라미터 | 필수 | 값 |
+|---|---|---|
+| `market` | ✅ | `KOSPI` · `KOSDAQ` (대소문자 무관) |
+| `date` | ✅ | `yyyy-MM-dd`, **KST** 기준 하루 |
+
+```json
+{
+  "market": "KOSPI",
+  "date": "2026-07-13",
+  "items": [
+    {
+      "eventId": 1,
+      "eventType": "CIRCUIT_BREAKER",
+      "stage": 1,
+      "triggeredAt": "2026-07-13T13:28:32+09:00",
+      "haltUntil": "2026-07-13T13:48:32+09:00",
+      "publishedAt": "2026-07-13T13:29:00+09:00",
+      "receivedAt": "2026-07-13T13:29:07+09:00",
+      "active": true,
+      "title": "유가증권시장 매매거래 일시중단(1단계 CB 발동)",
+      "sourceUrl": "https://kind.krx.co.kr/external/2026/07/13/000273/20260713000658/99443.htm"
+    }
+  ]
+}
+```
+
+사이드카는 `stage` 대신 `direction`(`BUY` · `SELL`)을, 서킷브레이커는 `direction` 대신 `stage`(1~3)를 갖습니다. 전역 Jackson `non_null` 설정 때문에 쓰지 않는 필드는 `null`이 아니라 **생략**됩니다.
+
+**응답의 모든 시각은 `+09:00`입니다.** 저장은 UTC로 하고 변환은 응답 경계에서 한 번만 하므로, 클라이언트가 오프셋을 해석할 일이 없습니다.
+
+**`active`는 저장 컬럼이 아니라 판정값입니다.** `triggeredAt <= now < haltUntil`이고 `haltUntil`은 배타적입니다. 구간이 지난 이벤트도 이력에는 남지만 `active: false`로 나옵니다.
+
+**`triggeredAt`의 출처는 RSS `pubDate`가 아닙니다.** `pubDate`는 게시 시각이라 실제 발동보다 늦습니다. 수집기가 KRX 상세 공시를 읽어 그 안에 적힌 실제 발동시각을 씁니다(fixture 실측 19~28초 차이). 수집 경로는 `docs/shared-components.ko.md`를 보세요.
+
+**범위.** 이 엔드포인트는 **서킷브레이커·사이드카만** 반환합니다 — 일반 기업 공시는 제외입니다. 발동이 없던 시장·날짜는 `items: []`입니다. 정렬은 `triggeredAt DESC, eventId DESC`(같은 시각에서도 결정적)이고 응답당 최대 100건입니다. 발생 빈도상 커서 페이지네이션은 두지 않습니다. 해당 시장의 거래일이 아닌 날짜도 `[]`를 반환합니다 — 날짜는 KST 구간 필터일 뿐 거래일 검증이 아닙니다.
+
+`market`이나 `date`를 해석할 수 없으면 위반한 필드를 `data.field`에 담아 `400 INVALID_INPUT`을 반환합니다.
+
+```json
+{
+  "code": "INVALID_INPUT",
+  "message": "입력값이 올바르지 않아요",
+  "data": { "field": "market" }
+}
+```
 
 ---
 
@@ -254,6 +431,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
   "items": [
     {
       "rank": 1,
+      "stockId": 5,
       "symbol": "005930",
       "name": "삼성전자",
       "market": "KOSPI",
@@ -267,7 +445,8 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
       "changeRate": "0.0231",
       "tradingAmount": "1240000000000",
       "quoteAt": "2026-08-11T12:36:59+09:00",
-      "realtime": true
+      "realtime": true,
+      "stockLikeId": 42
     }
   ],
   "nextCursor": "eyJ0YSI6IjEyNDAwMDAwMDAwMDAiLCJpZCI6MTAyNH0",
@@ -275,6 +454,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 }
 ```
 - **`realtime`** — `quoteAt` 이 현재 정규장 시간 내이면 `true`. 프론트가 **"12:36:59 기준 · 실시간"** 과 **"8월 11일 종가"** 를 구분하는 근거입니다.
+- **관심 종목 여부 (#169)** — 랭킹은 계속 비로그인으로 조회할 수 있습니다. 유효한 `Authorization` 헤더를 보내면 그 사용자의 관심 종목에 `stockLikeId`가 채워집니다. 페이지당 `(user_id, stock_id) IN (...)` 조회가 1번 추가됩니다.
+  - 관심 종목이 아니거나 비로그인이면 `stockLikeId` 필드가 응답에서 빠집니다. 필드가 없으면 관심 종목이 아닌 것으로 처리하면 됩니다.
+  - 등록(`POST /stocks/likes`)에는 `stockId`를, 해제(`DELETE /stocks/likes/{id}`)에는 `stockLikeId`를 씁니다.
+  - 만료된 토큰을 보내면 다른 API와 마찬가지로 401 `TOKEN_EXPIRED`입니다.
 - **화면 컬럼 매핑** — 종목명(`name`) · 티커(`symbol`) · 종류(`category`) · 현재가(`lastPrice`) · 전일대비(`changeAmount`, `changeRate`) · 거래대금(`tradingAmount`).
 - `tradingAmount` 는 **최근 1주 누적**(`duration=1w`). **선정 기준이 곧 표시 값**이라 사용자가 "왜 이 순서인지"를 이해할 수 있습니다. 화면에 **"최근 1주 거래대금"** 이라고 밝혀주세요.
 
@@ -301,7 +484,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 }
 ```
 **검색 범위는 전 종목(약 8,500개)으로 확정했습니다.** `stock` 테이블 전체가 대상이며, 상위 100 여부와 무관하게 모두 검색됩니다. 클릭하면 상세 페이지도 정상적으로 열립니다 — 차이는 실시간이냐 전일 종가냐뿐입니다.
-**상위 100 밖 종목은 `quote_snapshot` 이 비어 있습니다** — 스케줄러가 도는 대상은 상위 100 뿐이니까요. **상세를 여는 순간 `/prices` 와 `/candles` 를 함께 호출해 채우고 `quote_snapshot` 에 UPSERT** 해두세요. 한 번 조회된 종목은 다음부터 DB 에서 나갑니다. 검색 결과 목록에 가격을 같이 보여주려면 **20건을 `/prices` 배치 1콜로** 받아오세요 — 종목마다 따로 부르면 20콜이 되어 rate limit 에 걸립니다. **가격 없이 종목명만 먼저 보여주고 클릭 후에 채우는 편이 1주차에는 더 간단합니다.**
+**현재가는 정규장 중 랭킹·활성 지정가 주문 종목만 5초 목표로 수집합니다.** 그 외는 상세 온디맨드 조회와 5초 수집 캐시를 사용합니다. 진행 중 요청을 공유하고 원본 quoteAt은 수집 시각으로 교체하지 않습니다. 비랭킹 주문과 견적에도 랭킹 종목과 동일한 신선도 검증을 적용합니다.
 **토스가 미국 종목에도 한글명을 주므로 "엔비디아"로도 검색됩니다.** 다만 영문명 표기가 일정하지 않아(SamsungElec, HyundaiMtr, KIA CORP.) **공백 제거 + 소문자 정규화 후 부분 일치**를 권합니다. PostgreSQL **생성 컬럼**으로 검색 키를 만들어두면 편합니다.
 **1주차 구현은 `LIKE '%검색어%'` 로 갑니다.** 8,500행이면 풀스캔이어도 수 ms 라 문제되지 않습니다. 다만 앞뒤 `%` 는 인덱스를 타지 않으니, 데이터가 커지면 **`pg_trgm` 확장 + GIN 인덱스**로 바꾸세요 — 쿼리는 그대로 두고 인덱스만 추가하면 됩니다.
 **정렬은 ① 정확 일치 → ② 앞부분 일치 → ③ 부분 일치 순으로 주세요.** "삼성"을 쳤을 때 삼성전자가 미래에셋삼성... 보다 위에 와야 합니다.
@@ -310,8 +493,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 |---|---|
 | `INVALID_QUERY` | 검색어 2자 미만 |
 
-### `GET /stocks/{symbol}`
+### `GET /stocks/{symbol}?marketCountry={KR|US}`
 종목 상세 — 전 종목 대상
+
+`marketCountry`는 필수입니다. 종목은 `(UPPER(symbol), market_country)` 조합으로 식별하므로 동일한 심볼의 국내·미국 종목을 구분합니다.
 
 시세를 어디서 가져올지는 **"그 종목의 시장이 열려 있는가"** 로 갈립니다. 보는 사람의 시각이 아니라 **종목이 속한 시장 기준**입니다 — 한국 낮에 엔비디아를 열면 미국장이 닫혀 있으므로 전일 종가가 나갑니다.
 
@@ -350,6 +535,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
   "warnings": [
     { "type": "INVESTMENT_WARNING", "label": "투자경고" }
   ],
+  "warningsStatus": "AVAILABLE",
   "tradable": true,
   "tradableReason": null
 }
@@ -358,42 +544,131 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 **핵심 필드**
 | 필드 | 의미 |
 |---|---|
+| `warnings` | 토스에서 받은 활성 매수 유의사항. `type`은 원천 코드(`OVERHEATED` · `INVESTMENT_WARNING` · `VI_STATIC` · 미지정 코드)를 그대로 보존하고, `label`은 그 종류의 화면 문구 — `과열종목` · `투자경고` · `변동성완화장치`이고 아직 매핑하지 않은 코드는 `거래유의종목`으로 폴백 |
+| `warningsStatus` | 유의사항 조회 성공 여부. 실패하면 `UNAVAILABLE`. **`UNAVAILABLE`은 "유의사항 없음"이 아니다** — 화면이 깨끗한 종목인 것처럼 배지를 감추면 안 된다 |
 | `tradable` | 지금 이 종목을 거래할 수 있는가 |
 | `tradableReason` | `tradable=false` 일 때의 사유 코드 |
+
+**유의사항은 정보성이며 거래를 막지 않는다.** `warnings`는 토스 유의사항 API를 종목별 짧은 TTL 캐시로 읽으므로, 상세 화면의 폴링이 갱신마다 외부 호출을 한 번씩 쓰지 않는다. `[startDate, endDate]` 구간에 오늘이 포함된 유의사항만 반환합니다. 조회가 실패해도 `tradable`/`tradableReason`은 바뀌지 않습니다. **문구는 백엔드가 정하고**(`tools/terms.md` 표기) 프론트는 `label`을 그대로 표시합니다 — 같은 사실을 두 곳에서 번역하지 않습니다.
 
 **`tradableReason` 값**
 | 코드 | 화면 문구 |
 |---|---|
 | `MARKET_CLOSED` | 장 마감 · 09:00~15:30 거래 가능 |
-| `NOT_IN_UNIVERSE` | 이 종목은 아직 거래를 지원하지 않아요 |
+| `STOCK_NOT_TRADABLE` | 현재 거래를 지원하지 않는 종목이에요 |
 | `SUSPENDED` | 거래정지 종목 |
 | `LIQUIDATION` | 정리매매 종목 |
+| `QUOTE_NOT_FOUND` | 아직 적재된 시세가 없음 |
 
-`quote_snapshot` 이 전 종목을 담고 있어서, **상위 100 여부와 무관하게 이 엔드포인트 하나로 모든 종목의 상세가 응답**됩니다. 차이는 `realtime` 과 `tradable` 두 플래그뿐이라 **프론트가 분기를 짤 필요가 없습니다.**
+`quote_snapshot` 적재는 별도 시세 적재 작업이 담당합니다. 아직 시세가 없는 경우에도 종목 메타데이터와 null 가격 필드를 반환하며 `realtime: false`, `tradable: false`, `tradableReason: "QUOTE_NOT_FOUND"`로 표시합니다.
 
 | 에러 코드 | 상황 |
 |---|---|
 | `STOCK_NOT_FOUND` | 존재하지 않는 심볼 |
+| `INVALID_INPUT` | `marketCountry` 누락 또는 KR/US 이외의 값 |
 
+
+### `GET /stocks/{symbol}/financials?marketCountry=KR`
+국내 종목 산업분류 및 재무제표 조회 — 캐시 우선
+
+`GET /stocks/{symbol}`에는 KIS 외부 호출을 섞지 않으며(시세 지연 및 가용성 보호), 기업 재무정보는 이 전용 엔드포인트로 조회합니다.
+
+| 파라미터 | 필수 | 값 |
+|---|---|---|
+| `marketCountry` | O | 시장 식별자 — `KR`만 지원 |
+
+**응답 · 200**
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "dataStatus": "FRESH",
+  "industry": {
+    "standard": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "large": { "code": "03", "name": "제조업" },
+    "medium": { "code": "0326", "name": "전자부품, 컴퓨터, 영상, 음향 및 통신장비 제조업" },
+    "small": { "code": "03261", "name": "반도체 제조업" }
+  },
+  "annual": [
+    {
+      "statementYearMonth": "202512",
+      "balanceSheet": {
+        "currentAssets": "...",
+        "fixedAssets": "...",
+        "totalAssets": "...",
+        "currentLiabilities": "...",
+        "fixedLiabilities": "...",
+        "totalLiabilities": "...",
+        "capitalStock": "...",
+        "capitalSurplus": "...",
+        "retainedEarnings": "...",
+        "totalEquity": "..."
+      },
+      "incomeStatement": {
+        "sales": "...",
+        "operatingProfit": "...",
+        "netIncome": "..."
+      },
+      "ratios": {
+        "salesGrowthRate": "...",
+        "operatingProfitGrowthRate": "...",
+        "netIncomeGrowthRate": "...",
+        "roe": "...",
+        "eps": "...",
+        "salesPerShare": "...",
+        "bps": "...",
+        "reserveRatio": "...",
+        "debtRatio": "...",
+        "netProfitMargin": "...",
+        "operatingProfitMargin": "..."
+      }
+    }
+  ],
+  "quarterly": [],
+  "syncedAt": {
+    "industry": "2026-09-08T00:00:00Z",
+    "annual": "2026-09-08T00:00:01Z",
+    "quarterly": "2026-09-08T00:00:02Z"
+  }
+}
+```
+
+- **데이터 형식**: 모든 금액과 비율은 정밀도 보존을 위해 불필요한 후행 0이 없는 문자열(`FinancialDecimalFormatter.plain`)로 내려줍니다. `annual`, `quarterly` 배열은 결산연월(`statementYearMonth`) 내림차순 정렬입니다. null 필드는 백엔드 전역 `non_null` 정책에 따라 JSON에서 생략됩니다.
+- **영업이익률 (`operatingProfitMargin`)**: 조회 시점에 `operatingProfit × 100 ÷ sales`로 계산하며 소수점 6자리 `HALF_UP`으로 반올림합니다. `sales`가 0 또는 null이면 null로 반환합니다.
+- **`dataStatus`**:
+  - `FRESH`: 세 그룹(산업 30일 / 30d, 재무 7일 / 7d)이 모두 TTL 안이거나 방금 갱신에 성공함. 정상 빈 응답으로 적재된 negative cache도 TTL 안이면 `FRESH`입니다.
+  - `STALE`: 갱신이 필요하여 외부 KIS 호출을 시도했으나 실패하고 기존 캐시를 폴백으로 반환함.
+
+| 에러 코드 | HTTP | 상황 |
+|---|---|---|
+| `INVALID_INPUT` | 400 | `marketCountry` 파라미터 누락 또는 형식 오류 |
+| `STOCK_NOT_FOUND` | 404 | 존재하지 않는 종목 |
+| `FINANCIALS_NOT_SUPPORTED` | 422 | 미국 주식, ETF, ETN 또는 6자리 숫자가 아닌 국내 종목코드 |
+| `KIS_RATE_LIMITED` | 429 | KIS 호출 제한 발생 및 반환할 기존 캐시 없음 |
+| `KIS_API_ERROR` | 502 | KIS 외부 통신/계약 오류 발생 및 반환할 기존 캐시 없음 |
+| `KIS_API_UNAVAILABLE` | 503 | KIS 비활성화(`kis.enabled=false`) 상태이며 필요한 그룹의 캐시 없음 |
 ### `GET /stocks/{symbol}/candles`
 일봉 · 분봉 차트
 
 | 파라미터 | 필수 | 값 |
 |---|---|---|
+| `marketCountry` | O | 심볼이 속한 시장 — `KR` · `US` |
 | `interval` | O | 봉 하나의 시간 단위 — `1m` · `5m` · `10m` · `1d` · `1w` |
-| `range` | O | 조회 기간 — `1D` · `1W` · `1M` · `6M` · `1Y` · `3Y` |
+| `range` | O | 조회 기간 — `1D` · `1W` · `1M` · `6M` · `1Y` |
 
 **유효 조합 — 그 외는 400 으로 거절**
 
 | interval | 허용 range | 봉 개수 | 데이터 출처 |
 |---|---|---|---|
-| `1m` | `1D` | 약 390 | 상위 100: 1분 주기 스케줄러 · 그 외 종목: 토스 `/candles?interval=1m` 온디맨드 |
-| `5m` | `1D` · `1W` | 78 / 390 | 1분봉을 집계 |
-| `10m` | `1W` | 195 | 1분봉을 집계 |
+| `1m` | `1D` | 최근 200 | 상위 100: 1분 주기 스케줄러 · 그 외 종목: 토스 `/candles?interval=1m` 온디맨드 |
+| `5m` | `1D` · `1W` | 78 / 390 | `candle_5m` (1분봉 연속 집계 뷰) |
+| `10m` | `1W` | 195 | `candle_10m` (1분봉 연속 집계 뷰) |
 | `1d` | `1M` · `6M` · `1Y` | 22 / 130 / 250 | `daily_candle` |
-| `1w` | `3Y` | 156 | 일봉을 집계 |
+| `1w` | `6M` · `1Y` | 26 / 52 | `candle_1w` (일봉 연속 집계 뷰) |
 
-**토스는 `1m` 과 `1d` 두 가지만 제공합니다.** 5m·10m·1w 는 우리가 집계해서 만들어야 합니다(1분봉 200개를 5개씩 묶으면 5분봉 40개). **`1m` + `1Y` 같은 조합은 반드시 막으세요** — 1분봉으로 1년이면 12만 개가 됩니다.
+**토스는 `1m` 과 `1d` 두 가지만 제공합니다.** 5m·10m·1w 는 우리가 만듭니다 — 자바로 묶지 않고 TimescaleDB 연속 집계 뷰에 맡깁니다. **`1m` + `1Y` 같은 조합은 반드시 막으세요** — 1분봉으로 1년이면 12만 개가 됩니다.
+
+**데이터가 모자라면 있는 만큼만 돌려줍니다.** `5m+1W`(1분봉 1,950개 필요) 처럼 원본이 부족한 조합은 채워질 때까지 짧은 차트가 나옵니다. 분봉 백필이 토스 상한인 200개라 한 번에 메울 수 없습니다.
 
 **Response**
 ```json
@@ -415,20 +690,20 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 }
 ```
 
-**마지막 봉은 현재가로 갱신해 내려줍니다.** 장중에는 오늘 봉이 확정되지 않았으므로 `daily_candle` 의 과거 봉 + `quote_snapshot.last_price` 로 만든 오늘 봉을 붙입니다. 그러면 프론트가 차트를 다시 안 받아도 **끝점이 살아 움직입니다.**
-**우리 API 에는 200봉 제한이 없습니다.** 토스의 `count` 상한 200 은 **수집할 때만** 해당합니다(일봉 200개 ≈ 10개월이라 1년치는 `before` 로 두 번 받습니다). `daily_candle` 에 쌓아두면 250봉을 그대로 내려주면 됩니다.
+MVP 일봉은 저장된 `daily_candle`을 반환합니다. 신규 저장은 확정 일봉만 허용하며 기존 개발 이력은 소급 검증 없이 조회를 유지합니다. `quote_snapshot.last_price`만으로는 당일 시가·고가·저가를 알 수 없으므로 임의의 오늘 OHLC를 만들지 않습니다. 현재가는 `GET /stocks/{symbol}`에서 별도로 표시합니다.
+**우리 API의 1Y 응답 상한은 250봉이지만, 온디맨드 최초 백필은 외부 API 한 번으로 최신 200봉만 수집합니다.** 상세 또는 어떤 일봉 차트 요청으로 먼저 진입해도 같은 200봉을 저장하며, 이후 1M·6M·1Y 전환은 DB 데이터를 재사용합니다. 백필 완료 후에는 시장 캘린더의 장 마감 10분 뒤를 기준으로 최신 확정 거래일과 DB 최신 일봉을 비교하고, 유니버스 밖 종목도 오래된 경우에만 최신 200봉을 다시 UPSERT합니다. 같은 실행 중 같은 확정 거래일에 성공한 최신화 요청은 반복하지 않습니다. 따라서 저장 이력이 없는 종목의 1Y 응답은 최대 200봉이고, 스케줄러 등 별도 적재 이력이 더 있으면 최대 250봉을 반환합니다.
 
 | 에러 코드 | 상황 |
 |---|---|
 | `INVALID_INTERVAL_RANGE` | 허용되지 않은 interval × range 조합 |
 | `STOCK_NOT_FOUND` | 존재하지 않는 심볼 |
 
-**1주차 범위는 `1d` 와 `1m` 둘입니다.** 일봉은 `daily_candle`(스케줄러가 마감 후 적재)에서 제공합니다. 랭킹 상위 100종목의 분봉은 `MARKET_DATA_CHART` 별도 5 TPS 그룹에서 20종목 단위로 순차 호출해 1분마다 수집합니다. 상위 100 밖 종목과 장외 상세 차트는 `minute_candle` 60초 캐시를 사용하는 온디맨드 방식입니다. 5m·10m·1w 집계는 2주차로 미룹니다.
+**지원 조합은 `1m+1D`, `5m+1D/1W`, `10m+1W`, `1d+1M/6M/1Y`, `1w+6M/1Y` 입니다.** 나머지는 `INVALID_INTERVAL_RANGE`로 거절합니다. 일봉은 `daily_candle`(스케줄러가 마감 후 적재)에서, 5m·10m·1w 는 연속 집계 뷰에서 제공합니다. 랭킹 상위 100종목의 분봉은 `MARKET_DATA_CHART` 별도 20 TPS 그룹에서 20종목 단위로 순차 호출해 1분마다 수집합니다. 상위 100 밖 종목과 장외 상세 차트는 `minute_candle` 60초 캐시를 사용하는 온디맨드 방식입니다.
 
 **분봉은 상위 100종목은 스케줄러로 수집하고, 그 외에는 온디맨드로 60초 캐싱합니다**
 ```
 // 1주차 분봉 처리 흐름
-GET /stocks/NVDA/candles?interval=1m&range=1D
+GET /stocks/NVDA/candles?marketCountry=US&interval=1m&range=1D
    ↓
 minute_candle 에 60초 이내 데이터가 있나?
    ├ 있다  → DB 에서 바로 반환                      토스 호출 없음
@@ -437,25 +712,167 @@ minute_candle 에 60초 이내 데이터가 있나?
              DB 에서 반환
 ```
 **장외 시간이나 다른 나라 종목도 똑같이 동작합니다.** 장이 닫힌 종목에 `/candles` 를 부르면 마지막 장의 분봉이 그대로 옵니다 — 한국 낮에 엔비디아를 열면 전일 종가 + 지난 미국장 분봉 차트가 보입니다. 프론트는 `realtime` 값으로 "실시간 / 종가" 문구만 바꾸면 되고, **차트 자체는 분기가 필요 없습니다.** 빈 차트는 "고장난 화면"으로 읽히므로 **거래 불가와 조회 불가를 반드시 분리하세요.**
-상위 100종목 수집기는 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위로 순차 호출하며 1분마다 실행합니다. 상위 100 밖 상세 요청은 온디맨드로만 처리하고 60초 캐시를 재사용하므로 아무도 보지 않는 종목까지 계속 수집하지 않습니다. 2주차에는 지정가 체결 판정과 5m·10m 집계를 추가합니다.
+상위 100종목 수집기는 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위로 순차 호출하며 1분마다 실행합니다. 상위 100 밖 상세 요청은 온디맨드로만 처리하고 60초 캐시를 재사용하므로 아무도 보지 않는 종목까지 계속 수집하지 않습니다. 2주차에는 지정가 체결 판정을 추가합니다.
 **한 번에 받을 수 있는 봉은 200개.** 국내 정규장 09:00~15:30 은 330분이라 하루치를 다 받으려면 `before` 로 2회 호출해야 합니다. **1주차 차트를 "최근 200분"으로 잡으면 1콜로 끝납니다** — 기본은 1콜로 두고 전체 보기를 누를 때만 2콜을 쓰는 편이 단순합니다.
 **실측 필요** — `before` 가 inclusive 인지, 마감 동시호가 봉(15:30)이 존재하는지. 15:30 봉이 없으면 330개가 아니라 329개입니다. 경계 봉이 중복돼도 `PRIMARY KEY (stock_id, candle_at)` 라 `ON CONFLICT DO NOTHING` 이 걸러줍니다.
+
+
+### `GET /stocks/{symbol}/orderbook?marketCountry={KR|US}`
+현재가 기반 가상 호가·가상 잔량 조회
+
+모든 사용자가 동일한 가상 호가 스냅샷을 공유하며, V2는 각 방향 0~10개 레벨을 반환합니다. 국내는 검증된 당일 상하한가, 모든 시장은 양수 유효 가격 및 저장 범위 경계에서 생성을 종료하며 한쪽 또는 양쪽이 비어 있을 수 있습니다. 조회 요청은 호가를 새로 생성하지 않으며 DB에 저장된 활성 버전을 기준으로 단일 SQL 스냅샷으로 조회합니다.
+
+| 항목 | 필수 | 설명 |
+|---|---|---|
+| `symbol` (경로 파라미터) | O | 종목 심볼 (예: `005930`, `NVDA`) |
+| `marketCountry` (쿼리 파라미터) | O | 시장 국가 (`KR` / `US`, 대소문자 무관). 누락 또는 미지원 시 400 |
+| 없음 | - | `depth`, `page`, `cursor` 파라미터는 받지 않으며, 서버는 V2의 방향별 가능한 레벨 전부를 반환합니다 (각 0~10개) |
+
+**Response 200** — `basePrice`와 레벨 `price`는 통화별 문자열입니다. KRW는 소수점 없는 원 단위, USD는 정확히 소수점 둘째 자리까지 표현합니다. 레벨 `quantity`는 `FinancialDecimalFormatter.plain()` 규칙의 문자열입니다. `initialQuantity`는 내부 감사용이며 공개 API에는 노출하지 않습니다.
+```json
+{
+  "symbol": "005930",
+  "marketCountry": "KR",
+  "bookVersion": 1042,
+  "revision": 3,
+  "basePrice": "72000",
+  "currency": "KRW",
+  "quoteAt": "2026-09-03T01:15:30Z",
+  "generatedAt": "2026-09-03T01:15:33Z",
+  "virtual": true,
+  "description": "현재가 기반 가상 호가·가상 잔량",
+  "asks": [
+    { "level": 1, "price": "72100", "quantity": "1500" },
+    { "level": 2, "price": "72200", "quantity": "1440" },
+    { "level": 3, "price": "72300", "quantity": "1380" },
+    { "level": 4, "price": "72400", "quantity": "1290" },
+    { "level": 5, "price": "72500", "quantity": "1200" },
+    { "level": 6, "price": "72600", "quantity": "1080" },
+    { "level": 7, "price": "72700", "quantity": "960" },
+    { "level": 8, "price": "72800", "quantity": "840" },
+    { "level": 9, "price": "72900", "quantity": "720" },
+    { "level": 10, "price": "73000", "quantity": "600" }
+  ],
+  "bids": [
+    { "level": 1, "price": "71900", "quantity": "1800" },
+    { "level": 2, "price": "71800", "quantity": "1720" },
+    { "level": 3, "price": "71700", "quantity": "1650" },
+    { "level": 4, "price": "71600", "quantity": "1550" },
+    { "level": 5, "price": "71500", "quantity": "1440" },
+    { "level": 6, "price": "71400", "quantity": "1300" },
+    { "level": 7, "price": "71300", "quantity": "1150" },
+    { "level": 8, "price": "71200", "quantity": "1000" },
+    { "level": 9, "price": "71100", "quantity": "860" },
+    { "level": 10, "price": "71000", "quantity": "720" }
+  ]
+}
+```
+
+- `asks`는 매도 호가(최우선 매도 ASK 1부터 가격 오름차순 0~10개 레벨).
+- `bids`는 매수 호가(최우선 매수 BID 1부터 가격 내림차순). 각 방향은 0~10개이며 국내 하한가 또는 양수 유효 가격 경계까지 반환합니다. 빈 배열은 해당 방향의 유동성 부족이며 데이터 오류와 구분합니다.
+- 응답의 `bookVersion`, `revision`, 레벨들은 단일 DB statement 스냅샷으로 일관성이 보장됩니다.
+
+**Errors**
+
+| 에러 코드 | HTTP | 발생 상황 |
+|---|---|---|
+| `INVALID_INPUT` | 400 | `marketCountry` 파라미터 누락 또는 미지원 (`KR`, `US` 외) |
+| `STOCK_NOT_FOUND` | 404 | 존재하지 않는 종목 심볼 |
+| `ORDER_BOOK_UNAVAILABLE` | 503 | 거래 불가 종목(정지·정리매매·유니버스 이탈), 장 마감/세션 만료, 15초 초과 지연 시세, 미래 시세, 통화 불일치, 활성 버전 없음/불완전 |
+
+GET 에러 응답은 주문 접수용 `retryPolicy`를 반환하지 않으며, 클라이언트는 일반 폴링 주기에 따라 재조회합니다.
+---
+
+## 관심 종목
+
+관심 종목 API입니다 (#169). 회원×종목 한 쌍당 최대 한 행이며, `stock_like`의 유니크 제약 `(user_id, stock_id)`로 보장합니다. **등록과 삭제는 중복 때문에 오류가 나지 않습니다.** 이미 등록된 종목을 다시 등록하거나 없는 id를 삭제해도 행을 바꾸지 않고 200을 돌려줍니다. 동시에 같은 요청이 들어와도 500이 나지 않습니다.
+
+### `POST /stocks/likes` 🔒
+관심 종목 등록
+
+**Request**
+```json
+{ "stockId": 5 }
+```
+
+**Response · 200**
+```json
+{ "stockLikeId": 42 }
+```
+새로 등록했든 이미 있었든 같은 `stockLikeId`를 돌려줍니다. 그래서 랭킹 폴링이 멈추는 장 마감 중에도 등록 직후 바로 해제할 수 있습니다.
+- 서버 처리: `INSERT ... ON CONFLICT (user_id, stock_id) DO NOTHING` 후 `(user_id, stock_id)`로 행을 조회합니다.
+- READ COMMITTED에서는 두 번째 조회가 새 시점으로 실행되므로, 동시 요청이 먼저 커밋한 행도 보입니다.
+
+| 에러 | 조건 |
+|---|---|
+| 400 `INVALID_INPUT` | `stockId` 누락 |
+| 404 `STOCK_NOT_FOUND` | 해당 `stockId`의 종목이 없음 |
+
+### `GET /stocks/likes` 🔒
+관심 종목 목록 · 최신 등록순 · 커서 페이지네이션
+
+| 파라미터 | 필수 | 설명 |
+|---|---|---|
+| `cursor` | — | 이전 응답의 `nextCursor` |
+| `size` | — | 기본 20, 최대 50 |
+
+**Response**
+```json
+{
+  "items": [
+    {
+      "stockLikeId": 42,
+      "stockId": 5,
+      "symbol": "005930",
+      "name": "삼성전자",
+      "marketCountry": "KR",
+      "prevClose": "236050",
+      "lastPrice": "241500",
+      "changeRate": "0.023089"
+    }
+  ],
+  "nextCursor": "NDI",
+  "hasNext": false
+}
+```
+- **커서**: 원장 조회와 같은 방식으로, 불투명한 `stock_like_id`입니다.
+  - 쿼리는 `WHERE user_id = ? AND stock_like_id < :cursor ORDER BY stock_like_id DESC LIMIT :size + 1`입니다.
+  - `nextCursor`는 마지막 페이지에도 채워지니, 계속 조회할지는 `hasNext`로 판단합니다.
+  - 잘못된 커서는 400 `INVALID_CURSOR`입니다.
+- **가격**: 랭킹과 같은 방식으로 종목 통화 기준 문자열이며, `quote_snapshot`에서 읽습니다.
+  - 시세가 한 번도 수집되지 않은 종목은 종목 상세와 같은 경로(`StockOnDemandQuoteService.ensureQuote`)로 온디맨드 조회합니다. 종목당 최대 1번입니다.
+  - 토스 호출이 실패하면 가격 세 필드만 빠지고 목록은 200으로 응답합니다.
+  - 이미 있지만 오래된 시세는 여기서 갱신하지 않습니다. 그래서 랭킹 밖 종목은 다른 경로로 수집되기 전까지 가격이 멈춰 있을 수 있습니다.
+- **폴링**: 관심 종목 화면은 종목마다 `GET /stocks/{symbol}`을 부르지 말고 이 API 하나만 폴링합니다. 종목별 상세 폴링은 요청이 종목 수만큼 늘고 토스 온디맨드 호출로 이어질 수 있습니다.
+- **트랜잭션**: 서비스는 바깥 트랜잭션 없이 실행됩니다(`propagation = NEVER`). 리포지토리 조회와 온디맨드 시세 저장이 각자 짧은 트랜잭션을 쓰므로, 토스 호출 동안 DB 연결을 붙잡지 않습니다.
+
+### `DELETE /stocks/likes/{id}` 🔒
+관심 종목 해제
+
+`{id}`는 등록 응답, 랭킹 항목, 관심 종목 목록 항목의 `stockLikeId`입니다. 서버는 `WHERE user_id = :현재사용자 AND stock_like_id = :id`로 삭제하므로, 다른 사용자의 id로는 아무것도 지워지지 않습니다.
+
+**Response · 200**: 빈 본문입니다. id가 없거나 다른 사용자의 것이어도 200이며, 다른 사용자의 행이 있는지는 응답으로 드러나지 않습니다. 숫자가 아닌 `id`는 400 `INVALID_INPUT`입니다.
 
 ---
 
 ## 거래
 
-### `GET /orders/quote` 🔒
+### `GET /orders/quote/market` 🔒
 수수료 · 세금 미리보기
 
+시장가 견적은 세션 조회 시작 시 닫힌 시장을 같은 요청 안에서 개장으로 재판정하지 않습니다. 조회 중 개장하면 다음 견적 요청에 반영합니다. 외부 조회 완료 시 원본 환율이 만료되었으면 시세도 오래되었더라도 `EXCHANGE_RATE_NOT_FOUND` 오류가 우선하며, 만료 환율로 계산한 견적은 반환하지 않습니다.
+
 ```
-?symbol=005930&side=BUY&quantity=10
+?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
+
+`marketCountry`는 `KR` 또는 `US`이며 필수입니다. 심볼은 시장마다 중복될 수 있으므로 서버는 `(symbol, marketCountry)`로 종목을 식별합니다.
 
 **Response**
 ```json
 {
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10",
   "executedPrice": "241500",
@@ -475,10 +892,13 @@ minute_candle 에 60초 이내 데이터가 있나?
 ```
 매수   netAmount = grossAmount + fee           (예수금에서 차감)
 매도   netAmount = grossAmount − fee − tax     (예수금으로 입금)
-grossAmount = executedPrice × quantity × exchangeRate
-fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공통)
-  tax         = KR grossAmount × 0.002                  (국내 매도만)
-             = max(USD grossAmount × 0.0000206, $0.01)  (미국 SEC Fee, 매도만)
+KR grossAmount = round(executedPriceKrw × quantity, 0)
+US priceUsd    = round(executedPriceUsd, 2)
+US grossAmount = round(priceUsd × quantity × exchangeRate, 0)
+fee            = round(grossAmount × 0.0001, 0)  거래 수수료 0.01% (매수·매도 공통)
+KR tax         = round(grossAmount × 0.002, 0)   (국내 매도만)
+US secFeeUsd   = round(max(priceUsd × quantity × 0.0000206, $0.01), 2)
+US tax         = round(secFeeUsd × exchangeRate, 0) (미국 매도만)
 ```
 **예시 — 삼성전자 10주 @ 241,500**
 ```
@@ -486,22 +906,62 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 매도  gross 2,415,000 − fee   242 − tax 4,830  = 2,409,928 입금
 ```
 - **시장별 요율을 `.env` 설정값으로 두고 하드코딩하지 마세요.** 국내 매도 세금은 0.2%, 미국 매도는 증권거래세 대신 SEC Fee `0.0000206`과 최소 `$0.01`을 적용합니다. 거래 수수료 0.01%는 두 시장 모두 적용합니다.
-- **두 단계로 반올림합니다.** 미국 주문은 달러로 계산해 센트 단위로 먼저 반올림하고(`$0.01` 최소 포함), 최종 금액을 원화로 환산해 원 단위 **HALF_UP**으로 반올림합니다. 국내 주문은 원화 gross 를 먼저 반올림한 뒤 fee·tax 를 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
+- 통화 경계마다 **HALF_UP**으로 반올림합니다. 미국 주문은 주당 달러 가격을 센트로 먼저 반올림합니다. 그 가격으로 `grossKrw`를 계산하고, 거래 수수료와 `secFeeUsd → secFeeKrw`도 각각 원 단위로 반올림합니다. 국내 주문은 원화 gross를 먼저 반올림한 뒤 fee·tax를 각각 계산하고 다시 반올림합니다. 최종 원장 금액은 정수로 보존해야 합계 불변식이 맞습니다.
 - **견적과 실제 체결 사이에 가격이 바뀔 수 있습니다.** 견적은 참고값이고, 체결 시점에 서버가 다시 계산합니다.
 
-### `POST /orders` 🔒
+### `POST /orders/market` 🔒
 매수 · 매도 (시장가 즉시 체결)
 
 **Request**
 ```json
 {
+  "accountId": 42,
   "clientOrderId": "018f2c9e-4a1b-7c3d-9e5f-1a2b3c4d5e6f",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10"
 }
 ```
-`clientOrderId` 는 프론트가 **UUID v4 로 생성**합니다. 주문 화면 진입 시 한 번 만들고, 성공하면 새로 발급합니다. **같은 값으로 재요청하면 중복 체결 대신 기존 주문 결과를 반환**합니다 — 버튼 두 번 클릭과 네트워크 재시도를 모두 막습니다.
+`accountId`는 주문을 시작한 계좌 회차를 고정합니다. 주문 처리 중 포트폴리오가 초기화되어 해당 계좌가 `CLOSED`가 되면 새 ACTIVE 계좌로 주문을 넘기지 않고 `ACCOUNT_ROUND_CHANGED`로 거절합니다. 계좌 정보를 새로 조회한 뒤 사용자가 다시 주문할 때는 최신 `accountId`와 새로운 `clientOrderId`를 사용합니다. 이미 처리된 주문의 동일 요청 재시도는 계좌가 이후 종료되었더라도 최초 저장 결과를 반환합니다.
+
+`clientOrderId` 는 프론트가 **UUID v4 로 생성**하며 한 계좌 안에서 한 번의 의도적인 주문을 식별합니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지하고, 사용자가 새 주문을 추가할 때는 새 값을 발급합니다. **같은 값과 요청 내용으로 재요청하면 시장 API 호출 없이 저장된 결과를 반환하고, 같은 값에 다른 요청 내용을 보내면 충돌로 거절합니다.**
+
+실패 응답의 `data.retryPolicy`가 재시도 시 `clientOrderId` 처리 방법을 알려줍니다. `SAME_CLIENT_ORDER_ID`는 주문 행이 만들어지지 않은 실패이므로 같은 ID로 안전하게 재시도하고, `NEW_CLIENT_ORDER_ID`는 `REJECTED` 행이 최종 결과로 저장된 실패이므로 조건이 바뀐 뒤 새 ID를 발급합니다. `NOT_RETRYABLE`은 같은 ID의 요청 내용 충돌처럼 그대로 재전송해도 성공할 수 없는 요청입니다.
+
+```json
+{
+  "code": "MARKET_CONTEXT_EXPIRED",
+  "message": "시장 정보를 다시 확인한 뒤 주문해주세요",
+  "timestamp": "2026-08-27T10:30:00+09:00",
+  "data": {
+    "retryPolicy": "SAME_CLIENT_ORDER_ID"
+  }
+}
+```
+
+클라이언트는 HTTP 상태나 오류 코드만으로 ID 재사용 여부를 추론하지 않고, 응답에 포함된 `data.retryPolicy`를 우선합니다. `retryPolicy`가 없는 잘못된 JSON 등의 요청은 기존 요청을 그대로 자동 재전송하지 않습니다.
+
+**서킷브레이커 거절 데이터.** 주문 시장에 활성 서킷브레이커가 있어 신규 주문이 거절되면 `data`에 거절을 일으킨 이벤트의 공개 필드와 `retryPolicy`가 담깁니다. 모든 시각은 `+09:00`입니다.
+
+차단은 **KOSPI·KOSDAQ의 국내 종목에만** 적용합니다. 미국 종목과 `KR_ETC`는 차단하지 않고, 사이드카는 일반 주문을 막지 않습니다 — 프로그램 매매 호가만 정지시킵니다. 판정은 트랜잭션 밖 사전 검증이 아니라 account 잠금 뒤 거래 트랜잭션 안에서 수행합니다.
+
+```json
+{
+  "code": "MARKET_TRADING_HALTED",
+  "message": "현재 해당 시장의 매매거래가 일시 중단됐어요",
+  "data": {
+    "market": "KOSPI",
+    "eventType": "CIRCUIT_BREAKER",
+    "stage": 1,
+    "triggeredAt": "2026-07-13T13:28:32+09:00",
+    "haltUntil": "2026-07-13T13:48:32+09:00",
+    "retryPolicy": "NEW_CLIENT_ORDER_ID"
+  }
+}
+```
+
+거절 주문 행은 판정에 사용한 `market_event_id`를 저장합니다. 같은 `clientOrderId`로 재요청하면 **그 정확한 이벤트**의 데이터를 재생하므로, 서킷브레이커가 만료된 뒤나 더 긴 다른 서킷브레이커가 늦게 수집된 뒤에도 최종 응답이 바뀌지 않습니다. 시장가 거절은 quote/reference/rate 증거를 남기지 않고, 지정가 거절은 멱등 비교에 필요한 사용자 입력 가격·통화와 접수 환율만 유지하며 quote 증거와 동결은 남기지 않습니다.
 
 **Response · 201**
 ```json
@@ -509,6 +969,7 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "orderId": 1024,
   "status": "FILLED",
   "symbol": "005930",
+  "marketCountry": "KR",
   "side": "BUY",
   "quantity": "10",
   "executedPrice": "241500",
@@ -520,35 +981,62 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "quoteAt": "2026-08-11T12:36:59+09:00",
   "orderedAt": "2026-08-11T12:37:02+09:00",
   "account": {
-    "cashBalance": "45824758",
-    "totalAsset": "50412300"
+    "cashBalanceAfter": "45824758"
   }
 }
 ```
-**응답에 갱신된 계좌 요약을 포함**하면 프론트가 재조회하지 않아도 됩니다.
+주문 응답의 `cashBalanceAfter`는 현재 조회 시점 잔액이 아니라 해당 주문의 최초 체결 원장에 기록된 **체결 직후 잔액**입니다. 멱등 재응답에서도 같은 감사 값을 반환합니다. 포트폴리오 평가와 현재 계좌 상태는 체결과 분리하며, 최신 값이 필요하면 `GET /accounts/me`를 조회합니다.
 
-**서버 처리 순서 · 한 트랜잭션**
+시장가 멱등 응답은 주문 방향과 일치하고 `execution_id`가 있는 정상 원장을 조회합니다. 해당 원장이 없는 `FILLED` 주문은 `INTERNAL_ERROR`로 처리하며, 체결 연결 없는 과거 원장으로 응답하는 호환 처리는 지원하지 않습니다. 체결 존재·주문 연결은 DB 외래 키로 보장하므로 확인용 체결 추가 조회는 하지 않습니다.
+
+**서버 처리 순서**
 ```
-① SELECT ... FROM account WHERE account_id = ? FOR UPDATE
-② 검증 — 장 시간 · is_ranked · 거래정지 · 시세 유효시간 · 예수금/보유수량
-③ INSERT trade_order       (clientOrderId 유니크 위반 → 중복 요청)
-④ UPDATE account.cash_balance
-⑤ INSERT ledger_entry       (append only)
-⑥ UPSERT holding            (이동평균 단가 재계산)
+① accountId 소유권 확인 및 clientOrderId 조회 — 동일 요청 재시도면 종료된 회차에서도 저장된 결과 즉시 반환
+② 종목 조회 후 정적 검증 — 거래 대상 → 거래정지 → 정리매매
+③ 정적 검증 통과 시에만 신선한 시세를 요구하고 장 운영 정보와 미국 주문 실행 환율을 조회(국내는 환율 1)한 뒤 checkedAt 기록. 시세 준비 실패 시에는 account-lock 폴백이 활성 CB만 확인하여 중단이면 저장하고, 아니면 원래 준비 오류 반환
+④ 요청의 accountId와 userId로 정확한 계좌를 SELECT ... FOR UPDATE, CLOSED이면 새 회차로 넘기지 않고 거절
+⑤ clientOrderId 재확인 — 락 대기 중 동일 주문이 확정됐으면 저장 결과 반환
+⑥ 신규 주문만 시장 컨텍스트 만료 검사 후 시세 조회 및 통화 일치 검증, 매도 시 holding FOR UPDATE (락 순서: account → holding)
+⑦ 매도 holding 잠금 뒤 현재 Clock 시각으로 활성 CB를 컨텍스트 신선도보다 먼저 재검사한다. 대기 중 컨텍스트가 만료돼도 새 CB는 해당 이벤트와 함께 REJECTED로 저장한다. 이후 검증 — 거래 대상 → 거래정지 → 정리매매 → 장 운영 → 시세 시각 → 정산금액 → 예수금/보유수량
+⑧ INSERT trade_order FILLED (트랜잭션 내부의 유효한 업무 거절은 REJECTED)
+⑨ UPDATE account.cash_balance 및 holding 잠금·UPSERT
+⑩ INSERT ledger_entry (append only, FILLED만 기록)
 ```
+
+시장가 주문은 `PENDING`을 저장하지 않고 `locked_cash`나 `locked_quantity`도 변경하지 않습니다. 동결은 추후 지정가 주문 흐름에서만 사용합니다. 거절된 시장가 주문은 잔액·보유·원장을 변경하지 않습니다. 유효한 `clientOrderId`를 파싱한 뒤 발생한 입력 필드 검증 실패, 외부 시장 데이터 실패, 정적 사전 검증 실패, 락 대기 중 시장 컨텍스트 만료, 시세 통화 불일치는 일반적으로 주문 행을 만들지 않으며 `SAME_CLIENT_ORDER_ID`를 응답합니다. 예외는 활성 CB와 시세 준비 실패가 겹친 경우입니다. 전용 트랜잭션이 account를 잠근 뒤 CB 거절을 저장하고 `NEW_CLIENT_ORDER_ID`를 반환하며, 활성 CB가 없으면 원래 준비 오류를 그대로 반환합니다. 그 밖에도 트랜잭션 안에서 확정되어 `REJECTED` 행이 저장된 실패만 `NEW_CLIENT_ORDER_ID`를 응답하는 최종 결과입니다. 사전 검증 통과 후 락 획득 사이 종목 상태가 바뀌면 동일한 오류 코드라도 후자에 해당할 수 있으므로 프론트는 코드가 아니라 `data.retryPolicy`를 따릅니다. JSON 자체를 읽을 수 없거나 `clientOrderId`가 유효하지 않은 요청은 재사용할 정상 ID가 없으므로 이 규칙의 대상이 아닙니다.
+
+시장가 주문 유스케이스는 최상위 트랜잭션 경계로만 실행합니다. 애플리케이션 진입점은 `Propagation.NEVER`로 외부 트랜잭션 안에서의 호출을 금지하고, 실제 DB 변경 서비스가 자체 `REQUIRED` 트랜잭션을 시작합니다. 따라서 커밋된 `REJECTED` 기록이 관련 없는 외부 업무의 롤백에 함께 사라지지 않습니다.
+
+**거래 대상 범위** — 시장가·지정가 주문과 두 견적 API는 비랭킹 종목도 지원합니다. 신규 주문 전 공통 상태 캐시로 상장 상태와 국내 거래정지·정리매매 정보를 확인하고, 원본 시세가 15초 이내인지 검증합니다. 재조회 성공만으로 오래된 원본 시세가 신선해지지 않습니다. 외부 준비는 계좌 락 전에 수행하고 금융 트랜잭션에서 DB 상태·시세 시각을 재검증합니다. 처리된 멱등 요청은 외부 호출 전에 반환합니다. 시세 준비 실패 시 외부 호출이 없는 account-lock 트랜잭션으로 활성 CB를 확인해 거절을 저장하며, 활성 CB가 없으면 주문을 저장하지 않고 기존 동일 clientOrderId 재시도 정책을 유지합니다.
+
+주문 수량은 1회 최대 **1,000,000주**이며 지수 표기는 허용하지 않습니다. 상한은 `trading.max-order-quantity` 설정으로 관리합니다.
 
 **에러**
-| 코드 | HTTP | 화면 문구 |
-|---|---|---|
-| `MARKET_CLOSED` | 422 | 지금은 거래할 수 없는 시간이에요 |
-| `NOT_IN_UNIVERSE` | 422 | 이 종목은 아직 거래를 지원하지 않아요 |
-| `STOCK_SUSPENDED` | 422 | 거래정지 종목이에요 |
-| `INSUFFICIENT_CASH` | 422 | 주문가능금액이 부족해요 |
-| `INSUFFICIENT_QUANTITY` | 422 | 보유 수량이 부족해요 |
-| `STALE_QUOTE` | 422 | 시세 정보가 오래되었어요. 다시 시도해주세요 |
-| `INVALID_QUANTITY` | 400 | 수량은 1주 이상의 정수로 입력해주세요 |
+| 코드 | HTTP | 기본 재시도 정책 | 화면 문구 |
+|---|---|---|---|
+| `MARKET_CLOSED` | 422 | `NEW_CLIENT_ORDER_ID` | 지금은 거래할 수 없는 시간이에요 |
+| `MARKET_TRADING_HALTED` | 422 | `NEW_CLIENT_ORDER_ID` | 현재 해당 시장의 매매거래가 일시 중단됐어요 |
+| `MARKET_CONTEXT_EXPIRED` | 422 | `SAME_CLIENT_ORDER_ID` | 시장 정보를 다시 확인한 뒤 주문해주세요 |
+| `STOCK_NOT_TRADABLE` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 현재 거래를 지원하지 않는 종목이에요 |
+| `STOCK_SUSPENDED` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 거래정지 종목이에요 |
+| `STOCK_LIQUIDATION` | 422 | 처리 경로의 `data.retryPolicy` 확인 | 정리매매 종목이에요 |
+| `INSUFFICIENT_CASH` | 422 | `NEW_CLIENT_ORDER_ID` | 주문가능금액이 부족해요 |
+| `INSUFFICIENT_QUANTITY` | 422 | `NEW_CLIENT_ORDER_ID` | 보유 수량이 부족해요 |
+| `STALE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 정보가 오래되었어요. 다시 시도해주세요 |
+| `FUTURE_QUOTE` | 422 | `NEW_CLIENT_ORDER_ID` | 시세 기준 시각이 올바르지 않아요. 다시 시도해주세요 |
+| `INVALID_SETTLEMENT_AMOUNT` | 422 | 실제 경로의 `data.retryPolicy` 확인 | 정산 금액이 올바르지 않아요 |
+| `QUOTE_CURRENCY_MISMATCH` | 502 | `SAME_CLIENT_ORDER_ID` | 시세 통화 정보가 올바르지 않아요 |
+| `INVALID_QUANTITY` | 400 | `SAME_CLIENT_ORDER_ID` | 수량은 1주 이상의 정수로 입력해주세요 |
+| `DUPLICATE_ORDER` | 409 | `NOT_RETRYABLE` | 이미 처리된 주문이에요 |
+| `ACCOUNT_ROUND_CHANGED` | 409 | `NOT_RETRYABLE` | 포트폴리오가 초기화됐어요. 계좌 정보를 새로고침한 후 다시 주문해주세요 |
 
-**`STALE_QUOTE`** — `quote_at` 이 현재보다 **15초 이상** 오래되면 거절합니다. 오래된 가격으로 체결되면 원장의 신뢰가 무너집니다.
+**`STALE_QUOTE`** 는 `trading.quote-max-staleness-seconds` 기준으로 `quote_at`이 오래되면 거절하고, **`FUTURE_QUOTE`** 는 서버 검증 시각보다 미래인 시세를 거절합니다. 외부 시장 데이터 준비 완료 후부터 계좌 락 획득까지의 컨텍스트 허용 시간은 별도 설정 `trading.execution-context-max-age-seconds`를 사용합니다.
+
+미국 시장가도 환율 스냅샷의 수신 시각·`validFrom`·`validUntil`을 트랜잭션과 체결 생성에 전달합니다. 신규 주문은 계좌 잠금 후 컨텍스트 신선도와 별개로 원본 유효기간과 미래 수신 시각(별도의 수신 TTL 없음)을 재검증하며, 체결 생성 시에도 같은 검증 시각과 실제 정산 환율의 일치를 확인합니다. 환율 근거가 없거나 만료/미래이면 `EXCHANGE_RATE_NOT_FOUND`(404, `SAME_CLIENT_ORDER_ID`)로 종료하며 주문·체결·원장을 저장하거나 트랜잭션 안에서 외부 재조회하지 않습니다. 국내는 외부 환율 조회 없이 1을 사용합니다. 기존 주문의 멱등 응답은 이 검사보다 먼저 저장 결과를 반환하며, DB에는 사용 환율만 저장합니다.
+
+시장가 준비는 DB 환율을 우선 조회하며 누락/만료일 때 금융 트랜잭션 밖에서 한 번 공통 갱신을 요청한 뒤 DB 유효기간을 재검증합니다. 견적·지정가 워커는 이 복구를 호출하지 않습니다. 복구 후에도 사용 불가하면 EXCHANGE_RATE_NOT_FOUND / SAME_CLIENT_ORDER_ID로 실패합니다. 잠금 대기 중 만료는 외부 호출이나 트랜잭션 자동 재실행 없이 실패합니다.
+
+시장가 정산은 미국 단가를 센트 `HALF_UP`으로 반올림한 뒤 저장 범위를 검사합니다. 단가·정산 금액은 `NUMERIC(19,4)`, 수량·환율은 `NUMERIC(19,6)` 범위를 준수하며 환율 자체는 반올림하지 않습니다. 저장 범위 초과는 `INVALID_SETTLEMENT_AMOUNT` + `SAME_CLIENT_ORDER_ID`로 종료하고 주문·체결·원장을 남기지 않습니다. 계산 가능한 범위지만 최종 정산액이 0 이하인 경우는 기존대로 `REJECTED` 기록 후 `NEW_CLIENT_ORDER_ID`를 반환합니다.
 
 ---
 
@@ -567,11 +1055,11 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
   "totalAsset": "50412300",
   "unrealizedPnl": "137300",
   "unrealizedPnlRate": "0.0675",
-  "exchangeRate": "1398.50",
+  "exchangeRate": "1398.5",
   "asOf": "2026-08-11T12:36:59+09:00"
 }
 ```
-**1주차는 평가손익만 제공합니다.** 실현손익은 체결 내역이 쌓인 뒤 2주차에 분리합니다. `stockValue` 는 `holding × quote_snapshot.last_price` 로 계산하며, 해외 종목은 `exchangeRate` 로 원화 환산합니다.
+**1주차는 평가손익만 제공합니다.** 실현손익은 체결 내역이 쌓인 뒤 2주차에 분리합니다. `stockValue` 는 `holding × quote_snapshot.last_price` 로 계산하며, 해외 종목은 `exchangeRate` 로 원화 환산합니다. 종목별 평가손익의 취득원가는 수수료를 제외한 `holding.krw_purchase_amount`를 사용하며, 거래 수수료는 예수금에서 차감되므로 계좌 전체 수익에는 이미 반영됩니다.
 
 ### `GET /accounts/me/holdings` 🔒
 보유 종목
@@ -650,14 +1138,24 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 | `BUY` | − | 매수 | `−(gross + fee)` |
 | `SELL` | + | 매도 | `+(gross − fee − tax)` |
 
-**수수료·세금은 별도 항목으로 쪼개지 않고 매수·매도 금액에 포함합니다.** 원장 한 줄이 `trade_order.net_amount` 하나에 대응하므로 목록이 절반으로 짧아지고 커서 처리도 단순해집니다. 수수료 총액이 필요해지면 `SUM(trade_order.fee)` 로 언제든 구할 수 있습니다. **`RESET` 항목도 두지 않습니다** — 포트폴리오 초기화는 새 계좌를 만드는 일이라 새 계좌의 `INITIAL_DEPOSIT` 한 줄이 그 역할을 대신합니다.
+**수수료·세금은 별도 항목으로 쪼개지 않고 각 체결의 매수·매도 금액에 포함합니다.** 정상 거래 원장 한 줄은 `execution_id`로 `trade_execution` 한 건에 연결됩니다. BUY는 `-net_amount_krw`, SELL은 `+net_amount_krw`를 기록하고, `balanceAfter`는 해당 체결 직후 계좌 잔액을 보존합니다. 시장가는 체결·원장 한 쌍을, 지정가는 소비한 호가 레벨마다 체결·원장 한 쌍을 생성하므로 동일 `orderId`의 원장이 여러 줄일 수 있습니다. `trade_order.net_amount`는 주문의 누적 정산액이지 각 원장 행의 금액이 아닙니다. 수수료 합계는 체결별 또는 주문별 단위에 맞춰 집계하며, 주문 누적 금액을 여러 원장 행에 조인한 뒤 합산하면 중복 집계됩니다. **`RESET` 항목도 두지 않습니다** — 초기화 시 새 계좌의 `INITIAL_DEPOSIT` 원장이 그 역할을 대신하며 체결 연결은 없습니다.
 **`exchangeRate`** — 체결 시점 환율. 원화 종목은 1, 미국 종목은 그때의 USD/KRW. `amount` 는 이미 원화 환산값이라 계산에 쓰이지는 않습니다 — **"이 거래를 얼마짜리 환율로 했는가"를 원장만 보고 알 수 있게 하는 감사 항목**입니다. 1주차 화면에는 안 띄워도 되지만, **지금 안 남기면 과거 값은 복원할 수 없습니다.**
 **커서는 `entryId` 로 잡으세요. `occurredAt` 은 안 됩니다.** 연속 주문이면 TIMESTAMPTZ 정밀도 안에서 시각이 겹칠 수 있고, 그 경계에서 항목이 누락되거나 무한 루프에 빠집니다. `entryId` 는 단조 증가라 **중복도 누락도 구조적으로 불가능**합니다. 최신순이므로 `WHERE account_id = ? AND entry_id < :cursor ORDER BY entry_id DESC LIMIT :size + 1` 로 조회하고, `size + 1` 번째 행의 존재 여부로 `hasNext` 를 판단합니다.
-**거절된 주문은 원장에 남지 않습니다.** 돈이 안 움직였으니까요. "왜 안 됐는지"를 보여주려면 `trade_order` 기반 주문 내역 탭을 따로 두거나 2주차로 미루세요. 1주차 화면에는 원장 하나만 있으면 충분합니다.
+**거절된 주문이나 동결 자원만 변경하는 작업은 거래 원장을 생성하지 않습니다.** 실제 현금 이동이 없기 때문입니다. 지정가 접수는 자원을 동결하고, 취소·만료는 미체결 잔여분만 해제하며 기존 체결·원장 기록은 보존합니다. 주문 상태와 거절 사유는 `GET /accounts/me/orders`, 체결별 상세는 `GET /orders/{orderId}/executions`에서 조회합니다.
 
 ### `POST /accounts/me/reset` 🔒
 포트폴리오 초기화
 
+**Request**
+```json
+{
+  "accountId": 1
+}
+```
+
+`accountId`는 `GET /accounts/me`에서 받은 현재 활성 계좌 ID입니다. 중복 클릭과 네트워크 재시도에는 같은 값을 유지합니다. 같은 계좌 ID로 성공 요청을 다시 보내면 회차를 추가하지 않고 직전에 생성한 계좌를 그대로 반환합니다. 재시도 응답의 `cashBalance`도 현재 조회 잔액이 아니라 최초 초기화 직후의 `initialCash` 값입니다. 사용자가 새 회차를 다시 초기화하려면 새로 조회한 활성 `accountId`를 보냅니다.
+
+**Response · 200**
 ```json
 {
   "accountId": 2,
@@ -669,11 +1167,14 @@ fee         = grossAmount × 0.0001   거래 수수료 0.01% (매수·매도 공
 
 **서버 처리**
 ```
-UPDATE account SET status='CLOSED', closed_at=now() WHERE account_id = 현재;
+SELECT ... FROM account WHERE account_id = 요청값 AND user_id = 현재 사용자 FOR UPDATE;
+UPDATE account SET status='CLOSED', closed_at=:resetAt WHERE account_id = 요청값;
 INSERT INTO account (user_id, round_no, ...) VALUES (?, 이전+1, 50000000, 50000000);
-INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
+INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ...);
 ```
 **삭제가 아니라 새 회차 계좌 개설입니다.** 기존 원장·체결내역·보유종목은 그대로 보존되고, 조회 시 새 `account_id` 기준이라 화면에서는 자동으로 비워집니다. 나중에 **"지난 회차 성적"** 기능으로 확장할 수 있습니다. **프론트는 확인 모달을 반드시 띄우세요.**
+
+기존 계좌 종료, 신규 계좌 개설, 초기 지급 원장은 한 트랜잭션이며 같은 UTC `resetAt`을 사용합니다. 현재 시장가 주문과는 계좌 행 잠금으로 직렬화됩니다. 향후 지정가 주문의 동결액 또는 동결 수량이 남아 있으면 `ACCOUNT_HAS_PENDING_ORDERS`(409)로 초기화를 거절합니다. 요청 계좌보다 두 회차 이상 진행된 상태에서 오래된 ID를 다시 보내면 `ACCOUNT_RESET_CONFLICT`(409)를 반환합니다.
 
 ---
 
@@ -684,11 +1185,11 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
 | 메인 | `/market/status` (선택) |
 | 주식 랭킹 | `/exchange-rates/latest` · `/stocks/rankings` · `/stocks/search` |
 | 종목 상세 | `/stocks/{symbol}` · `/stocks/{symbol}/candles` |
-| 거래 패널 | `/orders/quote` · `POST /orders` |
+| 거래 패널 | `/orders/quote/market` · `POST /orders/market` |
 | 마이페이지 | `/accounts/me` · `/accounts/me/holdings` · `/accounts/me/ledger` |
 | 포트폴리오 초기화 | `POST /accounts/me/reset` |
 | 이용 가이드 | 없음 (정적 콘텐츠) |
-| 회원가입 유도 | 1주차에는 호출 없음 — 화면 UX 만 만들고 `/auth/*` 는 2주차에 붙입니다 |
+| 회원가입 유도 | `POST /auth/signup` · `POST /auth/login` |
 
 ## 폴링 정책
 
@@ -696,24 +1197,23 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
 
 **프론트가 폴링하는 것은 우리 API 이고, 우리 서버가 토스를 호출하는 주기는 아래와 같습니다.** 둘은 완전히 분리되어 있습니다 — **사용자가 100명이 되어도 토스 호출량은 그대로입니다.**
 
-| 시각 (KST) | 주기 | 하는 일 |
-|---|---|---|
-| 월 07:00 | 주 1회 | 전체 종목 마스터 갱신 — `/stocks/all` + `/stocks` 배치 |
-| 월 08:00 | 주 1회 | 국내 거래대금 상위 100 선정 — `/rankings?market=KR&duration=1w` · 1콜 |
-| 월 21:00 | 주 1회 | 미국 거래대금 상위 100 선정 — 1콜. 미국장 시작 1시간 30분 전 |
-| 08:50 | 일 1회 | 국내 `prev_close` ← 전일 종가. 상하한가 동시 수집 |
-| 09:00 ~ 15:30 | 5초 | 국내 상위 100 현재가 — `/prices` 배치 1콜 (한도의 1.3%) |
-| 09:00 ~ 15:30 | 1분 | 국내 상위 100 분봉 — 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위 순차 호출 |
-| 15:40 | 일 1회 | 국내 일봉 적재 — 마감 10분 후 |
-| 22:00 * | 일 1회 | 미국 `prev_close` 갱신 — 정규장 시작 30분 전 |
-| 22:30 ~ 05:00 * | 5초 | 미국 상위 100 현재가 — 배치 1콜. 겨울에는 23:30 ~ 06:00 |
-| 22:30 ~ 05:00 * | 1분 | 미국 상위 100 분봉 — 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위 순차 호출 |
-| 05:10 * | 일 1회 | 미국 일봉 적재 — 마감 10분 후. 겨울에는 06:10 |
-| 매시 정각 | 1시간 | 환율 적재 — 하루 24콜 |
+| 시각 (KST) | 주기 | 하는 일                                                                              |
+|---|---|--------------------------------------------------------------------------------------|
+| 월 07:00 | 주 1회 | 전체 종목 마스터 갱신 — `/stocks/all` + `/stocks` 배치                               |
+| 월 08:00 | 주 1회 | 국내 거래대금 상위 100 선정 — `/rankings?market=KR&duration=1w` · 1콜                |
+| 월 21:00 | 주 1회 | 미국 거래대금 상위 100 선정 — 1콜. 미국장 시작 1시간 30분 전                         |
+| 기동 5초 후 · 이후 1분 | fixed delay | KR/US 누락 종가·기준가 복구. 별도 스케줄러, 실패 종목 재시도. |
+| 국내 정규장(캘린더) | 5초 목표 | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집. |
+| 09:00 ~ 15:30 | 1분 | 국내 상위 100 분봉 — 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위 순차 호출  |
+| 15:40 ~ 17:10 | 30분 | 국내 일봉 적재 재시도 — 캘린더상 마감 10분 후부터, 당일 저장 완료 종목 제외          |
+| 미국 정규장(캘린더) | 5초 목표 | 랭킹·활성 지정가 주문 종목만 수집. 서머타임은 캘린더 적용. |
+| 22:30 ~ 05:00 * | 1분 | 미국 상위 100 분봉 — 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위 순차 호출  |
+| America/New_York 16:10 ~ 17:10 * | 30분 | 미국 일봉 적재 재시도 — KST 서머타임 05:10~, 표준시 06:10~, 당일 저장 완료 종목 제외 |
+| 매분 | 1분 | 환율 적재 — 하루 1,440회 예정. 공유 MARKET_INFO 제한 적용, 휴장일에도 실행. |
 
 **국내장과 미국장은 시간대가 겹치지 않습니다.** 09:00~15:30 과 22:30~05:00 이라 **같은 순간에 도는 수집기는 언제나 하나**. 합산 부하를 걱정할 필요가 없습니다.
 \* **미국 시각은 서머타임에 따라 1시간 이동** — 하드코딩하지 말고 `/market-calendar/US` 의 세션 시각을 그대로 쓰세요.
-**스케줄러에 넣지 않은 것** — 상위 100 밖 종목의 시세와 장외 분봉은 **사용자가 상세를 열 때 온디맨드로 채웁니다.** 상위 100 분봉 수집은 1주차 스케줄러에 포함하며, 2주차에는 지정가 체결 판정과 집계를 추가합니다.
+**온디맨드 보충** — 지속 수집 밖 종목은 상세 진입 시 공통 조정자로 조회하며 5초 수집 캐시를 재사용합니다. 일봉 백필·분봉 정책은 유지합니다.
 
 ### 클라이언트 폴링 정책
 
@@ -723,7 +1223,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
 | 종목 상세 | 5초 | `/stocks/{symbol}` |
 | 마이페이지 | 10초 | `/accounts/me` + `/holdings` |
 | 차트 | 60초 | `/stocks/{symbol}/candles` |
-| 환율 배너 | 1시간 | `/exchange-rates/latest` |
+| 환율 배너 | 1분 | `/exchange-rates/latest` |
 
 **세 가지를 꼭 넣으세요.**
 ① **백그라운드 탭에서는 폴링 중단** — `document.visibilityState` 확인만으로 실사용 트래픽이 절반 가까이 줄어듭니다.
@@ -744,7 +1244,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
 |---|---|
 | 검색 범위 | 전 종목(약 8,500개) · `LIKE '%q%'` |
 | 수수료 · 세율 | 수수료 0.01%(매수·매도) · 증권거래세 0.2%(매도만) |
-| 인증 | 1주차 미구현 — 시드 사용자 1명 고정 |
+| 인증 | PostgreSQL 세션 + JWT/RTR · Bearer Access · 동일 Origin HttpOnly Refresh ([계약](authentication.ko.md)) |
 | 소수점 거래 | 2주차 — 1주차는 정수 주 단위만. **화면에서 토글 자체를 제거했습니다** |
 | 체결 내역 | 원장 기준 `GET /accounts/me/ledger` |
 | 원장 항목 | 매수 · 매도 · 초기지급 3종. 수수료·세금은 매수·매도 금액에 포함(한 줄) |
@@ -758,26 +1258,122 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', ...);
 |---|---|
 | `before` 경계 | 토스 `/candles` 의 `before` 가 inclusive 인지, 마감 동시호가(15:30) 봉이 존재하는지 실측 필요 |
 | `STALE_QUOTE` 임계값 | 15초 기준이 적절한지 |
-| 인증 방식 (2주차) | JWT vs 세션 쿠키 |
 | 소수점 자릿수 (2주차) | 미국 주식 최소 주문 단위 (0.1? 0.001?) |
+| 상세·검색의 관심 종목 여부 (#169) | 랭킹에는 이미 `stockLikeId`가 있습니다. 종목 상세·검색 응답에도 넣을지, 클라이언트가 따로 조회할지 결정 필요 |
 
 ---
 
 ## 2주차 이후 예정
 
+### 확정 LIMIT 정산 계약 (#119)
+
+계산기, 접수 API(#120), 공유 호가(#121), 엔진/워커/프리뷰(#122)를 연결합니다. MARKET은 가상 호가를 소비하지 않는 즉시 정산을 유지합니다.
+
+- 정수 수량만 지원합니다. 지정가 × 전체 수량 × 접수 환율의 원화 반올림값에 수수료 반올림값을 합해 동결합니다. KR은 외부 환율 조회가 없으며 환율 상승 버퍼도 없습니다. 접수 환율은 체결 환율을 고정하지 않습니다.
+- 매수는 해당 주문의 `reservedCash`에서 이번 실제 net만 차감합니다. 누적 net을 다시 빼거나 수량 비례로 동결을 재산정하지 않고 자유 예수금도 사용하지 않습니다. 엔진이 가능한 정수 수량으로 축소하며 1주도 불가능하면 보류합니다. 활성 매수 잔량이 남으면 동결액도 양수여야 합니다.
+- 전량 체결은 결제 후 남은 동결까지 전부 해제합니다. 취소·만료는 기존 체결을 유지하며 잔여 동결만 해제합니다. 해제는 lockedCash 차감이지 cashBalance 증액이 아닙니다.
+- 호가별 체결의 `netAmountKrw > 0`을 요구합니다. 0/음수 후보는 체결/원장 기록과 물량 소비 없이 보류하며 다음 호가 합산이나 건너뛰기로 이 조건을 우회하지 않습니다.
+- 여러 유효 호가는 주문 누적 거래대금/수수료/세금의 순차 차액과 한 트랜잭션의 동일 환율을 사용합니다. 호가나 트랜잭션마다 SEC 최소액을 중복 부과하지 않으며 과거 체결에는 당시 환율을 유지합니다.
+- `LimitOrderSettlementCalculator`는 주어진 후보를 계산하고 #122가 호가/수량 선택과 금융/물량 상태의 원자적 반영을 담당합니다. 환율은 DB 최신 행의 원본 유효기간과 미래 수신 시각을 검증하며 별도 TTL 없이 잠금 후 재검증합니다.
+
+지정가 가격은 옵션 B(매수 지정가 이하 / 매도 지정가 이상 호가 체결), 만료는 접수한 정규 세션 종료 시각입니다. 모든 사용자가 동일한 가상 시장의 물량을 소비하지만, 사용자 주문끼리 직접 매칭하지는 않습니다. 한 사용자의 체결로 줄어든 공유 잔량은 다른 사용자의 체결에도 반영됩니다.
+
 | 엔드포인트 | 내용 |
 |---|---|
-| `POST /auth/signup` · `/auth/login` | 인증 구현 — 1주차에는 화면만 있고 서버는 시드 사용자 고정 |
-| `POST /orders` | 지정가 주문 (`limitPrice`, `PENDING` 상태) |
-| `POST /orders` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
-| `GET /accounts/me/orders` | 주문 내역 탭 — 거절된 주문까지 포함 (원장에는 안 남음) |
-| `DELETE /orders/{id}` | 주문 취소 |
+| `POST /orders/market` (소수점) | 미국 종목 소수점 주문 개방. 그때 `allowsFractional` 필드를 종목 상세 응답에 추가하고, 미국 종목에서만 입력 단위를 바꿉니다 |
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
-| `GET /stocks/{symbol}/orderbook` | 호가 |
 | WebSocket | 실시간 시세 push (폴링 대체) |
+
+장기 보유 종목의 보유 시작 시각은 주문 접수 순서가 아닌 개별 `trade_execution`을 executedAt/executionId 순서로 재생하여 계산합니다. 부분 체결도 포함하며 전량 매도 시 보유 구간이 끝나고 재매수 시 새 구간이 시작됩니다.
 
 **지금 만들지는 않지만 URL 설계가 충돌하지 않게 미리 자리를 잡아둔 것입니다.**
 
 ---
-> 모의 주식 트레이딩 서비스 · 1주차 MVP API 명세서 · `erd.md` · `wireframe.md` 와 함께 보세요
+> 모의 주식 트레이딩 서비스 · 현재 API 명세서 · `erd.md` · `wireframe.md` 와 함께 보세요
+
+## 지정가 주문 생애주기 (#120)
+
+주문 상세·목록·지정가 접수·취소 응답에는 `symbol`, `name`, `marketCountry`를 제공합니다. 체결 목록 응답은 `{orderId, stock: {symbol, name, marketCountry}, items, nextCursor, hasNext}` 구조입니다. 종목 정보는 개별 체결 항목이 아닌 페이지 상위에 한 번 제공하며, 빈 목록에도 orderId와 stock을 반환합니다. 페이지네이션과 체결 정렬은 유지합니다. `currency` 필드는 반환하지 않으며 지정가·체결 단가는 KR이면 KRW, US이면 USD입니다. 원본 입력 통화는 `requestedLimitCurrency`로 구분합니다. 지정가 견적을 포함하여 가격 문자열은 KRW 원 단위, USD 소수점 두 자리로 통일합니다. 환율 정밀도와 정산 계산은 변경하지 않으며 gross/fee/tax/net/reservedCash/balanceAfter는 계속 KRW입니다. 경로·쿼리 파라미터 타입 변환 실패는 HTTP 400 `INVALID_INPUT` 및 문제 파라미터명을 담은 `data.field`로 응답하며 원본 입력값은 노출하지 않습니다.
+
+주문 유형에 따라 엔드포인트를 분리합니다: 시장가는 `POST /orders/market` 및 `GET /orders/quote/market`, 지정가는 `POST /orders/limit` 및 `GET /orders/quote/limit`을 사용합니다. 요청 바디의 orderType은 받지 않으며 URL 경로로 주문 유형을 확정합니다. 시장가 요청의 미등록 필드는 무시하며 limitPrice/limitCurrency를 보내도 URL로 결정한 주문 유형은 바뀌지 않습니다. 기존 시장가 응답은 유지하며 프론트 요청 수정은 별도 담당 범위입니다.
+
+LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW 원 단위, 미국은 KRW 원 단위 또는 USD 센트 단위를 허용합니다. 후행 0은 허용하지만 초과 자릿수·지수 표기는 거절합니다. 미국 원화 입력은 접수 환율로 나누어 HALF_UP 센트 반올림한 USD 지정가를 고정 저장합니다. 0달러가 되거나 저장 범위를 초과하면 거절합니다. 이후 원화 가격 한도를 계속 추적하는 주문은 아닙니다.
+
+매수 동결액은 원본 입력을 기준으로 합니다. 원화는 입력 단가 × 전체 수량 + 원 단위 수수료, 달러는 단가 × 전체 수량 × 환율의 원 단위 반올림액 + 수수료입니다. 센트 환산 가격을 원화로 역산하지 않습니다. 매도는 수량만 동결합니다. 미국 접수는 매수/매도 모두 검증된 체결용 환율 스냅샷을 사용하여 접수 환율을 보존하고 원화 입력을 환산합니다. 실제 체결 환율은 별개입니다. 센트 환산 반올림만으로도 동결액이 부족해 일부 수량만 체결되거나 보류될 수 있습니다.
+
+접수 성공은 `POST /orders/limit` 기준 201 OrderDetailResponse: orderId/accountId/stockId/orderType/side/status/quantity/filledQuantity/activeRemainingQuantity, requestedLimitPrice/requestedLimitCurrency/limitPrice/acceptanceExchangeRate, reservedCash, 누적 grossAmount/fee/tax/netAmount, rejectReason, orderedAt/expiresAt/closedAt입니다. activeRemainingQuantity는 활성 잔여 수량으로 종료 후 0입니다. 멱등 비교는 원본 가격의 수치와 입력 통화를 사용하고 새 환율로 재환산하지 않습니다. 현재 저장 상태를 반환하며 종료 주문을 재활성화하지 않습니다. 저장된 REJECTED는 같은 오류를 재생합니다. 기존 주문은 외부 조회 전에 확인하고, 잠금 후 회차 검사보다 먼저 재확인합니다.
+
+견적은 acceptable/reason, availableCash/availableQuantity, expiresAt, 원본·환산 지정가, acceptanceExchangeRate, limitEstimate(grossAmount/fee/tax/netAmount/reservedCash), executionPreview(아래 #122 참조)를 제공합니다. 지정가 기준 견적은 환산 지정가에 전량 한 번 체결하는 가정이며 원화 원본으로 계산한 동결액과 다를 수 있습니다. 동결·물량 소비는 하지 않습니다. 예상 매도 순금액이 0 이하라는 이유만으로 접수를 막지는 않습니다.
+
+- GET /orders/{orderId}: 본인 주문 상세, CLOSED 회차 포함.
+- GET /accounts/me/orders: 현재 ACTIVE 회차, orderId 내림차순. size 기본 20/최대 100, 계좌 범위가 포함된 불투명 커서.
+- GET /orders/{orderId}/executions: sequenceNo 오름차순, 동일 size 상한과 주문별 커서. 체결별 단가·환율·정산액·executedAt·원장 balanceAfter를 반환. 정상 원장 누락은 INTERNAL_ERROR.
+- PATCH /orders/{orderId}: 정확히 {"status":"CANCELED"}만 허용. 추가 필드·다른 상태는 INVALID_INPUT. 반복 취소는 이중 해제 없이 성공. FILLED/REJECTED/EXPIRED는 orderId/status가 포함된 409 ORDER_STATE_CONFLICT. 마감 이후 취소는 EXPIRED와 동결 해제를 먼저 커밋한 후 409를 반환.
+- 없는 주문과 타인 주문은 동일하게 404 ORDER_NOT_FOUND.
+
+지정가(LIMIT) 주문 접수는 상시 활성화되어 동작합니다. 기존 주문 재생·조회·취소·만료가 지원됩니다. 정적 사전 검증 실패는 저장하지 않습니다. 트랜잭션에서 확정한 업무 거절은 원본 조건·환율과 LIMIT REJECTED를 저장하고 NEW_CLIENT_ORDER_ID를 반환하며 동결·체결·원장은 생성하지 않습니다. 저장 전 컨텍스트/환율/시세/통화/계산 오류는 SAME_CLIENT_ORDER_ID입니다.
+
+만료는 전용 단일 스레드 스케줄러에서 저장된 expiresAt을 기준으로 이전 스캔 완료 30초 후 실행하며, 시작 시에도 비동기로 복구합니다. 만료 트랜잭션은 PostgreSQL SET LOCAL lock_timeout을 2초로 설정하고, 잠금 실패 건은 롤백 후 다음 스캔에서 재시도합니다. 계좌 우선 잠금의 주문별 트랜잭션이며 실패 건은 다음 주기에 재시도합니다. 외부 캘린더·환율 조회는 없습니다. 취소·만료는 동결만 해제하며 이미 체결된 금액·보유·원장을 되돌리지 않습니다.
+
+주문 종료와 동결 해제는 원자적으로 커밋합니다. 어느 단계에서든 실패하면 전체 롤백하고 상태·동결을 보존하며, ID 커서로 다음 주문을 계속 처리합니다. 실패 주문을 강제 EXPIRED 처리하거나 재시도 대상에서 제외하지 않습니다. 데이터 정합성 오류는 ERROR 로그로 남기고 원인 복구 후 다음 스캔에서 다시 처리합니다.
+
+지정가 입력 검증 실패는 기존 SAME_CLIENT_ORDER_ID 정책을 유지하고, data.field에 limitPrice 또는 limitCurrency를 제공합니다.
+
+시장가·지정가 공통 입력 검증도 잘못된 side, marketCountry, quantity, clientOrderId를 data.field로 식별합니다. 기존 오류 코드·재시도 정책은 유지하며, 잘못된 clientOrderId는 NOT_RETRYABLE, 유효한 ID 이후 주문 조건 오류는 SAME_CLIENT_ORDER_ID입니다.
+
+레거시 보정·데이터 백필은 제공하지 않습니다. 스키마 적용을 위한 DB 재생성 등은 별도 명시적 승인이 필요합니다.
+
+### 비랭킹 주문과 호가 공급
+
+지정가는 호가가 아직 없어도 PENDING으로 접수합니다. 커밋 후 랭킹 또는 활성 지정가 주문 종목만 스케줄러가 호가를 생성합니다. 마지막 활성 주문이 종료된 비랭킹 종목은 수집·호가 공급에서 제외되고 기존 활성 호가도 종료됩니다. 시장가 체결은 가상 호가를 소비하지 않습니다. 지정가 체결 워커는 상시 스케줄링하며 신선한 호가가 없으면 보류합니다.
+
+### 지정가 체결 및 비구속성 미리보기 (#122)
+
+- `executionPreview.status`: `AVAILABLE`은 유효 호가로 평가한 결과이며 예상 0주도 포함합니다. `UNAVAILABLE`은 사용 가능한 신선한 호가/컨텍스트 없음, `NOT_APPLICABLE`은 접수 불가 견적입니다. `acceptable=true`와 `UNAVAILABLE`은 함께 올 수 있습니다. `reason`은 FILLED, PRICE_LIMIT, NO_LIQUIDITY, INSUFFICIENT_RESERVED_CASH, NON_POSITIVE_SETTLEMENT 중 결과를 나타냅니다. 조회 불가에는 NO_USABLE_BOOK/CONTEXT_EXPIRED, 접수 불가에는 거절 코드를 제공합니다.
+- AVAILABLE은 숫자 `bookVersion`, `revision`, UTC `quoteAt`, `generatedAt`, `evaluatedAt`, 문자열 `expectedFilledQuantity`, `remainingQuantity`, `avgExecutionPrice`, `grossAmountKrw`, `feeKrw`, `taxKrw`, `netAmountKrw`, `remainingReservedCash`, `releasedCash`를 제공합니다. 0주이면 평균가는 null입니다. 나머지 상태는 status/reason/evaluatedAt 이외 결과 필드가 null입니다.
+- 평균 체결가는 수량 가중 평균을 **표시용으로만 KRW 0자리 / USD 2자리 HALF_UP** 합니다. 정산은 원본 호가와 누적 반올림 차액을 사용하며 표시 평균가×수량으로 재계산하지 않습니다. USD 99에 1주 + 100에 2주는 평균 `99.67`이지만 거래대금은 정확히 USD 299입니다.
+- 미리보기는 누적 체결 0에서 시작하며 원본 입력 기준 동결액을 사용합니다. 기존 부분체결 주문의 미리보기가 아니며 물량 예약, revision 증가, 호가 생성, 후속 체결 보장을 하지 않습니다.
+- 워커는 전용 단일 스레드에서 3초 fixed delay, 후보 페이지 50건, 틱당 최대 주문 100건, 새 주문 시작 예산 5초로 상시 실행합니다. 한 종목·방향은 방문당 최대 10건을 시도한 뒤 다음 그룹으로 이동하며 틱 경계에서도 그룹 순환 위치를 유지합니다. 활성화 플래그는 없으며 실행 중 금융 트랜잭션은 예산 초과 후에도 완료합니다. 페이지/시도 제한은 주문 수이지 호가 레벨 수나 주식 수량이 아니며, 주문 한 건은 여전히 해당 방향의 호가 전체를 검토합니다.
+- 전역 orderId 상한은 없습니다. BUY 지정가 내림차순 / SELL 오름차순, 동일 가격은 orderedAt/orderId 오름차순입니다. 그룹별 가격·시간 커서는 bookVersion과 실제 적용 환율 값에 연결합니다. 새 버전이나 환율 변경 시 기존 부분 체결·보류 주문을 포함해 선순위부터 재평가합니다. 잔량 소비에 따른 revision 변경이나 환율의 후행 0 표현 차이만으로는 초기화하지 않습니다.
+- 접수 커밋 후 알림은 종목·방향별 가장 선순위 한 건으로 합칩니다. 직전 시도의 진행 위치를 저장한 뒤 다음 한 건의 후보 선정 경계에서만 반영합니다. 알림이 해당 커서보다 선순위면 처음부터 재평가하고 후순위면 커서를 유지하며, 두 경우 모두 읽어 둔 페이지를 다시 조회합니다. 이미 선정한 시도를 중단하거나 그룹 방문을 종료하지 않습니다. 페이지 조회/체결 중 도착한 알림은 다음 선정에 반영하므로 접수가 계속되어도 조용해질 때까지 기다리지 않고 진행합니다. 가격·시간 우선순위는 선정 경계에 적용하며 페이지는 조회 캐시이지 한꺼번에 선정한 주문 묶음이 아닙니다. 롤백/거절/멱등 재요청은 알림을 발행하지 않으며 버전·환율 안전 검증은 유지합니다. 단일 인스턴스 커서와 대기 알림은 종목·방향별로만 유지하고 전체 순회 후 관찰되지 않은 그룹을 제거합니다. 재시작 시 선순위부터 안전하게 다시 시작합니다.
+- 선정한 버전·환율은 준비와 재시도 동안 고정합니다. 각 주문은 금융 잠금 전에 체결 컨텍스트를 새로 준비합니다. 버전/환율이 달라졌다면 후순위 주문을 새 물량에 자동 체결하지 않고 PRIORITY_CHANGED를 반환하여 워커가 재선정합니다. 같은 버전의 revision 충돌 및 금융 락 경합은 최대 1회 재시도하며 잠금 후 버전/revision과 신선도를 재검증합니다.
+- 후보 조회에서 만료/비활성 주문을 제외하고 주문별 실행에서도 환율 조회 전에 재확인합니다. 장외/호가 없음 준비는 환율을 조회하지 않습니다. 상태는 트랜잭션 밖의 공유 5분 캐시를 재사용합니다. 동결액 부족/순금액 0 이하의 정상 보류는 후순위를 진행하지만, 미해결 호가·락·컨텍스트·상태 실패는 해당 그룹을 초기화하고 다음 방문까지 보류하며 다른 그룹은 계속합니다. 그룹 준비가 진행되는 중 주문이 만료·종료되면 이미 시작된 그룹 준비에서는 환율을 조회할 수 있습니다.
+- 금융 트랜잭션은 계좌 → 주문 → 호가 버전 → 해당 방향 레벨 → 보유 수량 순서로 잠그며 SET LOCAL lock_timeout=2s를 적용합니다. 잠금 후 원래 회차·주문 상태/체결횟수·버전/revision·장 운영·종목 상태·원본 시세 나이·환율 유효기간·만료를 재검증합니다. 락 안에서는 외부 API를 호출하지 않습니다. 기존 접수 흐름과 달리 워커는 세션/상태/환율 준비 시작 전에 checkedAt을 기록하여 준비 지연이 먼저 조회한 근거의 유효 시간을 늘리지 않도록 합니다.
+- 선택한 모든 체결, 체결별 원장 balanceAfter, 주문 누적 금액, 예수금/동결/보유 수량, 공유 잔량을 한 번에 커밋합니다. 실제 체결이 있으면 revision은 트랜잭션당 1번만 증가합니다. 실패하면 전부 롤백하며 과거 이력 보정/재생을 만들지 않습니다.
+- 취소 및 기존 30초 만료 스캔은 계좌 우선 잠금을 공유합니다. 이전 체결 이력은 보존하며 워커가 직접 만료 상태로 바꾸지는 않습니다.
+
+주문 시장(KOSPI·KOSDAQ)에 활성 서킷브레이커가 있으면 이미 접수된 지정가 주문의 체결을 보류합니다. 접수된 주문은 기존 `expiresAt`과 동결을 그대로 유지한 채 PENDING/PARTIALLY_FILLED로 남고, 호가 잔량·revision, 체결, 계좌, 보유, 원장은 하나도 바뀌지 않습니다. `now == haltUntil`은 이미 비활성(배타 경계)이므로 아직 만료되지 않은 주문은 다음 워커 주기부터 체결될 수 있습니다. 취소와 만료는 보류 중에도 계속 가능하며 동결 현금·수량 해제도 그대로 동작합니다. 이 보류는 워커 전용 조건이므로 HTTP `MARKET_TRADING_HALTED` 응답이 아니고, REJECTED 행이나 `market_event_id`를 만들지 않습니다. 권위 있는 판정은 체결 트랜잭션 안에서 기존 account → 주문 → 호가 버전 → 레벨 → 보유 잠금과 두 번째 만료 판정을 마친 뒤 context 검증·계획·변경보다 앞에서 수행하므로, 해당 잠금을 기다리는 동안 시작된 CB도 잡습니다. 트랜잭션 밖에서 halt 상태를 미리 조회하거나 캐시하지 않습니다.
+
+`STOCK_STATUS_UNAVAILABLE`(503)은 상태 누락·알 수 없는 상태·국내 제약 정보 누락 또는 상태 조회 대기 실패입니다. 상태를 거래 가능으로 추정하지 않습니다. 상태 캐시 기본 TTL은 5분이며 미국 응답에는 국내 전용 거래정지·정리매매 정보가 없으므로 기존 값을 유지합니다.
+
+## 정규장 거래일과 기준가 (#173)
+
+미국 시간대 식별자는 `America/New_York`, 한국은 `Asia/Seoul`로 통일한다. 거래일은 거래소 현지 날짜이고 실제 주문·원장 시각은 UTC 저장/KST 표시한다. 일봉·주봉 응답의 KST 자정은 날짜 라벨이다.
+
+등락률은 표시 시세 거래일과 정확한 직전 거래일의 확정 종가를 비교한다. 날짜 검증 실패 시 기준가·등락률은 null이다. 랭킹 집계 시각으로 시세를 초기화하거나 마지막 현재가를 종가로 복사하지 않는다. 휴일·자정에는 기준가를 이동하지 않는다.
+
+기동 5초 후 및 이후 1분 fixed delay로 누락 종가를 복구한다. 정규장 마감 + 10분 이전에 시작한 요청의 당일 일봉은 확정 데이터로 저장하지 않는다. 빈 응답·날짜 누락은 완료로 캐시하지 않는다. V10은 `quote_snapshot.prev_close_date`만 추가한다. 기존 과거 일봉은 차트·주봉에 그대로 포함하되 재검증했다고 간주하지 않는다. 기준가 날짜가 없거나 다르면 DB 일봉 유무와 관계없이 토스에서 다시 받는다. 분봉도 봉 시작 시각으로 정규장만 수용한다.
+
+## 상하한가 표시 정책
+
+종목 상세의 기존 nullable `price.upperLimit`, `price.lowerLimit` 필드를 유지합니다. 국내 정규장에는 검증된 당일 값만 표시하고 장외에는 표시 시세의 정규장 거래일과 일치해야 합니다. 누락/미검증/날짜 불일치는 상세 전체를 실패시키지 않고 null로 반환합니다. 미국은 두 필드가 항상 null이며 화면에 '가격 제한 없음', 국내 null은 '정보 없음'으로 표시합니다. 수집 실패 시에도 상세 조회는 유지합니다. 국내 주문 접수와 호가 게시에는 검증된 당일 상하한가가 필요하며 미확보 상태에서는 기존 지정가 체결을 보류합니다. 신규 수집은 정규장만 지원하며 장전/휴일에는 날짜가 일치하는 저장값만 표시하고 과거 값을 새로 수집하지 않습니다.
+
+## 상하한가 거래 적용 (#178)
+
+국내 정규장 주문·예상 조회는 거래소 현지 당일 `price_limit_date`와 유효한 상하한가를 요구합니다. 경계 가격은 포함하고 지정가는 `TickSizePolicy`도 검증합니다. 입력 자동 보정이나 비율 기반 대체값은 사용하지 않습니다. 미국 NULL은 정상적인 가격 제한 없음이며 거래를 차단하지 않습니다. 국내 현재가 자체가 범위 밖이면 시장가도 체결하지 않습니다. 시장가는 기존 현재가 즉시 체결을 유지합니다.
+
+`PRICE_LIMIT_UNAVAILABLE`(503), `QUOTE_OUT_OF_PRICE_LIMIT`(502)은 주문·예약·체결·원장 저장 없이 SAME_CLIENT_ORDER_ID를 반환하고, 예상 조회에서는 실행 불가 사유로 표시합니다. `PRICE_OUT_OF_RANGE`, `INVALID_TICK_SIZE`(422)는 지정가 REJECTED로 저장하고 NEW_CLIENT_ORDER_ID를 반환하며 예약·원장은 생성하지 않습니다. 기존 주문의 멱등 응답을 검증보다 먼저 반환합니다.
+
+주문 준비는 금융 트랜잭션 밖에서 `ensureForTrading`으로 복구를 시도하고 DB를 재조회합니다. 기존 2 TPS 게이트·종목별 중복 억제·실패 1분 대기를 공유하고 게이트 슬롯을 기다리지 않습니다. 허용된 호출은 브로커 제한과 HTTP 타임아웃의 영향을 받습니다. 계좌·호가 잠금 후 외부 호출은 하지 않습니다. 배경 수집은 시작 즉시 실행하고 완료 후 5분 주기를 유지합니다.
+
+V2 구현만 유지합니다. ASK는 기준가보다 큰 가격, BID는 작은 가격에서 시작합니다. 당일 상하한가가 없거나 기준가가 범위 밖이면 게시하지 않습니다. 기존 V1은 즉시 조회·체결에서 제외하고 스케줄러가 V2로 교체합니다. 단일 SQL 스냅샷에 상하한가를 포함하며 양쪽이 비어도 헤더를 반환합니다. 예상 가격 배열로 경계 축소와 레벨 누락·중복을 구분합니다. 정상 빈 방향은 AVAILABLE/NO_LIQUIDITY, 예상 체결 0주입니다. 기존 주문은 예약 자원을 유지하며 접수 정규장 마감에 만료합니다. 익일 이월 및 당일 상하한가 정정은 추가하지 않습니다.
+
+
+## 비밀번호 재설정과 Stateful 인증
+
+브라우저의 `POST /api/auth/password/forgot`, `POST /api/auth/password/reset`은 Next.js의 명시적인 중계 경로를 사용합니다. 정확한 Origin, `X-Auth-Request: 1`, JSON Content-Type을 검증하고 빈 성공 응답과 오류를 전달하며 Refresh 쿠키를 변경하지 않습니다.
+
+발급은 사용자를 먼저 잠그고 쿨다운 확인·이전 토큰 무효화·새 토큰 저장을 직렬화합니다. 재설정은 소유자 ID 조회 후 사용자와 토큰을 순서대로 잠그고 사용·만료 상태를 다시 확인합니다. 비밀번호 변경과 모든 사용자 세션 폐기는 같은 트랜잭션에서 처리합니다.
+
+폐기 커밋 뒤 시작하는 인증 검증은 기존 Access와 Refresh를 거절합니다. 이미 인증된 요청을 소급 취소하지는 않습니다. V18에서 레거시 `token_version` 컬럼을 제거하며 실제 폐기는 `auth_session`으로 처리합니다. [상세 인증 정책](authentication.ko.md)을 참고하세요.

@@ -1,0 +1,376 @@
+package com.baedang.stock.controller;
+
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.stock.dto.RankingResponse;
+import com.baedang.stock.dto.CandleResponse;
+import com.baedang.stock.dto.StockSearchResponse;
+import com.baedang.stock.dto.StockDetailResponse;
+import com.baedang.stock.dto.StockFinancialResponse;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.StockCategory;
+import com.baedang.stock.service.RankingService;
+import com.baedang.stock.service.CandleQueryService;
+import com.baedang.stock.service.StockLikeService;
+import com.baedang.stock.service.StockSearchService;
+import com.baedang.stock.service.StockDetailService;
+import com.baedang.stock.service.StockFinancialQueryService;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.List;
+import java.time.OffsetDateTime;
+import java.time.LocalDate;
+
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(StockController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
+public class StockControllerTest {
+    @MockitoBean private AuthSessionService authSessions;
+
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @MockitoBean
+    private StockSearchService stockSearchService;
+
+    @MockitoBean
+    private RankingService rankingService;
+
+    @MockitoBean
+    private CandleQueryService candleQueryService;
+
+    @MockitoBean
+    private StockDetailService stockDetailService;
+
+
+    @MockitoBean
+    private StockFinancialQueryService stockFinancialQueryService;
+    @MockitoBean
+    private StockLikeService stockLikeService;
+    @MockitoBean
+    private JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    @DisplayName("관심 종목 API는 인증 없이 호출하면 401을 반환한다")
+    void likesRequireAuthentication() throws Exception {
+        mockMvc.perform(get("/api/stocks/likes"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+        mockMvc.perform(post("/api/stocks/likes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"stockId\":5}"))
+                .andExpect(status().isUnauthorized());
+        mockMvc.perform(delete("/api/stocks/likes/5"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("종목 검색 API가 검색 결과 반환")
+    void t1() throws Exception {
+        StockSearchResponse response = new StockSearchResponse(
+                List.of(
+                        new StockSearchResponse.Item(
+                                "005930",
+                                "삼성전자",
+                                "SamsungElec",
+                                "KOSPI",
+                                MarketCountry.KR,
+                                StockCategory.INDIVIDUAL
+                        )
+                )
+        );
+
+        when(stockSearchService.search("삼성", 10)).thenReturn(response);
+
+        mockMvc.perform(
+                        get("/api/stocks/search")
+                                .param("q", "삼성")
+                                .param("size", "10")
+                                .contentType(MediaType.APPLICATION_JSON)
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].symbol").value("005930"))
+                .andExpect(jsonPath("$.items[0].name").value("삼성전자"))
+                .andExpect(jsonPath("$.items[0].englishName").value("SamsungElec"))
+                .andExpect(jsonPath("$.items[0].market").value("KOSPI"))
+                .andExpect(jsonPath("$.items[0].marketCountry").value("KR"))
+                .andExpect(jsonPath("$.items[0].category").value("INDIVIDUAL"));
+
+        verify(stockSearchService).search("삼성", 10);
+
+    }
+
+    @Test
+    @DisplayName("size 생략시 기본값 10 사용")
+    void t2() throws Exception {
+        when(stockSearchService.search("삼성", 10)).thenReturn(new StockSearchResponse(List.of()));
+
+        mockMvc.perform(
+                        get("/api/stocks/search")
+                                .param("q", "삼성")
+                )
+                .andExpect(status().isOk());
+
+        verify(stockSearchService).search("삼성", 10);
+    }
+
+    @Test
+    @DisplayName("검색어가 잘못되면 400 응답 반환")
+    void t3() throws Exception {
+        when(stockSearchService.search("%", 10))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_QUERY));
+
+        mockMvc.perform(
+                        get("/api/stocks/search")
+                                .param("q", "%")
+                                .param("size", "10")
+                ).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_QUERY"))
+                .andExpect(jsonPath("$.message").value("검색어를 1자 이상 입력해주세요"));
+    }
+
+    @Test
+    @DisplayName("국내 종목 랭킹 반환")
+    void t4() throws Exception {
+        RankingResponse response = new RankingResponse(
+                List.of(new RankingResponse.Item(
+                        1,
+                        1L,
+                        "005930",
+                        "삼성전자",
+                        "KOSPI",
+                        StockCategory.INDIVIDUAL,
+                        false,
+                        null,
+                        "KRW",
+                        "241500",
+                        "236050",
+                        "5450",
+                        "0.023069",
+                        "1240000000000",
+                        null,
+                        true,
+                        null
+                )), "next-cursor", true
+        );
+
+        when(rankingService.getRankings("KR", 20, null, null)).thenReturn(response);
+
+        mockMvc.perform(
+                        get("/api/stocks/rankings")
+                                .param("market", "KR")
+                ).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].rank").value(1))
+                .andExpect(jsonPath("$.items[0].symbol").value("005930"))
+                .andExpect(jsonPath("$.items[0].lastPrice").value("241500"))
+                .andExpect(jsonPath("$.items[0].changeAmount").value("5450"))
+                .andExpect(jsonPath("$.items[0].realtime").value(true))
+                .andExpect(jsonPath("$.nextCursor").value("next-cursor"))
+                .andExpect(jsonPath("$.hasNext").value(true));
+
+        verify(rankingService).getRankings("KR", 20, null, null);
+    }
+
+    @Test
+    @DisplayName("cursor를 다음 페이지 조회에 전달한다")
+    void t5() throws Exception {
+        when(rankingService.getRankings("US", 20, "cursor-value", null))
+                .thenReturn(new RankingResponse(List.of(),null,false));
+
+        mockMvc.perform(
+                get("/api/stocks/rankings")
+                        .param("market", "US")
+                        .param("size", "20")
+                        .param("cursor", "cursor-value")
+        ).andExpect(status().isOk());
+
+        verify(rankingService).getRankings("US", 20, "cursor-value", null);
+    }
+
+    @Test
+    @DisplayName("캔들 API가 시장과 interval-range 조합을 서비스에 전달한다")
+    void candles() throws Exception {
+        CandleResponse response = new CandleResponse(
+                "005930",
+                "1d",
+                "6M",
+                "KRW",
+                List.of(new CandleResponse.Item(
+                        OffsetDateTime.parse("2026-08-11T00:00:00+09:00"),
+                        "237000", "242500", "236500", "241500", "12345678")));
+        when(candleQueryService.getCandles("005930", "KR", "1d", "6M"))
+                .thenReturn(response);
+
+        mockMvc.perform(get("/api/stocks/005930/candles")
+                        .param("marketCountry", "KR")
+                        .param("interval", "1d")
+                        .param("range", "6M"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.symbol").value("005930"))
+                .andExpect(jsonPath("$.interval").value("1d"))
+                .andExpect(jsonPath("$.range").value("6M"))
+                .andExpect(jsonPath("$.currency").value("KRW"))
+                .andExpect(jsonPath("$.items[0].close").value("241500"));
+
+        verify(candleQueryService).getCandles("005930", "KR", "1d", "6M");
+    }
+
+    @Test
+    @DisplayName("종목 상세 API가 시장 국가를 서비스에 전달한다")
+    void detail() throws Exception {
+        StockDetailResponse response = new StockDetailResponse(
+                "005930", "삼성전자", "SamsungElec", "KOSPI", MarketCountry.KR,
+                "KRW", "KR7005930003", StockCategory.INDIVIDUAL, null, false,
+                new StockDetailResponse.Price("241500", "236050", "5450", "0.023089",
+                        "313500", "169500", OffsetDateTime.parse("2026-08-27T12:00:00+09:00"), true),
+                new StockDetailResponse.Info("1441498485825000", "5968935760", LocalDate.parse("1975-06-11")),
+                List.of(), StockDetailResponse.WarningStatus.AVAILABLE, true, null);
+        when(stockDetailService.getDetail("005930", "KR")).thenReturn(response);
+
+        mockMvc.perform(get("/api/stocks/005930").param("marketCountry", "KR"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.symbol").value("005930"))
+                .andExpect(jsonPath("$.marketCountry").value("KR"))
+                .andExpect(jsonPath("$.price.lastPrice").value("241500"))
+                .andExpect(jsonPath("$.price.realtime").value(true))
+                .andExpect(jsonPath("$.info.marketCap").isString())
+                .andExpect(jsonPath("$.tradable").value(true));
+
+        verify(stockDetailService).getDetail("005930", "KR");
+    }
+
+    @Test
+    @DisplayName("종목 상세 API의 시장 국가가 누락되면 400 INVALID_INPUT을 반환한다")
+    void detailRequiresMarketCountry() throws Exception {
+        mockMvc.perform(get("/api/stocks/005930"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("종목 랭킹 API의 market 파라미터가 누락되면 400 INVALID_INPUT을 반환한다")
+    void rankingsRequiresMarket() throws Exception {
+        mockMvc.perform(get("/api/stocks/rankings"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("종목 검색 API의 q 파라미터가 누락되면 400 INVALID_INPUT을 반환한다")
+    void searchRequiresQuery() throws Exception {
+        mockMvc.perform(get("/api/stocks/search"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("재무정보 조회 성공 시 전체 중첩 구조와 상태 문자열을 반환한다")
+    void financials_success() throws Exception {
+        StockFinancialResponse response = new StockFinancialResponse(
+                "005930",
+                "KR",
+                "FRESH",
+                new StockFinancialResponse.Industry(
+                        new StockFinancialResponse.Classification("0326", "전자부품"),
+                        null, null, null
+                ),
+                new StockFinancialResponse.Valuation("14.27", "LATEST_ANNUAL_EPS"),
+                List.of(
+                        new StockFinancialResponse.Period(
+                                "202512",
+                                 new StockFinancialResponse.BalanceSheet(
+                                        "100", "200", "300", "50", "50", "100", "10", null, null, "200"
+                                ),
+                                new StockFinancialResponse.IncomeStatement("500", "50", "40"),
+                                new StockFinancialResponse.Ratios(
+                                        "10", "12", "8", "15", "5000", "60000", "40000", "800", "50", "8", "10"
+                                )
+                        )
+                ),
+                List.of(),
+                new StockFinancialResponse.SyncedAt(
+                        OffsetDateTime.parse("2026-09-08T00:00:00Z"),
+                        OffsetDateTime.parse("2026-09-08T00:00:01Z"),
+                        OffsetDateTime.parse("2026-09-08T00:00:02Z")
+                )
+        );
+
+        when(stockFinancialQueryService.getFinancials("005930", "KR")).thenReturn(response);
+
+        mockMvc.perform(get("/api/stocks/005930/financials").param("marketCountry", "KR"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.symbol").value("005930"))
+                .andExpect(jsonPath("$.marketCountry").value("KR"))
+                .andExpect(jsonPath("$.dataStatus").value("FRESH"))
+                .andExpect(jsonPath("$.valuation.calculatedPer").value("14.27"))
+                .andExpect(jsonPath("$.valuation.basis").value("LATEST_ANNUAL_EPS"))
+                .andExpect(jsonPath("$.industry.standard.code").value("0326"))
+                .andExpect(jsonPath("$.annual[0].statementYearMonth").value("202512"))
+                .andExpect(jsonPath("$.annual[0].balanceSheet.currentAssets").value("100"))
+                .andExpect(jsonPath("$.annual[0].incomeStatement.sales").value("500"))
+                .andExpect(jsonPath("$.annual[0].ratios.operatingProfitMargin").value("10"))
+                .andExpect(jsonPath("$.annual[0].balanceSheet.capitalSurplus").doesNotExist())
+                .andExpect(jsonPath("$.quarterly").isEmpty())
+                .andExpect(jsonPath("$.syncedAt.industry").value("2026-09-08T00:00:00Z"));
+
+        verify(stockFinancialQueryService).getFinancials("005930", "KR");
+    }
+
+    @Test
+    @DisplayName("재무정보 조회 시 marketCountry가 누락되면 400 INVALID_INPUT을 반환한다")
+    void financials_missing_marketCountry_returns_400() throws Exception {
+        mockMvc.perform(get("/api/stocks/005930/financials"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("지원하지 않는 종목 조회 시 422 FINANCIALS_NOT_SUPPORTED를 반환한다")
+    void financials_unsupported_returns_422() throws Exception {
+        when(stockFinancialQueryService.getFinancials("AAPL", "US"))
+                .thenThrow(new BusinessException(ErrorCode.FINANCIALS_NOT_SUPPORTED));
+
+        mockMvc.perform(get("/api/stocks/AAPL/financials").param("marketCountry", "US"))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("FINANCIALS_NOT_SUPPORTED"));
+    }
+
+    @Test
+    @DisplayName("랭킹은 비로그인도 조회할 수 있고, 로그인하면 userId를 서비스에 전달한다")
+    void rankingsArePublicAndPassUserId() throws Exception {
+        RankingResponse empty = new RankingResponse(List.of(), null, false);
+        when(rankingService.getRankings("KR", 20, null, null)).thenReturn(empty);
+        when(rankingService.getRankings("KR", 20, null, 7L)).thenReturn(empty);
+
+        mockMvc.perform(get("/api/stocks/rankings").param("market", "KR"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/stocks/rankings").param("market", "KR")
+                        .with(authentication(new UsernamePasswordAuthenticationToken(7L, null, List.of()))))
+                .andExpect(status().isOk());
+
+        verify(rankingService).getRankings("KR", 20, null, null);
+        verify(rankingService).getRankings("KR", 20, null, 7L);
+    }
+}

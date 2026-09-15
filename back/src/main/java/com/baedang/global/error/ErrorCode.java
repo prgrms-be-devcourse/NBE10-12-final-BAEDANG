@@ -27,32 +27,55 @@ public enum ErrorCode {
     // ── 공통 ────────────────────────────────────────────────────────────────
     INVALID_INPUT(HttpStatus.BAD_REQUEST, "입력값이 올바르지 않아요"),
     METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "지원하지 않는 요청 방식이에요"),
+    NOT_FOUND(HttpStatus.NOT_FOUND, "요청한 경로를 찾을 수 없어요"),
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했어요. 잠시 후 다시 시도해주세요"),
 
     // ── 인증 · 회원 ─────────────────────────────────────────────────────────
-    //   1주차에는 토큰을 발급하지 않으므로 UNAUTHORIZED 는 아직 쓰이지 않습니다.
-    //   2주차에 JWT 를 붙일 때부터 사용하세요.
+    //   JWT 인증과 회원 생명주기 API에서 사용하는 오류입니다.
     EMAIL_DUPLICATED(HttpStatus.CONFLICT, "이미 가입된 이메일이에요"),
     NICKNAME_DUPLICATED(HttpStatus.CONFLICT, "이미 사용 중인 닉네임이에요"),
     LOGIN_FAILED(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않아요"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "회원 정보를 찾을 수 없어요"),
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요해요"),
+    TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "로그인이 만료됐어요. 다시 로그인해주세요"),
+    INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "인증 정보가 올바르지 않아요"),
+    SESSION_REVOKED(HttpStatus.UNAUTHORIZED, "로그인이 해제됐어요. 다시 로그인해주세요"),
+    REFRESH_TOKEN_REUSED(HttpStatus.UNAUTHORIZED, "인증 정보가 재사용되어 로그인이 해제됐어요"),
+    AUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "인증 정보를 확인할 수 없어요. 잠시 후 다시 시도해주세요"),
+    INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않아요"),
+
+    /** 비밀번호 찾기 링크의 토큰이 없거나, 형식이 맞지 않거나, 이미 사용됐을 때. */
+    PASSWORD_RESET_TOKEN_INVALID(HttpStatus.BAD_REQUEST, "재설정 링크가 올바르지 않아요. 다시 요청해주세요"),
+    /** 비밀번호 찾기 링크의 유효 시간(기본 30분)이 지났을 때. */
+    PASSWORD_RESET_TOKEN_EXPIRED(HttpStatus.BAD_REQUEST, "재설정 링크가 만료됐어요. 다시 요청해주세요"),
 
     // ── 종목 ────────────────────────────────────────────────────────────────
     STOCK_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 종목이에요"),
-    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어는 2자 이상 입력해주세요"),
+    STOCK_STATUS_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "종목 거래 상태를 확인할 수 없어요. 다시 시도해주세요"),
+    STOCK_NOT_TRADABLE(HttpStatus.UNPROCESSABLE_ENTITY, "현재 거래를 지원하지 않는 종목이에요"),
+    INVALID_QUERY(HttpStatus.BAD_REQUEST, "검색어를 1자 이상 입력해주세요"),
     INVALID_INTERVAL_RANGE(HttpStatus.BAD_REQUEST, "지원하지 않는 차트 기간 조합이에요"),
     INVALID_CURSOR(HttpStatus.BAD_REQUEST, "잘못된 페이지 정보예요. 처음부터 다시 불러와주세요"),
 
     // ── 시세 ────────────────────────────────────────────────────────────────
+    PRICE_LIMIT_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "당일 상하한가를 확인할 수 없어요. 잠시 후 다시 시도해주세요"),
+    PRICE_OUT_OF_RANGE(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가격은 당일 하한가와 상한가 사이여야 해요"),
+    INVALID_TICK_SIZE(HttpStatus.UNPROCESSABLE_ENTITY, "주문 가격이 호가 단위에 맞지 않아요"),
+    QUOTE_OUT_OF_PRICE_LIMIT(HttpStatus.BAD_GATEWAY, "현재가가 당일 상하한가 범위를 벗어났어요. 잠시 후 다시 시도해주세요"),
     QUOTE_NOT_FOUND(HttpStatus.NOT_FOUND, "시세 정보를 가져올 수 없어요"),
+    QUOTE_CURRENCY_MISMATCH(HttpStatus.BAD_GATEWAY, "시세 통화 정보가 올바르지 않아요"),
     EXCHANGE_RATE_NOT_FOUND(HttpStatus.NOT_FOUND, "환율 정보를 가져올 수 없어요"),
+    ORDER_BOOK_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "현재 가상 호가를 조회할 수 없어요"),
 
     // ── 주문 · 체결 ─────────────────────────────────────────────────────────
     MARKET_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "지금은 거래할 수 없는 시간이에요"),
+    ORDER_NOT_FOUND(HttpStatus.NOT_FOUND, "주문을 찾을 수 없어요"),
+    ORDER_STATE_CONFLICT(HttpStatus.CONFLICT, "현재 주문 상태에서는 취소할 수 없어요"),
+    MARKET_CONTEXT_EXPIRED(HttpStatus.UNPROCESSABLE_ENTITY, "시장 정보를 다시 확인한 뒤 주문해주세요"),
     NOT_IN_UNIVERSE(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 아직 거래를 지원하지 않아요"),
     STOCK_SUSPENDED(HttpStatus.UNPROCESSABLE_ENTITY, "거래정지 종목이에요"),
     STOCK_LIQUIDATION(HttpStatus.UNPROCESSABLE_ENTITY, "정리매매 종목이에요"),
+    MARKET_TRADING_HALTED(HttpStatus.UNPROCESSABLE_ENTITY, "현재 해당 시장의 매매거래가 일시 중단됐어요"),
     INSUFFICIENT_CASH(HttpStatus.UNPROCESSABLE_ENTITY, "주문가능금액이 부족해요"),
     INSUFFICIENT_QUANTITY(HttpStatus.UNPROCESSABLE_ENTITY, "보유 수량이 부족해요"),
     INVALID_QUANTITY(HttpStatus.BAD_REQUEST, "수량은 1주 이상의 정수로 입력해주세요"),
@@ -62,6 +85,8 @@ public enum ErrorCode {
      * 오래된 가격으로 체결되면 원장의 신뢰가 무너지므로 차라리 거절합니다.
      */
     STALE_QUOTE(HttpStatus.UNPROCESSABLE_ENTITY, "시세 정보가 오래되었어요. 다시 시도해주세요"),
+    FUTURE_QUOTE(HttpStatus.UNPROCESSABLE_ENTITY, "시세 기준 시각이 올바르지 않아요. 다시 시도해주세요"),
+    INVALID_SETTLEMENT_AMOUNT(HttpStatus.UNPROCESSABLE_ENTITY, "정산 금액이 올바르지 않아요"),
 
     /**
      * 같은 {@code clientOrderId} 로 이미 처리된 주문. 중복 클릭이거나 네트워크 재시도입니다.
@@ -73,8 +98,15 @@ public enum ErrorCode {
     // ── 계좌 ────────────────────────────────────────────────────────────────
     ACCOUNT_NOT_FOUND(HttpStatus.NOT_FOUND, "계좌 정보를 찾을 수 없어요"),
     ACCOUNT_CLOSED(HttpStatus.UNPROCESSABLE_ENTITY, "종료된 회차의 계좌예요"),
+    ACCOUNT_ROUND_CHANGED(HttpStatus.CONFLICT, "포트폴리오가 초기화됐어요. 계좌 정보를 새로고침한 후 다시 주문해주세요"),
+    ACCOUNT_RESET_CONFLICT(HttpStatus.CONFLICT, "이미 다른 회차가 시작되었어요. 계좌 정보를 새로고침해주세요"),
+    ACCOUNT_HAS_PENDING_ORDERS(HttpStatus.CONFLICT, "미체결 주문이 있어 포트폴리오를 초기화할 수 없어요"),
 
     // ── 외부 API ────────────────────────────────────────────────────────────
+    FINANCIALS_NOT_SUPPORTED(HttpStatus.UNPROCESSABLE_ENTITY, "이 종목은 재무정보를 지원하지 않아요"),
+    KIS_API_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "재무정보 서비스를 사용할 수 없어요"),
+    KIS_API_ERROR(HttpStatus.BAD_GATEWAY, "재무정보를 가져올 수 없어요"),
+    KIS_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "재무정보 요청이 너무 많아요. 잠시 후 다시 시도해주세요"),
     TOSS_API_ERROR(HttpStatus.BAD_GATEWAY, "시세 서버와 통신할 수 없어요"),
     TOSS_RATE_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "요청이 너무 많아요. 잠시 후 다시 시도해주세요");
 

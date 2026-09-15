@@ -1,0 +1,255 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { AreaSeries, createChart, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from "lightweight-charts";
+import { PillTabs } from "./PillTabs";
+import { useTheme } from "./ThemeProvider";
+import { getExchangeRateHistory, type ExchangeRateHistoryItem, type ExchangeRatePeriod } from "@/lib/api";
+import { resolveCssColor } from "@/lib/chart-colors";
+// 굴곡진 선(라인) 아래에 그라데이션 효과를 넣어달라는 요청을 첨부받은 참고
+// 이미지(선 아래로 점점 옅어지는 붉은 그라데이션 영역)처럼 구현하려고, 선
+// 색상(accent)에 알파값만 다르게 입혀 위(선 바로 아래, 진하게)→아래
+// (완전 투명)로 옅어지는 두 색을 만든다. resolveCssColor가 항상
+// "rgb(r, g, b)" 형태로 정규화해 돌려주므로 정규식으로 채널만 뽑아 쓴다.
+function withAlpha(rgbColor: string, alpha: number): string {
+  const channels = rgbColor.match(/\d+(\.\d+)?/g);
+  if (!channels || channels.length < 3) return rgbColor;
+  const [r, g, b] = channels;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+import { formatCrosshairTime, formatTickMark, isTimeVisible, nextExchangeRateRange, toLinePoints } from "@/lib/exchange-rate-chart-data";
+import { formatNumber } from "@/lib/format";
+import { useVisiblePolling } from "@/lib/useVisiblePolling";
+import { createHistoryRefresh } from "@/lib/exchange-rate-history-refresh";
+
+const PERIOD_OPTIONS: { value: ExchangeRatePeriod; label: string }[] = [
+  { value: "1d", label: "1일" },
+  { value: "1w", label: "1주" },
+  { value: "1m", label: "1개월" },
+  { value: "3m", label: "3개월" },
+  { value: "1y", label: "1년" },
+];
+
+/**
+ * "환율 추이 그래프" 모달 (이슈 랭킹 화면 요청사항). `GET /api/exchange-rates/history`를
+ * 기간별로 조회해 `lightweight-charts` 라인 차트로 보여준다.
+ *
+ * <p>색 처리 방식은 종목 상세의 캔들차트(`CandlestickChart`)와 같다 — 자세한 이유는
+ * `@/lib/chart-colors`의 `resolveCssColor` 주석 참고.
+ */
+export function ExchangeRateTrendModal({ onClose }: { onClose: () => void }) {
+  const { theme } = useTheme();
+  const [period, setPeriod] = useState<ExchangeRatePeriod>("1m");
+  const [items, setItems] = useState<ExchangeRateHistoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Area"> | null>(null);
+  const refreshRef = useRef<(() => Promise<void>) | null>(null);
+  const fittedRef = useRef(false);
+  const lastPointRef = useRef<UTCTimestamp | undefined>(undefined);
+
+  // 로딩/에러 상태 초기화는 기간을 바꾸는 시점(PillTabs onChange)에서 하고, 이 effect는
+  // 요청 자체만 담당한다 — effect 본문에서 곧장 setState를 부르면
+  // react-hooks/set-state-in-effect 린트가 걸려서 우회 주석이 필요했는데, 상태 초기화를
+  // 이벤트 핸들러로 옮기면 그 주석 없이도 깔끔하게 처리된다(제미나이 코드 리뷰 반영).
+  useEffect(() => {
+    const request = createHistoryRefresh(
+      (signal) => getExchangeRateHistory(period, signal),
+      (res) => { setItems(res.items); setLoadError(false); },
+      () => setLoadError(true),
+      () => setLoading(false),
+    );
+    refreshRef.current = request.refresh;
+    void request.refresh();
+    return () => {
+      request.dispose();
+      refreshRef.current = null;
+    };
+  }, [period]);
+  useVisiblePolling(() => { void refreshRef.current?.(); }, 60_000);
+
+  // 차트 인스턴스는 마운트 시 한 번만 만든다 — 기간 전환·테마 변경은 별도 effect가
+  // 기존 인스턴스에 반영한다(CandlestickChart와 같은 이유).
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const line2 = resolveCssColor("--line2", "#e9f2f9");
+    const chart = createChart(container, {
+      width: container.clientWidth,
+      height: 320,
+      layout: { background: { color: "transparent" }, textColor: resolveCssColor("--ink", "#071829") },
+      grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
+      rightPriceScale: { borderColor: line2 },
+      localization: { locale: "ko-KR" },
+      timeScale: {
+        borderColor: line2,
+        timeVisible: false,
+        secondsVisible: false,
+        tickMarkFormatter: formatTickMark,
+      },
+    });
+    // 기존 디자인(선 색상·굵기·그리드·배경 등)은 그대로 두고, 선 아래에만
+    // 그라데이션 영역을 추가해달라는 요청 — LineSeries를 AreaSeries로 바꿔
+    // 선(lineColor)은 그대로 유지하면서 그 아래 영역만 위(topColor, 진하게)
+    // →아래(bottomColor, 완전 투명)로 옅어지는 채움을 얹었다.
+    const accentColor = resolveCssColor("--accent", "#0f3868");
+    const series = chart.addSeries(AreaSeries, {
+      lineColor: accentColor,
+      lineWidth: 2,
+      topColor: withAlpha(accentColor, 0.32),
+      bottomColor: withAlpha(accentColor, 0),
+    });
+
+    chartRef.current = chart;
+    seriesRef.current = series;
+
+    const resizeObserver = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) chart.applyOptions({ width });
+    });
+    resizeObserver.observe(container);
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      fittedRef.current = false;
+    };
+  }, []);
+
+  // 기간이 바뀌어 새 데이터가 오면 기존 인스턴스에 반영한다. 기간에 맞는 버킷 단위로
+  // 다운샘플링하고(`toLinePoints`), 축의 시:분 표시 여부도 기간에 맞춰 같이 조정한다 —
+  // 그렇지 않으면 "1개월"처럼 넓은 기간에서도 "08:59"류의 시각 단위 눈금이 찍힌다.
+  useEffect(() => {
+    if (!chartRef.current || !seriesRef.current) return;
+    chartRef.current.applyOptions({
+      timeScale: { timeVisible: isTimeVisible(period) },
+      localization: { timeFormatter: (time: Time) => formatCrosshairTime(time, period) },
+    });
+    const scale = chartRef.current.timeScale();
+    const visibleRange = fittedRef.current ? scale.getVisibleRange() : null;
+    const points = toLinePoints(items, period);
+    seriesRef.current.setData(points);
+    if (!fittedRef.current && points.length > 0) {
+      scale.fitContent();
+      fittedRef.current = true;
+    } else if (visibleRange && points.length > 0
+        && typeof visibleRange.from === "number" && typeof visibleRange.to === "number") {
+      scale.setVisibleRange(nextExchangeRateRange(
+        { from: visibleRange.from, to: visibleRange.to }, lastPointRef.current, points[points.length - 1].time,
+      ));
+    }
+    lastPointRef.current = points.at(-1)?.time;
+  }, [items, period]);
+
+  // 라이트/다크 전환 시 색만 다시 입힌다.
+  useEffect(() => {
+    const chart = chartRef.current;
+    const series = seriesRef.current;
+    if (!chart || !series) return;
+    const ink = resolveCssColor("--ink", "#071829");
+    const line2 = resolveCssColor("--line2", "#e9f2f9");
+    chart.applyOptions({
+      layout: { textColor: ink },
+      grid: { vertLines: { color: line2 }, horzLines: { color: line2 } },
+      rightPriceScale: { borderColor: line2 },
+      timeScale: { borderColor: line2 },
+    });
+    const accentColor = resolveCssColor("--accent", "#0f3868");
+    series.applyOptions({
+      lineColor: accentColor,
+      topColor: withAlpha(accentColor, 0.32),
+      bottomColor: withAlpha(accentColor, 0),
+    });
+  }, [theme]);
+
+  const latestRate = items.length > 0 ? items[items.length - 1].rate : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+      style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[640px] rounded-[24px] p-6.5"
+        style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-1 flex items-start justify-between">
+          <div>
+            <h3 className="text-[18px] font-bold" style={{ color: "var(--ink)" }}>
+              USD / KRW 환율 추이
+            </h3>
+            {latestRate && (
+              <p className="mt-1 text-[13px]" style={{ color: "var(--mut2)" }}>
+                최근값 {formatNumber(latestRate)}원
+              </p>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="rate-trend-close-btn cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold transition-colors duration-150"
+            style={{ color: "var(--mut)" }}
+            aria-label="닫기"
+          >
+            닫기
+          </button>
+        </div>
+
+        <div className="my-4">
+          <PillTabs
+            options={PERIOD_OPTIONS}
+            value={period}
+            onChange={(v) => {
+              if (v === period) return;
+              setLoading(true);
+              setLoadError(false);
+              setItems([]);
+              fittedRef.current = false;
+              setPeriod(v as ExchangeRatePeriod);
+            }}
+            trackClassName="w-fit gap-0.5 rounded-full p-[3px]"
+            // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+            // 기존 alpha 값을 절반으로 낮췄다.
+            trackStyle={{
+              background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+              border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
+            }}
+            buttonClassName="rounded-full px-3.5 py-1.5 text-[13px] font-bold"
+            inactiveTextStyle={{ color: "var(--mut)" }}
+          />
+        </div>
+
+        <div className="relative" style={{ minHeight: 320 }}>
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center text-[13px]" style={{ color: "var(--mut2)" }}>
+              불러오는 중…
+            </div>
+          )}
+          {!loading && loadError && items.length < 2 && (
+            <div className="absolute inset-0 flex items-center justify-center text-[13px]" style={{ color: "var(--mut2)" }}>
+              환율 추이를 불러오지 못했어요. 잠시 후 다시 시도해주세요.
+            </div>
+          )}
+          {!loading && loadError && items.length >= 2 && (
+            <p className="text-[12px]" role="status" style={{ color: "var(--mut2)" }}>
+              환율 갱신에 실패했어요. 이전 데이터를 표시하며 다음 주기에 다시 시도합니다.
+            </p>
+          )}
+          {!loading && !loadError && items.length < 2 && (
+            <div className="absolute inset-0 flex items-center justify-center text-[13px]" style={{ color: "var(--mut2)" }}>
+              표시할 데이터가 아직 없어요
+            </div>
+          )}
+          <div ref={containerRef} className="w-full" />
+        </div>
+      </div>
+    </div>
+  );
+}

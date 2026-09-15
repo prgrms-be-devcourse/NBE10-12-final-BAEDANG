@@ -1,0 +1,128 @@
+package com.baedang.trading.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.trading.dto.MarketOrderQuoteResponse;
+import com.baedang.trading.model.MarketOrderAmount;
+import com.baedang.trading.model.OrderQuoteQueryContext;
+import com.baedang.trading.model.OrderTerms;
+import com.baedang.user.entity.Account;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+
+@Service
+@Transactional(propagation = Propagation.NEVER)
+public class MarketOrderQuoteService {
+
+    private static final Logger log = LoggerFactory.getLogger(MarketOrderQuoteService.class);
+
+    private final OrderQuoteQueryService queryService;
+
+    // 시장 데이터 모듈이 구현하는 포트입니다. 거래 모듈에서는 구현하지 않습니다.
+    private final MarketSessionProvider marketSessionProvider;
+    private final ExecutionExchangeRateProvider exchangeRateProvider;
+    private final MarketOrderSettlementCalculator amountCalculator;
+    private final OrderPolicy orderPolicy;
+    private final MarketOrderPolicy marketOrderPolicy;
+    private final Clock clock;
+    private final OrderMarketDataService marketData;
+
+    public MarketOrderQuoteService(
+            OrderQuoteQueryService queryService,
+            MarketSessionProvider marketSessionProvider,
+            ExecutionExchangeRateProvider exchangeRateProvider,
+            MarketOrderSettlementCalculator amountCalculator,
+            OrderPolicy orderPolicy,
+            MarketOrderPolicy marketOrderPolicy,
+            Clock clock,
+            OrderMarketDataService marketData
+    ) {
+        this.queryService = queryService;
+        this.marketSessionProvider = marketSessionProvider;
+        this.exchangeRateProvider = exchangeRateProvider;
+        this.amountCalculator = amountCalculator;
+        this.orderPolicy = orderPolicy;
+        this.marketOrderPolicy = marketOrderPolicy;
+        this.clock = clock;
+        this.marketData = marketData;
+    }
+
+    /** 견적은 자금이나 수량을 예약하지 않는 비구속성 읽기 모델입니다. */
+    public MarketOrderQuoteResponse getQuote(
+            Long userId,
+            String symbolValue,
+            String marketCountryValue,
+            String sideValue,
+            String quantityValue
+    ) {
+        OrderTerms terms = orderPolicy.parseTerms(
+                symbolValue, marketCountryValue, sideValue, quantityValue);
+
+        OrderQuoteQueryContext queryContext = marketData.prepareEstimate(queryService.load(userId, terms));
+        Account account = queryContext.account();
+        Stock stock = queryContext.stock();
+        if (!orderPolicy.hasValidCurrencyForMarket(stock, queryContext.quote())) {
+            throw new BusinessException(
+                    ErrorCode.QUOTE_CURRENCY_MISMATCH,
+                    "stockCurrency=" + stock.getCurrency()
+                            + ", quoteCurrency=" + queryContext.quote().getCurrency());
+        }
+
+        ExecutionExchangeRateSnapshot snapshot = stock.getMarketCountry() == MarketCountry.KR
+                ? null : exchangeRateProvider.currentUsdKrwSnapshot();
+        BigDecimal exchangeRate = snapshot == null ? BigDecimal.ONE : snapshot.rate();
+        MarketOrderAmount amount = amountCalculator.calculate(
+                stock.getMarketCountry(),
+                terms.side(),
+                queryContext.quote().getLastPrice(),
+                terms.quantity(),
+                exchangeRate
+        );
+
+        MarketSessionStatus session = marketSessionProvider.currentSession(stock.getMarketCountry(), clock.instant());
+        // 외부 조회를 모두 마친 시각으로 시세·세션·원본 환율 유효기간을 판정합니다.
+        Instant now = clock.instant();
+        if (snapshot != null && !snapshot.isValidAt(now.atOffset(ZoneOffset.UTC))) {
+            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+        }
+        ErrorCode reason = marketOrderPolicy.determineRejection(
+                account,
+                stock,
+                queryContext.quote(),
+                terms.side(),
+                terms.quantity(),
+                amount,
+                queryContext.availableQuantity(),
+                () -> session.open() && session.validUntil() != null && now.isBefore(session.validUntil()),
+                now
+        );
+        if (reason != null) {
+            log.info("시장가 견적 실행 불가: userId={}, stockId={}, side={}, quantity={}, reason={}",
+                    userId, stock.getStockId(), terms.side(), terms.quantity(), reason);
+        }
+        return MarketOrderQuoteResponse.of(
+                stock.getSymbol(),
+                stock.getMarketCountry(),
+                terms.side(),
+                terms.quantity(),
+                amount,
+                account.availableCash(),
+                queryContext.quote().getQuoteAt(),
+                reason
+        );
+    }
+}

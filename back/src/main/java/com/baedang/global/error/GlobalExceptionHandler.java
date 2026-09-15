@@ -3,9 +3,14 @@ package com.baedang.global.error;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingRequestHeaderException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -27,7 +32,10 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleBusiness(BusinessException e) {
         ErrorCode code = e.getErrorCode();
         log.warn("[{}] {}", code.name(), e.getMessage());
-        return ResponseEntity.status(code.getStatus()).body(ErrorResponse.of(code));
+        ErrorResponse response = e.getData() == null
+                ? ErrorResponse.of(code)
+                : ErrorResponse.of(code, e.getData());
+        return ResponseEntity.status(code.getStatus()).body(response);
     }
 
     /** @Valid 검증 실패. 어느 필드가 왜 틀렸는지 data 에 담아줍니다. */
@@ -39,6 +47,40 @@ public class GlobalExceptionHandler {
         log.warn("[INVALID_INPUT] {}", fields);
         return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
                 .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, fields));
+    }
+
+    /** 필수 파라미터 누락 시 누락된 필드명을 data 에 담아 400 응답합니다. */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException e) {
+        log.warn("[INVALID_INPUT] {}", e.getMessage());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, Map.of("field", e.getParameterName())));
+    }
+
+    /** 경로/쿼리 파라미터의 타입 변환 실패는 문제 필드명만 제공하고 원본 입력은 노출하지 않습니다. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
+        log.warn("[INVALID_INPUT] field={}", e.getName());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ErrorResponse.of(ErrorCode.INVALID_INPUT, Map.of("field", e.getName())));
+    }
+
+    /** 필수 헤더 누락과 읽을 수 없는 JSON은 서버 장애가 아니라 잘못된 요청입니다. */
+    @ExceptionHandler({
+            MissingRequestHeaderException.class,
+            HttpMessageNotReadableException.class
+    })
+    public ResponseEntity<ErrorResponse> handleMalformedRequest(Exception e) {
+        log.warn("[INVALID_INPUT] {}", e.getMessage());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ErrorResponse.of(ErrorCode.INVALID_INPUT));
+    }
+
+    /** 존재하지 않는 엔드포인트/정적 리소스 요청은 500이 아니라 404로 응답합니다. */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResourceFound(NoResourceFoundException e) {
+        return ResponseEntity.status(ErrorCode.NOT_FOUND.getStatus())
+                .body(ErrorResponse.of(ErrorCode.NOT_FOUND));
     }
 
     /**

@@ -1,0 +1,841 @@
+package com.baedang.auth;
+
+import com.baedang.auth.dto.AccessTokenResponse;
+import com.baedang.auth.dto.AuthResponse;
+import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.RefreshTokenRequest;
+import com.baedang.auth.dto.SignUpRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
+import com.baedang.auth.dto.PasswordResetConfirmRequest;
+import com.baedang.auth.mail.PasswordResetMailSender;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthService;
+import com.baedang.auth.service.AuthSessionService;
+import com.baedang.user.service.UserService;
+import com.baedang.auth.service.AuthSessionService.Tokens;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.config.AsyncConfig;
+import com.baedang.global.error.ErrorCode;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.baedang.market.port.MarketCalendarPort;
+import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.user.dto.ChangePasswordRequest;
+import com.baedang.user.dto.UpdateNicknameRequest;
+import com.baedang.user.dto.WithdrawRequest;
+import com.baedang.user.entity.Account;
+import com.baedang.user.entity.AccountStatus;
+import com.baedang.user.entity.UserStatus;
+import com.baedang.user.repository.AccountRepository;
+import com.baedang.user.repository.UserRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.utility.DockerImageName;
+
+import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Map;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@Testcontainers
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@SpringBootTest(properties = {
+        "spring.jpa.hibernate.ddl-auto=validate",
+        "spring.sql.init.mode=never",
+        "logging.level.org.hibernate.SQL=OFF",
+        "auth.jwt.access-ttl=15m",
+        "trading.initial-cash=50000000"
+})
+@AutoConfigureMockMvc
+class AuthLifecycleIntegrationTest {
+
+    private static final Instant NOW = Instant.parse("2026-09-02T06:00:00Z");
+
+    @Container
+    @ServiceConnection
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>(
+            DockerImageName.parse("timescale/timescaledb:latest-pg18")
+                    .asCompatibleSubstituteFor("postgres"));
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private AccountRepository accountRepository;
+
+    @Autowired
+    private LedgerEntryRepository ledgerEntryRepository;
+
+    @Autowired
+    private JwtTokenProvider jwtTokenProvider;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @Autowired private UserService userService;
+    @Autowired private AuthService auth;
+    @Autowired private TransactionTemplate transactions;
+    @Autowired private AuthSessionService sessions;
+
+    @MockitoBean
+    private Clock clock;
+
+    @MockitoBean
+    private MarketCalendarPort marketCalendarPort;
+
+    /** 실제 메일을 보내지 않고(mail.enabled=false와 별개로 이 빈 자체를 대역으로) 링크만 가로챈다. */
+    @MockitoBean
+    private PasswordResetMailSender passwordResetMailSender;
+
+    @BeforeEach
+    void setUp() {
+        jdbcTemplate.execute("TRUNCATE TABLE ledger_entry, holding, trade_order, account, users RESTART IDENTITY CASCADE");
+        when(clock.instant()).thenReturn(NOW);
+    }
+
+    @Test
+    @DisplayName("보호 API는 token이 없거나 X-User-Id만 있으면 UNAUTHORIZED다")
+    void 보호_API는_token이_없거나_X_User_Id만_있으면_UNAUTHORIZED다() throws Exception {
+        mockMvc.perform(get("/api/accounts/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+        mockMvc.perform(get("/api/accounts/me")
+                        .header("X-User-Id", "1"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    @DisplayName("access_token으로 보호 API를 호출할 수 있다")
+    void access_token으로_보호_API를_호출할_수_있다() throws Exception {
+        SignUpRequest signUpRequest = new SignUpRequest("user1@example.com", "Password123!", "유저1");
+        String responseBody = mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(signUpRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse authResponse = objectMapper.readValue(responseBody, AuthResponse.class);
+
+        mockMvc.perform(get("/api/accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authResponse.accessToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountId").value(authResponse.account().accountId()))
+                .andExpect(jsonPath("$.roundNo").value(1));
+    }
+
+    @Test
+    @DisplayName("refresh_token을 Bearer로 보내면 INVALID_TOKEN이다")
+    void refresh_token을_Bearer로_보내면_INVALID_TOKEN이다() throws Exception {
+        SignUpRequest signUpRequest = new SignUpRequest("user2@example.com", "Password123!", "유저2");
+        String responseBody = mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(signUpRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse authResponse = objectMapper.readValue(responseBody, AuthResponse.class);
+
+        mockMvc.perform(get("/api/accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authResponse.refreshToken()))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
+    }
+
+    @Test
+    @DisplayName("변조된 token은 INVALID_TOKEN이다")
+    void 변조된_token은_INVALID_TOKEN이다() throws Exception {
+        String validToken = jwtTokenProvider.createAccessToken(1L, UUID.randomUUID(), NOW.plusSeconds(604800));
+        String tamperedToken = validToken + "tampered";
+
+        mockMvc.perform(get("/api/accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tamperedToken))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
+    }
+
+    @Test
+    @DisplayName("만료된 token은 TOKEN_EXPIRED다")
+    void 만료된_token은_TOKEN_EXPIRED다() throws Exception {
+        when(clock.instant()).thenReturn(NOW);
+        String token = jwtTokenProvider.createAccessToken(1L, UUID.randomUUID(), NOW.plusSeconds(604800));
+
+        when(clock.instant()).thenReturn(NOW.plus(Duration.ofMinutes(16)));
+
+        mockMvc.perform(get("/api/accounts/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + token))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("TOKEN_EXPIRED"));
+    }
+
+    @Test
+    @DisplayName("공개 stock API는 token없이 security filter를 통과한다")
+    void 공개_stock_API는_token없이_security_filter를_통과한다() throws Exception {
+        mockMvc.perform(get("/api/stocks/search").param("q", "삼성"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isArray());
+    }
+
+    @Test
+    @DisplayName("기존 auth me 경로는 404다")
+    void 기존_auth_me_경로는_404다() throws Exception {
+        String token = jwtTokenProvider.createAccessToken(1L, UUID.randomUUID(), NOW.plusSeconds(604800));
+        mockMvc.perform(get("/api/auth/me"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"))
+                .andExpect(jsonPath("$.message").value("요청한 경로를 찾을 수 없어요"));
+    }
+
+    @Test
+    @DisplayName("회원가입 -> 로그인 -> 갱신 -> 조회 -> 수정 -> 비밀번호변경 -> 탈퇴 전체 생명주기 검증")
+    void 회원가입_로그인_토큰갱신_정보수정_비밀번호변경_탈퇴의_전체_생명주기를_검증한다() throws Exception {
+        // 1. signup
+        SignUpRequest signUpRequest = new SignUpRequest("lifecycle@example.com", "Password123!", "라이프사이클");
+        String signupJson = mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(signUpRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse signupResponse = objectMapper.readValue(signupJson, AuthResponse.class);
+        Long userId = signupResponse.userId();
+        Long accountId = signupResponse.account().accountId();
+
+        // 2. login
+        LoginRequest loginRequest = new LoginRequest("lifecycle@example.com", "Password123!");
+        String loginJson = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(loginRequest)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse loginResponse = objectMapper.readValue(loginJson, AuthResponse.class);
+        String loginRefreshToken = loginResponse.refreshToken();
+
+        // 3. refresh
+        RefreshTokenRequest refreshRequest = new RefreshTokenRequest(loginRefreshToken);
+        String refreshJson = mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(refreshRequest)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        AccessTokenResponse refreshResponse = objectMapper.readValue(refreshJson, AccessTokenResponse.class);
+        String refreshedAccessToken = refreshResponse.accessToken();
+
+        // 4. GET /api/users/me
+        mockMvc.perform(get("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshedAccessToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId").value(userId))
+                .andExpect(jsonPath("$.email").value("lifecycle@example.com"))
+                .andExpect(jsonPath("$.nickname").value("라이프사이클"));
+
+        // 5. PATCH nickname
+        UpdateNicknameRequest nicknameRequest = new UpdateNicknameRequest("새닉네임");
+        mockMvc.perform(patch("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshedAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(nicknameRequest)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.nickname").value("새닉네임"));
+
+        // 6. PUT password
+        ChangePasswordRequest passwordRequest = new ChangePasswordRequest("Password123!", "NewPassword123!");
+        mockMvc.perform(put("/api/users/me/password")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + refreshedAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(passwordRequest)))
+                .andExpect(status().isOk());
+
+        // 7. old-password login rejection
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("lifecycle@example.com", "Password123!"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_FAILED"));
+
+        // 8. new-password login success
+        String newLoginJson = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("lifecycle@example.com", "NewPassword123!"))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse newLoginResponse = objectMapper.readValue(newLoginJson, AuthResponse.class);
+        String latestAccessToken = newLoginResponse.accessToken();
+        String latestRefreshToken = newLoginResponse.refreshToken();
+
+        // 9. DELETE withdrawal
+        WithdrawRequest withdrawRequest = new WithdrawRequest("NewPassword123!");
+        mockMvc.perform(delete("/api/users/me")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + latestAccessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(withdrawRequest)))
+                .andExpect(status().isOk());
+
+        // 10. login rejection after withdrawal
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("lifecycle@example.com", "NewPassword123!"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_FAILED"));
+
+        // 11. refresh rejection after withdrawal
+        mockMvc.perform(post("/api/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new RefreshTokenRequest(latestRefreshToken))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("INVALID_TOKEN"));
+
+        // Persisted state assertions
+        assertThat(userRepository.findById(userId).orElseThrow().getStatus())
+                .isEqualTo(UserStatus.WITHDRAWN);
+        assertThat(accountRepository.findById(accountId).orElseThrow().getStatus())
+                .isEqualTo(AccountStatus.CLOSED);
+        assertThat(ledgerEntryRepository.countByAccountId(accountId)).isEqualTo(1L);
+
+        Map<String, Object> ledgerRow = jdbcTemplate.queryForMap(
+                "SELECT entry_type, amount, order_id, occurred_at FROM ledger_entry WHERE account_id = ?",
+                accountId);
+        assertThat(ledgerRow.get("entry_type")).isEqualTo("INITIAL_DEPOSIT");
+        assertThat(new BigDecimal(ledgerRow.get("amount").toString()))
+                .isEqualByComparingTo(new BigDecimal("50000000"));
+        assertThat(ledgerRow.get("order_id")).isNull();
+        OffsetDateTime occurredAt = ((Timestamp) ledgerRow.get("occurred_at"))
+                .toInstant().atOffset(ZoneOffset.UTC);
+        assertThat(occurredAt).isEqualTo(NOW.atOffset(ZoneOffset.UTC));
+    }
+
+    @Test
+    @DisplayName("다른 회원의 accountId로 초기화 요청시 ACCOUNT_NOT_FOUND 이며 상태가 유지된다")
+    void 다른_회원의_accountId로_초기화_요청시_ACCOUNT_NOT_FOUND_이며_상태가_유지된다() throws Exception {
+        // User A
+        SignUpRequest userARequest = new SignUpRequest("usera@example.com", "Password123!", "유저A");
+        String resA = mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(userARequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse authA = objectMapper.readValue(resA, AuthResponse.class);
+
+        // User B
+        SignUpRequest userBRequest = new SignUpRequest("userb@example.com", "Password123!", "유저B");
+        String resB = mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(userBRequest)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        AuthResponse authB = objectMapper.readValue(resB, AuthResponse.class);
+
+        Long accountIdB = authB.account().accountId();
+
+        // User A의 토큰으로 User B의 accountId 초기화 시도
+        mockMvc.perform(post("/api/accounts/me/reset")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + authA.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"accountId\":" + accountIdB + "}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_FOUND"));
+
+        // B의 계좌는 여전히 ACTIVE 상태 유지, roundNo도 1 유지
+        Account accountB = accountRepository.findById(accountIdB).orElseThrow();
+        assertThat(accountB.getStatus()).isEqualTo(AccountStatus.ACTIVE);
+        assertThat(accountB.getRoundNo()).isEqualTo(1);
+
+        // B의 원장 수도 여전히 1개 (초기 지급 1건만 존재)
+        assertThat(ledgerEntryRepository.countByAccountId(accountIdB)).isEqualTo(1L);
+
+        // 전체 계좌 수도 2개 그대로 (User A 1개, User B 1개)
+        assertThat(accountRepository.count()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("동시 Refresh는 세대를 한 번만 증가시키고 같은 후속 토큰을 반환한다")
+    void concurrent_rotation_replays_same_successor() throws Exception {
+        AuthResponse signed = sessionUser();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            CompletableFuture<Tokens> first = rotateConcurrently(signed.refreshToken(), ready, start, executor);
+            CompletableFuture<Tokens> second = rotateConcurrently(signed.refreshToken(), ready, start, executor);
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            Tokens one = first.get(10, TimeUnit.SECONDS);
+            Tokens two = second.get(10, TimeUnit.SECONDS);
+            assertThat(one.refreshToken()).isEqualTo(two.refreshToken()).isNotEqualTo(signed.refreshToken());
+            UUID sid = jwtTokenProvider.refreshIdentity(one.refreshToken()).sessionId();
+            assertThat(jdbcTemplate.queryForObject("SELECT refresh_generation FROM auth_session WHERE id=?", Long.class, sid)).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject("SELECT refresh_token_hash FROM auth_session WHERE id=?", String.class, sid))
+                    .hasSize(64).isNotEqualTo(one.refreshToken());
+            assertThat(jdbcTemplate.queryForObject("SELECT encrypted_refresh FROM auth_session WHERE id=?", String.class, sid))
+                    .isNotEqualTo(one.refreshToken());
+            sessions.requireActive(jwtTokenProvider.accessIdentity(one.accessToken()));
+        }
+    }
+
+    @Test
+    @DisplayName("유예 재시도는 만료를 연장하지 않고 경계의 재사용은 해당 세션만 영구 폐기한다")
+    void grace_is_fixed_and_reuse_commits_revocation() {
+        AuthResponse signed = sessionUser();
+        AuthResponse other = auth.login(new LoginRequest(signed.email(), "Password123!"));
+        Tokens successor = sessions.rotate(signed.refreshToken());
+        when(clock.instant()).thenReturn(NOW.plusSeconds(15));
+        assertThat(sessions.rotate(signed.refreshToken()).refreshToken()).isEqualTo(successor.refreshToken());
+        when(clock.instant()).thenReturn(NOW.plusSeconds(20).minusNanos(1));
+        assertThat(sessions.rotate(signed.refreshToken()).refreshToken()).isEqualTo(successor.refreshToken());
+        when(clock.instant()).thenReturn(NOW.plusSeconds(20));
+        assertThatThrownBy(() -> sessions.rotate(signed.refreshToken())).isInstanceOfSatisfying(BusinessException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.REFRESH_TOKEN_REUSED));
+        assertRevoked(successor.accessToken());
+        assertThatThrownBy(() -> sessions.rotate(successor.refreshToken())).isInstanceOfSatisfying(BusinessException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED));
+        sessions.requireActive(jwtTokenProvider.accessIdentity(other.accessToken()));
+    }
+
+    @Test
+    @DisplayName("두 세대 전 Refresh는 유예 중이어도 허용하지 않는다")
+    void only_immediate_predecessor_has_grace() {
+        AuthResponse signed = sessionUser();
+        Tokens first = sessions.rotate(signed.refreshToken());
+        sessions.rotate(first.refreshToken());
+        assertThatThrownBy(() -> sessions.rotate(signed.refreshToken())).isInstanceOfSatisfying(BusinessException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.REFRESH_TOKEN_REUSED));
+        assertRevoked(first.accessToken());
+    }
+
+    @Test
+    @DisplayName("변조 Refresh는 세션을 폐기하지 않으며 로그아웃은 현재 세션만 폐기한다")
+    void tampering_and_current_session_logout() throws Exception {
+        AuthResponse signed = sessionUser();
+        AuthResponse other = auth.login(new LoginRequest(signed.email(), "Password123!"));
+        assertThatThrownBy(() -> sessions.rotate(signed.refreshToken() + "tampered")).isInstanceOfSatisfying(BusinessException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.INVALID_TOKEN));
+        sessions.requireActive(jwtTokenProvider.accessIdentity(signed.accessToken()));
+        sessions.logout(signed.refreshToken());
+        sessions.logout(signed.refreshToken());
+        mockMvc.perform(get("/api/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + signed.accessToken()))
+                .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("SESSION_REVOKED"));
+        sessions.requireActive(jwtTokenProvider.accessIdentity(other.accessToken()));
+    }
+
+    @Test
+    @DisplayName("비밀번호 변경 및 탈퇴는 모든 세션의 Access와 Refresh를 무효화한다")
+    void password_and_withdrawal_revoke_all_sessions() throws Exception {
+        AuthResponse signed = sessionUser();
+        AuthResponse other = auth.login(new LoginRequest(signed.email(), "Password123!"));
+        mockMvc.perform(put("/api/users/me/password").header(HttpHeaders.AUTHORIZATION, "Bearer " + signed.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new ChangePasswordRequest("Password123!", "NewPassword123!"))))
+                .andExpect(status().isOk());
+        assertRevoked(signed.accessToken());
+        assertRevoked(other.accessToken());
+        assertThatThrownBy(() -> sessions.rotate(other.refreshToken())).isInstanceOf(BusinessException.class);
+        AuthResponse renewed = auth.login(new LoginRequest(signed.email(), "NewPassword123!"));
+        mockMvc.perform(delete("/api/users/me").header(HttpHeaders.AUTHORIZATION, "Bearer " + renewed.accessToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new WithdrawRequest("NewPassword123!"))))
+                .andExpect(status().isOk());
+        assertRevoked(renewed.accessToken());
+        assertThatThrownBy(() -> sessions.rotate(renewed.refreshToken())).isInstanceOf(BusinessException.class);
+    }
+
+    @Test
+    @DisplayName("회전은 절대 만료를 연장하지 않으며 정리는 유예 암호문과 보관 만료 세션을 지운다")
+    void absolute_expiry_and_cleanup() {
+        AuthResponse signed = sessionUser();
+        when(clock.instant()).thenReturn(NOW.plusSeconds(604799));
+        Tokens successor = sessions.rotate(signed.refreshToken());
+        assertThat(successor.expiresAt()).isEqualTo(signed.expiresAt());
+        when(clock.instant()).thenReturn(NOW.plusSeconds(604801));
+        assertThatThrownBy(() -> sessions.rotate(successor.refreshToken())).isInstanceOfSatisfying(BusinessException.class,
+                error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.TOKEN_EXPIRED));
+        when(clock.instant()).thenReturn(NOW.plusSeconds(604819));
+        sessions.cleanup();
+        assertThat(jdbcTemplate.queryForObject("SELECT encrypted_refresh FROM auth_session", String.class)).isNull();
+        when(clock.instant()).thenReturn(NOW.plusSeconds(1209601));
+        sessions.cleanup();
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_session", Integer.class)).isZero();
+    }
+
+
+    @Test
+    @DisplayName("비밀번호 변경과 로그인·Refresh 경합 뒤 기존 자격증명 세션은 남지 않는다")
+    void password_change_races_login_and_rotation() throws Exception {
+        AuthResponse signed = sessionUser();
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            CompletableFuture<AuthResponse> login = CompletableFuture.supplyAsync(() -> {
+                awaitStart(start);
+                try { return auth.login(new LoginRequest(signed.email(), "Password123!")); }
+                catch (BusinessException error) {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.LOGIN_FAILED);
+                    return null;
+                }
+            }, executor);
+            CompletableFuture<Tokens> refresh = CompletableFuture.supplyAsync(() -> {
+                awaitStart(start);
+                try { return sessions.rotate(signed.refreshToken()); }
+                catch (BusinessException error) {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED);
+                    return null;
+                }
+            }, executor);
+            CompletableFuture<Void> change = CompletableFuture.runAsync(() -> {
+                awaitStart(start);
+                userService.changePassword(signed.userId(), new ChangePasswordRequest("Password123!", "NewPassword123!"));
+            }, executor);
+            start.countDown();
+            change.get(10, TimeUnit.SECONDS);
+            AuthResponse logged = login.get(10, TimeUnit.SECONDS);
+            Tokens rotated = refresh.get(10, TimeUnit.SECONDS);
+            if (logged != null) assertRevoked(logged.accessToken());
+            if (rotated != null) assertRevoked(rotated.accessToken());
+            assertRevoked(signed.accessToken());
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_session WHERE revoked_at IS NULL", Integer.class)).isZero();
+            AuthResponse renewed = auth.login(new LoginRequest(signed.email(), "NewPassword123!"));
+            sessions.requireActive(jwtTokenProvider.accessIdentity(renewed.accessToken()));
+        }
+    }
+
+
+    @Test
+    @DisplayName("탈퇴와 로그인·갱신 경합은 활성 세션을 남기지 않는다")
+    void withdrawal_races_login_and_rotation() throws Exception {
+        AuthResponse signed = sessionUser();
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            CompletableFuture<Void> login = CompletableFuture.runAsync(() -> {
+                awaitStart(start);
+                try { auth.login(new LoginRequest(signed.email(), "Password123!")); }
+                catch (BusinessException error) { assertThat(error.getErrorCode()).isEqualTo(ErrorCode.LOGIN_FAILED); }
+            }, executor);
+            CompletableFuture<Void> refresh = CompletableFuture.runAsync(() -> {
+                awaitStart(start);
+                try { sessions.rotate(signed.refreshToken()); }
+                catch (BusinessException error) { assertThat(error.getErrorCode()).isEqualTo(ErrorCode.INVALID_TOKEN); }
+            }, executor);
+            CompletableFuture<Void> withdrawal = CompletableFuture.runAsync(() -> {
+                awaitStart(start);
+                userService.withdraw(signed.userId(), new WithdrawRequest("Password123!"));
+            }, executor);
+            start.countDown();
+            CompletableFuture.allOf(login, refresh, withdrawal).get(10, TimeUnit.SECONDS);
+            assertRevoked(signed.accessToken());
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_session WHERE revoked_at IS NULL", Integer.class)).isZero();
+            assertThat(userRepository.findById(signed.userId()).orElseThrow().getStatus()).isEqualTo(UserStatus.WITHDRAWN);
+        }
+    }
+
+    private static void awaitStart(CountDownLatch start) {
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("동시 시작 시간 초과");
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private AuthResponse sessionUser() {
+        return auth.signUp(new SignUpRequest("session@example.com", "Password123!", "세션테스터"));
+    }
+
+    @Test
+    @DisplayName("동시 비밀번호 찾기 요청은 회원별 쿨다운 안에서 토큰과 메일을 한 번만 발급한다")
+    void concurrent_password_reset_requests_issue_once() throws Exception {
+        AuthResponse signed = sessionUser();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Runnable request = () -> {
+                ready.countDown();
+                awaitStart(start);
+                auth.requestPasswordReset(new PasswordForgotRequest(signed.email()));
+            };
+            CompletableFuture<Void> first = CompletableFuture.runAsync(request, executor);
+            CompletableFuture<Void> second = CompletableFuture.runAsync(request, executor);
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            CompletableFuture.allOf(first, second).get(10, TimeUnit.SECONDS);
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=? AND used_at IS NULL",
+                Integer.class, signed.userId())).isEqualTo(1);
+        verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+    }
+
+    @Test
+    @DisplayName("재설정 발급 트랜잭션이 롤백되면 토큰과 메일이 모두 남지 않는다")
+    void reset_rollback_does_not_send_mail() {
+        AuthResponse signed = sessionUser();
+        transactions.executeWithoutResult(transaction -> {
+            auth.requestPasswordReset(new PasswordForgotRequest(signed.email()));
+            verifyNoInteractions(passwordResetMailSender);
+            transaction.setRollbackOnly();
+        });
+        verifyNoInteractions(passwordResetMailSender);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token", Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("재설정 메일은 발급 트랜잭션 커밋 전에는 등록하지 않는다")
+    void reset_mail_is_submitted_after_commit() {
+        AuthResponse signed = sessionUser();
+        transactions.executeWithoutResult(transaction -> {
+            auth.requestPasswordReset(new PasswordForgotRequest(signed.email()));
+            verifyNoInteractions(passwordResetMailSender);
+        });
+        verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("실제 메일 큐가 포화되어도 가입·미가입 요청은 모두 200이며 토큰 커밋을 유지한다")
+    void saturated_mail_queue_preserves_response_and_commit() throws Exception {
+        AuthResponse signed = sessionUser();
+        ThreadPoolTaskExecutor executor = new AsyncConfig().passwordResetMailExecutor();
+        executor.initialize();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            executor.execute(() -> {
+                started.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            for (int index = 0; index < 50; index++) {
+                executor.execute(() -> {});
+            }
+            assertThat(executor.getThreadPoolExecutor().getQueue().remainingCapacity()).isZero();
+            doAnswer(invocation -> {
+                executor.execute(() -> {});
+                return null;
+            }).when(passwordResetMailSender).sendResetLink(any(), any());
+
+            mockMvc.perform(post("/api/auth/password/forgot").contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new PasswordForgotRequest(signed.email()))))
+                    .andExpect(status().isOk());
+            mockMvc.perform(post("/api/auth/password/forgot").contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new PasswordForgotRequest("absent@example.com"))))
+                    .andExpect(status().isOk());
+            verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token", Integer.class)).isEqualTo(1);
+        } finally {
+            release.countDown();
+            executor.shutdown();
+        }
+    }
+
+    private String issueResetToken(String email) {
+        auth.requestPasswordReset(new PasswordForgotRequest(email));
+        ArgumentCaptor<String> url = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetMailSender).sendResetLink(eq(email), url.capture());
+        return url.getValue().substring(url.getValue().indexOf("token=") + "token=".length());
+    }
+
+    @Test
+    @DisplayName("재설정과 로그인·RTR 경합 뒤 기존 자격증명으로 발급된 세션은 남지 않는다")
+    void password_reset_races_login_and_rotation() throws Exception {
+        AuthResponse signed = sessionUser();
+        String token = issueResetToken(signed.email());
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            CompletableFuture<AuthResponse> login = CompletableFuture.supplyAsync(() -> {
+                awaitStart(start);
+                try { return auth.login(new LoginRequest(signed.email(), "Password123!")); }
+                catch (BusinessException error) {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.LOGIN_FAILED);
+                    return null;
+                }
+            }, executor);
+            CompletableFuture<Tokens> refresh = CompletableFuture.supplyAsync(() -> {
+                awaitStart(start);
+                try { return sessions.rotate(signed.refreshToken()); }
+                catch (BusinessException error) {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED);
+                    return null;
+                }
+            }, executor);
+            CompletableFuture<Void> reset = CompletableFuture.runAsync(() -> {
+                awaitStart(start);
+                auth.resetPassword(new PasswordResetConfirmRequest(token, "NewPassword123!"));
+            }, executor);
+            start.countDown();
+            CompletableFuture.allOf(login, refresh, reset).get(10, TimeUnit.SECONDS);
+            if (login.get() != null) assertRevoked(login.get().accessToken());
+            if (refresh.get() != null) assertRevoked(refresh.get().accessToken());
+        }
+        assertRevoked(signed.accessToken());
+        assertThatThrownBy(() -> sessions.rotate(signed.refreshToken()))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_session WHERE user_id=? AND revoked_at IS NULL",
+                Integer.class, signed.userId())).isZero();
+        AuthResponse renewed = auth.login(new LoginRequest(signed.email(), "NewPassword123!"));
+        sessions.requireActive(jwtTokenProvider.accessIdentity(renewed.accessToken()));
+    }
+
+    @Test
+    @DisplayName("같은 재설정 토큰을 동시에 제출해도 한 요청만 성공한다")
+    void concurrent_reset_consumes_token_once() throws Exception {
+        AuthResponse signed = sessionUser();
+        String token = issueResetToken(signed.email());
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            CompletableFuture<Boolean> first = resetConcurrently(token, start, executor);
+            CompletableFuture<Boolean> second = resetConcurrently(token, start, executor);
+            start.countDown();
+            assertThat(first.get(10, TimeUnit.SECONDS)).isNotEqualTo(second.get(10, TimeUnit.SECONDS));
+        }
+        assertRevoked(signed.accessToken());
+    }
+
+    private CompletableFuture<Boolean> resetConcurrently(String token, CountDownLatch start, ExecutorService executor) {
+        return CompletableFuture.supplyAsync(() -> {
+            awaitStart(start);
+            try {
+                auth.resetPassword(new PasswordResetConfirmRequest(token, "NewPassword123!"));
+                return true;
+            } catch (BusinessException error) {
+                assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PASSWORD_RESET_TOKEN_INVALID);
+                return false;
+            }
+        }, executor);
+    }
+
+    private void assertRevoked(String accessToken) {
+        assertThatThrownBy(() -> sessions.requireActive(jwtTokenProvider.accessIdentity(accessToken)))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED));
+    }
+
+    private CompletableFuture<Tokens> rotateConcurrently(String token, CountDownLatch ready,
+                                                         CountDownLatch start, ExecutorService executor) {
+        return CompletableFuture.supplyAsync(() -> {
+            ready.countDown();
+            try {
+                if (!start.await(5, TimeUnit.SECONDS)) throw new IllegalStateException("동시 시작 시간 초과");
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(exception);
+            }
+            return sessions.rotate(token);
+        }, executor);
+    }
+
+    @Test
+    @DisplayName("비밀번호 찾기 이메일의 토큰으로 재설정하면 새 비밀번호로만 로그인할 수 있고 토큰은 재사용할 수 없다")
+    void 비밀번호_찾기_토큰으로_비밀번호를_재설정한다() throws Exception {
+        SignUpRequest signUpRequest = new SignUpRequest("forgot@example.com", "Password123!", "잊음이");
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(signUpRequest)))
+                .andExpect(status().isCreated());
+
+        // 1. 비밀번호 찾기 요청 — 실제 메일 발송(mail.enabled)과 무관하게, PasswordResetMailSender에
+        //    실린 링크를 가로채 토큰을 꺼낸다(실제 서비스에서 사용자가 이메일에서 얻는 것과 같은 값).
+        mockMvc.perform(post("/api/auth/password/forgot")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"forgot@example.com\"}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetMailSender).sendResetLink(eq("forgot@example.com"), urlCaptor.capture());
+        String resetUrl = urlCaptor.getValue();
+        assertThat(resetUrl).contains("/reset-password?token=");
+        String token = resetUrl.substring(resetUrl.indexOf("token=") + "token=".length());
+
+        // 2. 토큰으로 새 비밀번호 확정
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("token", token, "newPassword", "ResetPassword123!"))))
+                .andExpect(status().isOk());
+
+        // 3. 옛 비밀번호는 거절, 새 비밀번호는 로그인 성공
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("forgot@example.com", "Password123!"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_FAILED"));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("forgot@example.com", "ResetPassword123!"))))
+                .andExpect(status().isOk());
+
+        // 4. 같은 토큰 재사용은 거절
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("token", token, "newPassword", "AnotherPassword123!"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSWORD_RESET_TOKEN_INVALID"));
+    }
+
+    @Test
+    @DisplayName("가입되지 않은 이메일로 비밀번호 찾기를 요청해도 200이며 메일을 보내지 않는다")
+    void 가입되지_않은_이메일은_비밀번호_찾기_메일을_받지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/password/forgot")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"none@example.com\"}"))
+                .andExpect(status().isOk());
+
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 재설정 토큰은 PASSWORD_RESET_TOKEN_INVALID다")
+    void 존재하지_않는_재설정_토큰은_거절된다() throws Exception {
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("token", "no-such-token", "newPassword", "Password123!"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSWORD_RESET_TOKEN_INVALID"));
+    }
+}

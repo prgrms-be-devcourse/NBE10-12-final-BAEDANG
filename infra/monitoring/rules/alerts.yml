@@ -1,0 +1,262 @@
+# ============================================================================
+#  Prometheus 알림 규칙 — 상시 운영
+#
+#  [!! 모든 규칙에 for: 를 넣는다]
+#    순간적인 튐(스크레이프 한두 번의 스파이크)에 알림이 울리면 아무도 안 보게 된다.
+#    for: 로 "이 상태가 N 동안 지속될 때만" 울리게 한다.
+#
+#  [!! 나눗셈은 clamp_min 으로 0 나누기를 막는다]
+#    분모를 clamp_min(..., 1) 로 감싼다. 트래픽이 거의 없을 때 분모가 0/미세값이면
+#    비율이 폭발해 오탐이 난다. 저트래픽 구간에서 비율을 눌러 오탐을 죽이는 효과도 있다
+#    (에러 1건에 5xx율 100%로 울리는 사고 방지).
+# ============================================================================
+groups:
+  # ── 죽었는가 ────────────────────────────────────────────────────────────────
+  - name: liveness
+    rules:
+      - alert: AppDown
+        # up 은 스크레이프 성공 여부(1/0). 앱이 응답 없으면 0.
+        expr: up{job="spring-boot"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "앱 응답 없음 (spring-boot)"
+          description: "1분간 /actuator/prometheus 스크레이프 실패. 앱이 죽었거나 관리포트 8081 이 안 열림."
+
+      - alert: DatabaseDown
+        # 두 경우를 모두 잡는다:
+        #   up == 0     : exporter 자체가 스크레이프 안 됨(컨테이너 다운 등). pg_up 은 이때 시계열이
+        #                 없어 조용하므로 up 으로 잡는다.
+        #   pg_up == 0  : exporter 는 살아 있는데 DB 연결만 실패. up 은 1 이라 up 단독으론 놓친다.
+        expr: up{job="postgres"} == 0 or pg_up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DB 관측 불가 (postgres)"
+          description: "1분간 postgres-exporter 스크레이프 실패 또는 DB 연결 불가(pg_up=0). DB 또는 exporter 다운."
+
+      - alert: AppRestarted
+        # process_start_time_seconds 는 프로세스 시작 시각(고정값). 값이 바뀌면 재시작.
+        expr: changes(process_start_time_seconds{job="spring-boot"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "앱 재시작 감지"
+          description: "최근 10분 내 프로세스 시작 시각이 바뀜(재시작/크래시 후 부팅 가능성)."
+
+  # ── 느려졌는가 ──────────────────────────────────────────────────────────────
+  - name: latency
+    rules:
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(http_server_requests_seconds_bucket{job="spring-boot"}[5m]))
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP p95 > 1s"
+          description: "5분간 서버 응답 p95 가 1초를 초과. 값: {{ $value | humanizeDuration }}."
+
+      - alert: High5xxRate
+        # 5xx 비율 = 5xx rate / 전체 rate.
+        # !! 분모를 clamp_min(...,1) 로 누르지 않는다 — rate 는 초당값이라 저트래픽(1 RPS 미만)에서
+        #    분모가 1 로 눌려 실제 실패를 정상처럼 표시한다(false negative). 대신 비율은 그대로 두고
+        #    (0/0=NaN 은 비교에서 걸러짐) 최소 요청 수 조건을 and 로 분리해 저트래픽 오탐만 막는다.
+        expr: |
+          sum(rate(http_server_requests_seconds_count{job="spring-boot", status=~"5.."}[5m]))
+          /
+          sum(rate(http_server_requests_seconds_count{job="spring-boot"}[5m]))
+          > 0.05
+          and
+          sum(increase(http_server_requests_seconds_count{job="spring-boot"}[5m])) >= 5
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "5xx 에러율 > 5%"
+          description: "5분간 5xx 비율이 5% 초과. 값: {{ $value | humanizePercentage }}."
+
+  # ── 자원 ────────────────────────────────────────────────────────────────────
+  - name: resources
+    rules:
+      - alert: HikariPoolPending
+        # 대기 스레드가 있다 = 커넥션을 못 받아 줄 선 요청이 있다.
+        expr: hikaricp_connections_pending{job="spring-boot"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "커넥션풀 대기 발생 (HikariCP)"
+          description: "2분간 커넥션 획득 대기가 있음. 풀 고갈/느린 쿼리/락 대기 의심."
+
+      - alert: HikariConnectionTimeout
+        expr: increase(hikaricp_connections_timeout_total{job="spring-boot"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "커넥션 획득 타임아웃 발생"
+          description: "5분 내 커넥션 타임아웃 {{ $value }}건. connection-timeout(3s) 초과로 요청 실패 중."
+
+      - alert: HeapHigh
+        expr: |
+          sum(jvm_memory_used_bytes{job="spring-boot", area="heap"})
+          /
+          clamp_min(sum(jvm_memory_max_bytes{job="spring-boot", area="heap"}), 1)
+          > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "힙 사용률 > 90%"
+          description: "5분간 힙 사용률 90% 초과. OOM/GC 폭주 전조. 값: {{ $value | humanizePercentage }}."
+
+      - alert: GcOverhead
+        # GC 일시정지에 쓴 시간의 비율. 초당 0.1초 넘게 멈추면(=10%) 처리량이 깎인다.
+        expr: sum(rate(jvm_gc_pause_seconds_sum{job="spring-boot"}[5m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GC 과다"
+          description: "5분간 초당 GC 정지시간이 0.1s 초과. 힙 압박/할당 폭주 의심."
+
+  # ── DB ──────────────────────────────────────────────────────────────────────
+  - name: database
+    rules:
+      - alert: LowCacheHitRatio
+        # blks_hit / (blks_hit + blks_read). 낮으면 디스크 I/O 가 늘어 느려진다.
+        expr: |
+          sum(rate(pg_stat_database_blks_hit{job="postgres"}[5m]))
+          /
+          clamp_min(
+            sum(rate(pg_stat_database_blks_hit{job="postgres"}[5m]))
+            + sum(rate(pg_stat_database_blks_read{job="postgres"}[5m])),
+          1)
+          < 0.95
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB 캐시 히트율 < 95%"
+          description: "10분간 shared buffer 히트율이 95% 미만. 값: {{ $value | humanizePercentage }}."
+
+      - alert: DatabaseDeadlocks
+        expr: increase(pg_stat_database_deadlocks{job="postgres"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "데드락 발생"
+          description: "5분 내 데드락 {{ $value }}건. 주문 계좌 락(SELECT FOR UPDATE) 경합 의심."
+
+      - alert: DatabaseConnectionsHigh
+        # 사용 중 백엔드 수 / max_connections. 80% 넘으면 곧 커넥션 거절.
+        expr: |
+          sum(pg_stat_database_numbackends{job="postgres"})
+          /
+          clamp_min(sum(pg_settings_max_connections{job="postgres"}), 1)
+          > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "DB 연결 수 > 80%"
+          description: "5분간 연결 수가 max_connections 의 80% 초과. 값: {{ $value | humanizePercentage }}."
+
+  # ── 도메인 ──────────────────────────────────────────────────────────────────
+  #   !! 아래 규칙은 앱이 TradingMetrics 를 실제로 호출해야 시계열이 생긴다.
+  #      호출 전에는 데이터가 없어 조용하다(오탐이 아니라 무탐). README 참고.
+  - name: domain
+    rules:
+      - alert: QuoteStale
+        # 마지막 시세 갱신 이후 흐른 초. 폴링(5s)이 멈추면 계속 커진다.
+        #
+        # !! and on(market) (trading_market_open == 1) 로 개장 중인 시장만 본다.
+        #    앱은 장이 열린 시장만 폴링하므로 휴장 시장의 staleness 는 설계상 계속 커진다.
+        #    이 조인이 없으면 KR 마감(~15:30 KST)~다음날 개장까지, 그리고 주말 내내 max() 가
+        #    휴장 시장을 집어 상시 적색이 된다(상시 적색 알림은 결국 무시됨). 조인하면 휴장 시장은
+        #    걸러지고, 개장 중 폴링이 멈춘 경우에만(스케줄러가 죽으면 open 게이지도 마지막 개장값에
+        #    멈춰 그 시장이 계속 잡힌다) 울린다.
+        expr: |
+          max(
+            trading_quote_staleness_seconds{job="spring-boot"}
+            and on(market) (trading_market_open{job="spring-boot"} == 1)
+          ) > 60
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "시세 갱신 중단"
+          description: "2분간 개장 중인 시장의 시세 신선도가 60s 초과. 폴링 스케줄러 정지 의심."
+
+      - alert: ExternalApiFailureRate
+        # 외부 API 실패율 = 실패 rate / 전체 rate.
+        # !! 분모를 clamp_min(...,1) 로 누르지 않는다 — rate 는 초당값이라 저트래픽(1 RPS 미만)에서
+        #    분모가 1 로 눌려, 1분에 1건 전부 실패해도 ~1.67% 로 계산돼 알림이 침묵한다(false negative).
+        #    비율은 그대로 두고(0/0=NaN 은 비교에서 걸러짐) 최소 표본 수 조건을 and 로 분리한다.
+        expr: |
+          sum(rate(trading_external_api_seconds_count{job="spring-boot", outcome="FAILURE"}[5m]))
+          /
+          sum(rate(trading_external_api_seconds_count{job="spring-boot"}[5m]))
+          > 0.2
+          and
+          sum(increase(trading_external_api_seconds_count{job="spring-boot"}[5m])) >= 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "외부 API 실패율 > 20%"
+          description: "5분간 외부 API 실패 비율 20% 초과. 값: {{ $value | humanizePercentage }}."
+
+      - alert: DailyBatchNotRun
+        # time() - 마지막 성공 시각. 매일 도는 배치라 26시간(93600s) 넘게 성공이 없으면 미실행.
+        # leaderboard-snapshot 은 주 7일(07:30 KST) 돌므로 26h 임계가 맞는다.
+        # !! daily-candle 은 MON-FRI 라 주말 정상 공백(~58h)이 있어 여기서 제외 → 아래 별도 룰.
+        # !! 재시작 후 한 번도 안 돈 배치는 이 시계열 자체가 없어 침묵할 수 있다(README 한계 참고).
+        expr: (time() - max by (job_name) (trading_batch_last_success_timestamp_seconds{job="spring-boot", job_name="leaderboard-snapshot"})) > 93600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "일 배치 미실행 ({{ $labels.job_name }})"
+          description: "배치 {{ $labels.job_name }} 가 26시간 넘게 성공하지 않음."
+
+      # !! daily-candle 은 시장별로 성공 시각이 기록된다(market="KR"|"US"). 한 시장의 성공이 다른
+      #    시장의 실패를 가리지 않도록 시장별로 나눠 평가한다. KR/US 는 수집 시각·달력이 달라 조건도 다르다.
+      - alert: DailyCandleBatchNotRunKr
+        # KR 수집(15:40~17:10 KST = 06:40~08:10 UTC)은 KST 에 DST 가 없어 연중 고정 → KR 수집이
+        # 끝났어야 할 "평일 UTC 10~14시" 창에서만 26h 초과를 평가한다. 주말·창 밖에선 평가되지 않아 조용하다.
+        # !! 잔여 한계: 공휴일 미실행일엔 그날 창에서 오탐할 수 있다(희소, 허용).
+        expr: |
+          (time() - max by (market) (trading_batch_last_success_timestamp_seconds{job="spring-boot", job_name="daily-candle", market="KR"})) > 93600
+          and on() (day_of_week() >= 1)
+          and on() (day_of_week() <= 5)
+          and on() (hour() >= 10)
+          and on() (hour() < 14)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "국내 일봉 수집 배치 미실행 (daily-candle KR)"
+          description: "평일 KR 수집 창인데 daily-candle KR 이 26시간 넘게 성공하지 않음."
+
+      - alert: DailyCandleBatchNotRunUs
+        # US 수집은 미국 현지(NY) 시간이라 DST 가 있고 UTC 일 경계를 저녁에 넘나들어, KR 처럼 안전한
+        # UTC 시간창을 잡기 어렵다. 그래서 시간창 대신 "주말 정상 공백(~72h)을 견디는 임계"만 쓴다:
+        # 80시간(288000s) 넘게 성공이 없으면 미실행으로 본다.
+        # !! 트레이드오프: 감지까지 ~3.3일(KR 의 ~1일보다 둔감). 공휴일이 낀 주는 정상 공백이 더 길어
+        #    오탐 여지가 있다. 국내(KR)는 위 룰로 민감하게 잡고, 부차 시장인 US 만 이 느슨한 임계를 쓴다.
+        #    (DST 를 반영한 시장별 시간창 게이팅은 후속 개선 여지.)
+        expr: (time() - max by (market) (trading_batch_last_success_timestamp_seconds{job="spring-boot", job_name="daily-candle", market="US"})) > 288000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "미국 일봉 수집 배치 미실행 (daily-candle US)"
+          description: "daily-candle US 가 80시간 넘게 성공하지 않음."

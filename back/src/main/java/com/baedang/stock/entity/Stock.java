@@ -1,7 +1,10 @@
 package com.baedang.stock.entity;
 
 import com.baedang.global.entity.BaseEntity;
+import com.baedang.global.normalizer.DomainNormalizer;
 import jakarta.persistence.*;
+import org.hibernate.annotations.Generated;
+import org.hibernate.generator.EventType;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -9,8 +12,8 @@ import java.time.LocalDate;
 /**
  * 종목 마스터. 매주 월요일 07:00 배치가 전 종목(약 8,500개)을 갱신합니다.
  *
- * <p>검색은 이 테이블 전체가 대상이고, <b>거래는 {@code isRanked} 인 상위 100종목만</b>
- * 가능합니다. 나머지는 조회만 됩니다.
+ * <p>검색은 이 테이블 전체가 대상이고, <b>거래는 랭킹과 무관하게 종목 상태·장 운영·시세 신선도로 판단</b>
+ * 합니다. 랭킹은 정기 시세 수집 대상 선정에 사용합니다.
  */
 @Entity
 @Table(name = "stock")
@@ -90,7 +93,7 @@ public class Stock extends BaseEntity {
     @Column(name = "listing_status", nullable = false, length = 20)
     private ListingStatus listingStatus;
 
-    /** 거래대금 상위 100 포함 여부. <b>시세 수집·거래 가능 판정</b>에 씁니다. */
+    /** 거래대금 상위 100 포함 여부. <b>정기 시세 수집 대상 판정</b>에 씁니다. */
     @Column(name = "is_ranked", nullable = false)
     private Boolean isRanked;
 
@@ -102,6 +105,23 @@ public class Stock extends BaseEntity {
     @Column(name = "rank_no")
     private Integer rankNo;
 
+    /**
+     * V5 생성 컬럼(읽기 전용). 초성 검색 결과를 정렬할 때
+     * <b>검색과 같은 초성 공간에서</b> 완전일치/접두일치를 판정하려고 읽습니다.
+     * 값은 DB가 만들기 때문에 절대 쓰지(insert/update) 마세요. ({@code insertable/updatable = false}).
+     */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "name_chosung", insertable = false, updatable = false)
+    private String nameChosung;
+
+    /**
+     * V5 생성 컬럼(읽기 전용). 자모 분해 검색(3칸 고정폭, 종성 없으면 {@code ^} 패딩)의 원본입니다.
+     * 값은 DB가 만들기 때문에 절대 쓰지(insert/update) 마세요. ({@code insertable/updatable = false}).
+     */
+    @Generated(event = {EventType.INSERT, EventType.UPDATE})
+    @Column(name = "name_jamo", insertable = false, updatable = false)
+    private String nameJamo;
+
     /** 최근 1주 누적 거래대금. 랭킹 정렬 기준이자 커서의 1차 키. */
     @Column(name = "trading_amount", precision = 24, scale = 0)
     private BigDecimal tradingAmount;
@@ -109,15 +129,25 @@ public class Stock extends BaseEntity {
     protected Stock() {
     }
 
-    private Stock(String symbol, MarketCountry marketCountry, String market, String name,
-                  String currency, String securityType) {
-        this.symbol = symbol;
+    private Stock(
+            String symbol,
+            MarketCountry marketCountry,
+            String market,
+            String name,
+            String isinCode,
+            String currency,
+            String securityType,
+            Boolean isCommonShare
+    ) {
+        this.symbol = DomainNormalizer.symbol(symbol);
         this.marketCountry = marketCountry;
         this.market = market;
         this.name = name;
+        this.isinCode = isinCode;
         this.currency = currency;
         this.securityType = securityType;
-        this.stockCategory = StockCategory.INDIVIDUAL;
+        this.stockCategory = StockCategory.from(securityType, isCommonShare);
+        this.isCommonShare = isCommonShare;
         this.isDividend = false;
         this.isSuspended = false;
         this.isLiquidation = false;
@@ -129,23 +159,57 @@ public class Stock extends BaseEntity {
     /**
      * 마스터 배치가 신규 종목을 넣을 때 씁니다.
      * 필수값만 받고, 나머지는 {@link #updateMasterInfo} 로 채웁니다.
+     *
+     * <p><b>{@code stockCategory} 는 여기서 판정합니다.</b> 기본값 {@code INDIVIDUAL} 로 넣었다가
+     * 나중에 고치면, 그사이 검색·랭킹 화면에 우선주와 ETF 가 개별주로 노출됩니다.
      */
-    public static Stock create(String symbol, MarketCountry marketCountry, String market,
-                               String name, String currency, String securityType) {
-        return new Stock(symbol, marketCountry, market, name, currency, securityType);
+    public static Stock create(
+            String symbol,
+            MarketCountry marketCountry,
+            String market,
+            String name,
+            String isinCode,
+            String currency,
+            String securityType,
+            Boolean isCommonShare
+    ) {
+        return new Stock(
+                symbol,
+                marketCountry,
+                market,
+                name,
+                isinCode,
+                currency,
+                securityType,
+                isCommonShare
+        );
     }
 
     /** 매주 월요일 07:00 마스터 갱신. 선택 정보는 여기서 덮어씁니다. */
-    public void updateMasterInfo(String englishName, String isinCode, StockCategory category,
-                                 BigDecimal leverageFactor, Boolean isCommonShare,
-                                 BigDecimal sharesOutstanding, LocalDate listDate) {
-        this.englishName = englishName;
+    public void updateMasterInfo(
+            MarketCountry marketCountry, String market,
+            String name, String englishName,
+            String isinCode,
+            String currency,
+            String securityType,
+            BigDecimal leverageFactor,
+            Boolean isCommonShare,
+            BigDecimal sharesOutstanding,
+            LocalDate listDate, LocalDate delistDate,
+            ListingStatus listingStatus
+    ) {
+        this.marketCountry = marketCountry; this.market = market;
+        this.name = name; this.englishName = englishName;
         this.isinCode = isinCode;
-        if (category != null) this.stockCategory = category;
+        this.currency = currency;
+        this.securityType = securityType;
+        this.stockCategory = StockCategory.from(securityType, isCommonShare);
         this.leverageFactor = leverageFactor;
         this.isCommonShare = isCommonShare;
         this.sharesOutstanding = sharesOutstanding;
         this.listDate = listDate;
+        this.delistDate = delistDate;
+        this.listingStatus = listingStatus;
     }
 
     /** 매수 유의사항 배치. 주문을 막지는 않고 화면에 배너를 띄우는 용도도 있습니다. */
@@ -170,8 +234,7 @@ public class Stock extends BaseEntity {
 
     /** 지금 이 종목을 거래할 수 있는 상태인가 (장 시간 판정은 별도). */
     public boolean isTradable() {
-        return Boolean.TRUE.equals(isRanked)
-                && !Boolean.TRUE.equals(isSuspended)
+        return !Boolean.TRUE.equals(isSuspended)
                 && !Boolean.TRUE.equals(isLiquidation)
                 && listingStatus == ListingStatus.ACTIVE;
     }
@@ -181,6 +244,8 @@ public class Stock extends BaseEntity {
     public MarketCountry getMarketCountry() { return marketCountry; }
     public String getMarket() { return market; }
     public String getName() { return name; }
+    public String getNameJamo() { return nameJamo; }
+    public String getNameChosung() { return nameChosung; }
     public String getEnglishName() { return englishName; }
     public String getIsinCode() { return isinCode; }
     public String getCurrency() { return currency; }

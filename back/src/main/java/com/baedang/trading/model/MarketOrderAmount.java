@@ -1,0 +1,21 @@
+package com.baedang.trading.model;
+
+import java.math.BigDecimal;
+
+/** 시장가 주문의 수수료·세금 계산 결과를 나타내는 불변 값 객체입니다. */
+public record MarketOrderAmount(
+        BigDecimal executedPrice,
+        BigDecimal exchangeRate,
+        BigDecimal grossAmountUsd,
+        BigDecimal unroundedGrossAmountKrw,
+        BigDecimal grossAmount,
+        BigDecimal fee,
+        BigDecimal tax,
+        BigDecimal netAmount,
+        BigDecimal secFeeUsd
+) {
+    public ExecutionAmounts executionAmounts() {
+        return new ExecutionAmounts(grossAmountUsd, unroundedGrossAmountKrw, secFeeUsd,
+                grossAmount, fee, tax, netAmount);
+    }
+}

@@ -1,0 +1,210 @@
+name: Backend CD
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - ".github/workflows/backend-cd.yml"
+      - "back/src/**"
+      - "back/build.gradle"
+      - "back/settings.gradle"
+      - "back/Dockerfile"
+
+env:
+  IMAGE_NAME: nbe10-12-final-baedang
+  CONTAINER_1_NAME: trading-back-1
+  CONTAINER_2_NAME: trading-back-2
+  APPLICATION_PORT: 8080
+  DOCKERFILE_DIR: back
+  INSTANCE_TAG_NAME: baedang-ec2-1
+  DOCKER_NETWORK: common
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+jobs:
+  createTagAndRelease:
+    name: 1. 태그 및 릴리즈 생성
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.create_tag.outputs.new_tag }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: 태그 생성 (ex. v1.2.3)
+        id: create_tag
+        run: |
+          git fetch --tags --unshallow 2>/dev/null || git fetch --tags 2>/dev/null || true
+
+          # 1. 저장소 최신 Base SemVer 조회
+          LATEST_TAG=$(git tag -l --sort=-v:refname "v*.*.*" | head -n 1)
+          if [ -z "$LATEST_TAG" ]; then
+            BASE_VERSION="0.1.0"
+          else
+            BASE_VERSION=$(echo "$LATEST_TAG" | sed -E 's/^v([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+          fi
+
+          # 2. 브랜치명 슬러그화 (/ 및 _ 를 - 로 변환)
+          BRANCH_NAME="${GITHUB_REF_NAME}"
+          BRANCH_SLUG=$(echo "$BRANCH_NAME" | tr '/_' '--')
+
+          # 3. develop 브랜치인 경우 커밋 타입(feat 등)에 따라 SemVer 증가
+          if [ "$BRANCH_NAME" = "develop" ]; then
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+            LAST_MSG=$(git log -1 --pretty=%B)
+            if echo "$LAST_MSG" | grep -qiE "feat(\(.*\))?:|Merge pull request.*feat/"; then
+              MINOR=$((MINOR + 1))
+              PATCH=0
+            else
+              PATCH=$((PATCH + 1))
+            fi
+            BASE_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          # 4. 해당 브랜치의 최신 프리릴리즈 번호(.0, .1 ...) 계산
+          LATEST_BRANCH_TAG=$(git tag -l "v*-${BRANCH_SLUG}.*" --sort=-v:refname | head -n 1)
+          if [ -n "$LATEST_BRANCH_TAG" ]; then
+            CURR_SUFFIX=$(echo "$LATEST_BRANCH_TAG" | sed -E 's/.*\.([0-9]+)$/\1/')
+            NEXT_SUFFIX=$((CURR_SUFFIX + 1))
+          else
+            NEXT_SUFFIX=0
+          fi
+
+          if [ "$BRANCH_NAME" = "main" ]; then
+            NEW_TAG="v${BASE_VERSION}"
+          else
+            NEW_TAG="v${BASE_VERSION}-${BRANCH_SLUG}.${NEXT_SUFFIX}"
+          fi
+
+          # 5. Git 태그 생성 및 원격 푸시
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "$NEW_TAG"
+          git push origin "$NEW_TAG"
+
+          # 6. 직전 태그 이후 커밋 로그로 체인지로그 생성
+          if [ -n "$LATEST_TAG" ]; then
+            CHANGELOG=$(git log "${LATEST_TAG}..HEAD" --oneline --no-merges || git log -1 --oneline)
+          else
+            CHANGELOG=$(git log -1 --oneline)
+          fi
+
+          echo "new_tag=$NEW_TAG" >> $GITHUB_OUTPUT
+          {
+            echo "changelog<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: 릴리즈 생성
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.create_tag.outputs.new_tag }}" \
+            --title "Release ${{ steps.create_tag.outputs.new_tag }}" \
+            --notes "${{ steps.create_tag.outputs.changelog }}"
+
+  buildAndPushDockerImage:
+    name: 2. 도커 이미지 빌드 및 푸시
+    needs: [createTagAndRelease]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Docker Buildx 설치
+        uses: docker/setup-buildx-action@v4
+
+      - name: 레지스트리 로그인
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 저장소 소유자명을 소문자로 (GHCR 경로 표준화)
+        env:
+          OWNER: "${{ github.repository_owner }}"
+        run: |
+          echo "OWNER_LC=${OWNER,,}" >> "${GITHUB_ENV}"
+
+      - name: "이미지 빌드 및 푸시"
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ env.DOCKERFILE_DIR }}
+          platforms: linux/amd64
+          push: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ needs.createTagAndRelease.outputs.tag}}
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    name: 3.  배포
+    runs-on: ubuntu-latest
+    needs: [createTagAndRelease, buildAndPushDockerImage]
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: 인스턴스 퍼블릭 IP 조회
+        run: |
+          HOST=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${{ env.INSTANCE_TAG_NAME }}" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
+            echo "실행 중인 인스턴스의 퍼블릭 IP를 찾지 못했습니다." && exit 1
+          fi
+          echo "HOST=$HOST" >> $GITHUB_ENV
+
+      - name: Deploy via SSH
+        env:
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SSH_USER: ${{ secrets.EC2_USER }}
+        run: |
+          OWNER_LC="${{ github.repository_owner }}"
+          OWNER_LC="${OWNER_LC,,}"
+          IMAGE="ghcr.io/${OWNER_LC}/${{ env.IMAGE_NAME }}:${{ needs.createTagAndRelease.outputs.tag }}"
+
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            "$SSH_USER@$HOST" 'bash -s' <<DEPLOY
+          set -e
+          sudo docker pull $IMAGE
+
+          sudo docker stop ${{ env.CONTAINER_1_NAME }} || true
+          sudo docker rm ${{ env.CONTAINER_1_NAME }} || true
+
+          sudo docker run -d \
+            --name ${{ env.CONTAINER_1_NAME }} \
+            --network ${{ env.DOCKER_NETWORK }} \
+            --restart unless-stopped \
+            --env-file /opt/baedang/.env \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            --log-opt max-size=100m \
+            --log-opt max-file=3 \
+            -p ${{ env.APPLICATION_PORT }}:${{ env.APPLICATION_PORT }} \
+            $IMAGE
+
+          sudo docker image prune -af
+          DEPLOY

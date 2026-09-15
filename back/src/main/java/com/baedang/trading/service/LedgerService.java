@@ -1,0 +1,80 @@
+package com.baedang.trading.service;
+
+import com.baedang.trading.entity.LedgerEntry;
+import com.baedang.trading.entity.TradeExecution;
+import com.baedang.trading.entity.TradeOrder;
+import com.baedang.trading.entity.OrderSide;
+import com.baedang.stock.entity.Stock;
+import com.baedang.trading.repository.LedgerEntryRepository;
+import com.baedang.global.formatter.FinancialDecimalFormatter;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.OffsetDateTime;
+
+/** 원장 메모·부호·INSERT만 담당합니다. 잔액 변경과 정산 계산은 하지 않습니다. */
+@Service
+public class LedgerService {
+
+    private static final int MAX_MEMO_LENGTH = 200;
+
+    private final LedgerEntryRepository ledgerEntryRepository;
+
+    public LedgerService(LedgerEntryRepository ledgerEntryRepository) {
+        this.ledgerEntryRepository = ledgerEntryRepository;
+    }
+
+    /**
+     * 가입·초기화로 방금 개설한 계좌의 초기 지급을 기록합니다. 예수금을 다시 증가시키지 않습니다.
+     * 계좌 생성과 같은 트랜잭션에서 한 번만 호출하며, 시각·금액·회차는 생성된 계좌와 일치해야 합니다.
+     * 중복 요청 판정은 가입·초기화 유스케이스가 담당하고, 기존 계좌의 누락 원장 보정에는 사용하지 않습니다.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInitialDeposit(
+            Long accountId,
+            BigDecimal initialCash,
+            int roundNo,
+            OffsetDateTime occurredAt
+    ) {
+        if (accountId == null || accountId <= 0) {
+            throw new IllegalArgumentException("계좌 ID는 양수여야 합니다");
+        }
+        if (initialCash == null || initialCash.signum() <= 0) {
+            throw new IllegalArgumentException("초기 지급액은 0보다 커야 합니다");
+        }
+        if (roundNo < 1) throw new IllegalArgumentException("계좌 회차는 1 이상이어야 합니다");
+        if (occurredAt == null) throw new IllegalArgumentException("초기 지급 시각은 필수입니다");
+
+        String memo = roundNo == 1 ? "모의투자금 지급" : "모의투자금 지급 · " + roundNo + "회차";
+        ledgerEntryRepository.save(LedgerEntry.initialDeposit(accountId, initialCash, memo, occurredAt));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordBuy(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, Stock stock) {
+        recordExecution(order, execution, balanceAfter, stock, OrderSide.BUY);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordSell(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, Stock stock) {
+        recordExecution(order, execution, balanceAfter, stock, OrderSide.SELL);
+    }
+
+    private void recordExecution(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, Stock stock, OrderSide side) {
+        if (order == null || order.getSide() != side || execution == null || stock == null
+                || stock.getStockId() == null || !stock.getStockId().equals(order.getStockId())) {
+            throw new IllegalArgumentException("체결 방향/종목이 원장 요청과 일치하지 않습니다");
+        }
+        String charge = side == OrderSide.BUY
+                ? "(수수료 " + FinancialDecimalFormatter.krw(execution.getFeeKrw()) + "원 포함)"
+                : "(수수료 " + FinancialDecimalFormatter.krw(execution.getFeeKrw())
+                  + "원, 세금 " + FinancialDecimalFormatter.krw(execution.getTaxKrw()) + "원 포함)";
+        String memo = stock.getName() + " "
+                + FinancialDecimalFormatter.plain(execution.getQuantity()) + "주 @ "
+                + FinancialDecimalFormatter.currency(execution.getPrice(), stock.getCurrency())
+                + " " + charge;
+        if (memo.length() > MAX_MEMO_LENGTH) memo = memo.substring(0, MAX_MEMO_LENGTH);
+        ledgerEntryRepository.save(LedgerEntry.execution(order, execution, balanceAfter, memo));
+    }
+}

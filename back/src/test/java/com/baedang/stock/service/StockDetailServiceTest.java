@@ -1,0 +1,217 @@
+package com.baedang.stock.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.service.PriceLimitLoadService;
+import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.stock.dto.StockDetailResponse;
+import com.baedang.stock.entity.ListingStatus;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.entity.StockCategory;
+import com.baedang.stock.repository.StockRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.*;
+
+class StockDetailServiceTest {
+
+    private final StockRepository stockRepository = mock(StockRepository.class);
+    private final QuoteSnapshotRepository quoteSnapshotRepository = mock(QuoteSnapshotRepository.class);
+    private final QuoteRealtimePolicy quoteRealtimePolicy = mock(QuoteRealtimePolicy.class);
+    private final StockOnDemandQuoteService stockOnDemandQuoteService = mock(StockOnDemandQuoteService.class);
+    private final PriceLimitLoadService priceLimits = mock(PriceLimitLoadService.class);
+    private final StockWarningQueryService stockWarningQueryService = mock(StockWarningQueryService.class);
+    private final StockDetailService service =
+            new StockDetailService(stockRepository, quoteSnapshotRepository, quoteRealtimePolicy,
+                    stockOnDemandQuoteService, priceLimits, stockWarningQueryService);
+    private Stock stock;
+
+    @BeforeEach
+    void setUp() {
+        // 유의사항 조회는 StockWarningQueryServiceTest에서 검증한다 — 여기서는
+        // "확인했고 유의사항이 없다"로 고정해 주문 가능 여부 판정만 본다.
+        when(stockWarningQueryService.currentWarnings(any()))
+                .thenReturn(new StockWarningQueryService.WarningSnapshot(
+                        List.of(), StockDetailResponse.WarningStatus.AVAILABLE));
+
+        // 온디맨드 갱신은 별도 StockOnDemandQuoteServiceTest에서 검증한다 — 여기서는
+        // "넘겨받은 시세를 그대로 돌려준다"로 고정해 기존 시나리오에 영향이 없게 한다.
+        when(stockOnDemandQuoteService.ensureQuote(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        when(priceLimits.ensureForDisplay(any(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+        stock = mock(Stock.class);
+        when(stock.getStockId()).thenReturn(1L);
+        when(stock.getSymbol()).thenReturn("ABC");
+        when(stock.getName()).thenReturn("테스트 종목");
+        when(stock.getEnglishName()).thenReturn("Test Stock");
+        when(stock.getMarket()).thenReturn("KOSPI");
+        when(stock.getMarketCountry()).thenReturn(MarketCountry.KR);
+        when(stock.getCurrency()).thenReturn("KRW");
+        when(stock.getIsinCode()).thenReturn("KR0000000001");
+        when(stock.getStockCategory()).thenReturn(StockCategory.INDIVIDUAL);
+        when(stock.getIsDividend()).thenReturn(false);
+        when(stock.getSharesOutstanding()).thenReturn(new BigDecimal("1000"));
+        when(stock.getListDate()).thenReturn(LocalDate.parse("2020-01-01"));
+        when(stock.getIsRanked()).thenReturn(true);
+        when(stock.getListingStatus()).thenReturn(ListingStatus.ACTIVE);
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("abc", MarketCountry.KR))
+                .thenReturn(Optional.of(stock));
+    }
+
+    @Test
+    void 상하한가_확보후_같은_응답에_최신값을_반영한다() {
+        QuoteSnapshot before = quote("120", "100");
+        QuoteSnapshot after = quote("120", "100");
+        when(after.getUpperLimit()).thenReturn(new BigDecimal("130"));
+        when(after.getLowerLimit()).thenReturn(new BigDecimal("70"));
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(before));
+        when(priceLimits.ensureForDisplay(stock, before)).thenReturn(after);
+        when(priceLimits.canDisplay(stock, after)).thenReturn(true);
+        StockDetailResponse response = service.getDetail("abc", "KR");
+        assertThat(response.price().upperLimit()).isEqualTo("130");
+        assertThat(response.price().lowerLimit()).isEqualTo("70");
+        verify(priceLimits).ensureForDisplay(stock, before);
+        verify(quoteSnapshotRepository, times(1)).findById(1L);
+    }
+
+    @Test
+    void 미검증_상하한가는_시세와_분리해서_null로_반환한다() {
+        QuoteSnapshot stored = quote("120", "100");
+        when(stored.getUpperLimit()).thenReturn(new BigDecimal("130"));
+        when(stored.getLowerLimit()).thenReturn(new BigDecimal("70"));
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(stored));
+        StockDetailResponse response = service.getDetail("abc", "KR");
+        assertThat(response.price().lastPrice()).isEqualTo("120");
+        assertThat(response.price().upperLimit()).isNull();
+        assertThat(response.price().lowerLimit()).isNull();
+        verify(quoteSnapshotRepository, times(1)).findById(1L);
+    }
+
+    @Test
+    void 시장국가와_심볼로_조회하고_파생값을_문자열로_반환한다() {
+        QuoteSnapshot quote = quote("120", "100");
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(quote));
+        when(quoteRealtimePolicy.isRealtime(MarketCountry.KR, quote)).thenReturn(true);
+        when(quoteRealtimePolicy.isMarketOpen(MarketCountry.KR)).thenReturn(true);
+
+        StockDetailResponse result = service.getDetail("abc", "kr");
+
+        assertThat(result.price().lastPrice()).isEqualTo("120");
+        assertThat(result.price().changeAmount()).isEqualTo("20");
+        assertThat(result.price().changeRate()).isEqualTo("0.2");
+        assertThat(result.info().marketCap()).isEqualTo("120000");
+        assertThat(result.tradable()).isTrue();
+    }
+
+    @Test
+    void 시세가_없어도_메타데이터를_반환하고_거래불가로_표시한다() {
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.empty());
+        when(quoteRealtimePolicy.isMarketOpen(MarketCountry.KR)).thenReturn(true);
+
+        StockDetailResponse result = service.getDetail("abc", "KR");
+
+        assertThat(result.price().lastPrice()).isNull();
+        assertThat(result.price().realtime()).isFalse();
+        assertThat(result.tradable()).isFalse();
+        assertThat(result.tradableReason()).isEqualTo("QUOTE_NOT_FOUND");
+    }
+
+    @Test
+    void 거래정지_사유는_장상태와_시세보다_우선한다() {
+        when(stock.getIsSuspended()).thenReturn(true);
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.empty());
+
+        StockDetailResponse result = service.getDetail("abc", "KR");
+
+        assertThat(result.tradableReason()).isEqualTo("SUSPENDED");
+        verify(quoteRealtimePolicy, never()).isMarketOpen(any());
+    }
+
+    @Test
+    void 비랭킹_종목도_시세와_세션에_따라_실시간과_거래가능을_판정한다() {
+        when(stock.getIsRanked()).thenReturn(false);
+        QuoteSnapshot quote = quote("120", "100");
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(quote));
+
+        StockDetailResponse result = service.getDetail("abc", "KR");
+
+        verify(quoteRealtimePolicy).isRealtime(MarketCountry.KR, quote);
+        assertThat(result.tradableReason()).isEqualTo("MARKET_CLOSED");
+    }
+
+    @Test
+    void 유의사항_조회_실패는_경고없음이_아니라_UNAVAILABLE로_내려간다() {
+        when(stockWarningQueryService.currentWarnings(any()))
+                .thenReturn(new StockWarningQueryService.WarningSnapshot(
+                        List.of(), StockDetailResponse.WarningStatus.UNAVAILABLE));
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.empty());
+        when(quoteRealtimePolicy.isMarketOpen(MarketCountry.KR)).thenReturn(true);
+
+        StockDetailResponse result = service.getDetail("abc", "KR");
+
+        assertThat(result.warnings()).isEmpty();
+        assertThat(result.warningsStatus()).isEqualTo(StockDetailResponse.WarningStatus.UNAVAILABLE);
+    }
+
+    @Test
+    void 유의사항은_원천_타입을_보존한_채_정보성으로만_반환하고_주문가능여부는_바꾸지_않는다() {
+        when(stockWarningQueryService.currentWarnings(any()))
+                .thenReturn(new StockWarningQueryService.WarningSnapshot(
+                        List.of(new StockDetailResponse.Warning("OVERHEATED", "과열종목")),
+                        StockDetailResponse.WarningStatus.AVAILABLE));
+        QuoteSnapshot quote = quote("120", "100");
+        when(quoteSnapshotRepository.findById(1L)).thenReturn(Optional.of(quote));
+        when(quoteRealtimePolicy.isMarketOpen(MarketCountry.KR)).thenReturn(true);
+
+        StockDetailResponse result = service.getDetail("abc", "KR");
+
+        assertThat(result.warnings()).containsExactly(
+                new StockDetailResponse.Warning("OVERHEATED", "과열종목"));
+        assertThat(result.tradable()).isTrue();
+        assertThat(result.tradableReason()).isNull();
+    }
+
+    @Test
+    void 지원하지_않는_시장국가는_거절한다() {
+        assertThatThrownBy(() -> service.getDetail("ABC", "JP"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_INPUT);
+        verifyNoInteractions(stockRepository);
+    }
+
+    @Test
+    void 종목이_없으면_STOCK_NOT_FOUND를_던진다() {
+        when(stockRepository.findBySymbolIgnoreCaseAndMarketCountry("NONE", MarketCountry.US))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.getDetail("NONE", "US"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(error -> ((BusinessException) error).getErrorCode())
+                .isEqualTo(ErrorCode.STOCK_NOT_FOUND);
+    }
+
+    private QuoteSnapshot quote(String lastPrice, String prevClose) {
+        QuoteSnapshot quote = mock(QuoteSnapshot.class);
+        BigDecimal last = new BigDecimal(lastPrice);
+        BigDecimal previous = new BigDecimal(prevClose);
+        when(quote.getLastPrice()).thenReturn(last);
+        when(quote.getPrevClose()).thenReturn(previous);
+        when(quote.changeRate()).thenReturn(last.subtract(previous).divide(previous, 6, RoundingMode.HALF_UP));
+        when(quote.getQuoteAt()).thenReturn(OffsetDateTime.parse("2026-08-27T12:00:00+09:00"));
+        return quote;
+    }
+}

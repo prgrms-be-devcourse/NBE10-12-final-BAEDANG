@@ -2,10 +2,11 @@ plugins {
     id 'java'
     id 'org.springframework.boot' version '3.5.16'
     id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
 }
 
 group = 'com.baedang'
-version = '0.0.1-SNAPSHOT'
+version = '0.0.1'
 description = 'back'
 
 java {
@@ -22,17 +23,96 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // 비밀번호 찾기 메일 발송(MailSender). mail.enabled=false(기본값)면 실제로 보내지
+    // 않고 로그만 남기므로, SMTP 계정이 없어도 기동에는 영향이 없다(PasswordResetMailSender 참고).
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'org.jsoup:jsoup:1.18.3'
+    // Swagger / OpenAPI 문서 (springdoc). Swagger UI + /v3/api-docs 자동 생성.
+    //   Spring Boot 3.5 은 springdoc 2.8.x 계열과 호환된다.
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.9'
 
-    implementation 'org.springframework.security:spring-security-crypto' // ── 비밀번호 해시
+    // Spring Boot Actuator
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
 
+    // Prometheus
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+
+    // Flyway
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+
     runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.13.0'
+    runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.13.0'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+    // ── 외부 API(Toss) 어댑터 테스트용 — 실제 Toss 를 호출하지 않고 응답을 스텁한다.
+    //    org.wiremock:wiremock 은 Jetty 서버 구현체를 포함하지 않는 모듈형 아티팩트라
+    //    별도로 추가해야 한다 — standalone 버전이 다 번들돼 있어 더 간단하다.
+    testImplementation 'org.wiremock:wiremock-standalone:3.13.2'
+    // 도메인 지표 검증용. PrometheusMeterRegistry 는 태그 키 불일치에 엄격해(SimpleMeterRegistry 와 달리)
+    // 같은 메트릭에 태그 키가 다른 시계열이 섞이면 드롭한다 — 그 회귀를 테스트로 잡기 위해 test 컴파일에 노출한다.
+    testImplementation 'io.micrometer:micrometer-registry-prometheus'
 }
 
 tasks.named('test') {
     useJUnitPlatform()
+    systemProperty 'spring.profiles.active', 'test'
+    // 테스트가 끝나면 커버리지 리포트를 이어서 생성한다.
+    finalizedBy jacocoTestReport
+}
+
+jacoco {
+    toolVersion = '0.8.12'
+}
+
+// 커버리지 리포트(HTML: 사람이 열람 / XML: CI·뱃지 연동용). 초기엔 report-only —
+// 커버리지 강제(jacocoTestCoverageVerification threshold)는 후속 이슈에서 팀 합의 후 추가.
+tasks.named('jacocoTestReport') {
+    dependsOn test
+    reports {
+        html.required = true
+        xml.required = true
+    }
+}
+
+tasks.named('jar') {
+    enabled = false
+}
+
+tasks.named('bootJar') {
+    enabled = true
+    archiveFileName = 'application.jar'
+}
+
+// 브라우저 통합 테스트 전용 런처와 대역은 운영 JAR에 포함하지 않습니다.
+sourceSets {
+    e2e {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    e2eImplementation.extendsFrom implementation
+    e2eRuntimeOnly.extendsFrom runtimeOnly
+}
+tasks.register('e2eRun', JavaExec) {
+    dependsOn e2eClasses
+    classpath = sourceSets.e2e.runtimeClasspath
+    mainClass = 'com.baedang.e2e.E2eLauncher'
+}
+tasks.register('e2eClasspath') {
+    dependsOn e2eClasses
+    doLast {
+        file("$buildDir/e2e-classpath.txt").text = sourceSets.e2e.runtimeClasspath.asPath
+    }
 }

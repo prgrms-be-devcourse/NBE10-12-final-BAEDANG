@@ -1,0 +1,308 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Reveal } from "@/components/Reveal";
+import { useTheme } from "@/components/ThemeProvider";
+import { WIKI_TERMS, type WikiTerm } from "@/data/wikiTerms";
+
+/** 본문(마크다운) 을 문단과 코드블록으로 쪼갠다. wikiUI 디자인의 paras() 와 동일 규칙:
+ *  ``` 로 코드펜스를 가르고, 나머지는 빈 줄 기준으로 문단을 나눈다. 표 렌더링은 하지
+ *  않으므로 `**`(굵게)·백틱(인라인 코드) 표식만 벗겨 평문으로 보여준다. */
+type Para = { text: string; code: boolean };
+
+function toParas(body: string): Para[] {
+  const clean = (s: string) => s.replace(/\*\*/g, "").replace(/`/g, "").trim();
+  const out: Para[] = [];
+  (body || "").split("```").forEach((part, i) => {
+    if (i % 2 === 1) {
+      const t = part.replace(/^\n+|\n+$/g, "");
+      if (t.trim()) out.push({ text: t, code: true });
+    } else {
+      part.split(/\n\s*\n/).forEach((p) => {
+        const t = clean(p);
+        if (t) out.push({ text: t, code: false });
+      });
+    }
+  });
+  return out;
+}
+
+/** 전체 목록에서 n 개를 고르게 솎아낸다. 무작위가 아니라 결정적이라 서버·클라이언트
+ *  렌더가 일치한다(hydration 불일치·이펙트 없이 마퀴를 그릴 수 있다). */
+function spread<T>(arr: T[], n: number): T[] {
+  const step = Math.max(1, Math.floor(arr.length / n));
+  const out: T[] = [];
+  for (let i = 0; i < arr.length && out.length < n; i += step) out.push(arr[i]);
+  return out;
+}
+
+const MARQUEE_TERMS = spread(WIKI_TERMS, 24);
+
+function TermPill({ term, onOpen }: { term: WikiTerm; onOpen: (t: WikiTerm) => void }) {
+  const { theme } = useTheme();
+  // 타원(알약형) 용어 버튼에 마우스를 올렸을 때 나타나는 그림자 색을
+  // #b6d7fd로 바꿔달라는 요청 — 기존 짙은 남색 그림자(rgba(15,56,104,.12))
+  // 대신 이 하늘색을 썼다. 밝은 색이라 기존과 같은 12% 알파로는 거의 안
+  // 보여서, 옅은 하늘색 계열에 이미 쓰던 것과 같은 55% 알파로 올려 그림자가
+  // 실제로 보이게 했다. 이 그림자(블러)가 더 넓게 퍼지게 해달라는 후속
+  // 요청으로 blur 반경을 14px → 32px로 키우고, spread를 4px 줘서 퍼지는
+  // 느낌을 더했다. 이어서 색이 더 진하게 보이게 해달라는 요청으로 알파를
+  // 55% → 75%로 올렸다. 다크 모드일 때 여러 블루 계열(#114f8c → #a3d2ef →
+  // #5fa0d6 → #1b6da3 → #0f3868 → #175494)과 회색 계열(#b0b0b0 →
+  // #5a5a5a → #787878)을 모두 시도해봤지만 계속 이질적이라는 피드백을
+  // 받아, 최종적으로 순검정(#000000)으로 바꿨다. 이 페이지 배경
+  // (var(--bg) 다크)도 순검정이라 그라데이션이 배경과 거의 구별되지
+  // 않을 수 있다는 점을 미리 안내했고, 그래도 순검정을 쓰기로
+  // 확인받았다. 라이트 모드는 기존 하늘색·blur/spread(#b6d7fd,
+  // 32px/4px) 그대로 둔다.
+  const hoverShadowRgb = theme === "dark" ? "0,0,0" : "182,215,253";
+  const hoverShadowSpread = theme === "dark" ? "16px 2px" : "32px 4px";
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(term)}
+      className="flex-none cursor-pointer whitespace-nowrap rounded-full px-[26px] py-[15px] text-[18px] font-normal transition-shadow duration-150"
+      style={{ background: "var(--card)", color: "var(--ink)" }}
+      onMouseEnter={(e) => (e.currentTarget.style.boxShadow = `0 4px ${hoverShadowSpread} rgba(${hoverShadowRgb},.75)`)}
+      onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "none")}
+    >
+      {term.name}
+    </button>
+  );
+}
+
+/** 검색 전 유휴 상태의 흐르는 마퀴. 두 줄이 서로 다른 속도로 좌로 흐른다. */
+function IdleMarquee({ onOpen }: { onOpen: (t: WikiTerm) => void }) {
+  const half = Math.ceil(MARQUEE_TERMS.length / 2);
+  const rows = [MARQUEE_TERMS.slice(0, half), MARQUEE_TERMS.slice(half)];
+
+  return (
+    <div
+      className="mt-[34px] flex w-full flex-col gap-3 overflow-hidden"
+      style={{
+        maskImage: "linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)",
+        WebkitMaskImage: "linear-gradient(90deg,transparent,#000 8%,#000 92%,transparent)",
+      }}
+    >
+      {rows.map((row, ri) => (
+        <div key={ri} className="wiki-marquee-row" style={{ animationDuration: ri === 0 ? "44s" : "33s" }}>
+          {/* 이음매 없는 반복을 위해 같은 목록을 네 번 이어 붙인다(-25% 이동). */}
+          {[0, 1, 2, 3].map((copy) =>
+            row.map((t, i) => <TermPill key={`${copy}-${i}`} term={t} onOpen={onOpen} />)
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TermModal({ term, onClose }: { term: WikiTerm; onClose: () => void }) {
+  const paras = useMemo(() => toParas(term.body), [term.body]);
+  const chips = term.aliases.length ? term.aliases : ["별칭 없음"];
+
+  // 모달이 떠 있는 동안 뒷배경(가이드 페이지) 스크롤을 잠근다. 이 컴포넌트는 열릴 때만
+  // 마운트되므로 마운트에서 잠그고 언마운트에서 원복한다(이전 overflow 값 보존).
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-[150] flex items-center justify-center p-6"
+      style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="wiki-term-title"
+        onClick={(e) => e.stopPropagation()}
+        className="flex w-full max-w-[620px] flex-col rounded-[24px] px-8 py-[30px]"
+        style={{ maxHeight: "85vh", background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 id="wiki-term-title" className="text-[26px] font-extrabold tracking-[-.02em]" style={{ color: "var(--ink)" }}>
+              {term.name}
+            </h3>
+            <div className="mt-[9px] flex flex-wrap gap-1.5">
+              {chips.map((al) => (
+                <span
+                  key={al}
+                  className="rounded-full px-2.5 py-1 text-[12px] font-bold"
+                  style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
+                >
+                  {al}
+                </span>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-none cursor-pointer border-0 bg-transparent px-2.5 py-1.5 text-[13px] font-semibold"
+            style={{ color: "var(--mut)" }}
+          >
+            닫기
+          </button>
+        </div>
+
+        <p
+          className="mt-[18px] rounded-[14px] px-[18px] py-4 text-[15px] font-bold leading-[1.7]"
+          style={{ background: "var(--accentSoft)", color: "var(--onAccentSoftText)" }}
+        >
+          {term.summary}
+        </p>
+
+        <div className="mt-4 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+          {paras.map((p, i) =>
+            p.code ? (
+              // 코드블록(```)에 처음엔 모노스페이스(ui-monospace,Menlo,monospace)를
+              // 썼다 — PER·PBR·예수금처럼 여러 줄의 숫자를 칸에 맞춰 정렬해
+              // 보여주는 표라 필요하다고 판단했는데, "투자경고"뿐 아니라
+              // "예수금"의 여러 줄짜리 표에서도 본문과 폰트가 달라 보인다는
+              // 피드백을 받았다 — 정렬보다 사이트 전체 폰트 통일이 우선이라,
+              // 줄 수와 무관하게 모든 코드블록에 본문과 같은 Pretendard를
+              // 쓴다. 사각형(배경·라운드·패딩)은 그대로 유지된다.
+              <pre
+                key={i}
+                className="whitespace-pre-wrap rounded-[12px] px-4 py-3.5 text-[12.5px] leading-[1.7]"
+                style={{
+                  background: "var(--fill)",
+                  color: "var(--body)",
+                  fontFamily: "Pretendard,-apple-system,'Apple SD Gothic Neo',sans-serif",
+                }}
+              >
+                {p.text}
+              </pre>
+            ) : (
+              <p
+                key={i}
+                className="text-[14px] leading-[1.78]"
+                style={{ color: "var(--body)", whiteSpace: "pre-line" }}
+              >
+                {p.text}
+              </p>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function WikiPanel() {
+  const { theme } = useTheme();
+  // 다크 모드일 때 검색창 포커스 그라데이션에 여러 블루 계열과 회색
+  // 계열(#b0b0b0 → #5a5a5a → #787878)을 모두 시도해봤지만 계속
+  // 이질적이라는 피드백을 받아, 최종적으로 순검정(#000000,
+  // TermPill 호버와 항상 같은 색)으로 바꿨다 — 이 페이지 배경도
+  // 순검정이라 거의 안 보일 수 있다는 점을 미리 안내했고, 그래도
+  // 순검정을 쓰기로 확인받았다. "검색해보세요." 글자색은 이 요청
+  // 범위가 아니라 #114f8c 그대로 둔다. 라이트 모드는 기존
+  // 색·blur/spread(#b6d7fd, 32px/4px) 그대로다.
+  const searchAccentRgb = theme === "dark" ? "0,0,0" : "182,215,253";
+  const searchShadowSpread = theme === "dark" ? "16px 2px" : "32px 4px";
+  const [q, setQ] = useState("");
+  const [modal, setModal] = useState<WikiTerm | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setModal(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const query = q.trim().toLowerCase();
+  const found = useMemo(() => {
+    if (!query) return [];
+    // 쿼리가 자음 자모(ㄱ~ㅎ)로만 이뤄졌으면 초성 검색. 사용자가 자판으로 친 홑자음은
+    // 생성기가 미리 계산해 둔 chosung 과 같은 호환 자모라 변환 없이 바로 대조한다.
+    const isChosung = /^[ㄱ-ㅎ]+$/.test(query.replace(/\s/g, ""));
+    if (isChosung) {
+      const cq = query.replace(/\s/g, "");
+      return WIKI_TERMS.filter(
+        (t) => t.chosung.includes(cq) || t.aliasChosungs.some((c) => c.includes(cq))
+      ).slice(0, 40);
+    }
+    return WIKI_TERMS.filter(
+      (t) =>
+        t.name.toLowerCase().includes(query) ||
+        t.aliases.some((a) => a.toLowerCase().includes(query))
+    ).slice(0, 40);
+  }, [query]);
+
+  const hint = query
+    ? `"${q.trim()}" 검색 결과 ${found.length}개`
+    : `전체 ${WIKI_TERMS.length}개 · 마우스를 올리면 멈춰요`;
+
+  return (
+    <div>
+      <Reveal delay={0.02} className="flex flex-col items-center pt-[44px]">
+        <h2
+          className="text-center text-[42px] font-extrabold leading-[1.28] tracking-[-.02em]"
+          style={{ color: "var(--ink)", textWrap: "pretty" } as React.CSSProperties}
+        >
+          모르는 용어가 있다면?
+          <br />
+          <span style={{ color: theme === "dark" ? "#114f8c" : "var(--accentText)" }}>검색해보세요.</span>
+        </h2>
+        <p className="mt-3.5 text-[15px]" style={{ color: "var(--mut)" }}>
+          거래 화면에 실제로 등장하는 용어만 쉬운 말로 풀어 두었어요
+        </p>
+
+        <div className="relative mt-[26px] w-full max-w-[480px]">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2"
+          >
+            <circle cx="11" cy="11" r="7" stroke="var(--mut2)" strokeWidth="2" />
+            <path d="M21 21l-4.3-4.3" stroke="var(--mut2)" strokeWidth="2" strokeLinecap="round" />
+          </svg>
+          <input
+            type="text"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="용어·별칭·초성(ㅅㄱ)으로 검색"
+            className="w-full rounded-[12px] border-0 py-2.5 pl-[42px] pr-4 text-[15px] outline-none transition-shadow duration-150"
+            style={{ background: "var(--card)", color: "var(--ink)" }}
+            // 검색창을 클릭(포커스)했을 때도 용어 버튼 호버와 똑같은 그라데이션
+            // 그림자 효과를 적용해달라는 요청 — TermPill의 onMouseEnter/
+            // onMouseLeave에 쓰던 색·블러·스프레드 값을 그대로 가져와
+            // onFocus/onBlur에 적용했다. searchAccentRgb·searchShadowSpread로
+            // 다크/라이트 모드별 색과 범위를 TermPill과 항상 같게 맞춘다.
+            onFocus={(e) => (e.currentTarget.style.boxShadow = `0 4px ${searchShadowSpread} rgba(${searchAccentRgb},.75)`)}
+            onBlur={(e) => (e.currentTarget.style.boxShadow = "none")}
+          />
+        </div>
+        <p className="mt-3 text-[12.5px]" style={{ color: "var(--mut2)" }}>
+          {hint}
+        </p>
+      </Reveal>
+
+      {query ? (
+        <div className="mx-auto mt-[30px] flex w-full max-w-[820px] flex-wrap justify-center gap-2.5">
+          {found.length ? (
+            found.map((t) => <TermPill key={t.name} term={t} onOpen={setModal} />)
+          ) : (
+            <p className="py-8 text-[14px]" style={{ color: "var(--mut2)" }}>
+              검색 결과가 없어요. 다른 말로 검색해 보세요.
+            </p>
+          )}
+        </div>
+      ) : (
+        <IdleMarquee onOpen={setModal} />
+      )}
+
+      {modal && <TermModal term={modal} onClose={() => setModal(null)} />}
+    </div>
+  );
+}

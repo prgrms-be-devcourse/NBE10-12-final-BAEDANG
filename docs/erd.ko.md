@@ -1,10 +1,11 @@
-# 모의 주식 트레이딩 서비스 — ERD (1주차 MVP)
+# 모의 주식 트레이딩 서비스 — ERD
 
-> **버전**: 1주차 MVP 기준 · 26.08.20 ~ 08.25 · **인증은 1주차 미구현** — 시드 사용자 1명(`user_id = 1`)으로 개발
+> **버전**: 3주차 MVP 기준 · 26.09.03 ~ 09.09 · PostgreSQL 18 + TimescaleDB
 >
-> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 12 tables · append-only ledger · 회차 기반 초기화
+> - **배지**: Java 21 · Spring Boot 3.5.16 · PostgreSQL 18 · 22 tables · append-only 원장·시장조치 이력 · 회차 기반 초기화
 
 ## 목차
+
 - [전체 관계도](#전체-관계도)
 - [토스증권 API 매핑](#토스증권-api-매핑)
 - [컬럼 사전](#컬럼-사전)
@@ -19,6 +20,7 @@
 파란 테이블이 **계정계(사용자의 돈)**, 흰 테이블이 **시세·마스터**입니다. 돈이 움직이는 경로는 `account → trade_order → ledger_entry → holding` 하나뿐이고, 시세 쪽과 만나는 접점은 `trade_order` 와 `holding` 둘뿐입니다.
 
 **범례**
+
 - 파란색 = 계정계 · 흰색 = 시세·마스터 · 보라 = 시계열 (append only)
 - `PK` 기본키 · `FK` 외래키 · `UK` 유니크
 - **분류①② 태그** — 종목 유형 판정 컬럼
@@ -31,6 +33,8 @@
 | users → account | 1:N |
 | account → trade_order | 1:N |
 | trade_order → ledger_entry | 1:N |
+| trade_order → trade_execution | 1:N |
+| trade_execution → ledger_entry | 정상 체결 1:1 (초기 지급/상쇄 정정은 execution_id NULL) |
 | trade_order → holding | 1:N |
 | account → ledger_entry | 1:N |
 | account → daily_account_snapshot | 1:N |
@@ -41,12 +45,17 @@
 | stock → daily_candle | 1:N |
 | stock → minute_candle | 1:N |
 | daily_candle → quote_snapshot | 데이터 흐름 (`close_price` → `prev_close`) |
+| stock → order_book_version | 1:N (is_active=true는 종목당 최대 1개) |
+| order_book_version → order_book_level | 1:N (게시 완료 시 최대 20개: 방향별 0~10개, CASCADE) |
+| trade_execution → order_book_level | N:0..1 (MARKET은 NULL, LIMIT은 필수, RESTRICT) |
+| users → stock_like | 1:N |
+| stock → stock_like | 1:N (CASCADE) |
 
-### 테이블 맵 (12개)
+### 테이블 맵 (22개)
 
 | 그룹 | 테이블 | 비고 |
 |---|---|---|
-| **계정계** | `users` | 회원 (인증은 2주차) |
+| **계정계** | `users` | 회원 및 JWT 인증 정보 |
 | | `account` | 모의 계좌 (회차 기반) · `locked_cash` 보유 |
 | | `trade_order` | 주문+체결 (일부 TOSS) |
 | | `ledger_entry` | 거래 원장 · append only |
@@ -58,27 +67,36 @@
 | | `daily_candle` | 일봉 · TimescaleDB (TOSS /candles) |
 | | `minute_candle` | 분봉 시계열 · 상위 100 스케줄러 + 상위 100 밖 온디맨드 |
 | | `exchange_rate` | 환율 이력 · 일반 테이블 · FK 관계 없음 |
+| | `market_calendar` | 선택적 장 운영일 저장 테이블 · 현재는 시장 캘린더 포트/캐시로 조회 |
+| **모의 시장 호가** | `order_book_version` | 3초 주기 현재가 기반 가상 호가 세트 헤더 |
+| | `order_book_level` | 버전당 최대 20개 레벨(방향별 0~10개) 가격·수량 |
+| **산업 · 재무 (KIS)** | `stock_industry` | 표준산업분류 및 지수업종(대·중·소) 분류 |
+| | `stock_financial_period` | 연간·분기 대차대조표, 손익계산서, 재무/수익성비율 |
+| | `stock_financial_sync` | 그룹별 동기화 시각 및 TTL(negative cache 지원) |
+| **시장조치** | `market_event` | KRX KIND 서킷브레이커·사이드카 이력 · append-only |
+| **관심 종목** | `stock_like` | 회원별 관심 종목 · 회원×종목당 한 행 |
+| **학습 콘텐츠** | `wiki_term` | 초보 투자자를 위한 금융 용어 사전 |
 
 ### MVP 동작 매트릭스 (확정)
 
-> **조회는 언제나 전 종목 가능하고, 거래는 "해당 시장 정규장 + 상위 100" 에만 허용**됩니다.
+> **조회는 언제나 전 종목 가능하고, 거래는 랭킹과 무관하게 ACTIVE 상장 상태·해당 시장 정규장·거래 제약·시세 신선도 검증 후 허용**됩니다.
 > **판정 기준은 보는 사람의 시각이 아니라 그 종목이 속한 시장이 열려 있는가입니다** — 한국 낮에 엔비디아를 열면 미국장이 닫혀 있으므로 전일 종가가 나갑니다.
 
-| 시간대 (KST) | 국내 상위 100 | 미국 상위 100 | 그 외 전 종목 |
-|---|---|---|---|
-| 09:00 ~ 15:30 | **5초 실시간 · 거래 O** · 차트 1분봉(1분 수집) | 전일 종가 · 거래 X · 차트 마지막 장 분봉 | 전일 종가 · 거래 X · 차트 마지막 장 분봉 |
-| 22:30 ~ 05:00 * | 전일 종가 · 거래 X · 차트 마지막 장 분봉 | **5초 실시간 · 거래 O** · 차트 1분봉(1분 수집) | 전일 종가 · 거래 X · 차트 마지막 장 분봉 |
-| 그 외 시간 | 전일 종가 · 거래 X | 전일 종가 · 거래 X | 전일 종가 · 거래 X |
+| 시간대 (KST)     | 국내 상위 100                                  | 미국 상위 100                                  | 그 외 전 종목                            |
+| ---------------- | ---------------------------------------------- | ---------------------------------------------- | ---------------------------------------- |
+| 09:00 ~ 15:30    | **5초 실시간 · 거래 O** · 차트 1분봉(1분 수집) | 전일 종가 · 거래 X · 차트 마지막 장 분봉       | 전일 종가 · 거래 X · 차트 마지막 장 분봉 |
+| 22:30 ~ 05:00 \* | 전일 종가 · 거래 X · 차트 마지막 장 분봉       | **5초 실시간 · 거래 O** · 차트 1분봉(1분 수집) | 전일 종가 · 거래 X · 차트 마지막 장 분봉 |
+| 그 외 시간       | 전일 종가 · 거래 X                             | 전일 종가 · 거래 X                             | 전일 종가 · 거래 X                       |
 
 > **차트는 어느 칸에서든 그려집니다.** 정규장이면 5초 시세와 함께 1분봉이 이어지고, 장외이거나 다른 나라 종목이면 마지막 장의 분봉이 그대로 보입니다. 빈 차트는 사용자에게 "고장난 화면"으로 읽히므로 **거래 불가와 조회 불가를 반드시 분리하세요.**
-> **상위 100종목의 분봉은 1분마다 스케줄러가 수집합니다.** 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위로 순차 호출합니다. 상위 100 밖 종목과 장외 상세 차트는 토스에 온디맨드로 요청하고 `minute_candle` 을 60초 캐시로 재사용합니다.
+> **상위 100종목의 분봉은 1분마다 스케줄러가 수집합니다.** 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위로 순차 호출합니다. 상위 100 밖 종목과 장외 상세 차트는 토스에 온디맨드로 요청하고 `minute_candle` 을 60초 캐시로 재사용합니다.
 
-> ⚠️ * **미국 정규장 시각은 서머타임에 따라 1시간 이동합니다.** 서머타임(3월 둘째 일요일 ~ 11월 첫째 일요일) **22:30 ~ 05:00** ← 지금(8월) / 표준시(11월 첫째 일요일 ~ 3월 둘째 일요일) **23:30 ~ 06:00**.
+> ⚠️ \* **미국 정규장 시각은 서머타임에 따라 1시간 이동합니다.** 서머타임(3월 둘째 일요일 ~ 11월 첫째 일요일) **22:30 ~ 05:00** ← 지금(8월) / 표준시(11월 첫째 일요일 ~ 3월 둘째 일요일) **23:30 ~ 06:00**.
 > **절대 하드코딩하지 마세요.** `/market-calendar/US` 의 `regularMarket` 세션 시각을 그대로 쓰면 됩니다 — 응답이 KST 기준으로 오므로 변환도 필요 없습니다. 하드코딩하면 11월 첫째 주에 **장 시작 후 한 시간 동안 거래가 막힙니다.**
 
 > 📌 **상위 100 밖 종목의 전일 종가는 어떻게 채우나요?**
-> 스케줄러가 도는 대상은 상위 100 뿐이라 나머지 8,300여 종목은 `quote_snapshot` 이 비어 있습니다.
-> **상세 페이지를 여는 순간 `/prices` 와 `/candles` 를 함께 호출해 채우고, 그 결과를 `quote_snapshot` 에 UPSERT 해두세요.** 한 번 조회된 종목은 다음부터 DB 에서 나갑니다.
+> 정규장 현재가 수집은 랭킹·활성 지정가 주문 종목만 대상으로 합니다. 그 외 종목은 온디맨드로 조회합니다.
+> 상세 조회는 수집된 현재가를 재사용하거나 `QuoteRefreshCoordinator`를 통해 온디맨드 `/prices` 요청을 공유합니다. 일봉 백필은 별도이며 전일 종가의 근거를 제공합니다.
 > 검색 결과 목록에 가격을 같이 보여주고 싶다면, 20건이면 **`/prices` 배치 1콜로 한 번에 받아옵니다** — 종목마다 따로 부르면 20콜이 되어 rate limit 에 걸립니다.
 
 ### 종가 데이터 파이프라인
@@ -90,7 +108,7 @@ GET /api/v1/candles?symbol=005930&interval=1d&count=200
      └ 국내 15:40 / 미국 05:10 · 시장별 100콜 · 약 20초
         ↓ closePrice 를 저장
 daily_candle.close_price          그날 종가 확정
-        ↓ 다음 장 시작 직전 복사 (국내 08:50 / 미국 22:00)
+        ↓ match the exact previous trading day of the displayed quote
 quote_snapshot.prev_close
         ↓ 5초마다 갱신되는 last_price 와 함께
 등락률 = (last_price − prev_close) / prev_close
@@ -99,10 +117,10 @@ quote_snapshot.prev_close
 ```
 
 > **토스 현재가 응답에는 등락률이 없습니다.** `symbol · timestamp · lastPrice · currency` 네 필드뿐이라 전일 종가를 따로 확보해서 직접 계산해야 합니다. 그 전일 종가의 원천이 `daily_candle` 이고, 조인 없이 쓰려고 `quote_snapshot` 에 복사해둡니다.
-> **복사 시점이 "마감 직후"가 아니라 "다음 장 시작 직전"** 인 점을 주의하세요. 마감 직후에 복사하면 `prev_close = last_price` 가 되어 장외 시간 내내 등락률이 0% 로 표시됩니다.
+> 기준가는 달력의 오늘이 아니라 표시하는 시세의 거래일에 귀속된다. 금요일 마감 이후에는 금요일 종가 / 목요일 종가를 유지하고, 월요일 시세 수신 시 금요일 종가로 기준가를 변경한다.
 
 > 📌 **수집 범위** — 거래대금 상위 **국내 100 + 해외 100 = 총 200종목**. 랭킹 API 의 `count` 최대값이 100 이라 **시장별 1콜로 완결**됩니다. 선정 기준은 `duration=1w`, 갱신은 **매주 월요일 국내 08:00 · 미국 21:00**(각 시장 장 시작 직전).
-> **메모리 캐시로만 처리하는 것** — `market_calendar`(장 운영 시간), 현재 환율(1분 TTL). 이력을 쌓을 이유가 없기 때문입니다.
+> **메모리 캐시로만 처리하는 것** — `market_calendar`(장 운영 시간). 환율은 메모리 캐시가 아닌 DB로 공유합니다.
 > **이후 기능 추가 시** — `wiki_term`(금융 용어 위키), `index_candle`(지수 일봉 — 수익률 벤치마크 비교용).
 
 ---
@@ -115,64 +133,68 @@ quote_snapshot.prev_close
 
 ### 엔드포인트별 호출 계획 (2026-08 문서 기준)
 
-| 엔드포인트 | 그룹 / 한도 | 호출 주기 | 채우는 대상 |
-|---|---|---|---|
-| `POST /oauth2/token` | AUTH · 5 TPS | 만료 직전 1회 | DB 저장 없음. **토큰은 메모리 캐싱 필수** — 매 요청마다 발급하면 그것만으로 차단됩니다. |
-| `GET /api/v1/stocks/all` | STOCK_ALL · **1 TPS** | **매주 월요일 07:00** | **마켓별 전체 종목 목록.** 페이지네이션 없이 한 번에 반환(NASDAQ 약 2,800건, gzip 30KB). `market` 7개(KOSPI·KOSDAQ·NYSE·NASDAQ·AMEX·KR_ETC·US_ETC)를 각각 부르면 **7콜로 전 종목 심볼 확보**. 필터가 우리 설계와 맞습니다 — `commonShare=true`(우선주 제외), `status=ACTIVE`(상장폐지 제외), `securityType`(STOCK·ETF·ETN·REIT…). |
-| `GET /api/v1/stocks` | STOCK · 5 TPS | 매주 월요일 07:00 | `stock` 상세 — 종목명·통화·ISIN·`security_type`·`is_common_share`·`leverage_factor`·상장주식수·상장일, `koreanMarketDetail` 의 거래정지·정리매매 플래그. `/stocks/all` 심볼을 **200개씩 배치**로 — 8,500종목이면 43콜, 약 9초. |
-| `GET /api/v1/rankings` | RANKING · 5 TPS | 유니버스: 월요일 KR 08:00 · US 21:00 / 화면 랭킹: 30초 TTL | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, 신규 편입의 `prev_close`(`price.basePrice`). **시장별 100개씩이라 KR·US 각 1콜로 완결**. `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. 주말엔 집계가 없을 수 있으니 **빈 배열이면 지난주 유니버스 유지**. |
-| `GET /api/v1/prices` | MARKET_DATA · **15 TPS** | **5초** (정규장 시간에만) | `quote_snapshot.last_price`, `quote_at`, `currency`. **시장별 100종목이 배치 1콜** — 5초 주기여도 **한도의 1.3%**. 국내장·미국장이 겹치지 않아 동시 부하 없음. **장이 닫히면 스케줄러 멈춤** → 마지막 값(=종가)이 남아 "전일 종가" 조회. 가격이 **문자열로 오므로 BigDecimal 로 파싱**. |
-| `GET /api/v1/price-limits` | MARKET_DATA · 15 TPS | 장 시작 전 1회 | `quote_snapshot.upper_limit`, `lower_limit`. **전일 종가 기준으로 정해져 하루 동안 안 바뀌므로** 실시간 폴링 불필요. 단건 조회라 국내 100종목이면 100콜, 약 7초. **미국 종목은 가격제한이 없어 NULL**. |
-| `GET /api/v1/candles` (interval=1d) | MARKET_DATA_CHART · **20 TPS** | 국내 15:40 / 미국 05:10 | `daily_candle`. 한도 20 TPS 라 **상위 100종목이면 5초**, 전 종목 8,500개도 **약 7분**. 확정된 `close_price` 가 다음 장 시작 전 `quote_snapshot.prev_close` 로 복사되어 **등락률 기준**. `timestamp` 는 시각이므로 **KST 기준 날짜로 변환**. |
-| `GET /api/v1/candles` (interval=1m) | MARKET_DATA_CHART · **5 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 2주차에는 지정가 체결 판정과 5m·10m 집계를 추가합니다. |
-| `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS | **1주차 미사용** · 필요 시 08:00 배치 | `stock.is_warned`. 정리매매·단기과열·투자경고/위험·VI 발동. **단건 조회라 100종목이면 100콜, 약 20초.** **확정 스케줄에는 넣지 않았습니다** — 랭킹 API 의 `excludeInvestmentCaution=true` 로 이미 대부분 걸러지기 때문. |
-| `GET /api/v1/exchange-rate` | MARKET_INFO · 3 TPS | 이력 적재: **매시 정각** / 현재 환율: 1분 TTL 캐시 | **두 경로가 다릅니다.** 그래프용 이력은 매시 정각 `exchange_rate` 로 적재(하루 24콜), 체결용 현재 환율은 **1분 TTL 메모리 캐시**. 응답의 `validFrom` 을 `rate_at` 으로, `ON CONFLICT DO NOTHING` 으로 **주말 중복 자동 차단**. |
-| `GET /api/v1/market-calendar/KR·US` | MARKET_INFO · 3 TPS | 앱 기동 시 + 매일 1회 | **메모리 캐시로 충분**(이력을 남기고 싶으면 `schema.sql` 의 `market_calendar` 테이블 선택). 세 곳에 쓰임 — **① 주문 가능 시간 판정, ② 시세 수집 스케줄러 on/off, ③ 화면 "실시간/종가" 분기**. 서머타임·수능일·임시휴장 때문에 **절대 하드코딩 금지**. |
-| `wss://openapi-ws/ws/v1` | 구독 100건 / 연결 2개 | **2주차 개선 과제** | **실시간 체결·호가 웹소켓.** 연결당 구독 100건, 계정당 연결 2개라 **국내 100 + 미국 100 = 정확히 200종목**. 도입하면 폴링이 사라지고 진짜 실시간. 재연결·재구독, 60초 PING, full-replace 구독 관리 필요, 시세는 **LOSSY 보장**이라 프레임 유실 감안. **1주차에는 폴링**. |
-| `POST /api/v1/orders` 등 | — | 사용 안 함 | **주문 API 는 절대 호출하지 않습니다** — 실제 계좌에 실주문이 나갑니다. `QuoteClient` 에서 호출 가능 경로를 화이트리스트로 고정하세요. |
+| 엔드포인트                             | 그룹 / 한도                    | 호출 주기                                                                       | 채우는 대상                                                                                                                                                                                                                                                                                                                       |
+| -------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /oauth2/token`                   | AUTH · 5 TPS                   | 만료 직전 1회                                                                   | DB 저장 없음. **토큰은 메모리 캐싱 필수** — 매 요청마다 발급하면 그것만으로 차단됩니다.                                                                                                                                                                                                                                           |
+| `GET /api/v1/stocks/all`               | STOCK_ALL · **1 TPS**          | **매주 월요일 07:00**                                                           | **마켓별 전체 종목 목록.** 페이지네이션 없이 한 번에 반환(NASDAQ 약 2,800건, gzip 30KB). `market` 7개(KOSPI·KOSDAQ·NYSE·NASDAQ·AMEX·KR_ETC·US_ETC)를 각각 부르면 **7콜로 전 종목 심볼 확보**. 필터가 우리 설계와 맞습니다 — `commonShare=true`(우선주 제외), `status=ACTIVE`(상장폐지 제외), `securityType`(STOCK·ETF·ETN·REIT…). |
+| `GET /api/v1/stocks`                   | STOCK · 5 TPS                  | 매주 월요일 07:00                                                               | `stock` 상세 — 종목명·통화·ISIN·`security_type`·`is_common_share`·`leverage_factor`·상장주식수·상장일, `koreanMarketDetail` 의 거래정지·정리매매 플래그. `/stocks/all` 심볼을 **200개씩 배치**로 — 8,500종목이면 43콜, 약 9초.                                                                                                    |
+| `GET /api/v1/rankings`                 | RANKING · 5 TPS                | 유니버스: 월요일 KR 08:00 · US 21:00 / 화면 랭킹: 30초 TTL                      | `stock.is_ranked`, `stock.rank_no`, `stock.trading_amount`, 멤버십만 갱신하며 랭킹 가격으로 시세를 초기화하지 않음. **시장별 100개씩이라 KR·US 각 1콜로 완결**. `type=MARKET_TRADING_AMOUNT`, `duration=1w`, `excludeInvestmentCaution=true`. 주말엔 집계가 없을 수 있으니 **빈 배열이면 지난주 유니버스 유지**.                  |
+| `GET /api/v1/prices`                   | MARKET_DATA · **15 TPS 공유**  | 정규장 중 **5초 목표**                                                          | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집. 그 외는 온디맨드. 배경 기본 8 TPS, 최종 공유 제한 유지. 전일 종가·상하한가는 보존.                                                                                                                                                                                                |
+| `GET /api/v1/price-limits`             | MARKET_DATA (공유 제한)        | 시작 시 + 국내 정규장 5분 누락 복구, 상세 온디맨드                              | `upper_limit`, `lower_limit`, `price_limit_date`; 미국 NULL은 정상이며 수집 제외                                                                                                                                                                                                                                                    |
+| `GET /api/v1/candles` (interval=1d)    | MARKET_DATA_CHART · **20 TPS** | KR 15:40~17:10 / America/New_York 16:10~17:10; 30m retries + startup recovery   | 거래소 현지 거래일로 저장. 요청 시작 시각 기준 정규장 마감 + 10분을 지난 확정 일봉만 차트·기준가에 사용한다.                                                                                                                                                                                                                      |
+| `GET /api/v1/candles` (interval=1m)    | MARKET_DATA_CHART · **20 TPS** | **상위 100: 1분마다 20종목 단위 순차 호출** / 그 외 종목: 상세 진입 시 온디맨드 | `minute_candle`. 상위 100은 정규장 중 스케줄러로 수집합니다. 장외이거나 다른 나라 종목은 온디맨드로 호출하고 최근 60초 캐시를 재사용합니다. 5m·10m 봉은 이 테이블에서 파생한 연속 집계 뷰(`candle_5m` · `candle_10m`)로 제공합니다. 2주차에는 지정가 체결 판정을 추가합니다.                                                      |
+| `GET /api/v1/stocks/{symbol}/warnings` | STOCK · 5 TPS                  | **1주차 미사용** · 필요 시 08:00 배치                                           | `stock.is_warned`. 정리매매·단기과열·투자경고/위험·VI 발동. **단건 조회라 100종목이면 100콜, 약 20초.** **확정 스케줄에는 넣지 않았습니다** — 랭킹 API 의 `excludeInvestmentCaution=true` 로 이미 대부분 걸러지기 때문.                                                                                                           |
+| `GET /api/v1/exchange-rate`            | MARKET_INFO · 3 TPS            | 매분                                                                            | 원본 `validFrom`/`validUntil`과 수신 시각을 DB에 저장하여 화면·체결에서 공유합니다. 동일 통화쌍·시작 시각은 더 최근에 수신한 응답으로 갱신합니다. 시장가 준비 시 누락/만료 환율은 한 번 갱신할 수 있으며 환율 캐시는 없습니다.                                                                                                    |
+| `GET /api/v1/market-calendar/KR·US`    | MARKET_INFO · 3 TPS            | 앱 기동 시 + 매일 1회                                                           | **메모리 캐시로 충분**(이력을 남기고 싶으면 `V1__init.sql` 의 `market_calendar` 테이블 선택). 세 곳에 쓰임 — **① 주문 가능 시간 판정, ② 시세 수집 스케줄러 on/off, ③ 화면 "실시간/종가" 분기**. 서머타임·수능일·임시휴장 때문에 **절대 하드코딩 금지**.                                                                           |
+| `wss://openapi-ws/ws/v1`               | 구독 100건 / 연결 2개          | **2주차 개선 과제**                                                             | **실시간 체결·호가 웹소켓.** 연결당 구독 100건, 계정당 연결 2개라 **국내 100 + 미국 100 = 정확히 200종목**. 도입하면 폴링이 사라지고 진짜 실시간. 재연결·재구독, 60초 PING, full-replace 구독 관리 필요, 시세는 **LOSSY 보장**이라 프레임 유실 감안. **1주차에는 폴링**.                                                          |
+| `POST /api/v1/orders` 등               | —                              | 사용 안 함                                                                      | **주문 API 는 절대 호출하지 않습니다** — 실제 계좌에 실주문이 나갑니다. `TossSecuritiesClient` 등 외부 API 클라이언트에서 호출 가능 경로를 화이트리스트로 고정하세요.                                                                                                                                                             |
 
 ### 테이블별 데이터 출처
 
-| 테이블 | 출처 | 비고 |
-|---|---|---|
-| `stock` | TOSS | 대부분 `/stocks` + `/warnings` + `/rankings`. `stock_category` 는 **자체** 판정하고, `dividend_yield` 와 배당 뱃지는 토스가 배당 데이터를 주지 않으므로 **MVP에서 비활성화**합니다. |
-| `quote_snapshot` | TOSS | `collected_at` 만 **자체**. 나머지 `/prices`, `/price-limits`, `/rankings`. |
-| `daily_candle` | TOSS | 전부 `/candles?interval=1d`. 장 마감 직후 시장별 100콜. 수정주가(`adjusted`) 적용 여부를 팀에서 정하고 **고정** — 중간에 바꾸면 과거 데이터와 어긋남. |
-| `minute_candle` | TOSS | 전부 `/candles?interval=1m`. 상위 100은 1분마다 20종목 단위 순차 호출로 채우고, 상위 100 밖·장외 종목은 상세 진입 시 받아 저장해 60초간 캐시로 씁니다. |
-| `exchange_rate` | TOSS | 전부 `/exchange-rate`. `collected_at` 만 **자체**. |
-| `trade_order` | 자체 + TOSS | 주문 내용은 자체 생성, `executed_price`·`quote_at` 은 `quote_snapshot` 에서 복사(원천 `/prices`), `exchange_rate` 는 `/exchange-rate`. **토스에 주문을 보내지는 않음** — 체결은 우리 DB 안에서만. |
-| `holding` | 자체 | 원장에서 파생. `avg_exchange_rate` 만 토스 환율에서 유래. |
-| `ledger_entry` | 자체 | 전부 자체 생성. `exchange_rate` 만 `trade_order.exchange_rate` 를 **그대로 복사**해 넣음(원천은 토스 `/exchange-rate`). 원장은 append-only 라 주문 테이블이 나중에 어떻게 바뀌든 이 기록은 그대로 남습니다. |
-| `users` `account` `daily_account_snapshot` `stock_external_id` | 자체 | 외부 API 와 무관. **계정계는 전적으로 우리가 소유** — 이것이 이 프로젝트가 채널계가 아니라 계정계인 이유. |
+| 테이블                                                         | 출처        | 비고                                                                                                                                                                                              |
+| -------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stock`                                                        | TOSS        | 대부분 `/stocks` + `/warnings` + `/rankings`. `stock_category` 는 **자체** 판정하고, `dividend_yield` 와 배당 뱃지는 토스가 배당 데이터를 주지 않으므로 **MVP에서 비활성화**합니다.               |
+| `quote_snapshot`                                               | TOSS        | `collected_at` 만 **자체**. 나머지 `/prices`, `/price-limits`, `/rankings`.                                                                                                                       |
+| `daily_candle`                                                 | TOSS        | 전부 `/candles?interval=1d`. 장 마감 직후 시장별 100콜. 수정주가(`adjusted`) 적용 여부를 팀에서 정하고 **고정** — 중간에 바꾸면 과거 데이터와 어긋남.                                             |
+| `minute_candle`                                                | TOSS        | 전부 `/candles?interval=1m`. 상위 100은 1분마다 20종목 단위 순차 호출로 채우고, 상위 100 밖·장외 종목은 상세 진입 시 받아 저장해 60초간 캐시로 씁니다.                                            |
+| `exchange_rate`                                                | TOSS        | 전부 `/exchange-rate`. `collected_at` 만 **자체**.                                                                                                                                                |
+| `trade_order`                                                  | 자체 + TOSS | 주문 내용은 자체 생성, `executed_price`·`quote_at` 은 `quote_snapshot` 에서 복사(원천 `/prices`), `exchange_rate` 는 `/exchange-rate`. **토스에 주문을 보내지는 않음** — 체결은 우리 DB 안에서만. |
+| `holding`                                                      | 자체        | 원장에서 파생. `avg_exchange_rate` 만 토스 환율에서 유래.                                                                                                                                         |
+| `ledger_entry`                                                 | 자체        | 체결/원장 서비스가 기록하며 개별 trade_execution의 환율을 그대로 사용. append-only.                                                                                                               |
+| `users` `account` `daily_account_snapshot` `stock_external_id` | 자체        | 외부 API 와 무관. **계정계는 전적으로 우리가 소유** — 이것이 이 프로젝트가 채널계가 아니라 계정계인 이유.                                                                                         |
+| `stock_industry`                                               | KIS         | `/uapi/domestic-stock/v1/quotations/search-stock-info` 원천. 정상 빈 응답은 null 분류로 negative cache 저장.                                                                                      |
+| `stock_financial_period`                                       | KIS         | KIS 4대 재무 API(대차대조표, 손익계산서, 재무비율, 수익성비율) 원천. 과거 행 보존.                                                                                                                |
+| `stock_financial_sync`                                         | 자체 + KIS  | 그룹별 동기화 시각(재무 7일 / 7d, 산업 30일 / 30d TTL 판정 및 캐시 여부).                                                                                                                         |
+| `market_event`                                                 | KRX KIND    | 공식 RSS/상세 공시에서 확인한 서킷브레이커·사이드카 사실. append-only이며 정정은 새 `source_event_id` 행으로 저장합니다.                                                                          |
 
 ### 배치 일정 (확정)
 
-| 시각 (KST) | 주기 | 하는 일 |
-|---|---|---|
-| 월요일 **07:00** | 주 1회 | **① 전체 종목 마스터 갱신** — `/stocks/all` × 마켓 7개 → 전 종목 심볼, `/stocks` 배치 200개씩 → 상세. 신규 상장·상장폐지 반영. **약 50콜, 15초.** |
-| 월요일 **08:00** | 주 1회 | **② 국내 거래대금 상위 100 선정 — 토스 1콜.** `/rankings?market=KR&duration=1w&count=100` → `is_ranked`, `rank_no`, `trading_amount` 갱신 · 신규 편입의 `prev_close`·일봉 백필 · **빈 배열이면 지난주 유니버스 유지**. |
-| 월요일 **21:00** | 주 1회 | **③ 미국 거래대금 상위 100 선정 — 토스 1콜.** 국내와 동일한 처리. 미국장 시작(22:30) **1시간 30분 전**이라 새 유니버스로 첫 시세 수집을 시작할 수 있습니다. |
-| **08:50** | 일 1회 | 국내 `prev_close` ← 전일 `daily_candle.close_price` (장 시작 10분 전). 상하한가도 이때 함께 받음. **확정 목록에는 없지만 등락률 계산에 필요** (아래 설명). |
-| 09:00 ~ 15:30 | 5초 | 국내 상위 100 현재가 수집 — **`/prices` 배치 1콜, 한도의 1.3%**. 이 시간에만 국내 종목 거래가 열립니다. |
-| 09:00 ~ 15:30 | 1분 | 국내 상위 100 분봉 수집 — 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위 순차 호출. |
-| **15:40** | 일 1회 | **국내 일봉 적재 — 마감 10분 후.** `/candles?interval=1d` 100콜, 약 5초. |
-| **22:00** * | 일 1회 | **미국 `prev_close` 갱신 — 정규장 시작 30분 전.** 서머타임이면 23:00. |
-| 22:30 ~ 05:00 * | 5초 | 미국 상위 100 현재가 수집 — 배치 1콜. **표준시(겨울)에는 23:30 ~ 06:00 으로 1시간 이동.** |
-| 22:30 ~ 05:00 * | 1분 | 미국 상위 100 분봉 수집 — 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위 순차 호출. |
-| **05:10** * | 일 1회 | **미국 일봉 적재 — 마감 10분 후.** 표준시에는 06:10. |
-| 매시 정각 | 1시간 | **환율 적재** — 하루 24콜. 주말·휴장에도 그냥 돌림(중복은 UNIQUE 로 자동 차단). |
-| 그 외 시간 | — | **시세 수집 정지.** 조회는 되지만 전일 종가 표시 + 주문 거부. |
+| 시각 (KST)                            | 주기        | 하는 일                                                                                                                                                                                                                                      |
+| ------------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 월요일 **07:00**                      | 주 1회      | **① 전체 종목 마스터 갱신** — `/stocks/all` × 마켓 7개 → 전 종목 심볼, `/stocks` 배치 200개씩 → 상세. 신규 상장·상장폐지 반영. **약 50콜, 15초.**                                                                                            |
+| 월요일 **08:00**                      | 주 1회      | **② 국내 거래대금 상위 100 선정 — 토스 1콜.** `/rankings?market=KR&duration=1w&count=100` → `is_ranked`, `rank_no`, `trading_amount` 갱신 · **빈 배열이면 지난주 유니버스 유지**.                                                            |
+| 월요일 **08:10**                      | 주 1회      | **국내 거래대금 상위 100 재무정보 갱신 — 종목당 연간 4콜 + 분기 4콜.** 산업분류는 미적재 또는 30일(30d) 경과 시에만 조회(최대 800 / 900콜). 순차 처리 및 종목별 예외 격리. 2026-09-10 KST 이전 3 TPS / 2026-09-10 KST 이후 18 TPS 운영 예정. |
+| 월요일 **21:00**                      | 주 1회      | **③ 미국 거래대금 상위 100 선정 — 토스 1콜.** 국내와 동일한 처리. 미국장 시작(22:30) **1시간 30분 전**이라 새 유니버스로 첫 시세 수집을 시작할 수 있습니다.                                                                                  |
+| 기동 5초 후 · 이후 1분                | fixed delay | KR/US 누락 종가·기준가 복구. 별도 스케줄러, 실패 종목 재시도.                                                                                                                                                                                |
+| 국내 정규장(캘린더)                   | 5초 목표    | 랭킹·활성 지정가 주문 종목만 최대 200개씩 수집.                                                                                                                                                                                              |
+| 09:00 ~ 15:30                         | 1분         | 국내 상위 100 분봉 수집 — 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위 순차 호출.                                                                                                                                                    |
+| **15:40 ~ 17:10**                     | 30분        | **국내 일봉 적재 재시도.** 캘린더상 마감 10분 후부터 실행하며 수능일 지연 마감도 반영. 당일 저장 완료 종목은 건너뜀.                                                                                                                         |
+| 미국 정규장(캘린더)                   | 5초 목표    | 랭킹·활성 지정가 주문 종목만 수집. 서머타임은 캘린더 적용.                                                                                                                                                                                   |
+| 22:30 ~ 05:00 \*                      | 1분         | 미국 상위 100 분봉 수집 — 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위 순차 호출.                                                                                                                                                    |
+| **America/New_York 16:10 ~ 17:10** \* | 30분        | **미국 일봉 적재 재시도.** KST로 서머타임 05:10~06:10, 표준시 06:10~07:10. 당일 저장 완료 종목은 건너뜀.                                                                                                                                     |
+| 매분                                  | 1분         | 환율 적재 — 하루 1,440회 예정. 공유 MARKET_INFO 제한 적용, 휴장일에도 실행.                                                                                                                                                                  |
+| 그 외 시간                            | —           | **시세 수집 정지.** 조회는 되지만 전일 종가 표시 + 주문 거부.                                                                                                                                                                                |
 
-> ⚠️ **정규장 중에는 5초마다 배치 1콜이 전부입니다. 한도의 1.3% 만 씁니다.** 200종목을 한 번에 조회하는 배치 API 덕분에 **사용자 수와 외부 API 호출량이 완전히 분리**됩니다 — 이 프로젝트에서 처음 풀어야 했던 문제가 이 한 줄로 해결됩니다.
-> **국내장과 미국장은 시간대가 겹치지 않습니다.** 09:00~15:30 과 22:30~05:00 이라 **같은 순간에 도는 수집기는 언제나 하나**. 합산 부하를 걱정할 필요가 없습니다.
+> ⚠️ 현재가 배경 제출은 기본 8 TPS이며 다른 호출을 포함한 MARKET_DATA 15 TPS 상한은 Toss 클라이언트가 적용합니다. 순회 주기는 목표이지 시세 신선도 보장이 아닙니다. 거래 시 원본 `quote_at` 검증은 유지합니다.
+> 시장별 커서는 독립적이며 두 시장이 열려 있어도 공정하게 순회합니다. 장 중첩 여부와 관계없이 공통 TPS 여유가 필요합니다.
 
 > 📌 **`prev_close` 갱신을 목록에 넣은 이유**
 > 토스 현재가 응답에는 등락률이 없습니다(`symbol·timestamp·lastPrice·currency` 네 필드뿐). 전일 종가를 직접 확보해 `(last_price − prev_close) / prev_close` 로 계산해야 합니다.
-> 복사 시점이 **"마감 직후"가 아니라 "다음 장 시작 직전"** 이어야 합니다. 마감 직후에 복사하면 `prev_close = last_price` 가 되어 장외 시간 내내 등락률이 0% 로 표시됩니다. **일봉 적재(15:40)와 prev_close 복사(다음날 08:50)를 반드시 분리하세요.**
+> 기준가는 달력의 오늘이 아니라 표시하는 시세의 거래일에 귀속된다. 금요일 마감 이후에는 금요일 종가 / 목요일 종가를 유지하고, 월요일 시세 수신 시 금요일 종가로 기준가를 변경한다.
 
 > **스케줄러에 넣지 않은 것 — 온디맨드로 처리합니다**
 > · 장외 분봉 — 상세 진입 시 `/candles?interval=1m` 호출 + 60초 캐시. 상위 100 분봉 수집은 1주차 스케줄러에 포함하고, 2주차에는 지정가 체결 판정을 추가합니다.
-> · 상위 100 밖 종목의 시세 — 상세 진입 시 `/prices`·`/candles` 를 불러 `quote_snapshot` 에 UPSERT. **8,500종목을 매일 도는 배치는 만들지 않습니다.**
+> **온디맨드 보충** — 지속 수집 밖 종목은 상세 진입 시 공통 조정자로 조회하며 5초 수집 캐시를 재사용합니다. 일봉 백필·분봉 정책은 유지합니다.
 > · 매수 유의사항(`/warnings`) — 단건 조회라 100종목이면 20초. 필요해지면 08:00 배치에 붙이세요.
 
 > 💡 **수집기가 토스와 대화하는 유일한 지점입니다.** 화면(채널계)과 원장(계정계)은 토스를 직접 호출하지 않고 우리 DB 만 봅니다. 그래서 나중에 시세 공급자를 교체해도 `QuotePort` 구현체 하나만 갈아끼우면 되고, 원장·주문 코드는 손댈 일이 없습니다.
@@ -186,18 +208,19 @@ quote_snapshot.prev_close
 ### 계정계 — 사용자의 돈
 
 #### `users` — 회원
-> **1주차에는 인증을 구현하지 않습니다.** 회원가입·로그인은 **화면 UX 만** 만들고, 서버는 **시드 사용자 1명(`user_id = 1`)으로 고정**해 동작합니다 (`AUTH_ENABLED=false` · `DEV_FIXED_USER_ID=1` in `.env`).
-> **테이블은 지금 만들어 두세요.** `account.user_id` 가 이걸 참조하기 때문에 나중에 붙이려면 FK 와 데이터를 함께 손봐야 합니다. `password_hash` 는 **1주차에 비워두거나 더미 값**을 넣고, 2주차에 로그인을 붙일 때 채웁니다. 소셜 로그인·OAuth 도 그때 검토합니다.
-| 컬럼 | 타입 | 설명 |
-|---|---|---|
-| `user_id` | BIGINT PK | 내부 식별자. IDENTITY 로 자동 채번. |
-| `email` | VARCHAR(255) UK | 로그인 아이디 겸함. **대소문자 구분 문제**가 있으니 저장 전 소문자로 정규화. |
-| `password_hash` | VARCHAR(255) | **평문 저장 금지.** BCrypt 로 해시. Spring Security 의 `BCryptPasswordEncoder` 기본값이면 충분. 1주차엔 비움/더미. |
-| `nickname` | VARCHAR(50) | 화면 노출 이름. 이메일 노출 방지. |
-| `status` | VARCHAR(20) | `ACTIVE` / `DORMANT` / `WITHDRAWN`. 탈퇴를 물리 삭제로 하면 원장 FK 가 깨지므로 **상태 전환으로만**. |
-| `created_at` `updated_at` | TIMESTAMPTZ | 감사용 공통 컬럼. 모든 테이블 권장. |
+
+> 회원은 JWT와 PostgreSQL 로그인 세션의 활성 검증으로 인증합니다. 탈퇴는 행 삭제 대신 `WITHDRAWN` 상태로 전환해 account·ledger 외래 키를 보존합니다.
+> | 컬럼 | 타입 | 설명 |
+> |---|---|---|
+> | `user_id` | BIGINT PK | 내부 식별자. IDENTITY 로 자동 채번. |
+> | `email` | VARCHAR(255) UK | 로그인 아이디 겸함. **대소문자 구분 문제**가 있으니 저장 전 소문자로 정규화. |
+> | `password_hash` | VARCHAR(255) | **평문 저장 금지.** BCrypt 로 해시. Spring Security 의 `BCryptPasswordEncoder` 기본값이면 충분. 1주차엔 비움/더미. |
+> | `nickname` | VARCHAR(50) | 화면 노출 이름. 이메일 노출 방지. |
+> | `status` | VARCHAR(20) | `ACTIVE` / `DORMANT` / `WITHDRAWN`. 탈퇴를 물리 삭제로 하면 원장 FK 가 깨지므로 **상태 전환으로만**. |
+> | `created_at` `updated_at` | TIMESTAMPTZ | 감사용 공통 컬럼. 모든 테이블 권장. |
 
 #### `account` — 모의 투자 계좌
+
 포트폴리오 초기화의 단위입니다. 초기화 시 이 행을 지우지 않고 **회차를 올린 새 행을 만듭니다.**
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
@@ -212,62 +235,132 @@ quote_snapshot.prev_close
 | `opened_at` `closed_at` | TIMESTAMPTZ | 회차의 시작·종료 시각. 회차별 운용 기간 계산. |
 
 #### `trade_order` — 주문 + 체결
-MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 주문도 남깁니다** — "왜 안 됐는지" 설명용. 지정가를 도입하면 체결 부분을 `trade_execution` 으로 분리하게 됩니다.
+
+주문 조건과 누적 체결 결과를 보존합니다. 개별 체결 근거는 `trade_execution`에 기록하며, 시장가는 한 번에 체결하고 지정가는 부분 체결을 누적합니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `order_id` | BIGINT PK | 주문 번호. 체결 내역 화면 정렬 키. |
 | `account_id` | BIGINT FK | 어느 회차 계좌인지. 초기화 후에는 새 계좌 것만 조회. |
 | `stock_id` | BIGINT FK | 거래 대상 종목. 심볼이 아니라 내부 ID(심볼은 바뀔 수 있고 시장마다 중복). |
-| `client_order_id` | UUID UK | **멱등성 키.** 프론트가 주문 화면 진입 시 생성해 함께 보냄. 유니크 제약으로 중복 체결 차단(버튼 두 번, 네트워크 재시도). 토스 API 도 같은 방식. |
+| `client_order_id` | UUID | **계좌 범위 멱등성 키.** 프론트가 주문 화면 진입 시 생성해 함께 보냄. `UNIQUE(account_id, client_order_id)`로 같은 계좌의 중복 체결을 차단하면서 서로 다른 사용자의 우연한 UUID 중복은 허용합니다. |
 | `side` | VARCHAR(4) | `BUY` / `SELL`. |
-| `order_type` | VARCHAR(10) | MVP는 `MARKET` 고정. 컬럼 미리 두어 `LIMIT` 추가 시 스키마 변경 불필요. |
+| `order_type` | VARCHAR(10) | `MARKET` / `LIMIT`. |
 | `quantity` | NUMERIC(19,6) | 주문 수량. 국내는 정수지만 미국은 소수점 주식 가능 — NUMERIC 으로 여유. |
-| `status` | VARCHAR(12) | **주문의 생애주기.** 1주차 시장가는 **`PENDING` 을 거치지 않습니다** — 접수와 체결이 한 트랜잭션 안에서 연속 실행되므로 `FILLED` 또는 `REJECTED` 로 **직행**. `PENDING` 이 실제로 저장되는 건 지정가를 붙이는 2주차부터.
-  `PENDING` 접수 완료·자금/수량 동결 · `FILLED` 체결 완료·동결 해제+출금 확정 · `REJECTED` 검증 단계 거절(동결 안 함) · `CANCELED` 사용자 취소 · `EXPIRED` 타임아웃 자동 해제.
-  상태 전이는 **조건부 UPDATE** 로 — `WHERE order_id=? AND status='PENDING'` 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것. |
-| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `SUSPENDED` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE`. 화면 문구 근거. |
+| `status` | VARCHAR(20) | MARKET은 FILLED/REJECTED로 즉시 확정. LIMIT은 PENDING → PARTIALLY_FILLED → FILLED 또는 활성 잔여분 CANCELED/EXPIRED. 계좌 잠금 아래 상태·체결 순번을 검증하며 EXPIRED는 저장된 정규 세션 종료 시각 기준. |
+| `reject_reason` | VARCHAR(40) | `MARKET_CLOSED` · `MARKET_TRADING_HALTED` · `STOCK_NOT_TRADABLE` · `STOCK_SUSPENDED` · `STOCK_LIQUIDATION` · `INSUFFICIENT_CASH` · `INSUFFICIENT_QUANTITY` · `STALE_QUOTE` · `FUTURE_QUOTE` · `INVALID_SETTLEMENT_AMOUNT`. 화면 문구 근거. |
+| `reference_price` | NUMERIC(19,4) | `REJECTED` 판정에 사용한 종목 통화 기준 가격. 체결가와 구분하기 위해 `executed_price`에는 넣지 않습니다. |
 | `executed_price` | NUMERIC(19,4) | 체결 단가. **종목 통화 기준**(미국이면 달러). 원화 환산은 `gross_amount` 에 별도 저장. |
-| `quote_at` | TIMESTAMPTZ | **체결에 사용한 시세의 기준 시각.** "왜 이 가격에 체결됐는가"의 유일한 근거. 금융 도메인 최중요 감사 항목. `quote_snapshot.quote_at` 을 그대로 복사. |
-| `exchange_rate` | NUMERIC(19,6) | **체결 시점 환율.** 원화 종목은 1. 지금 안 남기면 환차손익(주가 손익 vs 환율 손익) **영원히 분리 불가**. |
-| `gross_amount` | NUMERIC(19,4) | 체결 금액(원화 환산). `executed_price × quantity × exchange_rate`. |
+| `quote_at` | TIMESTAMPTZ | 체결 또는 거절 판정에 사용한 시세의 기준 시각. `quote_snapshot.quote_at` 을 그대로 복사. |
+| `exchange_rate` | NUMERIC(19,6) | MARKET 체결 또는 거절 판정 시점 환율 원본. 원화 종목은 1. LIMIT은 개별 체결에서 조회. |
+| `gross_amount` | NUMERIC(19,4) | MARKET 단일 정산 금액 또는 LIMIT 체결 차액 누계(원화). |
 | `fee` | NUMERIC(19,4) | 거래 수수료 — **`gross_amount × 0.0001` (0.01%, 매수·매도 공통)**. **율이 아니라 적용된 금액 저장** — 정책이 바뀌어도 과거 기록 보존. |
 | `tax` | NUMERIC(19,4) | 시장별 매도 비용. 국내: **`gross_amount × 0.002` (0.2%)**. 미국: SEC Fee **`max(USD gross × 0.0000206, $0.01)`**, 원화 환산 전 센트 반올림. 매수는 0. 요율과 최소 금액은 `.env` 로 관리하고 적용된 금액을 저장합니다. |
 | `net_amount` | NUMERIC(19,4) | 실제 예수금 증감액. **매수: gross + fee (차감) / 매도: gross − fee − tax (입금)**. 이 등식이 항상 성립하는지 검증 테스트 필수. |
 | `ordered_at` | TIMESTAMPTZ | 주문 접수 시각. `quote_at` 과의 차이가 곧 시세 지연. |
 
+지정가 주문의 추가 컬럼:
+
+| 컬럼 | 용도 |
+|---|---|
+| `limit_price` | 지정가. NUMERIC(19,4), 종목 통화 기준 |
+| `filled_quantity`, `execution_count`, `last_executed_at` | 누적 체결 수량·반영 순번·마지막 체결 시각 |
+| `reserved_cash` | 미체결 잔여분에 현재 동결된 원화 금액. NUMERIC(19,4), SELL·MARKET·종료 주문은 0 |
+| `expires_at`, `closed_at` | 접수 세션 종료 시각 / 실제 주문 종료 시각 |
+| `market_event_id` | `market_event` FK. **`MARKET_TRADING_HALTED` 거절에만** 설정하고 다른 주문은 NULL입니다. 거절을 결정한 정확한 서킷브레이커 이벤트를 고정하므로, CB가 만료된 뒤나 더 긴 CB가 늦게 수집된 뒤에도 멱등 재생이 최초 오류 데이터를 반환합니다. `ck_trade_order_market_event_rejection` CHECK가 `status=REJECTED` + 이 사유 + non-null 이벤트 조합을 요구하고, 그 외 주문에는 NULL을 강제합니다 |
+
+수수료율·세율·SEC 최소액은 `.env`의 `FEE_RATE`, `K_TAX_RATE`, `A_TAX_RATE`, `A_TAX_MIN_USD`를 프로젝트 고정값으로 사용합니다. 주문별 요율/계산 버전은 저장하지 않습니다. 재시작·재배포에도 동일한 설정을 유지하며, 활성 주문이 있는 동안 변경하지 않습니다. 체결마다 달라질 수 있는 환율과는 별개의 정책입니다.
+
+취소·만료 후에도 체결 누계는 보존하고 활성 잔여 수량과 잔여 동결액만 0으로 종료합니다. LIMIT의 단일 체결가·환율 대신 개별 체결을 조회하며, `gross_amount/fee/tax/net_amount`는 체결 차액의 합계입니다.
+
+활성 BUY(PENDING/PARTIALLY_FILLED)에 잔여 수량이 있으면 `reserved_cash > 0`을 엔티티와 DB에서 검증합니다. 필요한 동결액의 충분성은 정산 서비스에서 계산합니다. `cancel(at)` / `expire(at)`는 `OrderClosureResult(changed, releasedCash, releasedQuantity)`를 반환합니다. 최초 종료는 0으로 변경하기 전의 매수 동결액 또는 매도 미체결 수량을 반환하고, 같은 종료 요청의 반복은 false와 두 해제량 0을 반환합니다. 호출부는 계좌 잠금 아래 같은 트랜잭션에서 반환된 해제량을 account/holding에 반영해야 하며, 종료 후 주문 getter로 해제량을 읽지 않습니다. 반환 객체는 DB에 저장하지 않습니다.
+
+`reserved_cash`는 최초 동결액 이력이 아닌 현재 상태입니다. 접수·미체결분 취소·만료는 `locked_cash`만 변경하므로 결제 원장을 남기지 않습니다. 실제 체결 시에만 해당 체결분의 예수금 변동을 원장에 기록합니다.
+
+#### `trade_execution` — 개별 체결
+
+주문과 1:N 관계입니다. 수량·가격·환율·정산 차액·시각·호가 출처를 보존합니다. `(order_id, execution_key)`와 `(order_id, sequence_no)`가 각각 UNIQUE입니다. 기존 시장가에는 이 행이 없어도 이력을 조회할 수 있습니다.
+
+| 컬럼                                                       | 용도                                                                             |
+| ---------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `execution_id`, `order_id`                                 | 체결 식별·주문 FK. 계좌·종목·매매 방향은 주문에서 조회하며 중복 저장하지 않음    |
+| `execution_key`, `sequence_no`                             | 주문 내 체결 재시도 키 / 1부터 증가하는 반영 순번                                |
+| `quantity`, `price`                                        | 이번 체결 수량(NUMERIC(19,6)) / 종목 통화 단가(NUMERIC(19,4))                    |
+| `exchange_rate`                                            | 해당 체결 트랜잭션에 전달되어 실제 계산에 사용한 환율. NUMERIC(19,6), KR은 1     |
+| `sec_fee_usd`                                              | 이번 체결의 센트 단위 SEC 비용 차액. 매수/KR은 0                                 |
+| `gross_amount_krw`, `fee_krw`, `tax_krw`, `net_amount_krw` | 이번 체결의 원화 정산 차액. NUMERIC(19,4), 값은 원 단위 정수                     |
+| `quote_at`, `executed_at`                                  | 가격 기준 시각 / 체결 확정 시각                                                  |
+| `book_level_id`                                            | 소비한 공유 호가 레벨의 고유 ID(양수 BIGINT). 시세를 직접 사용하는 MARKET은 NULL |
+
+환율은 토스 응답이 소수점 6자리 이하라는 프로젝트 전제에 맞춰 NUMERIC(19,6)으로 저장합니다. 반올림 전 거래대금은 별도 컬럼 없이 저장된 체결 값으로 복원합니다. `grossAmountUsd(marketCountry)`는 US에서 `price × quantity`, KR에서 0이며, `unroundedGrossAmountKrw()`는 `price × quantity × exchange_rate`입니다(KR 환율은 1). 계산에 사용한 단가·수량·환율과 원본 거래대금의 일치를 체결 생성 시 검증하며, 복원 과정에서는 반올림하지 않습니다. 환율 확보 시각·유효 구간은 `ExecutionRateEvidence` 입력으로 검증하되 DB에 저장하지 않습니다. 외부 조회는 DB 트랜잭션 전에 수행하며, 같은 체결 트랜잭션 안에서는 전달된 환율을 공유하고 다음 트랜잭션은 새로 준비한 환율을 사용합니다. 접수 환율을 이후 체결에 고정하지 않으며, 확정 이력은 최신 환율로 다시 계산하지 않습니다.
+
+LIMIT의 누적 정산 정책은 유지합니다. US의 반올림 전 누적 세금은 `SUM(sec_fee_usd × exchange_rate)`로 복원하고, 이를 원 단위 `HALF_UP`으로 반올림한 값에서 기존 `SUM(tax_krw)`를 빼서 이번 체결 세금을 구합니다. 이전 체결의 SEC 비용에 새 환율을 다시 곱하거나 체결마다 SEC 최소액을 독립 부과하지 않습니다. KR 누적 세금은 누적 원화 거래대금과 프로젝트 고정 세율로 계산합니다. 별도 원본 세금/누적 USD 캐시 컬럼은 저장하지 않습니다.
+
+한 체결은 한 호가 레벨만 소비합니다. 같은 `book_level_id`를 여러 체결이 소비할 수 있으므로 UNIQUE가 아니며, 공유 잔량 차감은 체결과 같은 트랜잭션에서 보호합니다. 체결의 `price`는 영구 보존하는 실제 체결 단가 스냅샷입니다. `book_level_id`는 소비 당시 레벨의 고유 ID를 기록하는 FK 없는 추적 값이며, 종료 버전 retention 이후에는 원본 레벨을 조회할 수 없습니다.
+
+지정가 체결 생성 시 `TradeExecution.limit(order, marketCountry, ...)`에 주문 종목의 시장을 전달합니다. KR은 환율 1·USD 거래대금 0·SEC 비용 0, US는 체결단가가 센트 단위로 표현 가능하고 USD 거래대금이 `price × quantity`인지 검증합니다. 후행 0은 허용하며 엔티티에서 단가를 반올림하지 않습니다. 시장은 검증 입력으로만 사용하며 체결 테이블에 중복 저장하지 않습니다.
+
+#### `market_event` — KRX 시장조치 이력
+
+KRX KIND에서 확인한 KOSPI/KOSDAQ 서킷브레이커와 사이드카 공시를 저장합니다. append-only 테이블이므로 정정 공시는 새 공시 ID로 저장하고 UPDATE/DELETE하지 않습니다. 서킷브레이커는 일반 사용자 거래를 차단하는 근거이고, 사이드카는 이력·조회만 제공하며 일반 주문을 차단하지 않습니다. `halt_until`이 자동 만료의 기준이므로 RSS 장애가 중단을 무기한 연장하지 않습니다.
+
+| 컬럼                           | 타입               | 설명                                                                                             |
+| ------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------ |
+| `market_event_id`              | BIGINT IDENTITY PK | 내부 시장조치 식별자.                                                                            |
+| `source`                       | VARCHAR(20)        | 원천 enum. 현재 `KRX_KIND`.                                                                      |
+| `source_event_id`              | VARCHAR(20)        | KIND 공식 `acptNo`; `source`와 함께 유일합니다.                                                  |
+| `market`                       | VARCHAR(10)        | `KOSPI` 또는 `KOSDAQ`.                                                                           |
+| `event_type`                   | VARCHAR(30)        | `CIRCUIT_BREAKER` 또는 `SIDECAR`.                                                                |
+| `circuit_breaker_stage`        | SMALLINT           | CB 단계 1~3; 사이드카는 NULL.                                                                    |
+| `sidecar_direction`            | VARCHAR(4)         | 사이드카 방향 `BUY`/`SELL`; CB는 NULL.                                                           |
+| `triggered_at` / `halt_until`  | TIMESTAMPTZ        | 상세 공시의 실제 발동 시각 / 자동 비활성화 경계. 활성 구간은 `[triggered_at, halt_until)`입니다. |
+| `published_at` / `received_at` | TIMESTAMPTZ        | RSS 게시 시각 / 최초 정상 파싱 수신 시각. 발동 시각을 대체하지 않습니다.                         |
+| `title`                        | VARCHAR(300)       | RSS 원문 제목.                                                                                   |
+| `source_url`                   | VARCHAR(1000)      | HTTPS KIND 상세 공시 URL.                                                                        |
+| `created_at`                   | TIMESTAMPTZ        | DB 생성 시각. `updated_at`은 없습니다.                                                           |
+
+시장·종류·CB/사이드카 payload 조합·시간 순서를 CHECK로 강제하고 `(source, source_event_id)`를 UNIQUE로 지정합니다. 활성 CB 조회와 KST 날짜별 이력을 위한 인덱스를 둡니다. 종목 스냅샷이 아닌 원천 공시 사실 이력이므로 FK는 두지 않습니다.
+
 #### `ledger_entry` — 거래 원장
+
+`(execution_id, order_id)` → 체결, `(order_id, account_id)` → 주문의 두 복합 FK로 원장·체결·계좌 연결을 보장합니다.
+
 **예수금이 움직인 모든 사건을 기록합니다. UPDATE 와 DELETE 를 하지 않는 것이 이 테이블의 존재 이유입니다.** 잘못 기록했으면 수정하지 말고 반대 부호 항목을 넣어 상쇄합니다.
-**항목은 세 가지뿐입니다 — `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료와 세금을 **별도 줄로 쪼개지 않고 매수·매도 금액에 포함**합니다. 원장 한 줄이 곧 `trade_order.net_amount` 하나에 대응하므로 목록이 절반으로 짧아지고 커서 처리도 단순해집니다. 대신 "지금까지 수수료로 얼마 썼나"는 원장만으로 뽑을 수 없습니다 — 그건 `SUM(trade_order.fee)` 로 언제든 구할 수 있으니 정보가 사라지지 않습니다.
+**항목은 `INITIAL_DEPOSIT` · `BUY` · `SELL`.** 수수료·세금은 체결 원장 금액에 포함합니다. 정상 체결 원장 한 줄은 `trade_execution.net_amount_krw`에 대응합니다. 주문당 여러 원장/상쇄 정정이 가능하며 시장가 멱등 응답은 주문 방향과 일치하고 `execution_id`가 있는 최초 정상 원장의 잔액을 조회합니다. 해당 원장이 없으면 `INTERNAL_ERROR`입니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `entry_id` | BIGINT PK | 원장 번호. 시간순으로 증가. |
+| `execution_id` | BIGINT FK, NULL | 정상 체결 연결. non-null 부분 UNIQUE. 초기 지급/독립 상쇄 정정은 NULL. `order_id`는 UNIQUE 아님. |
 | `account_id` | BIGINT FK | 어느 계좌의 원장인지. |
-| `order_id` | BIGINT FK, NULL | 원인이 된 주문. **최초 지급·초기화는 NULL.** |
+| `order_id` | BIGINT FK, NULL | 원인이 된 주문. **최초 지급·초기화는 NULL.** `(order_id, entry_id)` 인덱스로 주문별 원장을 시간순 조회. |
 | `entry_type` | VARCHAR(20) | **세 가지뿐.**
-  `INITIAL_DEPOSIT` — 모의투자금 5천만원 지급 (+)
-  `BUY` — gross + fee 차감 (−)
-  `SELL` — gross − fee − tax 입금 (+)
-  **`RESET` 항목은 두지 않습니다.** 초기화는 새 계좌를 만드는 일이고, 새 계좌의 `INITIAL_DEPOSIT` 한 줄이 그 역할을 대신합니다. 이전 회차의 마감 시각은 `account.closed_at` 에 남습니다. |
-| `amount` | NUMERIC(19,4) | **부호 있는 예수금 증감액, 수수료·세금 포함** — 언제나 `trade_order.net_amount` 와 절대값이 같음. 매수는 음수, 매도는 양수. **이 컬럼의 누적 합이 `account.cash_balance` 와 일치해야 함** — 항목이 세 가지뿐이라 이 검증식이 아주 단순해집니다. |
+`INITIAL_DEPOSIT` — 모의투자금 5천만원 지급 (+)
+`BUY` — gross + fee 차감 (−)
+`SELL` — gross − fee − tax 입금 (+)
+**`RESET` 항목은 두지 않습니다.** 초기화는 새 계좌를 만드는 일이고, 새 계좌의 `INITIAL_DEPOSIT` 한 줄이 그 역할을 대신합니다. 이전 회차의 마감 시각은 `account.closed_at` 에 남습니다. |
+| `amount` | NUMERIC(19,4) | 정상 체결은 `trade_execution.net_amount_krw`의 부호 있는 금액(매수 − / 매도 +). 계좌별 원장 합계는 cash_balance와 일치. |
 | `balance_after` | NUMERIC(19,4) | 이 항목 반영 직후의 잔액. 엄밀히는 파생값이지만, **정합성이 깨진 지점을 즉시 찾아내는 용도**로 매우 유용. |
-| `exchange_rate` | NUMERIC(19,6) | **체결 시점 환율.** 원화 종목은 1, 미국 종목은 그때의 USD/KRW. `amount` 는 이미 원화 환산값이라 계산에는 안 쓰임 — **"이 거래를 얼마짜리 환율로 했는가"를 원장만 보고 알 수 있게 하는 감사 항목.** `trade_order.exchange_rate` 와 같은 값이지만, 원장은 append-only 라 주문 테이블이 나중에 어떻게 바뀌든 이 기록은 그대로 남습니다. **1주차 화면에는 안 써도 됨 — 다만 지금 안 남기면 과거 값은 복원 불가.** |
+| `exchange_rate` | NUMERIC(19,6) | 개별 체결의 환율 원본. KR은 1. 원장 감사 근거를 최신 환율로 재계산하지 않음. |
 | `memo` | VARCHAR(200) | 사람이 읽을 설명. 수수료를 별도 줄로 쪼개지 않으므로 **"삼성전자 10주 @ 241,500 (수수료 포함)"** 처럼 내역을 여기에 담습니다. 디버깅·CS 대응이 쉬워짐. |
 | `occurred_at` | TIMESTAMPTZ | 발생 시각. `(account_id, occurred_at)` 인덱스로 기간별 조회 처리. |
 
 #### `holding` — 보유 종목
+
 원장에서 파생되는 집계. 이론적으로는 원장을 재생하면 복원할 수 있지만, **조회 성능을 위해 별도 유지**. 계좌+종목당 한 행.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `holding_id` | BIGINT PK | 대리키. `(account_id, stock_id)` 유니크. |
 | `account_id` | BIGINT FK | 회차 계좌. 초기화하면 새 계좌라 보유 종목 자동 비움. |
 | `stock_id` | BIGINT FK | 보유 종목. |
-| `quantity` | NUMERIC(19,6) | 보유 수량. 0 이 되면 **남기는 쪽 권장**(재매수 시 평균단가 이력이 이어짐). |
+| `quantity` | NUMERIC(19,6) | 보유 수량. 수량 0인 행은 유지하지만 두 매수금액은 0으로 초기화하므로, 재매수하면 과거 원가를 승계하지 않고 새 평균을 계산합니다. |
 | `locked_quantity` | NUMERIC(19,6) | **미체결 매도 주문에 묶인 수량.** 예수금 동결과 정확히 같은 원리 — 10주를 갖고 **5주 매도 주문을 세 번 걸면 15주를 팔게** 되니까요. **매도 가능 수량 = `quantity − locked_quantity`**. `CHECK (locked_quantity <= quantity)` 로 과다 동결 방지. |
-| `avg_buy_price` | NUMERIC(19,4) | **이동평균 매입단가**(종목 통화). 매수 시 `(기존수량×기존단가 + 신규수량×체결가) ÷ 총수량`. 매도 시 **바꾸지 않음** — 평가손익의 기준. |
-| `avg_exchange_rate` | NUMERIC(19,6) | **매수 시점 평균 환율.** 원화 종목은 1. 이 값이 있어야 **"수익 중 얼마가 주가 상승이고 얼마가 환율 상승인지"** 나중에 분리 가능. 지금 안 넣으면 복구 불가. |
+| `avg_buy_price` | NUMERIC(19,4) | **수수료 제외 이동평균 체결단가.** 국내는 `krw_purchase_amount ÷ quantity`, 미국은 `usd_purchase_amount ÷ quantity`로 계산합니다. 반올림된 평균값은 응답값일 뿐 다음 매수 계산의 입력으로 재사용하지 않습니다. 부분 매도 시 유지하고, 전량 매도 후 재매수하면 새 매수금액만으로 다시 계산합니다. |
+| `avg_exchange_rate` | NUMERIC(19,6) | **원본 USD/KRW 환율의 매수금액 가중평균.** 미국은 `krw_purchase_amount ÷ usd_purchase_amount`, 국내는 항상 1입니다. 원 단위 반올림 금액에서 환율을 역산하지 않으므로 단일 매수에서는 받은 환율이 그대로 보존됩니다. 매수 수수료는 제외합니다. |
+| `usd_purchase_amount` | NUMERIC(29,10) | 현재 잔여 수량에 귀속되는 **수수료 제외 USD 매수금액**. 국내 종목은 0입니다. 미국 매수마다 `체결단가 × 수량`을 더하고, 부분 매도 시 비례 차감하며, 전량 매도 시 0으로 초기화합니다. |
+| `krw_purchase_amount` | NUMERIC(38,16) | 현재 잔여 수량에 귀속되는 **원 단위 반올림 전·수수료 제외 원화 매수금액**. 국내 평단가, 미국 평균환율 계산 및 보유 원가 평가에 사용합니다. 부분 매도 시 비례 차감하며, 전량 매도 시 0으로 초기화합니다. |
 | `updated_at` | TIMESTAMPTZ | 마지막 변동 시각. |
 
 #### `daily_account_snapshot` — 일별 자산 스냅샷
+
 **1주차에는 화면에 쓰지 않지만 배치는 지금 넣으세요.** 매일 장 마감 후 한 줄씩 쌓는 단순한 작업인데, 이게 없으면 2주차에 자산 추이 그래프를 그릴 과거 데이터가 아예 없습니다. 거래 내역으로 역산하려면 과거 시점의 모든 시세가 필요해 현실적이지 않습니다.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
@@ -280,6 +373,7 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 ### 시세 · 마스터
 
 #### `stock` — 종목 마스터
+
 내부 `stock_id` 를 정규 식별자로 삼고, 외부 심볼은 매핑 테이블로 분리. 매주 월요일 07:00 배치 갱신.
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
@@ -301,99 +395,219 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 | `is_suspended` | BOOLEAN | 거래정지. **주문 검증 즉시 거절 사유.** |
 | `is_liquidation` | BOOLEAN | 정리매매 중. 상장폐지 직전 단계라 위험 안내 필요. |
 | `is_warned` | BOOLEAN | 투자경고·투자위험 지정. 주문은 막지 않고 **경고 배너**. |
-| `is_ranked` | BOOLEAN | 거래대금 상위 100 포함 여부. **시세 수집 대상 판정.** |
+| `is_ranked` | BOOLEAN | 거래대금 상위 100 여부. 활성 지정가 주문 존재 여부와 OR 조건으로 현재가 지속 수집 대상을 결정합니다. |
 | `rank_no` | INT | 랭킹 순위(1~100). **화면 표시 전용.** ⚠️ **커서로 쓰면 안 됩니다** — 배치가 통째로 다시 쓰는 값이라 갱신 직후 같은 번호가 다른 종목을 가리킵니다. 상위 100 밖이면 NULL. |
 | `trading_amount` | NUMERIC(24,0) | **최근 1주 누적 거래대금(`duration=1w`).** 랭킹 **정렬 기준이자 커서의 1차 키**. 선정 기준을 그대로 화면에 보여주므로 사용자가 "왜 이 순서인지" 이해. **커서는 `(trading_amount, stock_id)` 튜플** — 거래대금이 같은 종목이 있으면 `stock_id` 가 순서를 유일하게 결정. 인덱스도 `(market_country, trading_amount DESC, stock_id DESC)` 로 **같은 순서·같은 방향**이어야 추가 정렬 없이 훑습니다. |
 
 #### `quote_snapshot` — 현재가 스냅샷
-**전 종목을 1행씩 — 약 8,500행 고정.** 이력을 쌓지 않고 계속 UPDATE 하므로 시계열 테이블이 아닙니다.
 
-| 대상 | 갱신 | `quote_at` |
-|---|---|---|
-| **상위 200종목**(국내 100 + 미국 100) | 해당 시장 정규장 중 **5초마다** | 방금 전 → **"12:36:59 기준 · 실시간"** |
-| 나머지 약 8,300종목 | **온디맨드** — 상세 진입 시 `/prices`+`/candles` 호출 후 UPSERT | 조회 시점 → `quote_at` 에 따라 실시간/전일 종가 라벨 |
+**종목당 최대 1행의 스냅샷입니다.** 이력을 쌓지 않고 갱신하므로 시계열 테이블이 아닙니다.
 
-> **이렇게 하면 화면 로직이 하나로 통일됩니다.** 상세 페이지는 종목이 상위 100 이든 아니든 항상 이 테이블만 조회하고, `quote_at` 을 보고 문구만 바꿉니다. **"이 종목이 상위 100 인가?"를 화면이 알 필요가 없어집니다.** 거래 가능 판정은 별도 — `stock.is_ranked` AND 해당 시장 정규장 중 AND 거래정지 아님.
+| 대상                                | 갱신                                       | `quote_at`                                                     |
+| ----------------------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| 랭킹 종목 + 활성 지정가 주문 종목   | 해당 시장 정규장 중 **5초 우선 수집 목표** | 토스 원본 시각. 수집 시각만으로 신선한 시세를 보장하지 않음.   |
+| 활성 지정가 주문이 없는 비랭킹 종목 | 상세 조회 시 온디맨드, 5초 수집 캐시       | 원본 quote_at 유지. 재조회 성공만으로 신선한 시세가 되지 않음. |
+
+> **이렇게 하면 화면 로직이 하나로 통일됩니다.** 상세 페이지는 종목이 상위 100 이든 아니든 항상 이 테이블만 조회하고, `quote_at` 을 보고 문구만 바꿉니다. **"이 종목이 상위 100 인가?"를 화면이 알 필요가 없어집니다.** 거래 가능 판정은 별도 — ACTIVE 상장 상태 AND 해당 시장 정규장 중 AND 거래정지·정리매매 아님 및 원본 시세 신선도.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | `stock_id` | BIGINT PK/FK | 종목당 한 행이라 PK=fk (1:1). |
 | `last_price` | NUMERIC(19,4) | 현재가(종목 통화). 토스가 **문자열로 주므로 반드시 BigDecimal 파싱**. double 로 받으면 잔고 어긋남. |
-| `prev_close` | NUMERIC(19,4) | **전일 종가.** 토스 현재가 응답에 등락률이 없어 `(last_price − prev_close)/prev_close` 로 직접 계산. **전일 `daily_candle.close_price` 복사**(국내 08:50 / 미국 22:00, 다음 장 시작 직전). 일봉 수집 실패면 `last_price` 복사 폴백(마감 시점 값이 곧 종가), 신규 편입 종목은 랭킹 `price.basePrice` 로 초기화. **갱신 시점이 "마감 직후"가 아니라 "다음 장 시작 직전"인 이유** — 마감 직후 갱신하면 `prev_close = last_price` 가 되어 장외 시간 내내 등락률이 0% 로 표시. |
-| `upper_limit` `lower_limit` | NUMERIC(19,4) | 상한가/하한가. **전일 종가 기준으로 하루 동안 안 바뀌므로 장 시작 전 1회만 조회.** 주문 가격 검증. |
+| `prev_close` | NUMERIC(19,4) | `quote_at`에서 파생한 거래소 현지 시세 거래일의 정확한 직전 거래일 `prev_close_date`에 해당하는 확정 일봉 종가. 검증 실패 시 등락률은 null. `last_price` 또는 날짜 미확인 랭킹 기준가로 대체하지 않는다. |
+| `prev_close_date` | DATE | 기준가의 거래일. 시세 거래일은 quote_at과 MarketCountry.zoneId()로 계산한다. 기존 행의 날짜는 NULL로 두고 재조회한다. |
+| `upper_limit` `lower_limit` | NUMERIC(19,4) | 검증된 날짜와 일치할 때만 표시하는 외부 상하한가. 국내 주문 및 V2 호가에 검증된 당일 범위를 적용 (#178) |
+| `price_limit_date` | DATE | 한국 데이터 시각을 Asia/Seoul로 변환하고 요청 거래일과 검증한 날짜. 기존 미검증 값과 미국은 NULL. V14 추가. |
 | `currency` | VARCHAR(3) | 가격의 통화. `stock` 과 중복이지만 조인 없이 시세만 조회할 때 편함. |
 | `quote_at` | TIMESTAMPTZ | **토스가 알려준 시세 기준 시각.** 두 곳에 사용 — 화면의 "12:36:59 기준" 표시, 주문 시 유효시간 검증(15초 넘게 오래됐으면 `STALE_QUOTE` 로 거절). |
 | `collected_at` | TIMESTAMPTZ | 우리가 수집한 시각. `quote_at` 과의 차이로 수집 파이프라인 지연 모니터링. |
 
 #### `daily_candle` — 일봉
-용도가 둘 — **일봉 차트**와 **`prev_close` 원천**. 장 마감 직후 수집해 그날 봉을 확정하고, 그 `close_price` 가 다음 장 시작 전 `quote_snapshot.prev_close` 로 복사되어 등락률의 기준이 됩니다. 일봉과 분봉은 **TimescaleDB** 에 저장해 두 차트 시계열을 같은 보존·시간 범위 조회 모델로 관리합니다. 200종목 × 250거래일 = **연 5만 행, 약 3MB**라 일봉 하이퍼테이블은 분봉이 커져도 작게 유지됩니다.
 
-| 컬럼 | 타입 | 설명 |
-|---|---|---|
-| `stock_id` + `trade_date` | 복합 PK | 종목 × 거래일로 하루 한 행. 응답의 `timestamp` 는 시각이므로 **KST 기준 날짜로 변환** — UTC 로 자르면 미국 종목이 하루씩 밀립니다. |
-| `open_price` | NUMERIC(19,4) | 시가. |
-| `high_price` `low_price` | NUMERIC(19,4) | 고가/저가. 캔들 차트의 꼬리. |
-| `close_price` | NUMERIC(19,4) | 종가. 다음 거래일의 `prev_close` 로 복사되어 등락률 계산의 분모. |
-| `volume` | NUMERIC(20,0) | 거래량. 차트 하단 막대. |
+기존 과거 일봉은 그대로 보존하고 차트·주봉에 포함한다. 새 수집은 확정일 필터를 적용한다. 기준가 검증에는 기존 DB 행의 존재를 증거로 사용하지 않고 토스에서 다시 조회한다.
 
-> ⚠️ **수정주가 적용 여부 지금 정하세요.** 액면분할·무상증자가 일어나면 과거 주가가 소급 조정됩니다. 토스 캔들 API 의 `adjusted` 파라미터를 합의하고 **고정**. **장기 차트는 페이지네이션 필요** — `count` 최대 200봉, 일봉 200개 ≈ 10개월. 3년 차트는 `before` 로 네 번 호출(저장해두면 그 부담이 사라짐). **주봉·월봉은 API 가 안 줌** — `interval` 이 `1m`·`1d` 둘뿐이라 이 테이블을 집계해서 만들어야 함.
+| 컬럼                      | 타입          | 설명                                                                                  |
+| ------------------------- | ------------- | ------------------------------------------------------------------------------------- |
+| `stock_id` + `trade_date` | composite PK  | 종목 × 거래소 현지 거래일. 봉 시작 `timestamp`를 `MarketCountry.zoneId()`로 변환한다. |
+| `open_price`              | NUMERIC(19,4) | 시가.                                                                                 |
+| `high_price` `low_price`  | NUMERIC(19,4) | 고가/저가. 캔들 차트의 꼬리.                                                          |
+| `close_price`             | NUMERIC(19,4) | 종가. 다음 거래일의 `prev_close` 로 복사되어 등락률 계산의 분모.                      |
+| `volume`                  | NUMERIC(20,0) | 거래량. 차트 하단 막대.                                                               |
+
+> ⚠️ **수정주가 적용 여부 지금 정하세요.** 액면분할·무상증자가 일어나면 과거 주가가 소급 조정됩니다. 토스 캔들 API 의 `adjusted` 파라미터를 합의하고 **고정**. 현재 온디맨드 백필은 상세·차트 최초 진입 시 외부 API를 한 번만 호출해 최신 200봉을 저장하고, 이후 기간 전환은 DB를 재사용합니다. 이후 조회에서는 시장 캘린더로 구한 최신 확정 거래일(장 마감 10분 후)보다 저장 일봉이 오래된 경우에만 200봉을 다시 UPSERT하며, 같은 실행·같은 확정 거래일의 성공한 요청은 반복하지 않습니다. 저장 이력이 없는 종목의 1Y 응답은 최대 200봉이며 스케줄러 등 별도 적재 이력이 있으면 최대 250봉을 반환합니다. **주봉·월봉은 API 가 안 줌** — `interval` 이 `1m`·`1d` 둘뿐이라 이 테이블을 집계해서 만들어야 함.
 
 #### `minute_candle` — 분봉 시계열
-**상위 100종목은 1분 주기로 채웁니다.** 별도 `MARKET_DATA_CHART` 5 TPS 그룹에서 20종목 단위로 순차 호출해 이 테이블에 저장합니다. 상위 100 밖 종목과 장외 상세는 `/candles?interval=1m` 을 온디맨드로 호출하고 **60초 동안은 DB 에서 바로 내려줍니다 — 테이블이 저장소이자 캐시 역할을 겸합니다.**
+
+**상위 100종목은 1분 주기로 채웁니다.** 별도 `MARKET_DATA_CHART` 20 TPS 그룹에서 20종목 단위로 순차 호출해 이 테이블에 저장합니다. 상위 100 밖 종목과 장외 상세는 `/candles?interval=1m` 을 온디맨드로 호출하고 **60초 동안은 DB 에서 바로 내려줍니다 — 테이블이 저장소이자 캐시 역할을 겸합니다.**
 **장외 시간에도 차트는 그려집니다.** 장이 닫힌 종목에 `/candles` 를 부르면 마지막 장의 분봉이 그대로 옵니다. 한국 낮에 엔비디아를 열어도 마찬가지 — 전일 종가와 함께 지난 미국장의 분봉 차트가 보입니다. 화면은 `quote_at` + 장 운영 캘린더로 "실시간/종가" 문구만 바꾸면 되고, 차트 자체는 분기 필요 없음.
 **한 번에 받을 수 있는 봉은 200개.** 국내 정규장 09:00~15:30 = 330분이라 하루치를 다 받으려면 `before` 로 2회 호출. **1주차 차트가 "최근 200분"이면 1콜로 끝나니, 기본은 1콜로 두고 전체 보기를 누를 때만 2콜** 쓰는 편이 단순.
 **실측 필요** — `before` 가 inclusive 인지, 마감 동시호가(15:30) 봉이 존재하는지. 15:30 봉이 없으면 330개가 아니라 329개라 개수로 검증하는 로직이 깨짐. 경계 봉이 중복돼도 `(stock_id, candle_at)` PK 의 `ON CONFLICT DO NOTHING` 이 걸러줌.
-**2주차에는 지정가 체결 판정과 집계를 추가합니다.** 체결 엔진은 사용자가 차트를 안 봐도 과거 봉을 조회해야 하므로 "그 1분 안에 지정가에 닿았는가"를 `low <= 지정가` 로 판정합니다. **테이블 구조는 그대로 두고 사용하는 방식만 확장합니다.**
+**5m·10m 봉은 연속 집계 뷰가 만듭니다.** `candle_5m` · `candle_10m` 은 이 테이블에서 직접 파생하며(계층형이 아니라 갱신 지연이 한 단계로 끝납니다), 1분마다 갱신합니다. 자바에서 묶지 않습니다.
+**2주차에는 지정가 체결 판정을 추가합니다.** 체결 엔진은 사용자가 차트를 안 봐도 과거 봉을 조회해야 하므로 "그 1분 안에 지정가에 닿았는가"를 `low <= 지정가` 로 판정합니다. **테이블 구조는 그대로 두고 사용하는 방식만 확장합니다.**
 
-| 컬럼 | 타입 | 설명 |
-|---|---|---|
-| `stock_id` + `candle_at` | 복합 PK | `candle_at` 은 **봉 시작 시각**(응답 `timestamp`). TimescaleDB 하이퍼테이블은 PK 에 파티션 키를 반드시 포함해야 하는데 이 구조가 이미 만족. |
-| `open_price` | NUMERIC(19,4) | 그 1분의 시가. |
-| `high_price` `low_price` | NUMERIC(19,4) | 고가/저가. 차트 꼬리 + 나중에 **지정가 체결 판정** — "그 1분 안에 지정가에 닿았는가"를 `low <= 지정가`(매수) 로 판정. |
-| `close_price` | NUMERIC(19,4) | 종가. |
-| `volume` | NUMERIC(20,0) | 거래량. |
+| 컬럼                     | 타입          | 설명                                                                                                                                        |
+| ------------------------ | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stock_id` + `candle_at` | 복합 PK       | `candle_at` 은 **봉 시작 시각**(응답 `timestamp`). TimescaleDB 하이퍼테이블은 PK 에 파티션 키를 반드시 포함해야 하는데 이 구조가 이미 만족. |
+| `open_price`             | NUMERIC(19,4) | 그 1분의 시가.                                                                                                                              |
+| `high_price` `low_price` | NUMERIC(19,4) | 고가/저가. 차트 꼬리 + 나중에 **지정가 체결 판정** — "그 1분 안에 지정가에 닿았는가"를 `low <= 지정가`(매수) 로 판정.                       |
+| `close_price`            | NUMERIC(19,4) | 종가.                                                                                                                                       |
+| `volume`                 | NUMERIC(20,0) | 거래량.                                                                                                                                     |
 
 > ⚠️ **일봉과 분봉 모두 TimescaleDB 를 사용합니다.** `continuous aggregate` 로 1분봉→5분봉·15분봉을 테이블 없이 뷰로 파생합니다. 일봉은 API `adjusted=true` 원본을 사용하고 분봉에서 파생하지 마세요 — 액면분할 시 과거 일봉 조정을 반영할 수 없습니다. **하이퍼테이블은 다른 테이블 FK 참조 불가**하고, 압축·연속집계는 **TSL 라이선스**, 관리형 DB(RDS)는 대체로 미지원 → 배포 방식 영향.
 
 #### `exchange_rate` — 환율 이력 (일반 테이블)
-**TimescaleDB 하이퍼테이블이 아닌 일반 append-only 테이블입니다.** 시세는 `quote_snapshot` 에 UPDATE 하므로 이력이 없지만, 환율은 그래프를 그려야 해서 시점별로 쌓습니다. 다른 테이블과 FK 연결 없음 — **원장에 필요한 환율은 "그때 그 값"이지 참조가 아니어야** 하기 때문. 나중에 환율 데이터를 정정해도 과거 체결 기록은 흔들리면 안 됩니다.
 
-| 컬럼 | 타입 | 설명 |
-|---|---|---|
-| `exchange_rate_id` | BIGINT PK | 대리키. 실제 식별은 `(base_currency, quote_currency, rate_at)` 유니크. |
-| `base_currency` `quote_currency` | VARCHAR(3) | 통화쌍. MVP 에서는 USD → KRW 하나뿐이지만, 컬럼으로 두면 나중에 통화가 늘어도 스키마 안 고쳐도 됨. |
-| `rate` | NUMERIC(19,6) | **매수 환율** — 실제로 달러를 살 때 적용되는 값. `mid_rate` 와의 차이가 **환전 스프레드**이고, 이것도 거래 비용의 일종이라 수수료·세금과 같은 맥락의 교육 소재. |
-| `mid_rate` | NUMERIC(19,6) | **매매기준율(은행간 mid rate)** — 일반적으로 "환율"이라고 하면 이 값. 그래프 표시와 평가금액 환산에 사용. |
-| `rate_at` | TIMESTAMPTZ | **환율 시점 — 응답의 `validFrom` 을 그대로.** 토스는 1분 단위로 갱신하며 `validFrom~validUntil` 유효 윈도 제공. 10:03:27 에 조회했어도 그 환율의 시점은 10:03:00 이므로, 그래프 X축은 이 값이어야 정확. |
-| `collected_at` | TIMESTAMPTZ | 우리가 받은 시각. `rate_at` 과의 차이로 수집 지연 확인. |
+**TimescaleDB 하이퍼테이블이 아닌 일반 환율 이력 테이블입니다. 동일 시작 시각의 새 수신 응답은 해당 행을 갱신합니다.** 시세는 `quote_snapshot` 에 UPDATE 하므로 이력이 없지만, 환율은 그래프를 그려야 해서 시점별로 쌓습니다. 다른 테이블과 FK 연결 없음 — **원장에 필요한 환율은 "그때 그 값"이지 참조가 아니어야** 하기 때문. 나중에 환율 데이터를 정정해도 과거 체결 기록은 흔들리면 안 됩니다.
 
-> **수집 주기: 매시 정각 (확정).** 환율은 하루 0.3~0.5% 정도만 움직여 분 단위로 쌓으면 노이즈만 늘고 그래프는 같아 보입니다. 시간별로 쌓아두면 일간·주간·월간 그래프를 전부 여기서 집계. 반대로 일별로만 집계해두면 "시간별로 보고 싶다"가 나왔을 때 데이터가 없습니다. **주말·휴장에도 그냥 돌리세요** — 외환시장이 쉬는 동안 토스가 같은 `validFrom` 을 계속 반환하므로 `UNIQUE (base_currency, quote_currency, rate_at)` 에 걸려 자동으로 걸러집니다. `ON CONFLICT DO NOTHING` 이면 스케줄러에 주말 조건 불필요. 실제 적재량은 평일 위주 **연 6,000행**. **한 시간 건너뛰어도 괜찮음** — 그래프에 점 하나 빠질 뿐, 실패 시 재시도 말고 다음 정각에. 연속 실패만 알림으로.
+| 컬럼                             | 타입          | 설명                                                                                                                                                                                                    |
+| -------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `exchange_rate_id`               | BIGINT PK     | 대리키. 실제 식별은 `(base_currency, quote_currency, valid_from)` 유니크.                                                                                                                               |
+| `base_currency` `quote_currency` | VARCHAR(3)    | 통화쌍. MVP 에서는 USD → KRW 하나뿐이지만, 컬럼으로 두면 나중에 통화가 늘어도 스키마 안 고쳐도 됨.                                                                                                      |
+| `rate`                           | NUMERIC(19,6) | **매수 환율** — 실제로 달러를 살 때 적용되는 값. `mid_rate` 와의 차이가 **환전 스프레드**이고, 이것도 거래 비용의 일종이라 수수료·세금과 같은 맥락의 교육 소재.                                         |
+| `mid_rate`                       | NUMERIC(19,6) | **매매기준율(은행간 mid rate)** — 일반적으로 "환율"이라고 하면 이 값. 그래프 표시와 평가금액 환산에 사용.                                                                                               |
+| `valid_from`                     | TIMESTAMPTZ   | **환율 시점 — 응답의 `validFrom` 을 그대로.** 토스는 1분 단위로 갱신하며 `validFrom~validUntil` 유효 윈도 제공. 10:03:27 에 조회했어도 그 환율의 시점은 10:03:00 이므로, 그래프 X축은 이 값이어야 정확. |
+| `collected_at`                   | TIMESTAMPTZ   | 우리가 받은 시각. `valid_from` 과의 차이로 수집 지연 확인.                                                                                                                                              |
+| `valid_until`                    | TIMESTAMPTZ   | NOT NULL, 유효 종료 시각(미포함). 신규 수집은 원본 값, V9 이전 개발 이력은 valid_from + 1초 보정값입니다.                                                                                               |
+
+> **수집 주기: 매분.** 화면과 체결이 같은 DB 환율을 사용합니다. `valid_from`은 API `validFrom` 및 차트 X축에 대응하며 `valid_until`은 체결 시 검증합니다. 유효기간은 `[valid_from, valid_until)`이며 미래 수신 시각도 거절합니다. 별도 60초 TTL은 없습니다. 시장가 준비 단계만 DB 환율 누락/만료 시 금융 락 전에 한 번 갱신하며 견적·지정가 워커는 DB 조회만 유지합니다. 수집 실패 시 다음 주기에 재시도하며 유효한 환율이 없으면 미국 주문/체결을 거절 또는 보류합니다. V9는 개발 이력에 valid_from + 1초의 보정값(실제 공급자 유효기간 아님)을 넣어 보존합니다. 최근 보정 행은 해당 1초가 끝날 때까지 사용될 수 있으며 만료 대기 없이 모든 행에 NOT NULL을 적용합니다. 동일 시작 시각 응답은 최신 수신 결과로 갱신하되 과거 체결/원장은 바꾸지 않습니다.
 
 #### `stock_external_id` — 소스별 심볼 매핑
+
 같은 삼성전자를 토스는 `005930`으로 부르고, 향후 소스는 DART의 `00126380`처럼 다른 식별자를 사용할 수 있습니다. **지금 만들어두면 소스 추가·교체 시 도메인 코드 무수정.** 비용은 거의 0 인데 나중에 넣으려면 이미 짠 코드를 전부 손대야 함.
+
+| 컬럼                  | 타입        | 설명                                                                                               |
+| --------------------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `stock_id` + `source` | 복합 PK     | MVP에서는 `source` 를 `TOSS` 로 사용하고, `DART` / `FINNHUB` 는 향후 연동용으로 예약합니다.        |
+| `external_id`         | VARCHAR(50) | 해당 소스 식별자. `(source, external_id)` 유니크로 **한 외부 ID 가 두 종목에 매핑되는 사고 방지**. |
+
+#### `order_book_version` — 가상 호가 버전
+
+현재가(`quote_snapshot`)를 기준으로 생성한 공유 가상 호가 세트의 버전 헤더입니다. 3초 주기로 새 공급 세트가 게시되며 종목당 활성 버전(`is_active = true`)은 최대 1개입니다.
 
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
-| `stock_id` + `source` | 복합 PK | MVP에서는 `source` 를 `TOSS` 로 사용하고, `DART` / `FINNHUB` 는 향후 연동용으로 예약합니다. |
-| `external_id` | VARCHAR(50) | 해당 소스 식별자. `(source, external_id)` 유니크로 **한 외부 ID 가 두 종목에 매핑되는 사고 방지**. |
+| `book_version_id` | BIGINT PK | 가상 호가 세트 고유 식별자. 새 버전 게시 시 증가. |
+| `stock_id` | BIGINT FK | 종목 ID. `stock(stock_id)` 참조. 부분 유니크 인덱스(`WHERE is_active = true`)로 종목당 활성 버전 1개 제한. |
+| `base_price` | NUMERIC(19,4) | 호가 생성의 기준이 된 현재가 (양수). |
+| `currency` | VARCHAR(3) | 통화 (`KRW` / `USD`). |
+| `quote_at` | TIMESTAMPTZ | 기준 시세의 거래소 시각. 덮어쓰지 않고 실제 시세 시각 보존. |
+| `generated_at` | TIMESTAMPTZ | 호가 버전 생성 시각. |
+| `policy_version` | VARCHAR(20) | 호가 생성 정책 버전 (`V2`). |
+| `seed` | BIGINT | 결정론적 수량 노이즈 재현용 난수 seed. |
+| `revision` | BIGINT | 잔량 변경 트랜잭션 커밋 횟수 (기본 0). #122 체결 트랜잭션당 1씩 증가. |
+| `is_active` | BOOLEAN | 현재 조회 및 소비 가능한 활성 버전 여부 (기본 true). |
+| `closed_at` | TIMESTAMPTZ | 새 버전 게시 또는 장 마감으로 종료된 시각. |
 
----
+#### `order_book_level` — 가상 호가 레벨
+버전당 각 방향 0~10개를 생성하며 국내 당일 상하한가 또는 양수 가격 경계에서 종료합니다. `(book_version_id, side, level_depth)` 복합 유니크 제약이 걸려 있습니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| `level_id` | BIGINT PK | 호가 레벨 고유 식별자. `trade_execution.book_level_id`가 참조. |
+| `book_version_id` | BIGINT FK | 버전 ID. `order_book_version(book_version_id)` 참조 (`ON DELETE CASCADE`). |
+| `side` | VARCHAR(4) | 호가 방향 (`BID` / `ASK`). |
+| `level_depth` | INT | 호가 깊이 (1~10). |
+| `price` | NUMERIC(19,4) | 해당 호가 가격 (양수). |
+| `initial_quantity` | NUMERIC(19,6) | 최초 공급 수량 (감사용, 양수). V2 공급 수량은 정수 주 단위. |
+| `remaining_quantity` | NUMERIC(19,6) | 현재 소비 가능한 잔여 수량 (`0 <= remaining_quantity <= initial_quantity`). |
+
+### 가상 호가 보존 및 정리 정책 (확정)
+
+- **활성 버전 보존**: `is_active = true`인 활성 버전은 삭제하지 않습니다.
+- **종료 버전 정리**: `is_active = false`이고 종료 후 1분이 지난 버전은 소비·체결 참조 여부와 무관하게 삭제합니다.
+- **레벨 연쇄 정리**: 종료 버전 삭제 시 연관된 최대 20개 레벨은 `ON DELETE CASCADE`로 함께 삭제합니다.
+- **체결 영구 보존**: `trade_execution`의 가격·수량·환율·정산 금액은 유지되며, `book_level_id`는 FK 없는 소비 당시 추적 값으로 남습니다.
+
+### 산업 · 재무 (KIS — Flyway V5)
+
+#### `stock_industry` — 산업분류
+
+국내 종목의 표준산업분류와 시장 지수업종 대·중·소분류 최신 한 행을 저장합니다.
+
+| 컬럼                         | 타입         | 설명                                                     |
+| ---------------------------- | ------------ | -------------------------------------------------------- |
+| `stock_id`                   | BIGINT PK    | `stock(stock_id)` 참조 (`ON DELETE CASCADE`).            |
+| `standard_industry_code`     | VARCHAR(10)  | 한국표준산업분류 코드 (negative cache인 경우 null 가능). |
+| `standard_industry_name`     | VARCHAR(100) | 한국표준산업분류 명칭.                                   |
+| `index_industry_large_code`  | VARCHAR(10)  | 지수업종 대분류 코드.                                    |
+| `index_industry_large_name`  | VARCHAR(100) | 지수업종 대분류 명칭.                                    |
+| `index_industry_medium_code` | VARCHAR(10)  | 지수업종 중분류 코드.                                    |
+| `index_industry_medium_name` | VARCHAR(100) | 지수업종 중분류 명칭.                                    |
+| `index_industry_small_code`  | VARCHAR(10)  | 지수업종 소분류 코드.                                    |
+| `index_industry_small_name`  | VARCHAR(100) | 지수업종 소분류 명칭.                                    |
+| `fetched_at`                 | TIMESTAMPTZ  | 증권사에서 산업분류 정보를 조회한 시각.                  |
+| `created_at` `updated_at`    | TIMESTAMPTZ  | 감사용 자동 기록 컬럼 (`BaseEntity`).                    |
+
+#### `stock_financial_period` — 연간·분기 재무제표 및 지표
+
+결산연월별 대차대조표, 손익계산서, 재무/수익성 비율 이력을 저장합니다.
+
+| 컬럼                      | 타입          | 설명                                                                                                                                                                                        |
+| ------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `stock_id`                | BIGINT        | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). 복합 PK.                                                                                                                                      |
+| `period_type`             | VARCHAR(10)   | `ANNUAL`(연간) 또는 `QUARTERLY`(분기). 복합 PK.                                                                                                                                             |
+| `statement_year_month`    | CHAR(6)       | `YYYYMM` 형식의 6자리 결산연월(예: `202512`). 복합 PK.                                                                                                                                      |
+| 대차대조표 (10개)         | NUMERIC(30,6) | `current_assets`, `fixed_assets`, `total_assets`, `current_liabilities`, `fixed_liabilities`, `total_liabilities`, `capital_stock`, `capital_surplus`, `retained_earnings`, `total_equity`. |
+| 손익계산서 (3개)          | NUMERIC(30,6) | `sales`, `operating_profit`, `net_income`.                                                                                                                                                  |
+| 재무/수익성 비율 (10개)   | NUMERIC(30,6) | `sales_growth_rate`, `operating_profit_growth_rate`, `net_income_growth_rate`, `roe`, `eps`, `sales_per_share`, `bps`, `reserve_ratio`, `debt_ratio`, `net_profit_margin`.                  |
+| `created_at` `updated_at` | TIMESTAMPTZ   | 감사용 자동 기록 컬럼 (`BaseEntity`).                                                                                                                                                       |
+
+- **파생 지표**: 영업이익률은 조회 시점에 `operatingProfit × 100 ÷ sales` (소수점 6자리 `HALF_UP`)로 동적 계산하며, `sales`가 0 또는 null이면 null로 반환합니다.
+- **과거 이력 보존**: 재수집 시 동일 결산연월은 갱신하고, 응답에서 누락된 이전 결산연월 행은 삭제하지 않고 영구 보존합니다.
+
+#### `stock_financial_sync` — 동기화 메타데이터 및 negative cache 추적
+
+그룹별 최신 성공 동기화 시각을 저장해 TTL 판정과 negative cache를 관리합니다.
+
+| 컬럼                      | 타입        | 설명                                          |
+| ------------------------- | ----------- | --------------------------------------------- |
+| `stock_id`                | BIGINT PK   | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). |
+| `industry_synced_at`      | TIMESTAMPTZ | 산업분류 최신 성공 시각 (TTL: 30일 / 30d).    |
+| `annual_synced_at`        | TIMESTAMPTZ | 연간 재무 최신 성공 시각 (TTL: 7일 / 7d).     |
+| `quarterly_synced_at`     | TIMESTAMPTZ | 분기 재무 최신 성공 시각 (TTL: 7일 / 7d).     |
+| `created_at` `updated_at` | TIMESTAMPTZ | 감사용 자동 기록 컬럼 (`BaseEntity`).         |
+
+- **시세·주문 비사용 원칙**: KIS 데이터는 종목 상세의 기업 정보 표시 전용입니다. 시세 산정, 주문 가능 여부 판정, 체결 정산에는 절대 사용하지 않습니다.
+- **Negative Cache**: KIS에서 정상 빈 응답이 오면 해당 `*_synced_at`을 갱신하고 빈 상태를 유지하여, TTL 동안 불필요한 반복 외부 호출을 방지합니다.
+
+### 관심 종목 (Flyway V13)
+
+#### `stock_like` — 관심 종목
+
+회원×종목 한 쌍당 한 행입니다 (#169).
+
+- 등록은 `INSERT ... ON CONFLICT (user_id, stock_id) DO NOTHING` 후 행을 조회합니다. 그래서 중복이나 동시 요청이 와도 유니크 위반 500이 나지 않습니다.
+- 삭제는 물리 DELETE입니다. 회계 이력이 아니라 사용자 설정이기 때문입니다.
+
+| 컬럼            | 타입               | 설명                                                                                                                 |
+| --------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `stock_like_id` | BIGINT IDENTITY PK | 단조 증가라서 최신순 커서 키이자 `DELETE /stocks/likes/{id}`의 대상으로 씁니다.                                      |
+| `user_id`       | BIGINT FK          | `users(user_id)` 참조. CASCADE 없음: 탈퇴는 상태 변경이고, 회원 행의 물리 삭제는 막힙니다(`account.user_id`와 같음). |
+| `stock_id`      | BIGINT FK          | `stock(stock_id)` 참조 (`ON DELETE CASCADE`). 종목 마스터 행이 지워지면 관심 종목 행도 함께 지워져도 됩니다.         |
+| `created_at`    | TIMESTAMPTZ        | 등록 시각 (DB 기본값). `updated_at` 없음: 행은 추가되거나 삭제될 뿐 수정되지 않습니다.                               |
+
+- 유니크 제약 `uq_stock_like_user_stock (user_id, stock_id)`가 중복을 막습니다.
+- 이 인덱스는 등록 후 조회, 랭킹 페이지의 관심 여부 조회(`user_id = ? AND stock_id IN (...)`), 목록 조회의 `user_id` 필터에도 쓰입니다.
+- 회원당 행이 많지 않아서 정렬용 `(user_id, stock_like_id)` 인덱스는 따로 두지 않았습니다. 회원당 행 수가 크게 늘면 그때 추가합니다.
+
+## V9~V12는 동시에 열린 PR들이 이미 쓰고 있는 버전이라, 충돌을 피하려고 건너뛰었습니다.
 
 ## 종목 분류 모델
 
 레버리지·인버스·우선주를 **숨기지 않고 전부 노출**하되, 유형에 따라 다른 안내를 보여줍니다. 모르는 상품을 가려두면 사용자는 실전에서 처음 만나게 됩니다. 손실이 0원인 환경에서 설명하는 편이 "거래를 이해시키는 도구"라는 목적에 맞습니다.
 
 ### 유형(배타적) × 속성(태그) 조합
+
 배당주는 **유형이 아니라 속성**. KB금융은 배당주이면서 개별주이므로 한 컬럼에 넣으면 표현 불가. 그래서 유형과 태그를 분리.
 
-| 조합 | 화면 뱃지 | 안내 문구 (프론트 정적 콘텐츠) |
-|---|---|---|
-| `INDIVIDUAL` | 개별주 | 특정 기업 한 곳의 지분을 사는 것입니다. 그 회사가 잘되면 오르고 어려워지면 내립니다. 한 종목에 자산을 몰아넣지 않는 것이 중요합니다. |
-| `INDIVIDUAL` + `is_dividend` | 개별주 · 배당주 | 이익의 일부를 주주에게 정기적으로 나눠주는 기업입니다. 주가 상승이 크지 않아도 배당으로 수익이 발생할 수 있습니다. |
-| `PREFERRED` | 우선주 | 의결권이 없는 대신 배당을 우선적으로 받는 주식입니다. 같은 회사의 보통주와 가격이 다르게 움직이며 거래량이 적은 편입니다. |
-| `ETF` + leverage = 1.0 | ETF | 여러 종목을 묶어 담은 상품입니다. 한 기업이 흔들려도 충격이 분산되어 개별주보다 변동이 작습니다. |
-| `ETF` + leverage ≥ 2.0 | **레버리지 ETF** ⚠ 경고 배너 | **지수가 1% 오르면 약 2% 오르고, 1% 내리면 약 2% 내립니다.** 또한 매일 수익률을 재계산하는 구조라, 장기 보유하면 지수가 제자리로 돌아와도 손실이 남을 수 있습니다. |
-| `ETF` + leverage < 0 | **인버스 ETF** ⚠ 경고 배너 | **지수가 내릴 때 오르는 상품입니다.** 방향을 반대로 베팅하는 것이라 시장이 오르면 손실이 납니다. 레버리지와 마찬가지로 장기 보유에 불리합니다. |
+| 조합                         | 화면 뱃지                    | 안내 문구 (프론트 정적 콘텐츠)                                                                                                                                     |
+| ---------------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `INDIVIDUAL`                 | 개별주                       | 특정 기업 한 곳의 지분을 사는 것입니다. 그 회사가 잘되면 오르고 어려워지면 내립니다. 한 종목에 자산을 몰아넣지 않는 것이 중요합니다.                               |
+| `INDIVIDUAL` + `is_dividend` | 개별주 · 배당주              | 이익의 일부를 주주에게 정기적으로 나눠주는 기업입니다. 주가 상승이 크지 않아도 배당으로 수익이 발생할 수 있습니다.                                                 |
+| `PREFERRED`                  | 우선주                       | 의결권이 없는 대신 배당을 우선적으로 받는 주식입니다. 같은 회사의 보통주와 가격이 다르게 움직이며 거래량이 적은 편입니다.                                          |
+| `ETF` + leverage = 1.0       | ETF                          | 여러 종목을 묶어 담은 상품입니다. 한 기업이 흔들려도 충격이 분산되어 개별주보다 변동이 작습니다.                                                                   |
+| `ETF` + leverage ≥ 2.0       | **레버리지 ETF** ⚠ 경고 배너 | **지수가 1% 오르면 약 2% 오르고, 1% 내리면 약 2% 내립니다.** 또한 매일 수익률을 재계산하는 구조라, 장기 보유하면 지수가 제자리로 돌아와도 손실이 남을 수 있습니다. |
+| `ETF` + leverage < 0         | **인버스 ETF** ⚠ 경고 배너   | **지수가 내릴 때 오르는 상품입니다.** 방향을 반대로 베팅하는 것이라 시장이 오르면 손실이 납니다. 레버리지와 마찬가지로 장기 보유에 불리합니다.                     |
 
 > ⚠️ **레버리지의 "일일 재계산"을 꼭 설명하세요.** 초보자가 가장 크게 손해 보는 지점입니다. 지수가 +10% 후 −9.09% 해서 제자리로 돌아와도, 2배 레버리지는 원금을 회복하지 못합니다. 이 개념을 안전한 환경에서 배우게 하는 것이 이 서비스의 존재 이유에 가깝습니다.
 
@@ -403,36 +617,47 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 
 ---
 
-## 매수 처리 — 2단계 모델
+## 주문 처리 — 시장가는 즉시, 지정가는 2단계
 
-> **MVP(시장가 즉시 체결)는 두 단계를 한 트랜잭션 안에서 연속 실행**합니다. 지정가를 도입하면 Phase 1 을 커밋하고 체결 엔진이 나중에 Phase 2 를 돌립니다. 스키마를 미리 이렇게 잡아두면 그때 **로직만 쪼개면** 됩니다.
+### 시장가 주문 — 한 트랜잭션에서 즉시 체결
 
-> ⚠️ **1주차에는 `PENDING` 이 DB 에 남지 않습니다.** 한 트랜잭션이라 Phase 1 의 `locked_cash += net_amount` 와 Phase 2 의 `locked_cash −= net_amount` 가 커밋 전에 상쇄되고, `status` 는 `FILLED` 로 커밋됩니다.
-> **그래도 두 단계를 그대로 코드에 남겨두세요.** 지금 지우면 2주차에 다시 쓰게 되고, 무엇보다 **동결 로직을 처음부터 검증하게 됩니다** — `locked_cash` 계산이 틀려 있으면 지정가를 붙이는 날 한꺼번에 터집니다.
+시장가 주문에는 커밋되는 중간 상태가 없습니다. 계좌 행을 먼저 잠근 뒤 `cash_balance − locked_cash` 또는 `quantity − locked_quantity` 기준으로 검증하고, 계좌·보유 수량 변경, `FILLED` 주문 INSERT, 원장 INSERT를 하나의 트랜잭션에서 처리합니다. 다른 트랜잭션이 볼 수 없는 동결액을 증가시켰다가 바로 감소시키지 않습니다.
+
+형식이 유효해도 외부 조회 전 정적 사전 검증에서 거절되거나 시장 컨텍스트가 만료된 요청은 주문 행을 만들지 않으며 같은 `client_order_id`로 재시도할 수 있습니다. 사전 검증 통과 후 계좌 락 획득 사이 종목 상태가 바뀌거나, 트랜잭션 내부 업무 규칙으로 거절된 경우에만 예수금·수량·원장을 변경하지 않고 `reject_reason`과 함께 `REJECTED` 주문을 커밋합니다. 이 저장된 거절은 최종 결과이므로 새 주문에는 새 `client_order_id`를 사용합니다. FK나 숫자 형식조차 만족할 수 없는 잘못된 요청도 주문 행으로 저장하지 않고 요청 오류로 반환합니다.
+
+### 지정가 주문 — 서로 다른 두 트랜잭션
+
+지정가 주문은 아래 두 단계를 사용합니다. Phase 1이 동결과 `PENDING`을 커밋하고 체결 Worker가 나중에 Phase 2를 반복 수행합니다. 외부 조회는 트랜잭션 밖에서 준비하며 취소·만료·복구도 같은 동결 정책을 따릅니다.
+
+매수 최초 동결액은 지정가 × 전체 정수 수량 × 접수 환율을 원 단위 HALF_UP한 거래대금과, 그 거래대금 × 수수료율을 원 단위 HALF_UP한 수수료의 합입니다. 환율 버퍼가 없고 KR은 외부 조회 없이 환율 1입니다. 부분 체결은 이번 net만 주문 동결액과 계좌 cash/lockedCash에서 차감합니다. 자유 예수금 추가 사용·수량 비례 재산정은 하지 않습니다. 매수 잔량이 남으면 동결액도 양수여야 하며 전량 체결은 미사용 잔액까지 해제합니다. 취소·만료는 잔여 동결 전부를 해제합니다.
+
+누적 정산 근거는 저장된 체결 단가·수량·환율·SEC USD·확정 금액으로 복원합니다. DB 컬럼·요율 스냅샷·최초 동결액·접수 환율 필드를 추가하지 않습니다. 정수 수량·저장 상한·누적 반올림·호가별 양수 net을 검증하며 0/음수 후보는 체결 저장 전에 보류합니다. 실제 DB 반영은 엔진 책임입니다.
 
 ### Phase 1 — 주문 접수 [동결]
-| 단계 | 동작 | 설명 |
-|---|---|---|
-| ① | `SELECT … FOR UPDATE` | 계좌 행 잠금. **검증보다 먼저 잠가야** 그 사이에 값이 안 바뀝니다. |
-| ② | 검증 | 장 시간 · `is_ranked` · 거래정지 · 시세 유효시간(15초) · **주문가능금액 = `cash_balance − locked_cash` ≥ `net_amount`** |
-| ③ | `locked_cash += net_amount` | **자금 동결.** 수수료·세금을 포함한 `net_amount` 를 묶습니다 — `gross_amount` 만 묶으면 체결 시점에 수수료만큼 부족해집니다. |
-| ④ | `INSERT trade_order (PENDING)` | `client_order_id` 유니크 위반이면 중복 클릭이므로 기존 주문 결과를 반환. |
+
+| 단계 | 동작                           | 설명                                                                                                                       |
+| ---- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| ①    | `SELECT … FOR UPDATE`          | 계좌 행 잠금. **검증보다 먼저 잠가야** 그 사이에 값이 안 바뀝니다.                                                         |
+| ②    | 검증                           | 장 시간 · 상장/거래 상태 · 거래정지 · 시세 유효시간(15초) · **주문가능금액 = `cash_balance − locked_cash` ≥ `net_amount`** |
+| ③    | `locked_cash += reserved_cash` | 매수 비용까지 고려해 계산된 최초 동결액. 주문의 현재 동결액에도 저장하며 미체결 주문의 net_amount(체결 누계)는 0.          |
+| ④    | `INSERT trade_order (PENDING)` | `(account_id, client_order_id)` 유니크 위반이면 중복 클릭이므로 기존 주문 결과를 반환.                                     |
 
 ### Phase 2 — 주문 체결 [확정]
-| 단계 | 동작 | 설명 |
-|---|---|---|
-| ① | `locked_cash −= ?` `cash_balance −= ?` | 계좌 재잠금 → **동결 해제와 실제 출금을 동시에** 반영. |
-| ② | `UPSERT holding` | 수량 증가 + 이동평균 단가·환율 재계산. **락 순서는 항상 `account` → `holding`**. 엇갈리면 데드락. |
-| ③ | `UPDATE … WHERE status='PENDING'` | **조건부 UPDATE 로 경합 방지.** 영향 행이 0 이면 이미 취소됐거나 다른 워커가 가져간 것이므로 롤백. |
-| ④ | `INSERT ledger_entry` | 원장 기록. append only — **`BUY` 한 줄에 수수료까지 포함해 넣고 `exchange_rate` 를 함께 남깁니다.** |
 
-> 💡 **매도는 대칭입니다.** Phase 1 에서 `holding.locked_quantity` 를 늘리고, Phase 2 에서 `quantity` 와 `locked_quantity` 를 함께 줄이며 예수금을 입금합니다. **`avg_buy_price` 는 건드리지 않습니다** — 평가손익의 기준이기 때문입니다.
+| 단계 | 동작                                             | 설명                                                                                               |
+| ---- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
+| ①    | `locked_cash −= ?` `cash_balance −= ?`           | 계좌 재잠금 → **동결 해제와 실제 출금을 동시에** 반영.                                             |
+| ②    | `UPSERT holding`                                 | 수량 증가 + 이동평균 단가·환율 재계산. **락 순서는 항상 `account` → `holding`**. 엇갈리면 데드락.  |
+| ③    | `INSERT trade_execution` + `applyExecution(...)` | 계좌 잠금 아래 활성 상태와 다음 순번을 검증. 부분 체결은 PARTIALLY_FILLED, 잔여 수량 0이면 FILLED. |
+| ④    | `LedgerService.recordBuy/recordSell(...)`        | 저장한 체결에 연결된 원장 한 줄. 정산 차액·환율·직후 잔액을 append-only로 보존.                    |
 
-> ⛔ **지정가를 도입하면 반드시 필요한 것** — Phase 1 커밋 직후 장애가 나면 **동결액이 영원히 안 풀립니다.** 사용자는 "돈이 있는데 왜 주문이 안 되지?"가 됩니다. 타임아웃 기반 자동 해제 배치를 만드세요:
-> `UPDATE trade_order SET status='EXPIRED' WHERE status='PENDING' AND ordered_at < now() − INTERVAL '5 min'` → 해당 금액만큼 `locked_cash` 를 되돌림.
-> **MVP 는 한 트랜잭션이라 롤백으로 끝나므로 이 배치가 필요 없습니다.**
+> 💡 **지정가 매도는 대칭입니다.** Phase 1 에서 `holding.locked_quantity` 를 늘리고, Phase 2 에서 `quantity` 와 `locked_quantity` 를 함께 줄이며 예수금을 입금합니다. **`avg_buy_price` 는 건드리지 않습니다** — 이동평균법에서는 매도 시 수량과 취득원가가 같은 비율로 줄어 남은 주당 평균단가가 변하지 않기 때문입니다.
 
-> ✅ **검증식이 하나 늘어납니다.** `locked_cash = SUM(trade_order.net_amount WHERE status='PENDING')` — 미체결 주문 합계와 동결액이 항상 같아야 합니다. 고아 PENDING 이 생기면 이 식이 깨지므로 즉시 잡아낼 수 있습니다.
+> 지정가 접수 후 장애가 나도 동결이 고아 상태로 남지 않도록, 세션 종료 만료와 재시작 복구를 함께 구현해야 합니다.
+> 저장한 `expires_at`에 PENDING/PARTIALLY_FILLED 잔여분을 만료하고 계좌 잠금 아래 잔여 동결만 해제합니다. 5분 타이머나 자정 기준이 아닙니다.
+> **시장가 주문은 즉시 체결 트랜잭션 전체가 롤백되므로 이 배치가 필요 없습니다.**
+
+> 동결 검증: 계좌별 `locked_cash = SUM(활성 BUY.reserved_cash)`, 계좌·종목별 `locked_quantity = SUM(활성 SELL.quantity - filled_quantity)`입니다.
 
 ---
 
@@ -442,10 +667,65 @@ MVP는 시장가 즉시 체결이라 주문과 체결이 한 행. **거절된 �
 2. **시각은 전부 `TIMESTAMPTZ`** — 국내장·미국장·서머타임이 섞이므로 DB 에는 UTC 로 저장하고 표시할 때만 변환합니다.
 3. **매수 트랜잭션은 계좌 행 잠금부터** — `SELECT … FROM account WHERE account_id = ? FOR UPDATE` 로 시작해야 동시 주문 시 예수금 이중 차감을 막습니다. 종목 단위로 잠그면 못 막습니다.
 4. **원장은 append-only** — 잘못 기록했으면 수정하지 말고 반대 부호 항목을 넣어 상쇄합니다.
-5. **포트폴리오 초기화는 삭제가 아니다** — 기존 계좌를 CLOSED 로 바꾸고 `round_no + 1` 인 새 계좌를 만듭니다. 기존 원장·체결·보유는 보존.
+5. **포트폴리오 초기화는 삭제가 아니다** — 요청한 현재 `account_id`를 `FOR UPDATE`로 잠그고 기존 계좌를 CLOSED 로 바꾼 뒤 `round_no + 1` 인 새 계좌와 `INITIAL_DEPOSIT` 원장을 한 트랜잭션으로 만듭니다. 종료·개설·원장에는 같은 UTC 시각을 사용하고 기존 원장·체결·보유는 보존합니다. 같은 종료 계좌 ID의 즉시 재요청은 직전 신규 계좌를 반환하여 회차를 중복 생성하지 않습니다.
 6. **지금 안 넣으면 복구 불가능한 것 다섯 가지** — `trade_order.quote_at`, `trade_order.exchange_rate`, `ledger_entry.exchange_rate`, `holding.avg_exchange_rate`, 그리고 `daily_account_snapshot` 배치입니다. 컬럼은 나중에 추가할 수 있지만 **과거 값은 복원할 수 없습니다.**
 
 > 🧪 **검증 테스트로 만들면 좋은 것** — 모든 거래 후 `매수 시 net_amount = gross_amount + fee`, `매도 시 net_amount = gross_amount − fee − tax` 가 항상 성립하는지, 그리고 `ledger_entry.amount`(수수료 포함) 의 누적 합이 `account.cash_balance` 와 일치하는지 확인하는 테스트를 두세요. 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
 
+## 지정가 접수 근거 (#120)
+
+주문 이력은 계좌별 주문 ID 커서 조회에 맞춘 `ix_order_history (account_id, order_id DESC)`를 사용합니다 (`db/migration/V2__limit_order_lifecycle.sql` 적용).
+
+trade_order에 접수 후 변경하지 않는 세 컬럼을 추가합니다.
+
+- requested_limit_price NUMERIC(19,4): 사용자 원본 단가. KRW 원 단위 또는 USD 센트 단위.
+- requested_limit_currency VARCHAR(3): KRW/USD. 국내 종목은 KRW만 허용.
+- acceptance_exchange_rate NUMERIC(19,6): 검증한 접수 환율, 국내는 1. 취소·만료 후에도 보존하며 이후 체결 환율을 고정하지 않음.
+
+MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 통화의 고정 지정가로 유지합니다. 미국 원화 입력은 접수 환율로 나눈 뒤 HALF_UP 센트 반올림합니다. 멱등 비교는 환산 결과가 아닌 원본 입력을 사용합니다. initial_reserved_cash는 추가하지 않습니다. 최초 동결은 원본 입력으로 계산하고 reserved_cash는 현재 잔여 동결액만 저장합니다.
+
+지정가 거절은 입력·환산 근거를 보존하되 동결·체결은 없습니다. 접수된 지정가는 expires_at 필수이며 정규장 외 거절은 세션 만료 시각이 없을 수 있습니다. 과거 행 보정은 포함하지 않습니다.
+
+서킷브레이커 거절도 같은 지정가 근거 형태를 유지합니다. 사용자 입력 가격·통화와 접수 환율은 저장하고(멱등 비교 기준이며 모든 LIMIT 행에 CHECK로 요구됩니다), quote 시각 근거와 동결은 남기지 않습니다 — quote로 가격을 매기지 않고 현금·수량을 동결하지 않기 때문입니다. `market_event_id`는 오직 이 경로의 저장된 `REJECTED` 행에만 설정합니다.
+
+### 기존 지정가 체결 중단 (#167)
+
+활성 KOSPI/KOSDAQ 서킷브레이커 동안 이미 접수된 지정가 주문의 체결을 보류하는 데 **스키마는 추가되지 않습니다**. 접수된 주문은 `status`가 PENDING/PARTIALLY_FILLED로 남고 기존 `expires_at`, `reserved_cash`와 이에 대응하는 `locked_cash`/`locked_quantity`를 그대로 유지합니다. 거절이 아니므로 `market_event_id`를 받지 **않습니다**. 체결 트랜잭션 전체가 롤백되므로 `trade_execution`·`ledger_entry` 행이 생기지 않고 호가 `remaining_quantity`/`revision`도 그대로입니다. 보류 중에도 정상 취소·만료 전이는 남은 동결을 해제합니다.
+
+### 지정가 체결 인덱스 (#122)
+
+테이블/컬럼 추가는 없습니다. `V7__limit_execution_indexes.sql`에서 잔여 수량이 있는 활성 LIMIT 주문에 부분 인덱스를 추가합니다. 수집 EXISTS용 `ix_order_quote_target(stock_id, expires_at)`, 매수용 `ix_order_execute_buy(stock_id, limit_price DESC, ordered_at, order_id)`, 매도용 가격 오름차순 인덱스입니다. 방향별 인덱스는 side 조건을 포함합니다. 만료는 조회 시 범위 조건이며 now()를 인덱스 조건에 넣지 않습니다. 계좌 이력/활성 주문/만료 인덱스는 유지합니다.
+
+이후 V8~V15는 시장조치 이력, 시세 상하한가 적용일과 서킷브레이커 거절 FK를 추가합니다. 이 체결 보류는 마이그레이션을 추가하지 않으므로 `V15__trade_order_market_event_rejection.sql`이 최신 버전입니다.
+
 ---
-> 모의 주식 트레이딩 서비스 · 1주차 MVP ERD · `schema.sql` 과 함께 보세요
+
+> 모의 주식 트레이딩 서비스 · 현재 ERD · `db/migration/V1__init.sql`부터 `V15__trade_order_market_event_rejection.sql`까지 함께 보세요
+
+## 정규장 거래일과 기준가 (#173)
+
+미국 시간대 식별자는 `America/New_York`, 한국은 `Asia/Seoul`로 통일한다. 거래일은 거래소 현지 날짜이고 실제 주문·원장 시각은 UTC 저장/KST 표시한다. 일봉·주봉 응답의 KST 자정은 날짜 라벨이다.
+
+등락률은 표시 시세 거래일과 정확한 직전 거래일의 확정 종가를 비교한다. 날짜 검증 실패 시 기준가·등락률은 null이다. 랭킹 집계 시각으로 시세를 초기화하거나 마지막 현재가를 종가로 복사하지 않는다. 휴일·자정에는 기준가를 이동하지 않는다.
+
+기동 5초 후 및 이후 1분 fixed delay로 누락 종가를 복구한다. 정규장 마감 + 10분 이전에 시작한 요청의 당일 일봉은 확정 데이터로 저장하지 않는다. 빈 응답·날짜 누락은 완료로 캐시하지 않는다. V10은 `quote_snapshot.prev_close_date`만 추가한다. 기존 과거 일봉은 차트·주봉에 그대로 포함하되 재검증했다고 간주하지 않는다. 기준가 날짜가 없거나 다르면 DB 일봉 유무와 관계없이 토스에서 다시 받는다. 분봉도 봉 시작 시각으로 정규장만 수용한다.
+
+#178은 마이그레이션을 추가하지 않습니다. 기존 V1 호가는 즉시 조회·체결에서 제외하며 정상 게시·보존기간 정리로 교체합니다. 주문과 과거 체결은 보존합니다. 상하한가는 `quote_snapshot`에서 읽고 주문·호가에 날짜·범위 컬럼을 중복 저장하지 않습니다. 이는 기존 당일 최초 상하한가 불변 정책에 기반합니다.
+
+
+## 인증 세션 (V18)
+
+V16과 V17 마이그레이션은 유지하며, V18에서 `auth_session`을 추가하고 V17의 `users.token_version`을 제거합니다.
+재설정은 같은 트랜잭션에서 사용자의 모든 `auth_session`을 폐기합니다. 커밋 뒤 시작한 인증 검증은
+기존 Access·Refresh를 모두 거절합니다. 인증과 세션 폐기는 `auth_session`만 사용합니다.
+발급·재설정은 사용자부터 잠그고 재설정 토큰을 처리하며, 쿨다운과 토큰 유효성은 잠금 안에서 확인합니다.
+
+`users → auth_session`은 1:N입니다. 기존 회원·계좌·원장·거래 데이터는 변경하지 않습니다.
+UUID PK `id`를 JWT sid로 사용하고 `user_id`는 users FK입니다. 현재 `refresh_token_hash`와
+`refresh_generation`은 필수이며 해시는 SHA-256 64자, 세대는 0 이상입니다.
+`previous_token_hash`, `grace_until`, `encrypted_refresh`는 직전 토큰의 고정 유예와 AES-GCM 후속
+토큰 복구용입니다. 평문 토큰은 저장하지 않습니다. `created_at`, `expires_at`은 필수 TIMESTAMPTZ이고
+만료가 생성보다 늦어야 합니다. `revoked_at`은 nullable TIMESTAMPTZ입니다.
+`user_id`, `expires_at` 인덱스를 둡니다. 사용자 → 세션 순으로 잠그고 전체 세션 폐기는 비밀번호 변경·
+탈퇴와 함께 커밋합니다. 재사용 폐기는 오류 반환 전에 커밋합니다. 매시간 만료 유예 정보를 지우고 절대
+만료 후 7일 지난 세션을 삭제합니다. [인증 정책](authentication.ko.md)을 참고하세요.

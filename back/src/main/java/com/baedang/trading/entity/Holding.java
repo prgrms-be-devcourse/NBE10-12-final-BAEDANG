@@ -1,10 +1,18 @@
 package com.baedang.trading.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.OffsetDateTime;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 /**
  * 보유 종목. 원장에서 파생되는 집계이고, 계좌+종목당 한 행입니다.
@@ -17,6 +25,11 @@ import java.time.OffsetDateTime;
 @Entity
 @Table(name = "holding")
 public class Holding {
+
+    private static final int AVG_BUY_PRICE_SCALE = 4;
+    private static final int AVG_EXCHANGE_RATE_SCALE = 6;
+    private static final int USD_PURCHASE_AMOUNT_SCALE = 10;
+    private static final int KRW_PURCHASE_AMOUNT_SCALE = 16;
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -47,6 +60,14 @@ public class Holding {
     @Column(name = "avg_exchange_rate", nullable = false, precision = 19, scale = 6)
     private BigDecimal avgExchangeRate;
 
+    /** 현재 잔여 수량에 귀속되는 수수료 제외 USD 매수금액. 국내 종목은 0입니다. */
+    @Column(name = "usd_purchase_amount", nullable = false, precision = 29, scale = 10)
+    private BigDecimal usdPurchaseAmount;
+
+    /** 현재 잔여 수량에 귀속되는 원 단위 반올림 전·수수료 제외 원화 매수금액입니다. */
+    @Column(name = "krw_purchase_amount", nullable = false, precision = 38, scale = 16)
+    private BigDecimal krwPurchaseAmount;
+
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
@@ -54,20 +75,27 @@ public class Holding {
     }
 
     private Holding(Long accountId, Long stockId, BigDecimal quantity,
-                    BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
+                    BigDecimal usdPurchaseAmount, BigDecimal krwPurchaseAmount,
+                    OffsetDateTime updatedAt) {
+        requirePositive(quantity, "매수 수량");
+        requireNonNegative(usdPurchaseAmount, "USD 매수금액");
+        requirePositive(krwPurchaseAmount, "원화 매수금액");
         this.accountId = accountId;
         this.stockId = stockId;
         this.quantity = quantity;
         this.lockedQuantity = BigDecimal.ZERO;
-        this.avgBuyPrice = avgBuyPrice;
-        this.avgExchangeRate = avgExchangeRate != null ? avgExchangeRate : BigDecimal.ONE;
-        this.updatedAt = OffsetDateTime.now();
+        this.usdPurchaseAmount = usdPurchaseAmount;
+        this.krwPurchaseAmount = krwPurchaseAmount;
+        recalculateAverages();
+        this.updatedAt = updatedAt;
     }
 
     /** 처음 매수하는 종목일 때. 두 번째부터는 {@link #addBuy} 를 씁니다. */
     public static Holding firstBuy(Long accountId, Long stockId, BigDecimal quantity,
-                                   BigDecimal avgBuyPrice, BigDecimal avgExchangeRate) {
-        return new Holding(accountId, stockId, quantity, avgBuyPrice, avgExchangeRate);
+                                   BigDecimal usdPurchaseAmount, BigDecimal krwPurchaseAmount,
+                                   OffsetDateTime updatedAt) {
+        return new Holding(
+                accountId, stockId, quantity, usdPurchaseAmount, krwPurchaseAmount, updatedAt);
     }
 
     /** 매도 가능 수량. 저장하지 않고 계산합니다. */
@@ -78,25 +106,142 @@ public class Holding {
     /**
      * 매수 체결 반영 — 이동평균으로 평단가와 평균환율을 다시 계산합니다.
      *
+     * <p>반올림된 평균값을 다음 매수 계산에 재사용하지 않습니다. 체결마다 USD·원화
+     * 반올림 전 매수금액을 합산한 뒤 그 합계에서 평단가와 평균환율을 다시 계산합니다.
+     *
      * <p>수수료는 평단가에 넣지 않습니다. 종목별 평가손익에는 안 들어가지만
      * 계좌 총 손익에는 이미 반영돼 있습니다 (예수금에서 빠졌으므로).
      */
-    public void addBuy(BigDecimal addQty, BigDecimal price, BigDecimal rate) {
-        BigDecimal totalQty = quantity.add(addQty);
-        this.avgBuyPrice = quantity.multiply(avgBuyPrice)
-                .add(addQty.multiply(price))
-                .divide(totalQty, 4, RoundingMode.HALF_UP);
-        this.avgExchangeRate = quantity.multiply(avgExchangeRate)
-                .add(addQty.multiply(rate))
-                .divide(totalQty, 6, RoundingMode.HALF_UP);
-        this.quantity = totalQty;
-        this.updatedAt = OffsetDateTime.now();
+    public void addBuy(BigDecimal addQty, BigDecimal addedUsdPurchaseAmount,
+                       BigDecimal addedKrwPurchaseAmount,
+                       OffsetDateTime updatedAt) {
+        requirePositive(addQty, "매수 수량");
+        requireNonNegative(addedUsdPurchaseAmount, "USD 매수금액");
+        requirePositive(addedKrwPurchaseAmount, "원화 매수금액");
+        requireSamePurchaseCurrency(addedUsdPurchaseAmount);
+
+        this.quantity = quantity.add(addQty);
+        this.usdPurchaseAmount = usdPurchaseAmount.add(addedUsdPurchaseAmount);
+        this.krwPurchaseAmount = krwPurchaseAmount.add(addedKrwPurchaseAmount);
+        recalculateAverages();
+        this.updatedAt = updatedAt;
     }
 
-    /** 매도 체결 반영. <b>평단가는 그대로 둡니다</b> — 평가손익의 기준이기 때문입니다. */
-    public void subtractSell(BigDecimal sellQty) {
-        this.quantity = this.quantity.subtract(sellQty);
-        this.updatedAt = OffsetDateTime.now();
+    private void requirePositive(BigDecimal value, String fieldName) {
+        if (value == null || value.signum() <= 0) {
+            throw new IllegalArgumentException(fieldName + "은 0보다 커야 합니다");
+        }
+    }
+
+    private void requireNonNegative(BigDecimal value, String fieldName) {
+        if (value == null || value.signum() < 0) {
+            throw new IllegalArgumentException(fieldName + "은 0 이상이어야 합니다");
+        }
+    }
+
+    private void requireSamePurchaseCurrency(BigDecimal addedUsdPurchaseAmount) {
+        if (quantity.signum() == 0) {
+            return;
+        }
+        boolean existingIsUsd = usdPurchaseAmount.signum() > 0;
+        boolean addedIsUsd = addedUsdPurchaseAmount.signum() > 0;
+        if (existingIsUsd != addedIsUsd) {
+            throw new IllegalArgumentException("기존 보유 종목과 같은 통화의 매수금액이어야 합니다");
+        }
+    }
+
+    private void recalculateAverages() {
+        if (usdPurchaseAmount.signum() > 0) {
+            this.avgBuyPrice = usdPurchaseAmount.divide(
+                    quantity, AVG_BUY_PRICE_SCALE, RoundingMode.HALF_UP);
+            this.avgExchangeRate = krwPurchaseAmount.divide(
+                    usdPurchaseAmount, AVG_EXCHANGE_RATE_SCALE, RoundingMode.HALF_UP);
+            return;
+        }
+        this.avgBuyPrice = krwPurchaseAmount.divide(
+                quantity, AVG_BUY_PRICE_SCALE, RoundingMode.HALF_UP);
+        this.avgExchangeRate = BigDecimal.ONE;
+    }
+
+    /**
+     * 매도 체결 반영. 부분 매도는 잔여 수량 비율만큼 매수금액을 남기고 평단가는 유지합니다.
+     * 전량 매도는 다음 재매수가 과거 원가를 승계하지 않도록 모든 매수금액을 0으로 초기화합니다.
+     */
+    public void subtractSell(BigDecimal sellQty, OffsetDateTime updatedAt) {
+        if (sellQty == null || sellQty.signum() <= 0) {
+            throw new IllegalArgumentException("매도 수량은 0보다 커야 합니다");
+        }
+        if (availableQuantity().compareTo(sellQty) < 0) {
+            throw new IllegalStateException("매도 가능 수량보다 많이 차감할 수 없습니다");
+        }
+        applySell(sellQty, updatedAt);
+    }
+
+    /** 같은 트랜잭션에서 동결 수량과 실제 수량을 함께 차감합니다. */
+    public void settleReservedSell(BigDecimal sellQty, OffsetDateTime at) {
+        if (sellQty == null || sellQty.signum() <= 0 || !isRepresentableAtScale(sellQty, 0) || at == null
+                || lockedQuantity.compareTo(sellQty) < 0 || quantity.compareTo(sellQty) < 0) {
+            throw new IllegalStateException("동결 수량으로 결제할 수 없습니다");
+        }
+        lockedQuantity = lockedQuantity.subtract(sellQty);
+        applySell(sellQty, at);
+    }
+
+    private void applySell(BigDecimal sellQty, OffsetDateTime updatedAt) {
+        BigDecimal previousQuantity = this.quantity;
+        BigDecimal remainingQuantity = previousQuantity.subtract(sellQty);
+        if (remainingQuantity.signum() == 0) {
+            this.quantity = BigDecimal.ZERO;
+            this.usdPurchaseAmount = BigDecimal.ZERO;
+            this.krwPurchaseAmount = BigDecimal.ZERO;
+        } else {
+            this.usdPurchaseAmount = proportionalRemainingAmount(
+                    usdPurchaseAmount, remainingQuantity, previousQuantity, USD_PURCHASE_AMOUNT_SCALE);
+            this.krwPurchaseAmount = proportionalRemainingAmount(
+                    krwPurchaseAmount, remainingQuantity, previousQuantity, KRW_PURCHASE_AMOUNT_SCALE);
+            this.quantity = remainingQuantity;
+        }
+        this.updatedAt = updatedAt;
+    }
+
+    private BigDecimal proportionalRemainingAmount(
+            BigDecimal amount, BigDecimal remainingQuantity, BigDecimal previousQuantity, int scale
+    ) {
+        if (amount.signum() == 0) {
+            return BigDecimal.ZERO;
+        }
+        return amount.multiply(remainingQuantity)
+                .divide(previousQuantity, scale, RoundingMode.HALF_UP);
+    }
+
+    public void reserveQuantity(BigDecimal amount, OffsetDateTime at) {
+        requirePositive(amount, "동결 수량");
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("동결 수량은 정수여야 합니다");
+        }
+        if (at == null) {
+            throw new IllegalArgumentException("변경 시각은 필수입니다");
+        }
+        if (availableQuantity().compareTo(amount) < 0) {
+            throw new IllegalStateException("매도 가능 수량이 부족합니다");
+        }
+        lockedQuantity = lockedQuantity.add(amount);
+        updatedAt = at;
+    }
+
+    public void releaseQuantity(BigDecimal amount, OffsetDateTime at) {
+        requirePositive(amount, "해제 수량");
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("해제 수량은 정수여야 합니다");
+        }
+        if (at == null) {
+            throw new IllegalArgumentException("변경 시각은 필수입니다");
+        }
+        if (lockedQuantity.compareTo(amount) < 0) {
+            throw new IllegalStateException("동결 수량보다 많이 해제할 수 없습니다");
+        }
+        lockedQuantity = lockedQuantity.subtract(amount);
+        updatedAt = at;
     }
 
     public Long getHoldingId() { return holdingId; }
@@ -106,5 +251,7 @@ public class Holding {
     public BigDecimal getLockedQuantity() { return lockedQuantity; }
     public BigDecimal getAvgBuyPrice() { return avgBuyPrice; }
     public BigDecimal getAvgExchangeRate() { return avgExchangeRate; }
+    public BigDecimal getUsdPurchaseAmount() { return usdPurchaseAmount; }
+    public BigDecimal getKrwPurchaseAmount() { return krwPurchaseAmount; }
     public OffsetDateTime getUpdatedAt() { return updatedAt; }
 }

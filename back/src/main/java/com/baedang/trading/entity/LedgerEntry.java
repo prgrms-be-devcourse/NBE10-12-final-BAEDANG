@@ -13,15 +13,13 @@ import java.time.OffsetDateTime;
  *
  * <p><b>항목은 세 가지뿐입니다</b> — INITIAL_DEPOSIT / BUY / SELL.
  * 수수료와 세금은 별도 줄로 쪼개지 않고 매수·매도 금액에 포함합니다.
- * 원장 한 줄이 {@code trade_order.net_amount} 하나에 대응합니다.
+ * 신규 거래 원장은 개별 체결에 대응하며 주문당 여러 줄이 존재할 수 있습니다.
  *
  * <p>검증식: {@code SUM(amount) = account.cash_balance} (계좌별).
  * 테스트로 만들어두면 원장을 제대로 이해했다는 가장 확실한 증거가 됩니다.
  *
- * <p><b>정적 팩토리가 세 개인 이유</b> — 항목 종류마다 필요한 값이 다릅니다.
- * 초기 지급은 주문이 없고, 매수는 음수, 매도는 양수여야 합니다.
- * 범용 빌더 하나로 두면 {@code SELL} 인데 음수를 넣는 실수가 컴파일됩니다.
- * 팩토리로 나누면 <b>잘못된 조합을 애초에 만들 수 없습니다.</b>
+ * <p>초기 지급은 주문 없이 생성하고, 정상 매수·매도 원장은 저장된 체결로 생성합니다.
+ * 매수는 음수, 매도는 양수로 기록하며 방향은 해당 체결의 주문에서 결정합니다.
  */
 @Entity
 @Table(name = "ledger_entry")
@@ -38,6 +36,10 @@ public class LedgerEntry {
     /** 원인이 된 주문. 초기금 지급은 주문이 없으므로 null. */
     @Column(name = "order_id")
     private Long orderId;
+
+    /** 개별 체결 근거. 초기 지급/독립 정정 기록은 null이며 정상 체결 원장은 반드시 연결합니다. */
+    @Column(name = "execution_id")
+    private Long executionId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "entry_type", nullable = false, length = 20)
@@ -72,41 +74,49 @@ public class LedgerEntry {
     }
 
     private LedgerEntry(Long accountId, Long orderId, EntryType entryType, BigDecimal amount,
-                        BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
+                        BigDecimal balanceAfter, BigDecimal exchangeRate, String memo,
+                        OffsetDateTime occurredAt) {
+        if (exchangeRate == null || exchangeRate.signum() <= 0) {
+            throw new IllegalArgumentException("원장 환율은 필수이며 양수여야 합니다");
+        }
         this.accountId = accountId;
         this.orderId = orderId;
         this.entryType = entryType;
         this.amount = amount;
         this.balanceAfter = balanceAfter;
-        this.exchangeRate = exchangeRate != null ? exchangeRate : BigDecimal.ONE;
+        this.exchangeRate = exchangeRate;
         this.memo = memo;
-        this.occurredAt = OffsetDateTime.now();
+        this.occurredAt = occurredAt;
     }
 
     /** 모의투자금 지급. 회원가입과 포트폴리오 초기화 두 곳에서 씁니다. */
-    public static LedgerEntry initialDeposit(Long accountId, BigDecimal amount, String memo) {
+    public static LedgerEntry initialDeposit(
+            Long accountId,
+            BigDecimal amount,
+            String memo,
+            OffsetDateTime occurredAt
+    ) {
         return new LedgerEntry(accountId, null, EntryType.INITIAL_DEPOSIT,
-                amount, amount, BigDecimal.ONE, memo);
-    }
-
-    /**
-     * 매수. {@code netAmount}(gross + fee)를 <b>음수로 뒤집어</b> 넣습니다.
-     * 호출부는 양수를 넘기면 됩니다 — 부호를 헷갈릴 일이 없습니다.
-     */
-    public static LedgerEntry buy(Long accountId, Long orderId, BigDecimal netAmount,
-                                  BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
-        return new LedgerEntry(accountId, orderId, EntryType.BUY,
-                netAmount.negate(), balanceAfter, exchangeRate, memo);
-    }
-
-    /** 매도. {@code netAmount}(gross − fee − tax)가 그대로 양수로 들어갑니다. */
-    public static LedgerEntry sell(Long accountId, Long orderId, BigDecimal netAmount,
-                                   BigDecimal balanceAfter, BigDecimal exchangeRate, String memo) {
-        return new LedgerEntry(accountId, orderId, EntryType.SELL,
-                netAmount, balanceAfter, exchangeRate, memo);
+                amount, amount, BigDecimal.ONE, memo, occurredAt);
     }
 
     public Long getEntryId() { return entryId; }
+    public Long getExecutionId() { return executionId; }
+
+    /** 신규 정상 체결 원장. 과거 기록 보정과 중복 요청 판정은 호출부의 별도 책임입니다. */
+    public static LedgerEntry execution(TradeOrder order, TradeExecution execution, BigDecimal balanceAfter, String memo) {
+        if (execution == null || execution.getExecutionId() == null || balanceAfter == null || balanceAfter.signum() < 0) {
+            throw new IllegalArgumentException("저장된 체결과 체결 직후 잔액이 필요합니다");
+        }
+        execution.validateOrder(order);
+        boolean buy = order.getSide() == OrderSide.BUY;
+        LedgerEntry entry = new LedgerEntry(order.getAccountId(), order.getOrderId(),
+                buy ? EntryType.BUY : EntryType.SELL,
+                buy ? execution.getNetAmountKrw().negate() : execution.getNetAmountKrw(), balanceAfter,
+                execution.getExchangeRate(), memo, execution.getExecutedAt());
+        entry.executionId = execution.getExecutionId();
+        return entry;
+    }
     public Long getAccountId() { return accountId; }
     public Long getOrderId() { return orderId; }
     public EntryType getEntryType() { return entryType; }

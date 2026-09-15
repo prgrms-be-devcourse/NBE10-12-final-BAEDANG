@@ -1,9 +1,19 @@
 package com.baedang.user.entity;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 /**
  * 모의 투자 계좌. <b>회차(round_no)당 한 개</b>입니다.
@@ -69,19 +79,25 @@ public class Account {
     protected Account() {
     }
 
-    private Account(Long userId, Integer roundNo, BigDecimal initialCash) {
+    private Account(Long userId, Integer roundNo, BigDecimal initialCash, OffsetDateTime openedAt) {
+        validateOpen(userId, roundNo, initialCash, openedAt);
         this.userId = userId;
         this.roundNo = roundNo;
         this.initialCash = initialCash;
         this.cashBalance = initialCash;
         this.lockedCash = BigDecimal.ZERO;
         this.status = AccountStatus.ACTIVE;
-        this.openedAt = OffsetDateTime.now();
+        this.openedAt = openedAt;
     }
 
     /** 새 회차 계좌 개설. 예수금은 지급액에서 시작합니다. */
-    public static Account open(Long userId, int roundNo, BigDecimal initialCash) {
-        return new Account(userId, roundNo, initialCash);
+    public static Account open(
+            Long userId,
+            int roundNo,
+            BigDecimal initialCash,
+            OffsetDateTime openedAt
+    ) {
+        return new Account(userId, roundNo, initialCash, openedAt);
     }
 
     /** 주문가능금액. 저장하지 않고 매번 계산합니다. */
@@ -89,9 +105,92 @@ public class Account {
         return cashBalance.subtract(lockedCash);
     }
 
-    public void close() {
+    /** 시장가 매수 금액을 즉시 차감합니다. 지정가 주문의 동결액은 침범하지 않습니다. */
+    public void debitMarketBuy(BigDecimal amount) {
+        requirePositive(amount);
+        if (availableCash().compareTo(amount) < 0) {
+            throw new IllegalStateException("주문가능금액보다 큰 금액을 차감할 수 없습니다");
+        }
+        this.cashBalance = this.cashBalance.subtract(amount);
+    }
+
+    /** 시장가 매도 체결 금액을 예수금에 즉시 반영합니다. */
+    public void creditMarketSell(BigDecimal amount) {
+        creditSell(amount);
+    }
+
+    private void creditSell(BigDecimal amount) {
+        requirePositive(amount);
+        this.cashBalance = this.cashBalance.add(amount);
+    }
+
+    public void reserveCash(BigDecimal amount) {
+        requirePositive(amount);
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("동결액은 원 단위여야 합니다");
+        }
+        if (status != AccountStatus.ACTIVE || availableCash().compareTo(amount) < 0) {
+            throw new IllegalStateException("예수금을 동결할 수 없습니다");
+        }
+        lockedCash = lockedCash.add(amount);
+    }
+
+    /** 지정가 매수는 자유 예수금이 아닌 예약 자원으로 결제합니다. 주문별 한도는 서비스가 검증합니다. */
+    public void settleReservedBuy(BigDecimal amount) {
+        requirePositive(amount);
+        if (status != AccountStatus.ACTIVE || !isRepresentableAtScale(amount, 0)
+                || lockedCash.compareTo(amount) < 0 || cashBalance.compareTo(amount) < 0) {
+            throw new IllegalStateException("동결 예수금으로 결제할 수 없습니다");
+        }
+        cashBalance = cashBalance.subtract(amount);
+        lockedCash = lockedCash.subtract(amount);
+    }
+
+    public void creditLimitSell(BigDecimal amount) {
+        if (status != AccountStatus.ACTIVE) throw new IllegalStateException("종료된 계좌에 입금할 수 없습니다");
+        creditSell(amount);
+    }
+
+    /** 동결 해제는 예수금 증가가 아닙니다. */
+    public void releaseCash(BigDecimal amount) {
+        requirePositive(amount);
+        if (!isRepresentableAtScale(amount, 0)) {
+            throw new IllegalArgumentException("해제액은 원 단위여야 합니다");
+        }
+        if (lockedCash.compareTo(amount) < 0) {
+            throw new IllegalStateException("동결액보다 많이 해제할 수 없습니다");
+        }
+        lockedCash = lockedCash.subtract(amount);
+    }
+
+    private void requirePositive(BigDecimal amount) {
+        if (amount == null || amount.signum() <= 0) {
+            throw new IllegalArgumentException("금액은 0보다 커야 합니다");
+        }
+    }
+
+    public void close(OffsetDateTime closedAt) {
+        if (closedAt == null) throw new IllegalArgumentException("계좌 종료 시각은 필수입니다");
+        if (status == AccountStatus.CLOSED) throw new IllegalStateException("이미 종료된 계좌입니다");
+        if (closedAt.isBefore(openedAt)) {
+            throw new IllegalArgumentException("계좌 종료 시각은 개설 시각보다 빠를 수 없습니다");
+        }
         this.status = AccountStatus.CLOSED;
-        this.closedAt = OffsetDateTime.now();
+        this.closedAt = closedAt;
+    }
+
+    private static void validateOpen(
+            Long userId,
+            int roundNo,
+            BigDecimal initialCash,
+            OffsetDateTime openedAt
+    ) {
+        if (userId == null) throw new IllegalArgumentException("사용자 ID는 필수입니다");
+        if (roundNo < 1) throw new IllegalArgumentException("계좌 회차는 1 이상이어야 합니다");
+        if (initialCash == null || initialCash.signum() <= 0) {
+            throw new IllegalArgumentException("초기 지급액은 0보다 커야 합니다");
+        }
+        if (openedAt == null) throw new IllegalArgumentException("계좌 개설 시각은 필수입니다");
     }
 
     public Long getAccountId() {

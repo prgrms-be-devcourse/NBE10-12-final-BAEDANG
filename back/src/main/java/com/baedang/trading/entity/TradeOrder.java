@@ -1,23 +1,41 @@
 package com.baedang.trading.entity;
 
-import jakarta.persistence.*;
+import com.baedang.trading.model.OrderClosureResult;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
+import java.util.Objects;
 import java.util.UUID;
+
+import static com.baedang.trading.support.DecimalScaleValidator.isRepresentableAtScale;
 
 /**
  * 주문 + 체결. {@code order} 는 SQL 예약어라 테이블명이 {@code trade_order} 입니다.
  *
- * <p><b>1주차 시장가는 PENDING 을 거치지 않습니다.</b> 접수와 체결이 한 트랜잭션
- * 안에서 연속 실행되므로 FILLED 또는 REJECTED 로 직행합니다.
+ * <p><b>시장가는 PENDING 을 거치지 않습니다.</b> 하나의 트랜잭션에서 즉시
+ * 체결되므로 FILLED 또는 REJECTED 로 INSERT 합니다. PENDING 은 지정가 주문의
+ * 접수·동결 트랜잭션부터 사용합니다.
  *
- * <p><b>요율은 저장하지 않습니다.</b> {@code fee}·{@code tax} 에는 계산된 <b>금액</b>이
- * 들어갑니다. 요율은 전역 정책이라 {@code application.yml} 의 {@code trading.*} 이
- * 유일한 정의 지점입니다. 금액이 남아 있으면 요율이 바뀌어도 과거 거래가 안 흔들립니다.
+ * <p>fee·tax는 확정 금액입니다. 요율은 프로젝트의 고정 환경 설정을 사용하며 주문에 저장하지 않습니다.
+ * 개별 체결 근거는 TradeExecution에 보존하며 LIMIT의 금액은 체결 차액의 누계입니다.
  */
 @Entity
-@Table(name = "trade_order")
+@Table(
+        name = "trade_order",
+        uniqueConstraints = @UniqueConstraint(
+                name = "uq_account_client_order",
+                columnNames = {"account_id", "client_order_id"}
+        )
+)
 public class TradeOrder {
 
     @Id
@@ -33,9 +51,9 @@ public class TradeOrder {
 
     /**
      * 멱등성 키. 프론트가 주문 화면 진입 시 생성해 함께 보냅니다.
-     * 버튼을 두 번 눌러도 UNIQUE 제약에 걸려 중복 체결이 막힙니다.
+     * 버튼을 두 번 눌러도 계좌+멱등 키 UNIQUE 제약에 걸려 중복 체결이 막힙니다.
      */
-    @Column(name = "client_order_id", nullable = false, unique = true)
+    @Column(name = "client_order_id", nullable = false)
     private UUID clientOrderId;
 
     @Enumerated(EnumType.STRING)
@@ -46,35 +64,38 @@ public class TradeOrder {
     @Column(name = "order_type", nullable = false, length = 10)
     private OrderType orderType;
 
-    /** 1주차는 정수만 받습니다. NUMERIC 인 건 2주차 소수점 주문 대비입니다. */
+    /** 주문 수량. NUMERIC으로 저장하며 허용 주문 단위는 주문 정책에서 검증합니다. */
     @Column(name = "quantity", nullable = false, precision = 19, scale = 6)
     private BigDecimal quantity;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false, length = 12)
+    @Column(name = "status", nullable = false, length = 20)
     private OrderStatus status;
 
     /** ErrorCode 이름을 그대로 넣습니다 — INSUFFICIENT_CASH, STALE_QUOTE 등. */
     @Column(name = "reject_reason", length = 40)
     private String rejectReason;
 
+    /** REJECTED 판정에 사용한 기준 가격. FILLED 주문은 {@code null}입니다. */
+    @Column(name = "reference_price", precision = 19, scale = 4)
+    private BigDecimal referencePrice;
+
     /** 체결 단가. <b>종목 통화 기준</b>입니다 (미국이면 달러). */
     @Column(name = "executed_price", precision = 19, scale = 4)
     private BigDecimal executedPrice;
 
     /**
-     * 체결에 쓴 시세의 기준 시각.
-     * "왜 이 가격에 체결됐는가"를 설명하는 유일한 근거이고,
-     * 금융 도메인에서 가장 중요한 감사 항목입니다.
+     * 체결 또는 거절 판정에 쓴 시세의 기준 시각.
+     * REJECTED 주문은 {@link #referencePrice}와 함께 감사 근거로 보존합니다.
      */
     @Column(name = "quote_at")
     private OffsetDateTime quoteAt;
 
-    /** 체결 시점 환율. 원화 종목은 1. 안 남기면 환차손익을 영원히 분리할 수 없습니다. */
+    /** 체결 또는 거절 판정 시점 환율. 원화 종목은 1입니다. */
     @Column(name = "exchange_rate", precision = 19, scale = 6)
     private BigDecimal exchangeRate;
 
-    /** 체결 금액(원화 환산) = executedPrice × quantity × exchangeRate. */
+    /** MARKET의 단일 체결 금액 또는 LIMIT의 체결별 정산 금액 누계(원화)입니다. */
     @Column(name = "gross_amount", precision = 19, scale = 4)
     private BigDecimal grossAmount;
 
@@ -93,44 +114,258 @@ public class TradeOrder {
     @Column(name = "ordered_at", nullable = false)
     private OffsetDateTime orderedAt;
 
+    @Column(name = "limit_price", precision = 19, scale = 4)
+    private BigDecimal limitPrice;
+    /** 접수 시 사용자가 입력한 통화와 단가. 멱등 비교는 환산 가격이 아닌 이 값으로 합니다. */
+    @Column(name = "requested_limit_price", precision = 19, scale = 4)
+    private BigDecimal requestedLimitPrice;
+    @Column(name = "requested_limit_currency", length = 3)
+    private String requestedLimitCurrency;
+    /** 지정가 환산 및 최초 동결의 근거. 이후 체결 환율을 고정하지 않습니다. */
+    @Column(name = "acceptance_exchange_rate", precision = 19, scale = 6)
+    private BigDecimal acceptanceExchangeRate;
+    @Column(name = "filled_quantity", nullable = false, precision = 19, scale = 6)
+    private BigDecimal filledQuantity = BigDecimal.ZERO;
+    @Column(name = "execution_count", nullable = false)
+    private int executionCount;
+    @Column(name = "last_executed_at")
+    private OffsetDateTime lastExecutedAt;
+    /** 해당 주문의 미체결 잔여분에 현재 동결된 원화 금액. 종료 시 0입니다. */
+    @Column(name = "reserved_cash", nullable = false, precision = 19, scale = 4)
+    private BigDecimal reservedCash = BigDecimal.ZERO;
+    @Column(name = "expires_at")
+    private OffsetDateTime expiresAt;
+    @Column(name = "closed_at")
+    private OffsetDateTime closedAt;
+
+    /**
+     * {@code MARKET_TRADING_HALTED} 거절에 사용한 {@code market_event}. 다른 주문은 {@code null}이다.
+     *
+     * <p>멱등 재생이 이 ID로 최초 판정 이벤트를 정확히 복원한다. 연관관계가 아니라 식별자만 보관한다 —
+     * 거래 aggregate가 시장 이벤트 aggregate를 소유하지 않으며, 이벤트는 append-only 감사 대상이다.
+     */
+    @Column(name = "market_event_id")
+    private Long marketEventId;
+
     protected TradeOrder() {
     }
 
     private TradeOrder(Long accountId, Long stockId, UUID clientOrderId,
-                       OrderSide side, BigDecimal quantity) {
+                       OrderSide side, BigDecimal quantity, OrderStatus status,
+                       OffsetDateTime orderedAt) {
         this.accountId = accountId;
         this.stockId = stockId;
         this.clientOrderId = clientOrderId;
         this.side = side;
         this.quantity = quantity;
         this.orderType = OrderType.MARKET;
-        this.status = OrderStatus.PENDING;
-        this.orderedAt = OffsetDateTime.now();
+        this.status = status;
+        this.orderedAt = orderedAt;
     }
 
-    /** 시장가 주문 접수. 1주차에는 이 상태가 커밋되지 않고 곧바로 체결로 넘어갑니다. */
-    public static TradeOrder placeMarketOrder(Long accountId, Long stockId, UUID clientOrderId,
-                                              OrderSide side, BigDecimal quantity) {
-        return new TradeOrder(accountId, stockId, clientOrderId, side, quantity);
+    /** 시장가 체결 결과를 처음부터 FILLED 상태로 생성합니다. */
+    public static TradeOrder filledMarketOrder(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, BigDecimal executedPrice, OffsetDateTime quoteAt,
+            BigDecimal exchangeRate, BigDecimal grossAmount, BigDecimal fee,
+            BigDecimal tax, BigDecimal netAmount, OffsetDateTime orderedAt
+    ) {
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.FILLED, orderedAt);
+        order.executedPrice = executedPrice;
+        order.quoteAt = quoteAt;
+        order.exchangeRate = exchangeRate;
+        order.grossAmount = grossAmount;
+        order.fee = fee;
+        order.tax = tax;
+        order.netAmount = netAmount;
+        order.filledQuantity = quantity;
+        order.executionCount = 1;
+        order.lastExecutedAt = orderedAt;
+        order.closedAt = orderedAt;
+        return order;
     }
 
-    /** 체결 확정. 시장가는 접수 직후 곧바로 이 메서드로 넘어옵니다. */
-    public void fill(BigDecimal executedPrice, OffsetDateTime quoteAt, BigDecimal exchangeRate,
-                     BigDecimal grossAmount, BigDecimal fee, BigDecimal tax, BigDecimal netAmount) {
-        this.executedPrice = executedPrice;
-        this.quoteAt = quoteAt;
-        this.exchangeRate = exchangeRate;
-        this.grossAmount = grossAmount;
-        this.fee = fee;
-        this.tax = tax;
-        this.netAmount = netAmount;
-        this.status = OrderStatus.FILLED;
+    /** 유효한 시장가 요청이 업무 규칙으로 거절된 기록을 생성합니다. */
+    public static TradeOrder rejectedMarketOrder(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, BigDecimal referencePrice, OffsetDateTime quoteAt,
+            BigDecimal exchangeRate, String reasonCode, OffsetDateTime orderedAt
+    ) {
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, orderedAt);
+        order.rejectReason = reasonCode;
+        order.referencePrice = referencePrice;
+        order.quoteAt = quoteAt;
+        order.exchangeRate = exchangeRate;
+        order.closedAt = orderedAt;
+        return order;
     }
 
-    /** 검증 단계 거절. 자금을 동결하지 않았으므로 되돌릴 것이 없습니다. */
-    public void reject(String reasonCode) {
-        this.status = OrderStatus.REJECTED;
-        this.rejectReason = reasonCode;
+    /**
+     * 시장 전체 CB로 거절된 시장가 주문.
+     *
+     * <p>CB 거절에는 시세가 필요 없으므로 {@code referencePrice}/{@code quoteAt}/{@code exchangeRate}
+     * 증거를 남기지 않는다. 대신 판정에 사용한 이벤트를 {@code market_event_id}로 고정해, 같은
+     * {@code clientOrderId} 재요청이 최초 오류 데이터를 그대로 복원할 수 있게 한다.
+     */
+    public static TradeOrder rejectedMarketOrderByHalt(
+            Long accountId, Long stockId, UUID clientOrderId, OrderSide side,
+            BigDecimal quantity, Long marketEventId, OffsetDateTime orderedAt
+    ) {
+        if (marketEventId == null) {
+            throw new IllegalArgumentException("CB 거절에는 market_event_id가 필요합니다");
+        }
+        TradeOrder order = new TradeOrder(
+                accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, orderedAt);
+        order.rejectReason = "MARKET_TRADING_HALTED";
+        order.marketEventId = marketEventId;
+        order.closedAt = orderedAt;
+        return order;
+    }
+
+    /** 지정가 접수의 CB 거절. 동결하지 않으므로 {@code reservedCash}는 0이고 가격·환율 근거는 유지한다. */
+    public static TradeOrder rejectedLimitOrderByHalt(Long accountId, Long stockId, UUID clientOrderId,
+            OrderSide side, BigDecimal quantity, BigDecimal limitPrice, BigDecimal requestedPrice,
+            String requestedCurrency, BigDecimal rate, Long marketEventId, OffsetDateTime at) {
+        if (marketEventId == null) {
+            throw new IllegalArgumentException("CB 거절에는 market_event_id가 필요합니다");
+        }
+        TradeOrder order = rejectedLimitOrder(
+                accountId, stockId, clientOrderId, side, quantity, limitPrice,
+                requestedPrice, requestedCurrency, rate, "MARKET_TRADING_HALTED", at);
+        order.marketEventId = marketEventId;
+        return order;
+    }
+
+    /** 금액 계산과 account/holding 동결은 호출부의 같은 트랜잭션에서 수행합니다. */
+    public static TradeOrder pendingLimitOrder(Long accountId, Long stockId, UUID clientOrderId,
+                                               OrderSide side, BigDecimal quantity, BigDecimal limitPrice,
+                                               BigDecimal reservedCash,
+                                               OffsetDateTime orderedAt,
+                                               OffsetDateTime expiresAt,
+                                               BigDecimal requestedLimitPrice, String requestedLimitCurrency,
+                                               BigDecimal acceptanceExchangeRate) {
+        validateAcceptance(requestedLimitPrice, requestedLimitCurrency, acceptanceExchangeRate);
+        if (accountId == null || accountId <= 0 || stockId == null || stockId <= 0 || clientOrderId == null
+                || side == null || quantity == null || quantity.signum() <= 0 || limitPrice == null || limitPrice.signum() <= 0
+                || reservedCash == null || reservedCash.signum() < 0 || (side == OrderSide.SELL && reservedCash.signum() != 0)
+                || (side == OrderSide.BUY && reservedCash.signum() == 0)
+                || orderedAt == null || expiresAt == null || !orderedAt.isBefore(expiresAt)
+                || !isRepresentableAtScale(reservedCash, 0)
+                || !isRepresentableAtScale(quantity, 6) || !isRepresentableAtScale(limitPrice, 4)) {
+            throw new IllegalArgumentException("지정가 접수 근거가 올바르지 않습니다");
+        }
+        TradeOrder order = new TradeOrder(accountId, stockId, clientOrderId, side, quantity, OrderStatus.PENDING, orderedAt);
+        order.orderType = OrderType.LIMIT;
+        order.limitPrice = limitPrice;
+        order.requestedLimitPrice = requestedLimitPrice;
+        order.requestedLimitCurrency = requestedLimitCurrency;
+        order.acceptanceExchangeRate = acceptanceExchangeRate;
+        order.reservedCash = reservedCash;
+        order.expiresAt = expiresAt;
+        order.grossAmount = BigDecimal.ZERO;
+        order.fee = BigDecimal.ZERO;
+        order.tax = BigDecimal.ZERO;
+        order.netAmount = BigDecimal.ZERO;
+        return order;
+    }
+
+    public static TradeOrder rejectedLimitOrder(Long accountId, Long stockId, UUID clientOrderId,
+            OrderSide side, BigDecimal quantity, BigDecimal limitPrice, BigDecimal requestedPrice,
+            String requestedCurrency, BigDecimal rate, String reason, OffsetDateTime at) {
+        validateAcceptance(requestedPrice, requestedCurrency, rate);
+        TradeOrder order = new TradeOrder(accountId, stockId, clientOrderId, side, quantity, OrderStatus.REJECTED, at);
+        order.orderType = OrderType.LIMIT;
+        order.limitPrice = limitPrice;
+        order.requestedLimitPrice = requestedPrice;
+        order.requestedLimitCurrency = requestedCurrency;
+        order.acceptanceExchangeRate = rate;
+        order.rejectReason = reason;
+        order.closedAt = at;
+        order.grossAmount = BigDecimal.ZERO;
+        order.fee = BigDecimal.ZERO;
+        order.tax = BigDecimal.ZERO;
+        order.netAmount = BigDecimal.ZERO;
+        return order;
+    }
+
+    private static void validateAcceptance(BigDecimal price, String currency, BigDecimal rate) {
+        if (price == null || price.signum() <= 0 || !("KRW".equals(currency) || "USD".equals(currency))
+                || !isRepresentableAtScale(price, "KRW".equals(currency) ? 0 : 2)
+                || rate == null || rate.signum() <= 0 || !isRepresentableAtScale(rate, 6)) {
+            throw new IllegalArgumentException("지정가 원본 입력과 접수 환율이 올바르지 않습니다");
+        }
+    }
+
+    public BigDecimal getRequestedLimitPrice() { return requestedLimitPrice; }
+    public String getRequestedLimitCurrency() { return requestedLimitCurrency; }
+    public BigDecimal getAcceptanceExchangeRate() { return acceptanceExchangeRate; }
+
+    /** CB 거절에 사용한 {@code market_event}. 멱등 재생이 이 값으로 오류 데이터를 복원한다. */
+    public Long getMarketEventId() { return marketEventId; }
+
+    public boolean isActive() {
+        return status == OrderStatus.PENDING || status == OrderStatus.PARTIALLY_FILLED;
+    }
+
+    /** 종료된 미체결 잔여분은 활성 수량에 포함하지 않습니다. */
+    public BigDecimal activeRemainingQuantity() {
+        return isActive() ? quantity.subtract(filledQuantity) : BigDecimal.ZERO;
+    }
+
+    /**
+     * 계좌 잠금 아래 저장된 체결 한 건을 반영합니다. sequence로 이중 반영을 거절합니다.
+     * 잔여 동결 계산과 계좌/보유수량 갱신은 상위 DB 서비스가 같은 트랜잭션에서 수행합니다.
+     */
+    public void applyExecution(TradeExecution execution, BigDecimal nextReservedCash) {
+        if (orderType != OrderType.LIMIT || !isActive() || execution == null || execution.getExecutionId() == null
+                || !Objects.equals(orderId, execution.getOrderId())
+                || execution.getSequenceNo() != executionCount + 1
+                || execution.getExecutedAt().isBefore(orderedAt) || !execution.getExecutedAt().isBefore(expiresAt)
+                || (lastExecutedAt != null && execution.getExecutedAt().isBefore(lastExecutedAt))
+                || (side == OrderSide.BUY ? execution.getPrice().compareTo(limitPrice) > 0
+                                         : execution.getPrice().compareTo(limitPrice) < 0)
+                || nextReservedCash == null || nextReservedCash.signum() < 0
+                || nextReservedCash.compareTo(reservedCash) > 0 || !isRepresentableAtScale(nextReservedCash, 0)) {
+            throw new IllegalArgumentException("체결 반영 순서/대상/잔여 동결액이 올바르지 않습니다");
+        }
+        execution.validateOrder(this);
+        BigDecimal nextFilled = filledQuantity.add(execution.getQuantity());
+        if (nextFilled.compareTo(quantity) > 0 || (nextFilled.compareTo(quantity) == 0 && nextReservedCash.signum() != 0)
+                || (side == OrderSide.SELL && nextReservedCash.signum() != 0)
+                || (side == OrderSide.BUY && nextFilled.compareTo(quantity) < 0 && nextReservedCash.signum() == 0)) {
+            throw new IllegalArgumentException("체결 수량 또는 종료 동결액이 올바르지 않습니다");
+        }
+        filledQuantity = nextFilled;
+        executionCount = execution.getSequenceNo();
+        lastExecutedAt = execution.getExecutedAt();
+        reservedCash = nextReservedCash;
+        grossAmount = grossAmount.add(execution.getGrossAmountKrw());
+        fee = fee.add(execution.getFeeKrw());
+        tax = tax.add(execution.getTaxKrw());
+        netAmount = netAmount.add(execution.getNetAmountKrw());
+        status = nextFilled.compareTo(quantity) == 0 ? OrderStatus.FILLED : OrderStatus.PARTIALLY_FILLED;
+        if (status == OrderStatus.FILLED) closedAt = execution.getExecutedAt();
+    }
+
+    public OrderClosureResult cancel(OffsetDateTime at) { return closeRemainder(OrderStatus.CANCELED, at); }
+    public OrderClosureResult expire(OffsetDateTime at) { return closeRemainder(OrderStatus.EXPIRED, at); }
+
+    private OrderClosureResult closeRemainder(OrderStatus target, OffsetDateTime at) {
+        if (orderType != OrderType.LIMIT) throw new IllegalStateException("지정가 잔여분만 종료할 수 있습니다");
+        if (status == target) return OrderClosureResult.unchanged();
+        if (!isActive() || at == null || at.isBefore(orderedAt)
+                || (lastExecutedAt != null && at.isBefore(lastExecutedAt))
+                || (target == OrderStatus.EXPIRED ? at.isBefore(expiresAt) : !at.isBefore(expiresAt))) {
+            throw new IllegalStateException("주문 상태 또는 종료 시각이 올바르지 않습니다");
+        }
+        OrderClosureResult result = new OrderClosureResult(true, reservedCash,
+                side == OrderSide.SELL ? activeRemainingQuantity() : BigDecimal.ZERO);
+        status = target;
+        reservedCash = BigDecimal.ZERO;
+        closedAt = at;
+        return result;
     }
 
     public Long getOrderId() { return orderId; }
@@ -142,6 +377,7 @@ public class TradeOrder {
     public BigDecimal getQuantity() { return quantity; }
     public OrderStatus getStatus() { return status; }
     public String getRejectReason() { return rejectReason; }
+    public BigDecimal getReferencePrice() { return referencePrice; }
     public BigDecimal getExecutedPrice() { return executedPrice; }
     public OffsetDateTime getQuoteAt() { return quoteAt; }
     public BigDecimal getExchangeRate() { return exchangeRate; }
@@ -150,4 +386,11 @@ public class TradeOrder {
     public BigDecimal getTax() { return tax; }
     public BigDecimal getNetAmount() { return netAmount; }
     public OffsetDateTime getOrderedAt() { return orderedAt; }
+    public BigDecimal getLimitPrice() { return limitPrice; }
+    public BigDecimal getFilledQuantity() { return filledQuantity; }
+    public int getExecutionCount() { return executionCount; }
+    public OffsetDateTime getLastExecutedAt() { return lastExecutedAt; }
+    public BigDecimal getReservedCash() { return reservedCash; }
+    public OffsetDateTime getExpiresAt() { return expiresAt; }
+    public OffsetDateTime getClosedAt() { return closedAt; }
 }

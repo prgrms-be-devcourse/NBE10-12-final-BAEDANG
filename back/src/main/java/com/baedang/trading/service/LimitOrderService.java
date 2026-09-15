@@ -1,0 +1,268 @@
+package com.baedang.trading.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
+import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketSessionProvider;
+import com.baedang.market.port.MarketSessionStatus;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.repository.StockRepository;
+import com.baedang.trading.dto.LimitOrderQuoteResponse;
+import com.baedang.trading.dto.LimitOrderRequest;
+import com.baedang.trading.dto.OrderDetailResponse;
+import com.baedang.trading.entity.OrderSide;
+import com.baedang.trading.entity.OrderStatus;
+import com.baedang.trading.entity.TradeOrder;
+import com.baedang.trading.model.ClientOrderRetryPolicy;
+import com.baedang.trading.model.ExecutionRateEvidence;
+import com.baedang.trading.model.LimitOrderCommand;
+import com.baedang.trading.model.LimitOrderResult;
+import com.baedang.trading.model.MarketOrderAmount;
+import com.baedang.trading.model.OrderInput;
+import com.baedang.trading.model.OrderMarketContext;
+import com.baedang.trading.model.OrderQuoteQueryContext;
+import com.baedang.trading.model.OrderTerms;
+
+import io.micrometer.core.instrument.Timer;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Optional;
+
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.krw;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.rate;
+
+@Service
+@Transactional(propagation = Propagation.NEVER)
+public class LimitOrderService {
+
+    private final OrderPolicy policy;
+    private final LimitOrderTransactionService transactions;
+    private final LimitOrderPricing pricing;
+    private final MarketSessionProvider sessions;
+    private final ExecutionExchangeRateProvider rates;
+    private final StockRepository stocks;
+    private final OrderReadService reads;
+    private final OrderQuoteQueryService quoteReads;
+    private final Clock clock;
+    private final OrderMarketDataService marketData;
+    private final LimitOrderPreviewService previews;
+    private final TradingMetrics metrics;
+
+    public LimitOrderService(
+            OrderPolicy policy,
+            LimitOrderTransactionService transactions,
+            LimitOrderPricing pricing,
+            MarketSessionProvider sessions,
+            ExecutionExchangeRateProvider rates,
+            StockRepository stocks,
+            OrderReadService reads,
+            OrderQuoteQueryService quoteReads,
+            Clock clock,
+            OrderMarketDataService marketData,
+            LimitOrderPreviewService previews,
+            TradingMetrics metrics
+    ) {
+        this.policy = policy;
+        this.transactions = transactions;
+        this.pricing = pricing;
+        this.sessions = sessions;
+        this.rates = rates;
+        this.stocks = stocks;
+        this.reads = reads;
+        this.quoteReads = quoteReads;
+        this.clock = clock;
+        this.marketData = marketData;
+        this.previews = previews;
+        this.metrics = metrics;
+    }
+
+    public OrderDetailResponse place(Long userId, LimitOrderRequest request) {
+        // 사용자 체감 주문 지연 측정. 거절(BusinessException)=REJECTED, 그 밖의 런타임 오류=ERROR.
+        Timer.Sample sample = metrics.startOrderTimer();
+        String result = "SUCCESS";
+        try {
+            return doPlace(userId, request);
+        } catch (BusinessException e) {
+            result = "REJECTED";
+            throw e;
+        } catch (RuntimeException e) {
+            result = "ERROR";
+            throw e;
+        } finally {
+            metrics.stopOrderTimer(sample, result);
+        }
+    }
+
+    private OrderDetailResponse doPlace(Long userId, LimitOrderRequest request) {
+        OrderInput base = policy.parseInput(
+                request.accountId(),
+                request.clientOrderId(),
+                request.symbol(),
+                request.marketCountry(),
+                request.side(),
+                request.quantity()
+        );
+        String currency = LimitOrderRequestPolicy.currency(request.limitCurrency(), base.terms().marketCountry());
+        LimitOrderCommand command = new LimitOrderCommand(
+                base.accountId(),
+                base.clientOrderId(),
+                base.terms(),
+                LimitOrderRequestPolicy.price(request.limitPrice(), currency),
+                currency
+        );
+        Optional<LimitOrderResult> existing = transactions.existing(userId, command);
+        if (existing.isPresent()) {
+            return unwrap(existing.get());
+        }
+
+        Stock stock = stocks.findBySymbolIgnoreCaseAndMarketCountry(base.terms().symbol(), base.terms().marketCountry())
+                .orElseThrow(() -> retry(ErrorCode.STOCK_NOT_FOUND));
+        try {
+            stock = marketData.refreshStatus(stock);
+        } catch (BusinessException e) {
+            throw retry(e.getErrorCode());
+        }
+        ErrorCode reason = policy.determineStaticRejection(stock);
+        if (reason != null) {
+            throw retry(reason);
+        }
+
+        try {
+            marketData.requireQuote(stock);
+        } catch (BusinessException e) {
+            Optional<LimitOrderResult> halted = transactions.rejectIfHalted(userId, command);
+            if (halted.isPresent()) {
+                return unwrap(halted.get());
+            }
+            throw retry(e.getErrorCode());
+        }
+        OrderMarketContext context = prepare(base.terms().marketCountry());
+        LimitOrderPricing.Price price;
+        try {
+            price = pricing.calculate(command, context.executionRate());
+        } catch (BusinessException e) {
+            throw retry(e.getErrorCode());
+        }
+        return unwrap(transactions.accept(userId, command, context, price));
+    }
+
+    private OrderMarketContext prepare(MarketCountry country) {
+        try {
+            MarketSessionStatus session = sessions.currentSession(country, clock.instant());
+            ExecutionRateEvidence evidence;
+            if (country == MarketCountry.KR) {
+                evidence = ExecutionRateEvidence.krw(clock.instant().atOffset(ZoneOffset.UTC));
+            } else {
+                ExecutionExchangeRateSnapshot snapshot = rates.currentUsdKrwSnapshot();
+                if (snapshot == null) {
+                    throw retry(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+                }
+                evidence = ExecutionRateEvidence.from(snapshot);
+            }
+            return new OrderMarketContext(country, session.open(), session.validUntil(), evidence, clock.instant());
+        } catch (BusinessException e) {
+            throw retry(e.getErrorCode());
+        }
+    }
+
+    private OrderDetailResponse unwrap(LimitOrderResult result) {
+        if (result.rejected()) {
+            // 커밋된 REJECTED는 새 ID로 재시도하도록 안내한다. CB 거절이면 이벤트 데이터를 함께 내보낸다.
+            ErrorCode reason = ErrorCode.valueOf(result.response().rejectReason());
+            Map<String, Object> data = rejectionResponse(result.rejectionData());
+            if (reason == ErrorCode.PRICE_OUT_OF_RANGE || reason == ErrorCode.INVALID_TICK_SIZE) {
+                data.put("field", "limitPrice");
+            }
+            throw new BusinessException(reason, data);
+        }
+        return result.response();
+    }
+
+    private Map<String, Object> rejectionResponse(Map<String, Object> eventData) {
+        Map<String, Object> response = new LinkedHashMap<>(eventData);
+        response.putAll(ClientOrderRetryPolicy.NEW_CLIENT_ORDER_ID.asData());
+        return response;
+    }
+
+    public OrderDetailResponse cancel(Long userId, Long orderId) {
+        TradeOrder order = reads.owned(userId, orderId);
+        OrderDetailResponse result = transactions.close(userId, order.getAccountId(), orderId, false);
+        if (result.status() != OrderStatus.CANCELED) {
+            throw new BusinessException(ErrorCode.ORDER_STATE_CONFLICT,
+                    Map.of("orderId", result.orderId(), "status", result.status().name()));
+        }
+        return result;
+    }
+
+    public LimitOrderQuoteResponse quote(
+            Long userId,
+            String symbol,
+            String country,
+            String side,
+            String quantity,
+            String price,
+            String currency
+    ) {
+        OrderTerms terms = policy.parseTerms(symbol, country, side, quantity);
+        String normalizedCurrency = LimitOrderRequestPolicy.currency(currency, terms.marketCountry());
+        BigDecimal requested = LimitOrderRequestPolicy.price(price, normalizedCurrency);
+        OrderQuoteQueryContext db = marketData.prepareEstimate(quoteReads.load(userId, terms));
+        OrderMarketContext context = prepare(terms.marketCountry());
+        LimitOrderPricing.Price p = pricing.calculate(
+                new LimitOrderCommand(db.account().getAccountId(), null, terms, requested, normalizedCurrency),
+                context.executionRate()
+        );
+        Instant now = clock.instant();
+        policy.validateExecutionContextFresh(context, now);
+        ErrorCode reason = policy.determineStaticRejection(db.stock());
+        if (reason == null && !context.isMarketOpenAt(now)) {
+            reason = ErrorCode.MARKET_CLOSED;
+        }
+        if (reason == null && !policy.hasValidCurrencyForMarket(db.stock(), db.quote())) {
+            reason = ErrorCode.QUOTE_CURRENCY_MISMATCH;
+        }
+        if (reason == null) {
+            reason = policy.validateQuoteTime(db.quote(), now);
+        }
+        if (reason == null) {
+            reason = policy.validateTradingPrice(db.stock(), db.quote(), p.limitPrice(), now, true);
+        }
+        if (reason == null && terms.side() == OrderSide.BUY && db.account().availableCash().compareTo(p.reserve()) < 0) {
+            reason = ErrorCode.INSUFFICIENT_CASH;
+        }
+        if (reason == null && terms.side() == OrderSide.SELL && db.availableQuantity().compareTo(terms.quantity()) < 0) {
+            reason = ErrorCode.INSUFFICIENT_QUANTITY;
+        }
+        MarketOrderAmount a = p.estimate();
+        return new LimitOrderQuoteResponse(
+                currency(requested, normalizedCurrency),
+                normalizedCurrency,
+                currency(p.limitPrice(), terms.marketCountry().defaultCurrency()),
+                rate(context.executionRate()),
+                reason == null,
+                reason,
+                krw(db.account().availableCash()),
+                plain(db.availableQuantity()),
+                context.marketOpenUntil() == null ? null : context.marketOpenUntil().atOffset(ZoneOffset.UTC),
+                new LimitOrderQuoteResponse.Estimate(krw(a.grossAmount()), krw(a.fee()), krw(a.tax()), krw(a.netAmount()), krw(p.reserve())),
+                previews.preview(db.stock(), terms, p, context, reason)
+        );
+    }
+
+    private static BusinessException retry(ErrorCode code) {
+        return new BusinessException(code, ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
+    }
+}

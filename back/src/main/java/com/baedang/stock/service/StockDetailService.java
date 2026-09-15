@@ -1,0 +1,137 @@
+package com.baedang.stock.service;
+
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.market.entity.QuoteSnapshot;
+import com.baedang.market.service.PriceLimitLoadService;
+import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.stock.dto.StockDetailResponse;
+import com.baedang.stock.entity.ListingStatus;
+import com.baedang.stock.entity.MarketCountry;
+import com.baedang.stock.entity.Stock;
+import com.baedang.stock.repository.StockRepository;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+
+import static com.baedang.global.formatter.FinancialDecimalFormatter.currency;
+import static com.baedang.global.formatter.FinancialDecimalFormatter.plain;
+
+@Service
+public class StockDetailService {
+
+    private final PriceLimitLoadService priceLimits;
+    private final StockRepository stockRepository;
+    private final QuoteSnapshotRepository quoteSnapshotRepository;
+    private final QuoteRealtimePolicy quoteRealtimePolicy;
+    private final StockOnDemandQuoteService stockOnDemandQuoteService;
+    private final StockWarningQueryService stockWarningQueryService;
+
+    public StockDetailService(
+            StockRepository stockRepository,
+            QuoteSnapshotRepository quoteSnapshotRepository,
+            QuoteRealtimePolicy quoteRealtimePolicy,
+            StockOnDemandQuoteService stockOnDemandQuoteService,
+            PriceLimitLoadService priceLimits,
+            StockWarningQueryService stockWarningQueryService
+    ) {
+        this.priceLimits = priceLimits;
+        this.stockRepository = stockRepository;
+        this.quoteSnapshotRepository = quoteSnapshotRepository;
+        this.quoteRealtimePolicy = quoteRealtimePolicy;
+        this.stockOnDemandQuoteService = stockOnDemandQuoteService;
+        this.stockWarningQueryService = stockWarningQueryService;
+    }
+
+    public StockDetailResponse getDetail(String symbol, String marketCountryValue) {
+        MarketCountry marketCountry = parseMarketCountry(marketCountryValue);
+        Stock stock = stockRepository.findBySymbolIgnoreCaseAndMarketCountry(symbol, marketCountry)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.STOCK_NOT_FOUND,
+                        "symbol=" + symbol + ", marketCountry=" + marketCountry));
+        QuoteSnapshot quote = quoteSnapshotRepository.findById(stock.getStockId()).orElse(null);
+        // 일봉은 랭킹 여부와 관계없이 부족하면 온디맨드 백필한다. 시세는 상위 100 밖
+        // 종목만 갱신하고, 상위 100은 스케줄러가 채운 기존 값을 그대로 사용한다.
+        quote = stockOnDemandQuoteService.ensureQuote(stock, quote);
+
+        quote = priceLimits.ensureForDisplay(stock, quote);
+        boolean showLimits = priceLimits.canDisplay(stock, quote);
+        boolean realtime = quoteRealtimePolicy.isRealtime(marketCountry, quote);
+        Tradability tradability = tradability(stock, quote);
+        StockWarningQueryService.WarningSnapshot warnings = stockWarningQueryService.currentWarnings(stock);
+
+        return new StockDetailResponse(
+                stock.getSymbol(),
+                stock.getName(),
+                stock.getEnglishName(),
+                stock.getMarket(),
+                stock.getMarketCountry(),
+                stock.getCurrency(),
+                stock.getIsinCode(),
+                stock.getStockCategory(),
+                plain(stock.getLeverageFactor()),
+                stock.getIsDividend(),
+                price(quote, realtime, stock.getCurrency(), showLimits),
+                info(stock, quote),
+                warnings.warnings(),
+                warnings.status(),
+                tradability.tradable(),
+                tradability.reason()
+        );
+    }
+
+    private Tradability tradability(Stock stock, QuoteSnapshot quote) {
+        if (stock.getListingStatus() != ListingStatus.ACTIVE) {
+            return Tradability.rejected("STOCK_NOT_TRADABLE");
+        }
+        if (Boolean.TRUE.equals(stock.getIsSuspended())) return Tradability.rejected("SUSPENDED");
+        if (Boolean.TRUE.equals(stock.getIsLiquidation())) return Tradability.rejected("LIQUIDATION");
+        if (!quoteRealtimePolicy.isMarketOpen(stock.getMarketCountry())) {
+            return Tradability.rejected("MARKET_CLOSED");
+        }
+        if (quote == null) return Tradability.rejected("QUOTE_NOT_FOUND");
+        return new Tradability(true, null);
+    }
+
+    private StockDetailResponse.Price price(QuoteSnapshot quote, boolean realtime, String currencyCode, boolean showLimits) {
+        if (quote == null) {
+            return new StockDetailResponse.Price(null, null, null, null, null, null, null, false);
+        }
+        BigDecimal changeAmount = quote.getPrevClose() == null
+                ? null
+                : quote.getLastPrice().subtract(quote.getPrevClose());
+        return new StockDetailResponse.Price(
+                currency(quote.getLastPrice(), currencyCode),
+                currency(quote.getPrevClose(), currencyCode),
+                currency(changeAmount, currencyCode),
+                plain(quote.changeRate()),
+                currency(showLimits ? quote.getUpperLimit() : null, currencyCode),
+                currency(showLimits ? quote.getLowerLimit() : null, currencyCode),
+                quote.getQuoteAt(),
+                realtime
+        );
+    }
+
+    private StockDetailResponse.Info info(Stock stock, QuoteSnapshot quote) {
+        BigDecimal marketCap = quote == null || quote.getLastPrice() == null || stock.getSharesOutstanding() == null
+                ? null
+                : quote.getLastPrice().multiply(stock.getSharesOutstanding());
+        return new StockDetailResponse.Info(
+                currency(marketCap, stock.getCurrency()),
+                plain(stock.getSharesOutstanding()),
+                stock.getListDate()
+        );
+    }
+
+    private MarketCountry parseMarketCountry(String value) {
+        return MarketCountry.parse(value)
+                .orElseThrow(() -> new BusinessException(
+                        ErrorCode.INVALID_INPUT, "marketCountry는 KR 또는 US여야 합니다"));
+    }
+
+    private record Tradability(boolean tradable, String reason) {
+        private static Tradability rejected(String reason) {
+            return new Tradability(false, reason);
+        }
+    }
+}

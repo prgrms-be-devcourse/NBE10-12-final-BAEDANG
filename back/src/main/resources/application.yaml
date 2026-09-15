@@ -31,11 +31,11 @@ spring:
   jpa:
     hibernate:
       # !! create / update 로 바꾸지 마세요.
-      #    스키마의 진실은 infra/schema.sql 하나입니다.
+      #    스키마의 진실은 Flyway 마이그레이션(db/migration/) 하나입니다.
       #    validate 는 "엔티티와 실제 테이블이 어긋나면 기동을 거부"합니다.
       #    update 로 두면 Hibernate 가 조용히 컬럼을 만들어버려서,
       #    내 PC 에서만 되는 상태가 됩니다.
-      #    스키마를 바꿨다면 infra 에서 docker compose down -v && up -d
+      #    스키마를 바꿨다면 db/migration 에 V2, V3 ... 새 파일을 추가하세요.
       ddl-auto: validate
     properties:
       hibernate:
@@ -56,19 +56,95 @@ spring:
       write-bigdecimal-as-plain: true
     default-property-inclusion: non_null
 
+  # 비밀번호 찾기 재설정 메일 발송(SMTP). host/username/password 가 비어 있어도
+  # (기본값) 기동은 정상이다 — 실제 발송 여부는 아래 mail.enabled 가 결정한다
+  # (PasswordResetMailSender 참고). 실제로 보내려면 .env 에 MAIL_ENABLED=true 와
+  # 이 셋(호스트·발신 계정)을 채우세요.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 server:
   port: 8080
   servlet:
     context-path: /
+  tomcat:
+    mbeanregistry:
+      enabled: true
+
+# ── CORS 허용 오리진 ─────────────────────────────────────────────────────────
+#   프론트(Next.js)가 다른 오리진에서 백엔드를 호출하므로 필요합니다. 배포 환경이
+#   늘어나면 코드를 고치지 말고 .env 의 CORS_ALLOWED_ORIGINS 에 콤마로 추가하세요.
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+# ── 프론트엔드 ───────────────────────────────────────────────────────────────
+#   비밀번호 재설정 메일 속 링크(`/reset-password?token=...`)를 만들 때만 쓴다.
+app:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:3000}
+
+# ── 메일 발송 게이트 — 비밀번호 찾기 재설정 메일 ────────────────────────────
+#   spring.mail.* (최상단 spring: 블록) 설정과 짝을 이룬다. false(기본값)면
+#   PasswordResetMailSender가 발송을 생략하며 재설정 토큰과 링크를 로그에 남기지 않는다.
+mail:
+  enabled: ${MAIL_ENABLED:false}
+  from: ${MAIL_FROM:no-reply@investup.local}
 
 # ── 토스증권 Open API ────────────────────────────────────────────────────────
-#   키가 비어 있으면 수집기를 끄고 Fake 어댑터로 돕니다.
-#   수집기 담당자만 .env 를 채우면 나머지 팀원은 키 없이도 앱이 뜹니다.
+#   개발용 대역(Fake) 구현체가 없으므로 키가 비어 있으면(기본값) 백엔드가 기동하지
+#   않습니다. .env 에 TOSS_CLIENT_ID/TOSS_CLIENT_SECRET/TOSS_ENABLED=true 를 채워
+#   실제 Toss API로 개발하세요.
 toss:
   base-url: https://openapi.tossinvest.com
   client-id: ${TOSS_CLIENT_ID:}
   client-secret: ${TOSS_CLIENT_SECRET:}
   enabled: ${TOSS_ENABLED:false}
+
+  # 일봉 시드 백필 관리자 트리거 활성화 플래그(기본 false).
+  #   true 일 때만 POST /internal/admin/seed/daily-candles 엔드포인트가 등록됩니다.
+  #   인증 도입 전이라 상시 노출을 피하려는 것으로, 운영자가 시딩이 필요한 구간에만 켜고 끕니다.
+  #   실데이터 적재에는 toss.enabled=true 도 함께 필요합니다.
+  seed-daily-candles: ${TOSS_SEED_DAILY_CANDLES:${SEED_DAILY_CANDLES:false}}
+
+  # 기동 시 1회 수동 적재 트리거(기본 false). StockMasterLoadRunner 가 읽습니다.
+  #   주간 스케줄(월 07:00/08:00/21:00 KST)을 기다리지 않고 초기 데이터를 채울 때만 켜세요.
+  #   랭킹은 스케줄과 달리 KR/US 를 한 번에 적재합니다.
+  load-stock-master: ${TOSS_LOAD_STOCK_MASTER:false}
+  load-stock-master-detail: ${TOSS_LOAD_STOCK_MASTER_DETAIL:false}
+  load-stock-ranking: ${TOSS_LOAD_STOCK_RANKING:false}
+
+# ── 한국투자증권 Open API — 산업·재무 조회 전용 ─────────────────────────────
+#   KIS_ENABLED=true일 때만 app key/secret을 필수로 검증합니다.
+#   신규 app key의 초기 3 TPS 제한이 끝나는 2026-09-10 KST 이후 18 TPS를 사용합니다.
+#   그 전에 임시로 켜야 하면 KIS_REQUESTS_PER_SECOND=3으로 낮춰 실행하세요.
+kis:
+  enabled: ${KIS_ENABLED:false}
+  base-url: https://openapi.koreainvestment.com:9443
+  app-key: ${KIS_APP_KEY:}
+  app-secret: ${KIS_APP_SECRET:}
+  requests-per-second: ${KIS_REQUESTS_PER_SECOND:18}
+  connect-timeout: ${KIS_CONNECT_TIMEOUT:3s}
+  read-timeout: ${KIS_READ_TIMEOUT:5s}
+  financial-cache-ttl: ${KIS_FINANCIAL_CACHE_TTL:7d}
+  industry-cache-ttl: ${KIS_INDUSTRY_CACHE_TTL:30d}
+  load-financials: ${KIS_LOAD_FINANCIALS:false}
+
+# ── KRX KIND — 시장조치(서킷브레이커·사이드카) 수집 ──────────────────────────
+krx:
+  market-events:
+    enabled: ${KRX_MARKET_EVENTS_ENABLED:false}
+    base-url: ${KRX_MARKET_EVENTS_BASE_URL:https://kind.krx.co.kr}
+    poll-interval: ${KRX_MARKET_EVENTS_POLL_INTERVAL:15s}
+    connect-timeout: ${KRX_MARKET_EVENTS_CONNECT_TIMEOUT:3s}
+    read-timeout: ${KRX_MARKET_EVENTS_READ_TIMEOUT:5s}
 
 # ── 거래 정책 ────────────────────────────────────────────────────────────────
 #   요율은 DB 에 저장하지 않습니다. 여기가 유일한 정의 지점이고,
@@ -78,12 +154,25 @@ toss:
 #     매도(국내)   net = gross - fee - k_tax
 #     매도(미국)   net = gross - fee - a_tax
 #
-#       fee   = gross x fee-rate
-#       k_tax = gross x k-tax-rate
-#       a_tax = max(gross x a-tax-rate, a-tax-min-usd x 환율)
+#       fee        = gross_krw x fee-rate
+#       k_tax      = gross_krw x k-tax-rate
+#       sec_fee_usd = max(price_usd x quantity x a-tax-rate, a-tax-min-usd)
+#       a_tax      = sec_fee_usd x 환율
 trading:
+  # 항상 실행하는 지정가 워커. 예산은 새로운 주문 시작을 제한하고 진행 중 트랜잭션은 완료합니다.
+  limit-execution:
+    interval: 3s
+    initial-delay: 3s
+    page-size: 50
+    max-attempts: 100
+    # 한 종목·방향이 실행 기회를 독점하지 않도록 다른 그룹으로 전환합니다.
+    group-attempts: 10
+    start-budget: 5s
+    lock-timeout: 2s
+  stock-status-cache-ttl: ${STOCK_STATUS_CACHE_TTL:5m}
   initial-cash: ${INITIAL_CASH:50000000}
 
+  # 요율·SEC 최소액은 프로젝트 고정 환경 설정입니다. 활성 주문 중 변경하지 않습니다.
   # 거래 수수료 0.01% — 매수·매도 공통, 국내·미국 공통
   fee-rate: ${FEE_RATE:0.0001}
 
@@ -99,18 +188,83 @@ trading:
 
   # 이 시간(초)보다 오래된 시세로는 체결하지 않습니다 → STALE_QUOTE
   quote-max-staleness-seconds: ${QUOTE_MAX_STALENESS_SECONDS:15}
+  # 장 운영 정보와 환율 준비가 끝난 뒤 계좌 락을 기다릴 수 있는 시간입니다.
+  execution-context-max-age-seconds: ${EXECUTION_CONTEXT_MAX_AGE_SECONDS:15}
 
-  # 시세 수집 주기(초)와 대상 종목 수
-  quote-poll-interval-seconds: ${QUOTE_POLL_INTERVAL_SECONDS:5}
+  # 1회 주문 수량 상한. 초기 예수금 5천만원인 교육용 서비스에서 100만 주는
+  # 정상 주문을 막지 않으면서 과도한 BigDecimal 계산과 DB 범위 초과를 방지합니다.
+  max-order-quantity: ${MAX_ORDER_QUANTITY:1000000}
+
+  # 랭킹과 활성 지정가 주문 종목만 지속 수집하고 그 외 종목은 온디맨드로 조회합니다.
   universe-size: ${QUOTE_UNIVERSE_SIZE:100}
+  quote-collection:
+    refresh-interval: ${QUOTE_REFRESH_INTERVAL:5s}
+    dispatch-interval: ${QUOTE_DISPATCH_INTERVAL:25ms}
+    background-concurrency: ${QUOTE_BACKGROUND_CONCURRENCY:3}
+    background-requests-per-second: ${QUOTE_BACKGROUND_RPS:8}
+    max-in-flight-stocks: ${QUOTE_MAX_IN_FLIGHT_STOCKS:1000}
+    request-timeout: ${QUOTE_REQUEST_TIMEOUT:20s}
 
-# ── 1주차 임시 설정 ──────────────────────────────────────────────────────────
-#   인증을 1주차에 붙이지 않으므로, 로그인하지 않은 요청은 시드 사용자로 봅니다.
-#   회원가입·로그인 API 는 동작하지만 토큰을 발급하지 않습니다.
-#   2주차에 JWT 를 붙이면 이 블록을 지우세요.
+  # 전체 사용자 공유 가상 호가 정책 (V2)
+  orderbook:
+    policy-version: V2
+    refresh-interval: 3s
+    refresh-initial-delay: ${ORDERBOOK_REFRESH_INITIAL_DELAY:0s}
+    max-quote-age: 15s
+    kr-base-notional: 20000000
+    us-base-notional: 15000
+    min-quantity: 1
+    max-quantity: 1000000
+    noise-min-bps: 8000
+    noise-max-bps: 12000
+    closed-version-retention: 1m
+    retention-initial-delay: ${ORDERBOOK_RETENTION_INITIAL_DELAY:0s}
+
+# ── 투자 성향 리포트 / 리더보드 ──────────────────────────────────────────────
+report:
+  # 4주 이상 보유 성과 섹션의 임계(표시용). 투자 MBTI 판정엔 영향 없음.
+  holding-period-weeks: ${REPORT_HOLDING_PERIOD_WEEKS:4}
+  # 투자 MBTI 축 비중을 평균낼 원가 구성 창(주). 체결 재생으로 이 창을 시점별 복원해 평균한다(§6.2).
+  mbti-window-weeks: ${REPORT_MBTI_WINDOW_WEEKS:4}
+  # 리포트 4주 회차 게이트(§6.1). 현재 ACTIVE 계좌 개설 후 이 주수를 채워야 리포트가 열린다.
+  unlock-weeks: ${REPORT_UNLOCK_WEEKS:4}
+  seed:
+    # 개발/데모용 합성 포트폴리오 시딩 관리자 트리거 활성 플래그(기본 false, #152 검증 게이트).
+    #   true 일 때만 POST /internal/admin/seed/portfolios 가 등록됩니다.
+    #   프로덕션에는 켜지 마세요 — 시드는 개발/데모 전용이며 실 리더보드엔 노출되지 않습니다.
+    enabled: ${REPORT_SEED_ENABLED:false}
+    account-count: ${REPORT_SEED_ACCOUNT_COUNT:50}
+    max-holdings: ${REPORT_SEED_MAX_HOLDINGS:8}
+
+  # 리더보드 배치 스냅샷(설계문서 §6.4).
+  leaderboard:
+    # 자격 = opened_at + N주를 채운 ACTIVE 계좌. 리포트 4주 게이트와 같은 창.
+    eligibility-weeks: ${REPORT_LEADERBOARD_ELIGIBILITY_WEEKS:4}
+    # 시드 포함 여부는 코호트(배치) 시점에 정한다. 기본 false = 프로덕션 안전(실유저만 랭킹).
+    #   dev/데모에서만 true 로 켜 시드 모집단을 리더보드에 노출한다.
+    include-seed: ${REPORT_LEADERBOARD_INCLUDE_SEED:false}
+    top-size: ${REPORT_LEADERBOARD_TOP_SIZE:10}
+    neighbor-radius: ${REPORT_LEADERBOARD_NEIGHBOR_RADIUS:2}
+    # 개발용 수동 배치 트리거. true 일 때만 POST /internal/admin/leaderboard/refresh 가 등록된다.
+    admin-trigger-enabled: ${REPORT_LEADERBOARD_ADMIN_TRIGGER_ENABLED:false}
+
 auth:
-  enabled: ${AUTH_ENABLED:false}
-  dev-fixed-user-id: ${DEV_FIXED_USER_ID:1}
+  session:
+    encryption-key: ${AUTH_SESSION_ENCRYPTION_KEY}
+    rotation-grace: 20s
+    cleanup-delay: 1h
+  jwt:
+    issuer: baedang
+    secret: ${JWT_SECRET}
+    access-ttl: ${JWT_ACCESS_TTL:15m}
+    refresh-ttl: ${JWT_REFRESH_TTL:7d}
+  # 비밀번호 찾기 이메일 링크의 유효 시간. 지나면 PASSWORD_RESET_TOKEN_EXPIRED.
+  password-reset:
+    token-ttl: ${PASSWORD_RESET_TOKEN_TTL:30m}
+    # 같은 회원에게 재설정 메일을 다시 보내기까지 최소 대기 시간(리뷰 지적, PR #207) —
+    # 이 안에 재요청이 오면 메일도 새 토큰 발급도 없이 조용히 무시한다(응답은 동일하게 200).
+    # 없으면 등록된 이메일을 아는 누구나 그 사람 받은편지함에 무한정 메일을 보낼 수 있다.
+    request-cooldown: ${PASSWORD_RESET_REQUEST_COOLDOWN:1m}
 
 logging:
   level:
@@ -119,3 +273,37 @@ logging:
     # 바인딩 파라미터까지 보고 싶을 때만 켜세요. 로그가 매우 길어집니다.
     # org.hibernate.orm.jdbc.bind: TRACE
 
+management:
+  server:
+    port: 8081
+  endpoints:
+    web:
+      base-path: /actuator
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  metrics:
+    # 모든 지표에 application=trading 라벨을 붙인다. 여러 서비스가 한 Prometheus 로
+    # 모일 때 어느 앱 지표인지 구분하기 위함(단일 앱이라도 라벨이 있어 해가 없다).
+    tags:
+      application: trading
+    distribution:
+      # http_server_requests 에 히스토그램 버킷을 방출한다(이슈 #70).
+      #   이게 없으면 http_server_requests_seconds_bucket 이 없어
+      #   Prometheus histogram_quantile 로 서버측 p95/p99 를 그릴 수 없다.
+      percentiles-histogram:
+        http.server.requests: true
+        # 앱→토스 outbound 호출(5초 시세·분봉·환율 등)의 p95/p99 를 그리기 위함.
+        http.client.requests: true
+        # 도메인 Timer(TradingMetrics). !! 없으면 _bucket 이 안 생겨 도메인 p95 패널이 빈 화면.
+        trading.external.api: true
+        trading.order.execution: true
+      # 부하 테스트 SLA(p95<500ms)를 명시적 SLO 경계로 잡아 저지연 구간 해상도를 높인다.
+      #   상시 모니터링용 5s 경계를 더해(상단 완만 구간 해상도) #70 의 300ms 는 유지한다.
+      #   버킷은 가산적이라 늘려도 비용이 작다.
+      slo:
+        http.server.requests: 50ms,100ms,200ms,300ms,500ms,1s,2s,5s

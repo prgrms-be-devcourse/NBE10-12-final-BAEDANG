@@ -1,0 +1,132 @@
+package com.baedang.report.controller;
+
+import com.baedang.auth.security.JwtAuthenticationFilter;
+import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService;
+import com.baedang.auth.security.RestAuthenticationEntryPoint;
+import com.baedang.global.config.SecurityConfig;
+import com.baedang.global.error.BusinessException;
+import com.baedang.global.error.ErrorCode;
+import com.baedang.report.dto.PersonalityReportResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardResponse;
+import com.baedang.report.leaderboard.dto.LeaderboardTypesResponse;
+import com.baedang.report.leaderboard.service.LeaderboardQueryService;
+import com.baedang.report.service.PersonalityReportService;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import java.time.OffsetDateTime;
+import java.util.List;
+
+import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+@WebMvcTest(ReportController.class)
+@Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
+class ReportControllerTest {
+    @MockitoBean private AuthSessionService authSessions;
+
+
+    @Autowired MockMvc mockMvc;
+    @MockitoBean PersonalityReportService personalityReportService;
+    @MockitoBean LeaderboardQueryService leaderboardQueryService;
+    @MockitoBean JwtTokenProvider jwtTokenProvider;
+
+    @Test
+    void 리포트를_조회하면_유형과_비중을_문자열로_응답한다() throws Exception {
+        when(personalityReportService.getReport(7L)).thenReturn(sampleReport());
+
+        mockMvc.perform(get("/api/reports/me").with(authenticatedUser(7L)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.accountId").value(10))
+                .andExpect(jsonPath("$.returnRate").value("0.06"))
+                .andExpect(jsonPath("$.classified").value(true))
+                .andExpect(jsonPath("$.typeCode").value("CKSB"))
+                .andExpect(jsonPath("$.typeLabel").value("집중·국내·개별주·안정형"))
+                .andExpect(jsonPath("$.shares.domestic").value("0.6364"))
+                .andExpect(jsonPath("$.holdingCount").value(2))
+                .andExpect(jsonPath("$.holdingPeriodWeeks").value(4))
+                .andExpect(jsonPath("$.longHeldStocks[0].symbol").value("005930"))
+                .andExpect(jsonPath("$.longHeldStocks[0].returnRate").value("0.0592"));
+    }
+
+    @Test
+    void 인증_없이_조회하면_401을_응답한다() throws Exception {
+        mockMvc.perform(get("/api/reports/me"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    }
+
+    @Test
+    void ACTIVE_계좌가_없으면_404_와_에러코드를_응답한다() throws Exception {
+        when(personalityReportService.getReport(1L))
+                .thenThrow(new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
+
+        mockMvc.perform(get("/api/reports/me").with(authenticatedUser(1L)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_NOT_FOUND"));
+    }
+
+    @Test
+    void 리더보드를_조회하면_asOf와_상위목록을_응답한다() throws Exception {
+        when(leaderboardQueryService.getLeaderboard(7L)).thenReturn(new LeaderboardResponse(
+                OffsetDateTime.parse("2026-09-11T07:30:00Z"), 100,
+                List.of(new LeaderboardResponse.Entry(1, "홍*동", "0.3")),
+                new LeaderboardResponse.MeSection(2, "0.2", 5,
+                        List.of(new LeaderboardResponse.Entry(2, "김*수", "0.2")),
+                        "DKSB", "분산·국내·개별주·안정형", 1, 20, 5)));
+
+        mockMvc.perform(get("/api/reports/leaderboard").with(authenticatedUser(7L)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.participants").value(100))
+                .andExpect(jsonPath("$.top[0].nickname").value("홍*동"))
+                .andExpect(jsonPath("$.me.topPercent").value(5))
+                .andExpect(jsonPath("$.me.typeCode").value("DKSB"))
+                .andExpect(jsonPath("$.me.typeRank").value(1));
+    }
+
+    @Test
+    void 리더보드도_인증_없이_조회하면_401을_응답한다() throws Exception {
+        mockMvc.perform(get("/api/reports/leaderboard"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void 유형_비교를_조회하면_유형별_평균수익률을_응답한다() throws Exception {
+        when(leaderboardQueryService.getTypeComparison()).thenReturn(new LeaderboardTypesResponse(
+                OffsetDateTime.parse("2026-09-11T07:30:00Z"),
+                List.of(new LeaderboardTypesResponse.TypeEntry("DKSB", "분산·국내·개별주·안정형", 12, "0.05"))));
+
+        mockMvc.perform(get("/api/reports/leaderboard/types").with(authenticatedUser(7L)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.types[0].typeCode").value("DKSB"))
+                .andExpect(jsonPath("$.types[0].typeLabel").value("분산·국내·개별주·안정형"))
+                .andExpect(jsonPath("$.types[0].avgReturnRate").value("0.05"));
+    }
+
+    private static RequestPostProcessor authenticatedUser(long userId) {
+        return authentication(new UsernamePasswordAuthenticationToken(userId, null, List.of()));
+    }
+
+    private PersonalityReportResponse sampleReport() {
+        return new PersonalityReportResponse(
+                10L, 1, false, OffsetDateTime.parse("2026-08-12T00:00:00Z"),
+                "50000000", "20000000", "33000000", "53000000", "3000000", "0.06",
+                true, "CKSB", "집중·국내·개별주·안정형",
+                new PersonalityReportResponse.Shares("0.6364", "0.6364", "0.6364", "0"),
+                2, 4,
+                List.of(new PersonalityReportResponse.LongHeldStock(
+                        "005930", "삼성전자", "KRW", "228000", "241500", "0.0592",
+                        OffsetDateTime.parse("2026-08-01T00:00:00Z"))),
+                OffsetDateTime.parse("2026-09-09T00:00:00Z"));
+    }
+}
