@@ -2,6 +2,7 @@ package com.baedang.auth.dto;
 
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.User;
+import java.time.Instant;
 
 public record AuthResponse(
         Long userId,
@@ -9,7 +10,8 @@ public record AuthResponse(
         String nickname,
         String accessToken,
         String refreshToken,
-        AccountInfo account
+        AccountInfo account,
+        Instant expiresAt
 ) {
     public record AccountInfo(
             Long accountId,
@@ -23,7 +25,8 @@ public record AuthResponse(
             User user,
             Account account,
             String accessToken,
-            String refreshToken
+            String refreshToken,
+            Instant expiresAt
     ){
         AccountInfo accountInfo = new AccountInfo(
                 account.getAccountId(),
@@ -37,7 +40,8 @@ public record AuthResponse(
                 user.getNickname(),
                 accessToken,
                 refreshToken,
-                accountInfo
+                accountInfo,
+                expiresAt
         );
     }
 }

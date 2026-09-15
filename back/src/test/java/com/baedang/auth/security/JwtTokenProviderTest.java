@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -37,7 +38,7 @@ class JwtTokenProviderTest {
     void t1() {
         Long userId = 7L;
 
-        String token = provider.createAccessToken(userId);
+        String token = provider.createAccessToken(userId, UUID.randomUUID(), NOW.plusSeconds(604800));
         Long parsedUserId = provider.parseAccessToken(token);
 
         assertThat(parsedUserId).isEqualTo(userId);
@@ -48,7 +49,7 @@ class JwtTokenProviderTest {
     void t2() {
         Long userId = 7L;
 
-        String token = provider.createRefreshToken(userId);
+        String token = provider.createRefreshToken(userId, UUID.randomUUID(), 0, NOW.plusSeconds(604800));
         Long parsedUserId = provider.parseRefreshToken(token);
 
         assertThat(parsedUserId).isEqualTo(userId);
@@ -57,7 +58,7 @@ class JwtTokenProviderTest {
     @Test
     @DisplayName("만료된 access_token을 거절한다")
     void t3() {
-        String token = provider.createAccessToken(7L);
+        String token = provider.createAccessToken(7L, UUID.randomUUID(), NOW.plusSeconds(604800));
         Clock futureClock = Clock.fixed(NOW.plus(Duration.ofMinutes(16)), ZoneOffset.UTC);
         JwtTokenProvider futureProvider = new JwtTokenProvider(properties, futureClock);
 
@@ -76,7 +77,7 @@ class JwtTokenProviderTest {
         );
 
         JwtTokenProvider otherProvider = new JwtTokenProvider(otherProps, clock);
-        String otherToken = otherProvider.createAccessToken(7L);
+        String otherToken = otherProvider.createAccessToken(7L, UUID.randomUUID(), NOW.plusSeconds(604800));
 
         assertThatThrownBy(() -> provider.parseAccessToken(otherToken))
                 .isInstanceOf(JwtException.class);
@@ -85,7 +86,7 @@ class JwtTokenProviderTest {
     @Test
     @DisplayName("refresh_token을 access로 검증하면 거절한다")
     void refresh_token을_access로_검증하면_거절한다() {
-        String refreshToken = provider.createRefreshToken(7L);
+        String refreshToken = provider.createRefreshToken(7L, UUID.randomUUID(), 0, NOW.plusSeconds(604800));
 
         assertThatThrownBy(() -> provider.parseAccessToken(refreshToken))
                 .isInstanceOf(JwtException.class);
@@ -94,7 +95,7 @@ class JwtTokenProviderTest {
     @Test
     @DisplayName("access_token을 refresh로 검증하면 거절한다")
     void access_token을_refresh로_검증하면_거절한다() {
-        String accessToken = provider.createAccessToken(7L);
+        String accessToken = provider.createAccessToken(7L, UUID.randomUUID(), NOW.plusSeconds(604800));
 
         assertThatThrownBy(() -> provider.parseRefreshToken(accessToken))
                 .isInstanceOf(JwtException.class);
@@ -135,4 +136,13 @@ class JwtTokenProviderTest {
         assertThatThrownBy(() -> new JwtTokenProvider(invalidProps, clock))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+    @Test
+    @DisplayName("배포 전 세션 식별자가 없는 토큰은 명시적으로 거절한다")
+    void legacy_token_without_session_is_invalid() {
+        String token = Jwts.builder().issuer("baedang").subject("7")
+                .claim("token_type", "access").expiration(Date.from(NOW.plusSeconds(900)))
+                .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(TEST_SECRET))).compact();
+        assertThatThrownBy(() -> provider.accessIdentity(token)).isInstanceOf(IllegalArgumentException.class);
+    }
+
 }

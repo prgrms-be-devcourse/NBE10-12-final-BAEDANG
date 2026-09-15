@@ -221,6 +221,10 @@ report:
     admin-trigger-enabled: ${REPORT_LEADERBOARD_ADMIN_TRIGGER_ENABLED:false}
 
 auth:
+  session:
+    encryption-key: ${AUTH_SESSION_ENCRYPTION_KEY}
+    rotation-grace: 5s
+    cleanup-delay: 1h
   jwt:
     issuer: baedang
     secret: ${JWT_SECRET}

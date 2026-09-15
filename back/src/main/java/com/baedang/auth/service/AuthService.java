@@ -5,7 +5,7 @@ import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
-import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService.Tokens;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.global.normalizer.DomainNormalizer;
@@ -16,8 +16,6 @@ import com.baedang.user.entity.User;
 import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
 import com.baedang.user.repository.UserRepository;
-import io.jsonwebtoken.ExpiredJwtException;
-import io.jsonwebtoken.JwtException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,7 +41,7 @@ public class AuthService {
     private final AccountRepository accountRepository;
     private final LedgerService ledgerService;
     private final PasswordEncoder passwordEncoder;
-    private final JwtTokenProvider jwtTokenProvider;
+    private final AuthSessionService sessions;
     private final BigDecimal initialCash;
     private final Clock clock;
 
@@ -60,14 +58,14 @@ public class AuthService {
                        AccountRepository accountRepository,
                        LedgerService ledgerService,
                        PasswordEncoder passwordEncoder,
-                       JwtTokenProvider jwtTokenProvider,
+                       AuthSessionService sessions,
                        @Value("${trading.initial-cash}") BigDecimal initialCash,
                        Clock clock) {
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.ledgerService = ledgerService;
         this.passwordEncoder = passwordEncoder;
-        this.jwtTokenProvider = jwtTokenProvider;
+        this.sessions = sessions;
         this.initialCash = initialCash;
         this.clock = clock;
     }
@@ -117,11 +115,10 @@ public class AuthService {
                 account.getRoundNo(),
                 account.getOpenedAt());
 
-        String accessToken = jwtTokenProvider.createAccessToken(user.getUserId());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
+        Tokens tokens = sessions.create(user.getUserId());
 
         log.info("회원가입 완료 userId={} normalizedEmail={}", user.getUserId(), normalizedEmail);
-        return AuthResponse.from(user, account, accessToken, refreshToken);
+        return AuthResponse.from(user, account, tokens.accessToken(), tokens.refreshToken(), tokens.expiresAt());
     }
 
     /**
@@ -133,11 +130,11 @@ public class AuthService {
      * 구분해서 알려주면 "이 이메일은 가입돼 있다" 는 정보가 새어나가
      * 계정 목록을 수집하는 데 쓰일 수 있습니다.
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public AuthResponse login(LoginRequest request) {
         String normalizedEmail = DomainNormalizer.email(request.email());
 
-        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+        User user = userRepository.findByEmailForUpdate(normalizedEmail).orElse(null);
         if (user == null) {
             passwordEncoder.matches(request.password(), DUMMY_PASSWORD_HASH);
             throw new BusinessException(ErrorCode.LOGIN_FAILED, "로그인 실패");
@@ -152,32 +149,20 @@ public class AuthService {
 
         Account account = accountRepository
                 .findByUserIdAndStatus(user.getUserId(), AccountStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND, "userId=" + user.getUserId()));
+                .orElseThrow(() -> new BusinessException(ErrorCode.ACCOUNT_NOT_FOUND));
 
-        String accessToken = jwtTokenProvider.createAccessToken(user.getUserId());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getUserId());
+        Tokens tokens = sessions.create(user.getUserId());
 
         log.info("로그인 성공 userId={}", user.getUserId());
-        return AuthResponse.from(user, account, accessToken, refreshToken);
+        return AuthResponse.from(user, account, tokens.accessToken(), tokens.refreshToken(), tokens.expiresAt());
     }
 
-    @Transactional(readOnly = true)
     public AccessTokenResponse refresh(RefreshTokenRequest request) {
-        Long userId;
-        try {
-            userId = jwtTokenProvider.parseRefreshToken(request.refreshToken());
-        } catch (ExpiredJwtException exception) {
-            throw new BusinessException(ErrorCode.TOKEN_EXPIRED);
-        } catch (JwtException | IllegalArgumentException exception) {
-            throw new BusinessException(ErrorCode.INVALID_TOKEN);
-        }
-
-
-        userRepository.findByUserIdAndStatus(userId, UserStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_TOKEN));
-
-        return new AccessTokenResponse(jwtTokenProvider.createAccessToken(userId));
+        Tokens tokens = sessions.rotate(request.refreshToken());
+        return new AccessTokenResponse(tokens.accessToken(), tokens.refreshToken(), tokens.expiresAt());
     }
+
+    public void logout(RefreshTokenRequest request) { sessions.logout(request.refreshToken()); }
 
     private boolean isConstraint(DataIntegrityViolationException exception, String constraintName) {
         Throwable current = exception;

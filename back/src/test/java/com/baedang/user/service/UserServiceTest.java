@@ -1,6 +1,7 @@
 package com.baedang.user.service;
 
 import com.baedang.auth.dto.UserResponse;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.user.dto.ChangePasswordRequest;
@@ -53,7 +54,7 @@ class UserServiceTest {
                 userRepository,
                 accountRepository,
                 passwordEncoder,
-                clock
+                clock, mock(AuthSessionService.class)
         );
     }
 

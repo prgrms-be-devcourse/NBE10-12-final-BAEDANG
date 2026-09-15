@@ -1,15 +1,16 @@
 package com.baedang.auth.security;
 
 import io.jsonwebtoken.JwtParser;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
+import java.util.UUID;
 import javax.crypto.SecretKey;
 
 @Component
@@ -55,44 +56,50 @@ public class JwtTokenProvider {
                 .build();
     }
 
-    public String createAccessToken(Long userId) {
-        return createToken(userId, TYPE_ACCESS, properties.accessTtl());
+    public record Identity(Long userId, UUID sessionId, long generation) {}
+
+    public Instant sessionExpiresAt() {
+        return clock.instant().plus(properties.refreshTtl());
     }
 
-    public String createRefreshToken(Long userId) {
-        return createToken(userId, TYPE_REFRESH, properties.refreshTtl());
+    public String createAccessToken(Long userId, UUID sessionId, Instant sessionExpiry) {
+        Instant expiry = clock.instant().plus(properties.accessTtl());
+        return createToken(userId, sessionId, 0, TYPE_ACCESS,
+                expiry.isBefore(sessionExpiry) ? expiry : sessionExpiry);
     }
 
-    public Long parseAccessToken(String token) {
-        return parseSubject(accessParser, token);
+    public String createRefreshToken(Long userId, UUID sessionId, long generation, Instant expiry) {
+        return createToken(userId, sessionId, generation, TYPE_REFRESH, expiry);
     }
 
-    public Long parseRefreshToken(String token) {
-        return parseSubject(refreshParser, token);
-    }
+    public Identity accessIdentity(String token) { return identity(accessParser, token); }
+    public Identity refreshIdentity(String token) { return identity(refreshParser, token); }
 
-    private String createToken(Long userId, String tokenType, Duration ttl) {
-        if (userId == null) throw new IllegalArgumentException("userId는 필수입니다");
+    public Long parseAccessToken(String token) { return accessIdentity(token).userId(); }
+    public Long parseRefreshToken(String token) { return refreshIdentity(token).userId(); }
 
-        Instant issuedAt = clock.instant();
-        return Jwts.builder()
-                .issuer(properties.issuer())
-                .subject(userId.toString())
-                .issuedAt(Date.from(issuedAt))
-                .expiration(Date.from(issuedAt.plus(ttl)))
-                .claim(CLAIM_TOKEN_TYPE, tokenType)
-                .signWith(key, Jwts.SIG.HS256)
-                .compact();
-    }
-
-    private Long parseSubject(JwtParser parser, String token) {
-        String subject = parser.parseSignedClaims(token).getPayload().getSubject();
-        if (subject == null) throw new IllegalArgumentException("JWT subject가 없습니다");
-
-        try {
-            return Long.valueOf(subject);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("JWT subject가 올바른 숫자 형식이 아닙니다: "+subject,e);
+    private Identity identity(JwtParser parser, String token) {
+        Claims claims = parser.parseSignedClaims(token).getPayload();
+        Long userId = Long.valueOf(claims.getSubject());
+        String sessionId = claims.get("sid", String.class);
+        if (sessionId == null) throw new IllegalArgumentException("JWT 세션 정보가 없습니다");
+        UUID sid = UUID.fromString(sessionId);
+        Number generation = claims.get("generation", Number.class);
+        if (userId <= 0 || generation == null || generation.longValue() < 0
+                || claims.getId() == null || claims.getExpiration() == null) {
+            throw new IllegalArgumentException("JWT 필수 정보가 올바르지 않습니다");
         }
+        return new Identity(userId, sid, generation.longValue());
+    }
+
+    private String createToken(Long userId, UUID sessionId, long generation, String type, Instant expiry) {
+        if (userId == null || sessionId == null || generation < 0) {
+            throw new IllegalArgumentException("JWT 발급 정보가 올바르지 않습니다");
+        }
+        return Jwts.builder().issuer(properties.issuer()).subject(userId.toString())
+                .id(UUID.randomUUID().toString()).issuedAt(Date.from(clock.instant()))
+                .expiration(Date.from(expiry)).claim(CLAIM_TOKEN_TYPE, type)
+                .claim("sid", sessionId.toString()).claim("generation", generation)
+                .signWith(key, Jwts.SIG.HS256).compact();
     }
 }

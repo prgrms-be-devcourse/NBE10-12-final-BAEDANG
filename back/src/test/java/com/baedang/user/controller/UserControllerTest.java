@@ -3,6 +3,7 @@ package com.baedang.user.controller;
 import com.baedang.auth.dto.UserResponse;
 import com.baedang.auth.security.JwtAuthenticationFilter;
 import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.config.SecurityConfig;
 import com.baedang.user.dto.ChangePasswordRequest;
@@ -37,6 +38,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(UserController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class UserControllerTest {
+    @MockitoBean private AuthSessionService authSessions;
+
 
     @Autowired
     private MockMvc mockMvc;
