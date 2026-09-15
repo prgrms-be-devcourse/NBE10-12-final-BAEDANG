@@ -1,6 +1,6 @@
 package com.baedang.auth.security;
 
-import com.baedang.user.entity.User;
+import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
@@ -19,7 +19,7 @@ public class JwtTokenProvider {
     private static final String TYPE_ACCESS = "access";
     private static final String TYPE_REFRESH = "refresh";
     private static final String CLAIM_TOKEN_TYPE = "token_type";
-    /** 비밀번호 재설정 등으로 무효화된 refresh token을 가려내는 데 쓴다(User.tokenVersion 참고). */
+    /** 레거시 토큰 도구의 호환용 클레임. 운영 인증은 auth_session으로 검증합니다. */
     private static final String CLAIM_TOKEN_VERSION = "token_version";
 
     private final JwtProperties properties;
@@ -84,7 +84,7 @@ public class JwtTokenProvider {
         return createRefreshToken(userId, 0);
     }
 
-    /** 발급 시점 회원의 {@code tokenVersion}을 실은 refresh token을 만듭니다. */
+    /** 호환 도구용 토큰입니다. DB 세션을 생성하지 않으므로 운영 인증에는 사용할 수 없습니다. */
     public String createRefreshToken(Long userId, int tokenVersion) {
         Instant expiry = clock.instant().plus(properties.refreshTtl());
         return createToken(userId, UUID.randomUUID(), 0, TYPE_REFRESH, expiry, tokenVersion);
@@ -131,7 +131,7 @@ public class JwtTokenProvider {
         if (userId == null || sessionId == null || generation < 0) {
             throw new IllegalArgumentException("JWT 발급 정보가 올바르지 않습니다");
         }
-        var builder = Jwts.builder().issuer(properties.issuer()).subject(userId.toString())
+        JwtBuilder builder = Jwts.builder().issuer(properties.issuer()).subject(userId.toString())
                 .id(UUID.randomUUID().toString()).issuedAt(Date.from(clock.instant()))
                 .expiration(Date.from(expiry)).claim(CLAIM_TOKEN_TYPE, type)
                 .claim("sid", sessionId.toString()).claim("generation", generation);

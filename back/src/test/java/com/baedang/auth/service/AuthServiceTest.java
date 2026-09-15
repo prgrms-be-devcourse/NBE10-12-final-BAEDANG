@@ -316,7 +316,7 @@ class AuthServiceTest {
     void 비밀번호_찾기_요청은_ACTIVE_회원에게_메일을_보낸다() {
         User user = User.create("test@example.com", "encoded", "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
 
@@ -338,7 +338,7 @@ class AuthServiceTest {
     void 쿨다운_이내_재요청은_무시한다() {
         User user = User.create("test@example.com", "encoded", "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         OffsetDateTime justIssued = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusSeconds(30);
         PasswordResetToken recentToken = PasswordResetToken.issue(1L, "old-hash", justIssued.plusMinutes(30));
@@ -358,7 +358,7 @@ class AuthServiceTest {
     void 쿨다운이_지나면_다시_메일을_보낸다() {
         User user = User.create("test@example.com", "encoded", "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         OffsetDateTime longAgo = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusMinutes(5);
         PasswordResetToken oldToken = PasswordResetToken.issue(1L, "old-hash", longAgo.plusMinutes(30));
@@ -376,7 +376,7 @@ class AuthServiceTest {
     @Test
     @DisplayName("존재하지 않는 이메일로 비밀번호 찾기를 요청해도 예외 없이 조용히 끝나고 메일을 보내지 않는다")
     void 존재하지_않는_이메일은_조용히_무시한다() {
-        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailForUpdate("none@example.com")).thenReturn(Optional.empty());
 
         authService.requestPasswordReset(new PasswordForgotRequest("none@example.com"));
 
@@ -390,7 +390,7 @@ class AuthServiceTest {
         User user = User.create("test@example.com", "encoded", "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
         ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
 
@@ -399,7 +399,7 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("유효한 토큰으로 비밀번호를 재설정하면 새 비밀번호로 바뀌고 토큰이 무효화되며 세션(token_version)도 무효화된다")
+    @DisplayName("유효한 토큰으로 재설정하면 비밀번호를 바꾸고 모든 세션을 폐기하며 호환 버전을 증가시킨다")
     void 유효한_토큰으로_비밀번호를_재설정한다() {
         User user = User.create("test@example.com", "old-encoded", "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
@@ -407,6 +407,7 @@ class AuthServiceTest {
         PasswordResetToken token = PasswordResetToken.issue(
                 1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
 
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.of(1L));
         when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
         when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE)).thenReturn(Optional.of(user));
 
@@ -415,15 +416,14 @@ class AuthServiceTest {
         assertThat(passwordEncoder.matches("NewPassword123!", user.getPasswordHash())).isTrue();
         verify(passwordResetTokenRepository).invalidateUnusedByUserId(eq(1L), any());
         verify(sessions).revokeAll(1L);
-        // 재설정 전에 발급된 refresh token(이 tokenVersion을 실었을)이 이후 refresh()에서
-        // 거절되도록, 비밀번호 재설정은 회원의 token_version을 반드시 올려야 한다.
+        // 실제 세션 폐기는 revokeAll이 담당하고, V17의 버전 증가는 호환성 때문에 유지합니다.
         assertThat(user.getTokenVersion()).isEqualTo(tokenVersionBefore + 1);
     }
 
     @Test
     @DisplayName("존재하지 않는 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_INVALID")
     void 존재하지_않는_토큰은_거절한다() {
-        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.empty());
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() ->
                 authService.resetPassword(new PasswordResetConfirmRequest("bad-token", "NewPassword123!")))
@@ -437,6 +437,9 @@ class AuthServiceTest {
         PasswordResetToken token = PasswordResetToken.issue(
                 1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
         token.markUsed(OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.of(1L));
+        when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE))
+                .thenReturn(Optional.of(User.create("test@example.com", "encoded", "tester")));
         when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
 
         assertThatThrownBy(() ->
@@ -450,6 +453,9 @@ class AuthServiceTest {
     void 만료된_토큰은_거절한다() {
         PasswordResetToken token = PasswordResetToken.issue(
                 1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusMinutes(1));
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.of(1L));
+        when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE))
+                .thenReturn(Optional.of(User.create("test@example.com", "encoded", "tester")));
         when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
 
         assertThatThrownBy(() ->

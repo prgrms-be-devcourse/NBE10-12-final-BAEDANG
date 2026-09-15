@@ -42,11 +42,8 @@ public class User extends BaseEntity {
     private boolean seed;
 
     /**
-     * 비밀번호 재설정 등으로 기존 refresh token을 무효화할 때 올라갑니다.
-     *
-     * <p>refresh token은 이 값을 발급 시점 그대로 담아두고(JwtTokenProvider), 재발급
-     * 요청 때마다 이 필드의 현재 값과 비교합니다 — 값이 다르면 그 refresh token은
-     * 이미 무효화된 이전 세션의 것입니다({@link #invalidateSessions()} 참고).
+     * V17에서 추가된 레거시 버전입니다. 재설정 시 증가 동작은 호환성을 위해 유지합니다.
+     * 운영 Stateful 인증은 이 값 대신 auth_session의 활성 여부를 확인합니다.
      */
     @Column(name = "token_version", nullable = false)
     private int tokenVersion;
@@ -103,13 +100,8 @@ public class User extends BaseEntity {
     }
 
     /**
-     * 지금까지 발급된 모든 refresh token을 무효화합니다.
-     *
-     * <p>비밀번호 재설정(이메일 링크)처럼 "계정이 털렸을 가능성"을 전제하는 복구
-     * 행위 뒤에 호출합니다 — 공격자가 훔친 refresh token을 들고 있어도 다음 재발급
-     * 요청부터는 거부됩니다. 로그인 상태에서의 일반 비밀번호 변경(마이페이지)에는
-     * 쓰지 않습니다 — 그 흐름은 새 토큰을 다시 내려주지 않아, 지금 로그인한 기기
-     * 자신도 즉시 튕겨나가기 때문입니다.
+     * 호환용 버전만 증가시킵니다. 이 호출만으로 Stateful 세션이 폐기되지는 않습니다.
+     * 실제 비밀번호 변경·재설정·탈퇴는 서비스에서 AuthSessionService.revokeAll을 호출합니다.
      */
     public void invalidateSessions() {
         this.tokenVersion++;

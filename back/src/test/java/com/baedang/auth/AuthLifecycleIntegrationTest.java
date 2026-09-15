@@ -5,6 +5,8 @@ import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
+import com.baedang.auth.dto.PasswordResetConfirmRequest;
 import com.baedang.auth.mail.PasswordResetMailSender;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.auth.service.AuthService;
@@ -572,6 +574,106 @@ class AuthLifecycleIntegrationTest {
 
     private AuthResponse sessionUser() {
         return auth.signUp(new SignUpRequest("session@example.com", "Password123!", "세션테스터"));
+    }
+
+    @Test
+    @DisplayName("동시 비밀번호 찾기 요청은 회원별 쿨다운 안에서 토큰과 메일을 한 번만 발급한다")
+    void concurrent_password_reset_requests_issue_once() throws Exception {
+        AuthResponse signed = sessionUser();
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Runnable request = () -> {
+                ready.countDown();
+                awaitStart(start);
+                auth.requestPasswordReset(new PasswordForgotRequest(signed.email()));
+            };
+            CompletableFuture<Void> first = CompletableFuture.runAsync(request, executor);
+            CompletableFuture<Void> second = CompletableFuture.runAsync(request, executor);
+            assertThat(ready.await(5, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+            CompletableFuture.allOf(first, second).get(10, TimeUnit.SECONDS);
+        }
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=? AND used_at IS NULL",
+                Integer.class, signed.userId())).isEqualTo(1);
+        verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+    }
+
+    private String issueResetToken(String email) {
+        auth.requestPasswordReset(new PasswordForgotRequest(email));
+        ArgumentCaptor<String> url = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetMailSender).sendResetLink(eq(email), url.capture());
+        return url.getValue().substring(url.getValue().indexOf("token=") + "token=".length());
+    }
+
+    @Test
+    @DisplayName("재설정과 로그인·RTR 경합 뒤 기존 자격증명으로 발급된 세션은 남지 않는다")
+    void password_reset_races_login_and_rotation() throws Exception {
+        AuthResponse signed = sessionUser();
+        String token = issueResetToken(signed.email());
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(3)) {
+            CompletableFuture<AuthResponse> login = CompletableFuture.supplyAsync(() -> {
+                awaitStart(start);
+                try { return auth.login(new LoginRequest(signed.email(), "Password123!")); }
+                catch (BusinessException error) {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.LOGIN_FAILED);
+                    return null;
+                }
+            }, executor);
+            CompletableFuture<Tokens> refresh = CompletableFuture.supplyAsync(() -> {
+                awaitStart(start);
+                try { return sessions.rotate(signed.refreshToken()); }
+                catch (BusinessException error) {
+                    assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED);
+                    return null;
+                }
+            }, executor);
+            CompletableFuture<Void> reset = CompletableFuture.runAsync(() -> {
+                awaitStart(start);
+                auth.resetPassword(new PasswordResetConfirmRequest(token, "NewPassword123!"));
+            }, executor);
+            start.countDown();
+            CompletableFuture.allOf(login, refresh, reset).get(10, TimeUnit.SECONDS);
+            if (login.get() != null) assertRevoked(login.get().accessToken());
+            if (refresh.get() != null) assertRevoked(refresh.get().accessToken());
+        }
+        assertRevoked(signed.accessToken());
+        assertThatThrownBy(() -> sessions.rotate(signed.refreshToken()))
+                .isInstanceOfSatisfying(BusinessException.class,
+                        error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.SESSION_REVOKED));
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM auth_session WHERE user_id=? AND revoked_at IS NULL",
+                Integer.class, signed.userId())).isZero();
+        AuthResponse renewed = auth.login(new LoginRequest(signed.email(), "NewPassword123!"));
+        sessions.requireActive(jwtTokenProvider.accessIdentity(renewed.accessToken()));
+    }
+
+    @Test
+    @DisplayName("같은 재설정 토큰을 동시에 제출해도 한 요청만 성공한다")
+    void concurrent_reset_consumes_token_once() throws Exception {
+        AuthResponse signed = sessionUser();
+        String token = issueResetToken(signed.email());
+        CountDownLatch start = new CountDownLatch(1);
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            CompletableFuture<Boolean> first = resetConcurrently(token, start, executor);
+            CompletableFuture<Boolean> second = resetConcurrently(token, start, executor);
+            start.countDown();
+            assertThat(first.get(10, TimeUnit.SECONDS)).isNotEqualTo(second.get(10, TimeUnit.SECONDS));
+        }
+        assertRevoked(signed.accessToken());
+    }
+
+    private CompletableFuture<Boolean> resetConcurrently(String token, CountDownLatch start, ExecutorService executor) {
+        return CompletableFuture.supplyAsync(() -> {
+            awaitStart(start);
+            try {
+                auth.resetPassword(new PasswordResetConfirmRequest(token, "NewPassword123!"));
+                return true;
+            } catch (BusinessException error) {
+                assertThat(error.getErrorCode()).isEqualTo(ErrorCode.PASSWORD_RESET_TOKEN_INVALID);
+                return false;
+            }
+        }, executor);
     }
 
     private void assertRevoked(String accessToken) {

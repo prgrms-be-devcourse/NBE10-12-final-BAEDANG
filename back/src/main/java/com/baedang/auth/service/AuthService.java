@@ -216,7 +216,8 @@ public class AuthService {
     @Transactional
     public void requestPasswordReset(PasswordForgotRequest request) {
         String normalizedEmail = DomainNormalizer.email(request.email());
-        User user = userRepository.findByEmail(normalizedEmail).orElse(null);
+        // 같은 회원의 쿨다운 검사·이전 토큰 폐기·발급을 한 잠금 안에서 직렬화합니다.
+        User user = userRepository.findByEmailForUpdate(normalizedEmail).orElse(null);
 
         if (user == null || user.getStatus() != UserStatus.ACTIVE) {
             log.info("[password-reset] 가입되지 않았거나 비활성 상태인 이메일이라 메일을 보내지 않습니다(응답은 동일)");
@@ -254,14 +255,18 @@ public class AuthService {
      * 알려줘도 "그런 이메일이 있는지"는 새어나가지 않습니다 — 토큰은 이미 발급된
      * 뒤라 이 시점엔 이메일 존재 여부가 노출 대상이 아닙니다.
      *
-     * <p><b>세션 무효화(리뷰 지적, PR #207)</b> — 재설정은 "계정이 털렸을 때의 복구
-     * 행위"이므로, 공격자가 들고 있을지 모르는 기존 refresh token(7일)을 여기서
-     * 무효화합니다({@link User#invalidateSessions()}). access token은 최대 15분
-     * 뒤 자연 만료로 정리됩니다 — refresh() 문서 참고.
+     * <p>비밀번호 변경과 같은 트랜잭션에서 모든 auth_session을 폐기합니다.
+     * 커밋 뒤 시작한 인증 검증은 기존 Access도 거절하며, 이미 인증된 요청은 소급 취소하지 않습니다.
+     * User.invalidateSessions는 레거시 버전 증가를 유지하는 용도입니다.
      */
     @Transactional
     public void resetPassword(PasswordResetConfirmRequest request) {
         String tokenHash = hashToken(request.token());
+        Long userId = passwordResetTokenRepository.findUserIdByTokenHash(tokenHash)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PASSWORD_RESET_TOKEN_INVALID, "토큰 없음"));
+        // 발급·로그인·RTR과 동일하게 사용자부터 잠그고 토큰 상태를 다시 확인합니다.
+        User user = userRepository.findByUserIdAndStatusForUpdate(userId, UserStatus.ACTIVE)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PASSWORD_RESET_TOKEN_INVALID, "회원을 찾을 수 없음"));
         PasswordResetToken token = passwordResetTokenRepository.findByTokenHashForUpdate(tokenHash)
                 .orElseThrow(() -> new BusinessException(ErrorCode.PASSWORD_RESET_TOKEN_INVALID, "토큰 없음"));
 
@@ -273,9 +278,6 @@ public class AuthService {
         if (token.isExpired(now)) {
             throw new BusinessException(ErrorCode.PASSWORD_RESET_TOKEN_EXPIRED);
         }
-
-        User user = userRepository.findByUserIdAndStatusForUpdate(token.getUserId(), UserStatus.ACTIVE)
-                .orElseThrow(() -> new BusinessException(ErrorCode.PASSWORD_RESET_TOKEN_INVALID, "회원을 찾을 수 없음"));
 
         user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
         user.invalidateSessions();
