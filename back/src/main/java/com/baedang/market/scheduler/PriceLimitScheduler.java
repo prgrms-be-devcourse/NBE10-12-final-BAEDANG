@@ -29,8 +29,8 @@ public class PriceLimitScheduler {
         this.clock = clock;
     }
 
-    /** 시작 60초 후 실행하고, 이전 처리가 완료된 후 5분마다 누락을 확인합니다. */
-    @Scheduled(initialDelayString = "60s", fixedDelayString = "5m", scheduler = "priceLimitTaskScheduler")
+    /** 시작 즉시 실행하고, 이전 처리가 완료된 후 5분마다 누락을 확인합니다. */
+    @Scheduled(initialDelayString = "0s", fixedDelayString = "5m", scheduler = "priceLimitTaskScheduler")
     public void recover() {
         try {
             long after = 0;
