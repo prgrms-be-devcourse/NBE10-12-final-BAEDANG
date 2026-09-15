@@ -69,6 +69,7 @@ public final class E2eLauncher {
         application.setRegisterShutdownHook(false);
         app = application.run(
                 "--server.address=127.0.0.1", "--server.port=18088",
+                "--mail.enabled=false",
                 "--spring.datasource.url=" + jdbcUrl, "--spring.datasource.username=baedang_e2e",
                 "--spring.datasource.password=" + password,
                 "--toss.enabled=true", "--kis.enabled=false", "--krx.market-events.enabled=false",
