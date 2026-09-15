@@ -162,65 +162,49 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Get Instance ID
-        id: get_instance_id
+      - name: 인스턴스 퍼블릭 IP 조회
         run: |
-          INSTANCE_ID=$(aws ec2 describe-instances --filters "Name=tag:Name,Values=baedang-ec2-1" "Name=instance-state-name,Values=running" --query "Reservations[].Instances[].InstanceId" --output text)
-          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          HOST=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=${{ env.INSTANCE_TAG_NAME }}" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          if [ -z "$HOST" ] || [ "$HOST" = "None" ]; then
+            echo "실행 중인 인스턴스의 퍼블릭 IP를 찾지 못했습니다." && exit 1
+          fi
+          echo "HOST=$HOST" >> $GITHUB_ENV
 
-      - name: Deploy via SSM
+      - name: Deploy via SSH
         env:
-          INSTANCE_ID: ${{ env.INSTANCE_ID }}
+          SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          SSH_USER: ${{ secrets.EC2_USER }}
         run: |
           OWNER_LC="${{ github.repository_owner }}"
           OWNER_LC="${OWNER_LC,,}"
-          IMAGE_TAG="${{ needs.createTagAndRelease.outputs.tag }}"
-          IMAGE_NAME="${{ env.IMAGE_NAME }}"
-          IMAGE="ghcr.io/${OWNER_LC}/${IMAGE_NAME}:${IMAGE_TAG}"
+          IMAGE="ghcr.io/${OWNER_LC}/${{ env.IMAGE_NAME }}:${{ needs.createTagAndRelease.outputs.tag }}"
 
-          SCRIPT=$(cat <<DEPLOY
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh -i ~/.ssh/deploy_key \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            "$SSH_USER@$HOST" 'bash -s' <<DEPLOY
+          set -e
           docker pull $IMAGE
 
-          docker stop trading-back-1 || true
-          docker rm trading-back-1 || true
+          docker stop ${{ env.CONTAINER_1_NAME }} || true
+          docker rm ${{ env.CONTAINER_1_NAME }} || true
 
           docker run -d \
-            --name trading-back-1 \
-            --network common \
+            --name ${{ env.CONTAINER_1_NAME }} \
+            --network ${{ env.DOCKER_NETWORK }} \
             --restart unless-stopped \
             --env-file /opt/baedang/.env \
-            -p 8080:8080 \
+            -e SPRING_PROFILES_ACTIVE=prod \
+            --log-opt max-size=100m \
+            --log-opt max-file=3 \
+            -p ${{ env.APPLICATION_PORT }}:${{ env.APPLICATION_PORT }} \
             $IMAGE
 
           docker image prune -af
           DEPLOY
-          )
-          PARAMS=$(jq -n --arg cmd "$SCRIPT" '{"commands":[$cmd]}')
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --comment "Deploy" \
-            --parameters "$PARAMS" \
-            --query "Command.CommandId" \
-            --output text)
-
-          echo "Command ID: $COMMAND_ID"
-
-          aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" \
-            --instance-id "$INSTANCE_ID"
-
-          OUTPUT=$(aws ssm get-command-invocation \
-            --command-id "$COMMAND_ID" \
-            --instance-id "$INSTANCE_ID")
-
-          STATUS=$(echo "$OUTPUT" | jq -r '.Status')
-          echo "Status: $STATUS"
-          echo "--- stdout ---"
-          echo "$OUTPUT" | jq -r '.StandardOutputContent'
-          echo "--- stderr ---"
-          echo "$OUTPUT" | jq -r '.StandardErrorContent'
-
-          if [ "$STATUS" != "Success" ]; then
-            exit 1
-          fi

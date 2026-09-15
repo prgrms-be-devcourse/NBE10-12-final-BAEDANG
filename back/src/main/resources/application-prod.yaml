@@ -1,0 +1,4 @@
+logging:
+  level:
+    com.baedang: INFO
+    org.hibernate.SQL: INFO
