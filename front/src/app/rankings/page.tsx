@@ -557,9 +557,12 @@ export default function RankingsPage() {
                 value={priceDisplay}
                 onChange={(v) => setPriceDisplay(v as "KRW" | "USD")}
                 trackClassName="w-fit gap-0.5 rounded-full p-[2px]"
+                // 국내/해외 주식 탭 뒤 트랙과 같은 밝기로 맞춰달라는 요청 —
+                // 위 시장 탭 trackStyle과 동일한 값을 쓴다(기존엔 이 토글만
+                // alpha가 더 높아 배경이 눈에 띄게 진해 보였다).
                 trackStyle={{
-                  background: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.08)",
-                  border: theme === "dark" ? "1px solid rgba(255,255,255,.08)" : "1px solid rgba(15,56,104,.14)",
+                  background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+                  border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
                 }}
                 buttonClassName="rounded-full px-2 py-0.5 text-[10.5px] font-bold"
                 inactiveTextStyle={{ color: "var(--mut2)" }}

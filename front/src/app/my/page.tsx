@@ -19,7 +19,9 @@ import {
   getHoldings,
   getLedger,
   getMyOrders,
+  getStockLikes,
   resetAccount,
+  unlikeStock,
   updateNickname,
   changeUserPassword,
   withdrawAccount,
@@ -28,6 +30,7 @@ import {
   type LedgerItem,
   type MarketCountry,
   type OrderDetailResponse,
+  type StockLikeItem,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
@@ -60,10 +63,38 @@ export default function MyPage() {
   // 이 때문이었다. hue를 원래의 순수한 빨강 쪽(28, 기존 25와 거의 같은 톤)으로
   // 되돌리고 채도만 낮게 유지해서, 핑크로 새지 않으면서도 기존보다 차분한
   // "레드"를 만들었다.
-  const dangerBg = theme === "light" ? "oklch(94% 0.035 30)" : "var(--dangerBg)";
+  //
+  // 그런데도 카드 배경(dangerBg)은 여전히 "은근히 핑크빛"이라는 피드백을 다시
+  // 받았다 — 이번엔 hue 문제가 아니라 밝기(lightness) 문제였다. 94%처럼 아주
+  // 밝은 명도에서는 채도를 아무리 낮게 잡아도(0.035) 사람 눈에는 "옅은 빨강"이
+  // 아니라 "분홍"으로 읽힌다(핑크 자체가 본질적으로 "아주 밝은 빨강"이라 그렇다).
+  // 참고 이미지(진한 와인·버건디 톤 카드)의 느낌에 맞춰 명도 88%/채도 0.05로
+  // 낮췄더니, 이번엔 반대로 "진해서 튄다"는 피드백을 받았다 — 카드 배경치고는
+  // 존재감이 너무 강했던 것. 명도를 88%→91%로 다시 올리고 채도도 0.05→0.04로
+  // 살짝 낮춰, 여전히 "분홍"으로 안 보일 만큼은 채도를 유지하면서 카드
+  // 배경다운 은은함을 찾았다(hue는 계속 30, 순빨강 영역 그대로).
+  const dangerBg = theme === "light" ? "oklch(91% 0.04 30)" : "var(--dangerBg)";
   const dangerText = theme === "light" ? "oklch(40% 0.16 28)" : "var(--dangerText)";
   const dangerTextSoft = theme === "light" ? "oklch(46% 0.06 28)" : "var(--dangerTextSoft)";
-  const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
+  // "초기화할게요"/"탈퇴할게요" 확인 버튼 배경을 다크 모드에서만 좀 더 세련된
+  // 레드로 바꿔달라는 요청(이번엔 반대로 다크 모드 한정 — 라이트 모드는 기존
+  // var(--dangerText) 원본 그대로 둔다). 이 두 버튼은 위 danger* 로컬 변수를
+  // 쓰지 않고 var(--dangerText)를 직접 참조하고 있었다 — 전역 변수라 여기서
+  // 바꾸면 StockDetailClient·OrderDetailModal의 에러 문구 색까지 같이
+  // 바뀌므로, 이번에도 전역 변수 대신 이 페이지 로컬 값을 새로 둔다. 다크
+  // 모드 원본(oklch 76%/0.15/22)은 텍스트용으로 밝게 잡은 값이라 버튼
+  // 배경으로 쓰면 옅고 밋밋해 보인다 — 라이트 모드 때와 같은 방향(채도를
+  // 낮추고 hue를 순빨강 쪽인 28로)으로, 명도만 버튼 배경에 맞게 낮춰
+  // 와인빛이 도는 차분한 레드로 만들었다.
+  const dangerButtonBg = theme === "dark" ? "oklch(46% 0.15 28)" : "var(--dangerText)";
+  // 관심 종목 탭의 전일대비 배지 배경(var(--upBg)/--downBg)이 다크 모드에서
+  // 너무 진하다는 요청 — 이 두 변수는 랭킹·보유종목 등 다른 화면과도 공유하는
+  // 전역 값이라 그대로 두고, 이 페이지 로컬로만 다크 모드에서 명도를 올리고
+  // 채도를 낮춘 더 은은한 색을 쓴다(라이트 모드는 기존 var(--upBg)/--downBg
+  // 그대로 — 요청이 다크 모드로 한정됨).
+  const changeUpBg = theme === "dark" ? "oklch(37% 0.06 28)" : "var(--upBg)";
+  const changeDownBg = theme === "dark" ? "oklch(37% 0.055 255)" : "var(--downBg)";
+  const [tab, setTab] = useState<"holdings" | "ledger" | "orders" | "likes">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
@@ -79,6 +110,14 @@ export default function MyPage() {
   const [ordersHasNext, setOrdersHasNext] = useState(false);
   const [ordersLoadingMore, setOrdersLoadingMore] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetailResponse | null>(null);
+
+  // ── 관심 종목(찜) ────────────────────────────────────────────────────────────
+  const [likes, setLikes] = useState<StockLikeItem[]>([]);
+  const [likesCursor, setLikesCursor] = useState<string | null>(null);
+  const [likesHasNext, setLikesHasNext] = useState(false);
+  const [likesLoadingMore, setLikesLoadingMore] = useState(false);
+  const [likeRemoving, setLikeRemoving] = useState<Set<number>>(new Set());
+
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -259,9 +298,17 @@ export default function MyPage() {
     isLoggedIn && !!user && hasActiveOrders
   );
 
-  function handleTabChange(nextTab: "holdings" | "ledger" | "orders") {
+  function handleTabChange(nextTab: "holdings" | "ledger" | "orders" | "likes") {
     setTab(nextTab);
-    if (nextTab === "orders") {
+    if (nextTab === "likes") {
+      getStockLikes()
+        .then((res) => {
+          setLikes(res.items);
+          setLikesCursor(res.nextCursor);
+          setLikesHasNext(res.hasNext);
+        })
+        .catch(() => {});
+    } else if (nextTab === "orders") {
       getMyOrders()
         .then((res) => {
           setOrders(res.items);
@@ -343,6 +390,42 @@ export default function MyPage() {
       })
       .catch(() => {})
       .finally(() => setLedgerLoadingMore(false));
+  }
+
+  function loadMoreLikes() {
+    if (likesLoadingMore || !likesCursor) return;
+    setLikesLoadingMore(true);
+    getStockLikes({ cursor: likesCursor })
+      .then((res) => {
+        setLikes((prev) => {
+          const existingIds = new Set(prev.map((l) => l.stockLikeId));
+          const additions = res.items.filter((l) => !existingIds.has(l.stockLikeId));
+          return [...prev, ...additions];
+        });
+        setLikesCursor(res.nextCursor);
+        setLikesHasNext(res.hasNext);
+      })
+      .catch(() => {})
+      .finally(() => setLikesLoadingMore(false));
+  }
+
+  // 랭킹 화면의 찜 해제와 같은 원칙 — 서버 응답을 받은 뒤에만 목록에서 지운다
+  // (실패하면 목록에 그대로 남아, 다시 눌러 재시도할 수 있다).
+  function handleUnlike(item: StockLikeItem) {
+    if (likeRemoving.has(item.stockLikeId)) return;
+    setLikeRemoving((prev) => new Set(prev).add(item.stockLikeId));
+    unlikeStock(item.stockLikeId)
+      .then(() => {
+        setLikes((prev) => prev.filter((l) => l.stockLikeId !== item.stockLikeId));
+      })
+      .catch(() => {})
+      .finally(() => {
+        setLikeRemoving((prev) => {
+          const next = new Set(prev);
+          next.delete(item.stockLikeId);
+          return next;
+        });
+      });
   }
 
   // 주문 취소가 성공하면(모달 안에서) 목록의 해당 행과 모달 둘 다 최신 상태로
@@ -522,10 +605,11 @@ export default function MyPage() {
             { value: "holdings", label: "보유 종목" },
             { value: "orders", label: "주문 내역" },
             { value: "ledger", label: "체결 내역" },
+            { value: "likes", label: "관심 종목" },
           ]}
           value={tab}
-          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders")}
-          trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
+          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders" | "likes")}
+          trackClassName="mb-4.5 w-[380px] max-md:w-full gap-0.5 rounded-full p-[3px]"
           // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
           // 기존 alpha 값을 절반으로 낮췄다.
           trackStyle={{
@@ -791,7 +875,8 @@ export default function MyPage() {
           )}
         </>
       )
-      ) : ledger.length === 0 ? (
+      ) : tab === "ledger" ? (
+      ledger.length === 0 ? (
         <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
           체결 내역이 없어요
         </div>
@@ -868,6 +953,124 @@ export default function MyPage() {
               style={{ background: "var(--card)", color: "var(--ink)" }}
             >
               {ledgerLoadingMore ? "불러오는 중…" : "더 보기"}
+            </button>
+          )}
+        </>
+      )
+      ) : likes.length === 0 ? (
+        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+          찜한 종목이 없어요
+        </div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 다른 테이블들과 같은 방식. */}
+            <div
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
+              style={{
+                gridTemplateColumns: "1.8fr 1fr 1fr 80px",
+                columnGap: "16px",
+                borderBottom: "1px solid var(--line2)",
+                color: "var(--mut2)",
+              }}
+            >
+              <span>종목</span>
+              <span className="text-right">현재가</span>
+              <span className="text-right">전일대비</span>
+              <span />
+            </div>
+            {likes.map((item) => {
+              const isUsd = item.marketCountry === "US";
+              const krwPriceDecimal = toKrw(item.lastPrice, isUsd ? "USD" : "KRW", rate);
+              const krwPrice = krwPriceDecimal ? krwPriceDecimal.round().toNumber() : null;
+              const changeRateDecimal = toDecimal(item.changeRate);
+              const isUp = !changeRateDecimal || changeRateDecimal.greaterThanOrEqualTo(0);
+              const priceText = item.lastPrice == null
+                ? "-"
+                : isUsd ? formatUsd(item.lastPrice) : formatNumber(krwPrice);
+              const changeNode = item.changeRate == null ? (
+                <span className="text-[12.5px]" style={{ color: "var(--mut2)" }}>시세 정보 없음</span>
+              ) : (
+                <span
+                  className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
+                  style={{ background: isUp ? changeUpBg : changeDownBg, color: isUp ? "var(--up)" : "var(--down)" }}
+                >
+                  {isUp ? "▲" : "▼"} {formatPercent(item.changeRate)}
+                </span>
+              );
+              const unlikeButton = (
+                <button
+                  type="button"
+                  // 이 버튼이 행 전체를 감싸는 <Link>(아래) 안에 중첩돼 있어서,
+                  // preventDefault 없이는 찜 해제와 동시에 종목 상세로 이동해버린다
+                  // — 랭킹 화면의 같은 패턴(하트 버튼 in Link)과 동일하게 막는다.
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleUnlike(item);
+                  }}
+                  disabled={likeRemoving.has(item.stockLikeId)}
+                  className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ color: "var(--heartActive)" }}
+                  aria-label="찜 해제하기"
+                >
+                  {/* 유니코드 하트(♥)는 폰트마다 모양이 들쭉날쭉하고 이 프로젝트
+                      폰트(Pretendard)엔 아예 없어 시스템 이모지 폰트로 대체되어
+                      보였다 — 매끈한 SVG 하트(Heroicons solid heart)로 바꿔서
+                      항상 같은 모양으로 보이게 했다. */}
+                  <svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M9.653 16.915l-.005-.003-.019-.01a20.759 20.759 0 01-1.162-.682 22.045 22.045 0 01-2.582-1.9C4.045 12.733 2 10.352 2 7.5 2 5.015 3.98 3 6.5 3c1.376 0 2.6.611 3.5 1.518A4.987 4.987 0 0113.5 3C16.02 3 18 5.015 18 7.5c0 2.852-2.044 5.233-3.885 6.82a22.049 22.049 0 01-3.744 2.582l-.019.01-.005.003h-.002a.739.739 0 01-.69.001l-.002-.001z" />
+                  </svg>
+                </button>
+              );
+              return (
+                <Link
+                  key={item.stockLikeId}
+                  href={`/stocks/${item.symbol}?marketCountry=${item.marketCountry}`}
+                  // 목록 전체(이름·가격·배지)의 글꼴을 프리텐다드로 명시적으로
+                  // 통일해달라는 요청 — body에 이미 Pretendard가 걸려 있어 보통은
+                  // 상속만으로 충분하지만, 하트 버튼처럼 상속이 어긋나기 쉬운
+                  // 자리가 있었으니 이 행 전체에 폰트를 명시적으로 고정해둔다.
+                  className="font-sans block px-5 py-3 text-[15px] transition-[background] duration-150"
+                  style={{ borderBottom: "1px solid var(--line2)" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {/* 데스크톱(md 이상). */}
+                  <div className="hidden items-center md:grid" style={{ gridTemplateColumns: "1.8fr 1fr 1fr 80px", columnGap: "16px" }}>
+                    <span style={{ color: "var(--ink)" }}>
+                      {item.name} <Tag weightClassName="font-bold">{item.symbol}</Tag>
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    <span className="flex justify-end">{changeNode}</span>
+                    <span className="text-right">{unlikeButton}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 md:hidden">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate" style={{ color: "var(--ink)" }}>
+                        {item.name} <Tag weightClassName="font-bold">{item.symbol}</Tag>
+                      </span>
+                      <span className="shrink-0">{unlikeButton}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                      {changeNode}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+          {likesHasNext && (
+            <button
+              type="button"
+              onClick={loadMoreLikes}
+              disabled={likesLoadingMore}
+              className="mt-2.5 w-full cursor-pointer rounded-xl py-2.5 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--card)", color: "var(--ink)" }}
+            >
+              {likesLoadingMore ? "불러오는 중…" : "더 보기"}
             </button>
           )}
         </>
@@ -1097,7 +1300,7 @@ export default function MyPage() {
             )}
             <button
               className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerText)" }}
+              style={{ background: dangerButtonBg }}
               onClick={handleWithdraw}
               disabled={withdrawing || !withdrawPassword}
             >
@@ -1146,7 +1349,7 @@ export default function MyPage() {
                 중일 때는 여전히 금지 커서로 보인다. */}
             <button
               className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerText)" }}
+              style={{ background: dangerButtonBg }}
               onClick={handleReset}
               disabled={resetting}
             >

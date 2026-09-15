@@ -51,7 +51,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | users → stock_like | 1:N |
 | stock → stock_like | 1:N (CASCADE) |
 
-### Table Map (22)
+### Table Map (23)
 
 | Group | Table | Note |
 |---|---|---|
@@ -75,6 +75,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
 | **Market Events** | `market_event` | KRX KIND circuit-breaker/sidecar history · append-only |
 | **Stock Likes** | `stock_like` | user stock likes (관심 종목) · unique per user×stock |
+| **Password Reset** | `password_reset_token` | email reset token (비밀번호 찾기) · SHA-256 hash only, no plaintext |
 | **Learning Content** | `wiki_term` | beginner-facing financial term dictionary |
 
 ### MVP Behavior Matrix (confirmed)
@@ -209,7 +210,7 @@ Every column and its intent — focused especially on **why each column exists**
 
 #### `users` — member
 
-> Members authenticate with stateless JWT. Withdrawal changes the user status to `WITHDRAWN` instead of deleting the row so account and ledger foreign keys remain valid.
+> Members authenticate with JWT. Access tokens (15m default) stay fully stateless — the auth filter never hits the DB. Refresh tokens (7d default) carry `token_version` at issuance, checked against this row's `token_version` on every `POST /api/auth/refresh` — this is the one place a DB lookup already happens on that path, so the check is free. Withdrawal changes the user status to `WITHDRAWN` instead of deleting the row so account and ledger foreign keys remain valid.
 > | Column | Type | Description |
 > |---|---|---|
 > | `user_id` | BIGINT PK | internal id. Auto-increment via IDENTITY. |
@@ -217,6 +218,7 @@ Every column and its intent — focused especially on **why each column exists**
 > | `password_hash` | VARCHAR(255) | **Never store plaintext.** Hash with BCrypt; default `BCryptPasswordEncoder` is enough. Empty/dummy in week 1. |
 > | `nickname` | VARCHAR(50) | display name. Avoids exposing email. |
 > | `status` | VARCHAR(20) | `ACTIVE` / `DORMANT` / `WITHDRAWN`. Withdrawal via physical delete breaks ledger FKs — **handle by status transition only**. |
+> | `token_version` | INT | (Flyway V17) bumped by `User.invalidateSessions()` on password reset, so refresh tokens issued before the reset fail their version check. Access tokens issued before the reset still work until they naturally expire (≤15m) — the auth filter does not check this column. |
 > | `created_at` `updated_at` | TIMESTAMPTZ | audit common columns. Recommended on all tables. |
 
 #### `account` — mock investment account
@@ -592,6 +594,23 @@ One row per user×stock (#169). Registration uses `INSERT ... ON CONFLICT (user_
 | `created_at`    | TIMESTAMPTZ        | Registration time (DB default). No `updated_at`: rows are inserted or deleted, never updated.                                                  |
 
 The unique constraint `uq_stock_like_user_stock (user_id, stock_id)` prevents duplicates. Its index also serves registration lookups, the per-page ranking stock like lookup (`user_id = ? AND stock_id IN (...)`), and the `user_id` filter of the list query. Each user has only a handful of rows, so there is no separate `(user_id, stock_like_id)` sort index. Add one if per-user row counts grow large.
+
+### Password Reset (Flyway V16)
+
+#### `password_reset_token` — email-based password reset token (비밀번호 찾기)
+
+Issued by `POST /api/auth/password/forgot` and consumed by `POST /api/auth/password/reset`. The plaintext token is never stored — only its SHA-256 (hex) hash, same reasoning as `password_hash`: a full table leak must not let anyone reconstruct a working reset link.
+
+| Column                    | Type               | Description                                                                                                                            |
+| ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `password_reset_token_id` | BIGINT IDENTITY PK | Internal id.                                                                                                                            |
+| `user_id`                 | BIGINT FK          | References `users(user_id)`. No CASCADE, same reasoning as `stock_like.user_id`.                                                       |
+| `token_hash`              | VARCHAR(64) UK     | SHA-256 hex of the raw token carried in the email link.                                                                                |
+| `expires_at`              | TIMESTAMPTZ        | `now() + auth.password-reset.token-ttl` (default 30m) at issuance.                                                                     |
+| `used_at`                 | TIMESTAMPTZ        | NULL while unused. Set when the token is spent (successful reset) or superseded by a newer request for the same user.                 |
+| `created_at`              | TIMESTAMPTZ        | Issuance time (DB default). Also doubles as the request-cooldown clock — a new request within `auth.password-reset.request-cooldown` (default 1m) of the most recent `created_at` for that user is silently ignored (no new row, no mail) to stop one target's inbox from being flooded (#207 review). |
+
+Requesting a reset invalidates that user's other unused tokens (`used_at` set) so only the newest email's link works. Successful reset does the same *and* bumps `users.token_version` (Flyway V17) to invalidate outstanding refresh tokens — see the `users` table above.
 
 ## V9–V12 were skipped to avoid clashing with versions claimed by concurrently open PRs.
 

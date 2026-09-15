@@ -50,16 +50,16 @@ export function SignupModal({ open, onClose, title, description }: Props) {
           )}
         </p>
         <button
-          className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white transition-[background] duration-150"
+          className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white transition-[filter] duration-150"
           style={{ background: "var(--accent)" }}
-          onMouseEnter={(e) => (e.currentTarget.style.background = "var(--buyHover)")}
-          onMouseLeave={(e) => (e.currentTarget.style.background = "var(--accent)")}
+          onMouseEnter={(e) => (e.currentTarget.style.filter = "brightness(.92)")}
+          onMouseLeave={(e) => (e.currentTarget.style.filter = "none")}
           onClick={() => router.push(`/signup?next=${next}`)}
         >
           회원가입하고 5,000만원 받기
         </button>
         <button
-          className="mb-3.5 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold transition-[background] duration-150"
+          className="mb-3.5 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold transition-[background] duration-150"
           style={{ background: "var(--fill)", color: "var(--ink)" }}
           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--line)")}
           onMouseLeave={(e) => (e.currentTarget.style.background = "var(--fill)")}
@@ -68,7 +68,7 @@ export function SignupModal({ open, onClose, title, description }: Props) {
           이미 계정이 있어요 · 로그인
         </button>
         <button
-          className="text-[13px] underline underline-offset-2"
+          className="cursor-pointer text-[13px] underline underline-offset-2"
           style={{ color: "var(--mut)" }}
           onClick={onClose}
         >

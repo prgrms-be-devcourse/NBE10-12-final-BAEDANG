@@ -23,6 +23,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // 비밀번호 찾기 메일 발송(MailSender). mail.enabled=false(기본값)면 실제로 보내지
+    // 않고 로그만 남기므로, SMTP 계정이 없어도 기동에는 영향이 없다(PasswordResetMailSender 참고).
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.jsoup:jsoup:1.18.3'
