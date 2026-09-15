@@ -117,7 +117,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 Authentication uses PostgreSQL sessions and RTR. The browser calls the same-origin Next.js auth relay;
 backend JSON and browser cookie contracts differ. See [Authentication](authentication.md) for deployment,
-5-second predecessor grace, locks, errors and migration. Access is memory-only; Refresh is HttpOnly.
+20-second predecessor grace, locks, errors and migration. Access is memory-only; Refresh is HttpOnly.
 
 ### `POST /auth/signup`
 Signup + account opening + mock-funding deposit
@@ -195,7 +195,7 @@ from its HttpOnly cookie and omits it from response JSON. The absolute session e
 | `TOKEN_EXPIRED` | refresh token expired |
 | `INVALID_TOKEN` | refresh token invalid, tampered, or user inactive |
 | `SESSION_REVOKED` | session revoked or inactive |
-| `REFRESH_TOKEN_REUSED` | signed predecessor reused outside the fixed 5-second grace, or older generation |
+| `REFRESH_TOKEN_REUSED` | signed predecessor reused outside the fixed 20-second grace, or older generation |
 | `AUTH_UNAVAILABLE` | session database/transport temporarily unavailable (503) |
 
 ### `POST /auth/password/forgot`

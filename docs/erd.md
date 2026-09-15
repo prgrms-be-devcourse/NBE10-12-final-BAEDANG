@@ -751,4 +751,4 @@ No migration is added for #178. Existing V1 books become unusable immediately an
 User-first, then session-row locking serializes login, rotation and revocation. All-session revocation
 shares the password-change/withdrawal transaction. Reuse revocation commits before the error response.
 Hourly cleanup clears expired grace material and removes sessions more than 7 days past absolute expiry.
-See [authentication policy](authentication.md) for the 5-second grace, encryption keys and rollout.
+See [authentication policy](authentication.md) for the 20-second grace, encryption keys and rollout.

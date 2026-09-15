@@ -17,9 +17,8 @@ import java.time.Duration;
  *
  * <p><b>SMTP가 설정돼 있지 않아도 백엔드는 정상 기동해야 합니다.</b> Toss/KIS와
  * 같은 이유로, 발송 자체를 {@code mail.enabled}(기본 false)로 게이팅합니다 — 꺼져
- * 있으면 실제 메일을 보내는 대신 재설정 링크를 로그에 남겨서, SMTP 계정이 없는
- * 로컬 개발에서도 "메일에 있어야 할 링크"를 확인하고 흐름을 끝까지 테스트할 수
- * 있게 합니다. {@code mail.enabled=true} + {@code spring.mail.*}(호스트·계정)를
+ * 있으면 발송을 생략하며 재설정 토큰과 링크는 로그에 남기지 않습니다.
+ * {@code mail.enabled=true} + {@code spring.mail.*}(호스트·계정)를
  * 채우면 실제 발송으로 전환됩니다.
  *
  * <p>{@link MailSender}를 생성자에서 직접 받지 않고 {@link ObjectProvider}로 받는
@@ -64,8 +63,7 @@ public class PasswordResetMailSender {
     @Async("passwordResetMailExecutor")
     public void sendResetLink(String toEmail, String resetUrl) {
         if (!enabled) {
-            log.info("[password-reset] mail.enabled=false — 실제 메일 대신 링크만 로그에 남깁니다: to={}, url={}",
-                    toEmail, resetUrl);
+            log.info("[password-reset] mail.enabled=false — 비밀번호 재설정 메일 발송을 생략합니다");
             return;
         }
 

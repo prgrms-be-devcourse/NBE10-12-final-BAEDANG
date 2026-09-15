@@ -119,7 +119,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 인증 정책은 [Stateful 인증·RTR](authentication.ko.md)을 따릅니다. 백엔드는 토큰 JSON을 반환하지만
 브라우저에는 Next.js 중계가 Refresh를 HttpOnly 쿠키로만 전달합니다. 가입·로그인·갱신 응답의
 `expiresAt`은 세션 절대 만료이며, 갱신은 Access와 Refresh를 함께 교체합니다. 직전 Refresh에만
-고정 5초 유예를 적용합니다. `SESSION_REVOKED`, `REFRESH_TOKEN_REUSED`, `AUTH_UNAVAILABLE`을 구분합니다.
+고정 20초 유예를 적용합니다. `SESSION_REVOKED`, `REFRESH_TOKEN_REUSED`, `AUTH_UNAVAILABLE`을 구분합니다.
 
 ### `POST /auth/signup`
 회원가입 + 계좌 개설 + 모의 투자금 지급

@@ -418,9 +418,11 @@ class AuthLifecycleIntegrationTest {
         AuthResponse signed = sessionUser();
         AuthResponse other = auth.login(new LoginRequest(signed.email(), "Password123!"));
         Tokens successor = sessions.rotate(signed.refreshToken());
-        when(clock.instant()).thenReturn(NOW.plusSeconds(4));
+        when(clock.instant()).thenReturn(NOW.plusSeconds(15));
         assertThat(sessions.rotate(signed.refreshToken()).refreshToken()).isEqualTo(successor.refreshToken());
-        when(clock.instant()).thenReturn(NOW.plusSeconds(5));
+        when(clock.instant()).thenReturn(NOW.plusSeconds(20).minusNanos(1));
+        assertThat(sessions.rotate(signed.refreshToken()).refreshToken()).isEqualTo(successor.refreshToken());
+        when(clock.instant()).thenReturn(NOW.plusSeconds(20));
         assertThatThrownBy(() -> sessions.rotate(signed.refreshToken())).isInstanceOfSatisfying(BusinessException.class,
                 error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.REFRESH_TOKEN_REUSED));
         assertRevoked(successor.accessToken());
@@ -486,7 +488,7 @@ class AuthLifecycleIntegrationTest {
         when(clock.instant()).thenReturn(NOW.plusSeconds(604801));
         assertThatThrownBy(() -> sessions.rotate(successor.refreshToken())).isInstanceOfSatisfying(BusinessException.class,
                 error -> assertThat(error.getErrorCode()).isEqualTo(ErrorCode.TOKEN_EXPIRED));
-        when(clock.instant()).thenReturn(NOW.plusSeconds(604805));
+        when(clock.instant()).thenReturn(NOW.plusSeconds(604819));
         sessions.cleanup();
         assertThat(jdbcTemplate.queryForObject("SELECT encrypted_refresh FROM auth_session", String.class)).isNull();
         when(clock.instant()).thenReturn(NOW.plusSeconds(1209601));

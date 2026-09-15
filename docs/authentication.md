@@ -23,9 +23,9 @@ Base64 secret (`openssl rand -base64 32`). Keep it separate from `JWT_SECRET` an
 Keep both keys stable across application restarts. Replacing the encryption key while grace records
 exist makes those retries unreadable; revoke sessions before intentional key replacement.
 
-**The external backend HTTPS address has not been configured yet.** Local implementation and tests
-can run, but production auth cannot be enabled by pointing the relay at the current HTTP IP.
-Configure NPMplus's HTTPS endpoint and these variables before releasing frontend and backend together.
+NPMplus exposes the backend at `https://54.180.217.176.sslip.io`, forwarding internally over HTTP
+to `trading-back-1:8080`. Set both backend URL variables above to this HTTPS origin and set
+`AUTH_PUBLIC_ORIGIN` to `https://nbe-10-12-final-baedang.vercel.app` before releasing frontend and backend together.
 The relay fails closed with `AUTH_UNAVAILABLE` on missing/unsafe configuration. Only non-Vercel runs
 whose frontend and backend are both localhost/127.0.0.1 allow HTTP. See `front/.env.example`.
 Vercel previews require their own exact allowed public origin.
@@ -81,7 +81,7 @@ Reuse revocation is committed before throwing the public error, so exception rol
 ## Rotation and bounded retry
 
 `auth_session` stores SHA-256 hashes of the current and immediate previous Refresh tokens. A current
-hash/generation match rotates once. For **5 seconds from that rotation**, a match of the immediate
+hash/generation match rotates once. For **20 seconds from that rotation**, a match of the immediate
 previous hash/generation returns the **same successor Refresh**. It neither rotates again nor extends
 the grace deadline. The successor is stored as AES-256-GCM ciphertext with a random nonce and the
 session ID as authenticated associated data; the encryption key is outside the database.
@@ -102,7 +102,7 @@ Proactive refresh (10 minutes, visible tabs only), TOKEN_EXPIRED recovery and re
 in-flight refresh per tab. Web Locks serialize cookie-changing auth operations across tabs;
 BroadcastChannel propagates user/login/logout state, guarded by the shared stamp against stale events.
 Use modern browsers with Web Locks and BroadcastChannel for cross-tab guarantees. Without Web Locks,
-the fallback only shares requests within a tab, and the 5-second server tolerance does not guarantee
+the fallback only shares requests within a tab, and the 20-second server tolerance does not guarantee
 arbitrary concurrent/out-of-order multi-tab recovery.
 
 Authenticated requests retry at most once after refresh, preserving the original body and clientOrderId.
@@ -126,7 +126,7 @@ AuthProvider applies them only to the matching current user while retaining the 
 
 ## Verification and transition
 
-V16 adds only `auth_session`; existing user, account and trade data are preserved. Deploying this
+V18 adds only `auth_session`; existing user, account and trade data are preserved. Deploying this
 contract requires one login for existing users and coordinated frontend/backend releases. A backend
 rollback leaves an unused extra table, but rolling back the frontend alone is incompatible with RTR.
 
@@ -135,6 +135,6 @@ session isolation, password/withdrawal invalidation, legacy/forged JWT rejection
 late responses, transient failures, relay CSRF/cookie transport, and real browser multi-tab restoration.
 E2E uses an independent browser login session and a separate API inspection session. The existing
 single-worker desktop/mobile trading suite stays enabled. Production HTTPS/cookie delivery must still
-be verified after the real endpoint is configured.
+be verified after the production environment variables and coordinated deployment are applied.
 
 Browser auth requests have a separate 15-second timeout covering headers and body consumption. A timeout aborts the fetch, releases the Web Lock and clears the shared refresh flight. REQUEST_TIMEOUT is transient: it does not clear authentication or automatically replay token rotation; pending logout stays retryable.

@@ -48,7 +48,7 @@ public class AuthSessionService {
 
     public AuthSessionService(JdbcTemplate jdbc, UserRepository users, JwtTokenProvider jwt,
                               RefreshTokenCipher cipher, Clock clock, TransactionTemplate transactions,
-                              @Value("${auth.session.rotation-grace:5s}") Duration grace) {
+                              @Value("${auth.session.rotation-grace:20s}") Duration grace) {
         if (grace.isNegative() || grace.compareTo(Duration.ofSeconds(30)) > 0) {
             throw new IllegalArgumentException("Refresh 유예는 0~30초여야 합니다");
         }
