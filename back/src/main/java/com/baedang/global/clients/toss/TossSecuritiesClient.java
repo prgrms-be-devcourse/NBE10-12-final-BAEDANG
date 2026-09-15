@@ -2,6 +2,7 @@ package com.baedang.global.clients.toss;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import org.slf4j.Logger;
@@ -26,6 +27,7 @@ public class TossSecuritiesClient {
 
     private final RestClient restClient;
     private final TossRateLimiterRegistry rateLimiterRegistry;
+    private final TradingMetrics metrics;
     private final String clientId;
     private final String clientSecret;
 
@@ -38,12 +40,14 @@ public class TossSecuritiesClient {
     public TossSecuritiesClient(
             RestClient.Builder builder,
             TossRateLimiterRegistry rateLimiterRegistry,
+            TradingMetrics metrics,
             @Value("${toss.base-url}") String baseUrl,
             @Value("${toss.client-id}") String clientId,
             @Value("${toss.client-secret}") String clientSecret
     ) {
         this.restClient = builder.baseUrl(baseUrl).build();
         this.rateLimiterRegistry = rateLimiterRegistry;
+        this.metrics = metrics;
         this.clientId = clientId;
         this.clientSecret = clientSecret;
     }
@@ -56,7 +60,13 @@ public class TossSecuritiesClient {
 
     public <T> T get(String path, MultiValueMap<String, String> queryParams, Class<T> responseType) {
         TossApiGroup group = resolveGroupOrThrow(path);
+        // 화이트리스트 위반(group 미해석)은 프로그래밍 오류라 외부 호출 지표에 넣지 않는다.
+        // 여기부터가 실제 outbound 호출 — 소요시간·성공/실패를 outcome 태그로 집계한다(401 재시도 포함).
+        return metrics.recordExternalCall("toss." + group.name(),
+                () -> send(path, queryParams, responseType, group));
+    }
 
+    private <T> T send(String path, MultiValueMap<String, String> queryParams, Class<T> responseType, TossApiGroup group) {
         String requestToken = token;
 
         try {

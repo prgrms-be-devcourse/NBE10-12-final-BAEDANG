@@ -1,5 +1,6 @@
 package com.baedang.market.scheduler;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.service.QuoteSnapshotLoadService;
@@ -30,15 +31,18 @@ public class QuoteSnapshotScheduler {
     private final QuoteSnapshotLoadService quoteSnapshotLoadService;
     private final MarketSessionProvider marketSessionProvider;
     private final Clock clock;
+    private final TradingMetrics metrics;
     private boolean usFirst;
 
     public QuoteSnapshotScheduler(
             QuoteSnapshotLoadService quoteSnapshotLoadService,
-            MarketSessionProvider marketSessionProvider, Clock clock
+            MarketSessionProvider marketSessionProvider, Clock clock,
+            TradingMetrics metrics
     ) {
         this.quoteSnapshotLoadService = quoteSnapshotLoadService;
         this.marketSessionProvider = marketSessionProvider;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${trading.quote-collection.dispatch-interval:25ms}",
@@ -55,6 +59,13 @@ public class QuoteSnapshotScheduler {
     private boolean pollIfMarketOpen(MarketCountry marketCountry, Instant now) {
         try {
             MarketSessionStatus session = marketSessionProvider.currentSession(marketCountry, now);
+            // 매 tick 개장 여부를 게이지로 갱신한다 — QuoteStale 알림이 이 값과 조인해
+            // 휴장 시장의 staleness 증가를 무시하도록(야간·주말 오탐 방지).
+            // !! 시세 신선도(quoteUpdated)는 여기서 기록하지 않는다. syncQuotes>0 은 "비동기 수집
+            //    대상으로 제출했다"는 뜻일 뿐, 실제 Toss 조회·저장은 이후 executor 에서 일어나기 때문이다.
+            //    제출 시점에 신선도를 초기화하면 조회/저장이 계속 실패해도 정상처럼 보인다(false green).
+            //    실제 저장 성공 시점에 QuoteRefreshCoordinator.fetch() 가 quoteUpdated 를 기록한다.
+            metrics.marketOpen(marketCountry.name(), session.open());
             if (session.open()) return quoteSnapshotLoadService.syncQuotes(marketCountry, session.validUntil()) > 0;
             else log.trace("장 휴장 상태로 시세 수집 건너뜀: marketCountry={}", marketCountry);
         } catch (Exception e) {

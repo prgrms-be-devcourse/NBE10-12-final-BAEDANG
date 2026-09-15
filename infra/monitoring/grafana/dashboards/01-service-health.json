@@ -1,0 +1,173 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "title": "01 · Service Health",
+  "uid": "service-health",
+  "tags": ["monitoring", "service"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "uri",
+        "label": "endpoint (uri)",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "PROM" },
+        "query": { "query": "label_values(http_server_requests_seconds_count{job=\"spring-boot\"}, uri)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "sort": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    { "id": 1, "type": "row", "title": "개요 (한눈에)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
+    {
+      "id": 2, "type": "stat", "title": "서버 상태",
+      "description": "up=1 이면 앱이 스크레이프에 응답 중(초록), 0 이면 응답 없음(빨강). 죽음 여부를 가장 먼저 본다.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": {
+        "mappings": [
+          { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
+        ],
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null }, { "color": "green", "value": 1 } ] }
+      }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "up{job=\"spring-boot\"}" } ]
+    },
+    {
+      "id": 3, "type": "stat", "title": "가동 시간",
+      "description": "프로세스가 켜진 이후 경과 시간. 값이 갑자기 작아지면 최근 재시작·크래시가 있었다는 뜻.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 4, "w": 5, "x": 4, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "colorMode": "none", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "process_uptime_seconds{job=\"spring-boot\"}" } ]
+    },
+    {
+      "id": 4, "type": "stat", "title": "초당 요청 수 (RPS)",
+      "description": "최근 5분 평균 초당 HTTP 요청 수. 평소 트래픽 수준과 급감/급증을 본다.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 4, "w": 5, "x": 9, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 1 }, "overrides": [] },
+      "options": { "colorMode": "none", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m]))" } ]
+    },
+    {
+      "id": 5, "type": "stat", "title": "5xx 에러율",
+      "description": "5분간 전체 요청 중 5xx 비율(실제 비율). 저트래픽에서 clamp_min 으로 분모를 누르면 100% 실패도 작게 표시되므로 쓰지 않는다. 요청이 없으면 0/0=NaN 이라 No data. 5% 초과면 빨강.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 1 },
+      "fieldConfig": { "defaults": {
+        "unit": "percentunit", "decimals": 2, "min": 0,
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] }
+      }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\", status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m]))" } ]
+    },
+    {
+      "id": 6, "type": "stat", "title": "응답시간 p95",
+      "description": "5분간 서버 응답 p95(히스토그램 기반). 1s 초과면 빨강. _bucket 이 없으면 빈 화면이 되므로 percentiles-histogram 필요.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 1 },
+      "fieldConfig": { "defaults": {
+        "unit": "s", "decimals": 3,
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.5 }, { "color": "red", "value": 1 } ] }
+      }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [ { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"spring-boot\"}[5m])))" } ]
+    },
+
+    { "id": 7, "type": "row", "title": "HTTP 트래픽 · 지연", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }, "collapsed": false },
+    {
+      "id": 8, "type": "timeseries", "title": "엔드포인트별 요청률",
+      "description": "uri 별 초당 요청 수. 상단 uri 변수로 특정 엔드포인트만 필터할 수 있다.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "sum by (uri) (rate(http_server_requests_seconds_count{job=\"spring-boot\", uri=~\"$uri\"}[5m]))", "legendFormat": "{{uri}}" } ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "응답시간 p50 / p95 / p99",
+      "description": "선택한 엔드포인트의 지연 분포. p99 가 p95 보다 크게 튀면 꼬리 지연(일부 요청만 느림)이 있다는 신호.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"spring-boot\", uri=~\"$uri\"}[5m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"spring-boot\", uri=~\"$uri\"}[5m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(http_server_requests_seconds_bucket{job=\"spring-boot\", uri=~\"$uri\"}[5m])))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "상태코드별 응답 수",
+      "description": "2xx(초록)·4xx(주황)·5xx(빨강) 초당 응답 수. 4xx 급증은 클라이언트/인증 문제, 5xx 급증은 서버 장애.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "custom": { "stacking": { "mode": "normal" } } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "2xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } } ] },
+          { "matcher": { "id": "byName", "options": "4xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } } ] },
+          { "matcher": { "id": "byName", "options": "5xx" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+        ]
+      },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\", status=~\"2..\"}[5m]))", "legendFormat": "2xx" },
+        { "refId": "B", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\", status=~\"4..\"}[5m]))", "legendFormat": "4xx" },
+        { "refId": "C", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\", status=~\"5..\"}[5m]))", "legendFormat": "5xx" }
+      ]
+    },
+    {
+      "id": 11, "type": "table", "title": "느린 엔드포인트 순위 (평균 응답시간)",
+      "description": "평균 = _sum / _count (rate 로 최근 5분). 상위 10개. 어떤 엔드포인트가 전체 지연을 끌어올리는지 본다. clamp_min 없이 실제 평균을 쓴다(저트래픽에서 분모를 1로 누르면 평균이 실제보다 작게 왜곡됨). 트래픽 없는 uri 는 0/0=NaN 이라 표에서 빠진다.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 4 }, "overrides": [] },
+      "options": { "showHeader": true },
+      "targets": [
+        { "refId": "A", "format": "table", "instant": true, "expr": "topk(10, sum by (uri) (rate(http_server_requests_seconds_sum{job=\"spring-boot\"}[5m])) / sum by (uri) (rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m])))" }
+      ]
+    },
+
+    { "id": 12, "type": "row", "title": "도메인 (트레이딩 핵심 동작)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 22 }, "collapsed": false },
+    {
+      "id": 13, "type": "timeseries", "title": "시세 데이터 신선도",
+      "description": "시장별 마지막 시세 갱신 이후 경과 초. 폴링(5s)이 정상이면 낮게 유지, 계속 커지면 시세 수집이 멈춘 것. (앱이 TradingMetrics.quoteUpdated 를 호출해야 표시됨)",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 23 },
+      "fieldConfig": { "defaults": {
+        "unit": "s",
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 30 }, { "color": "red", "value": 60 } ] }
+      }, "overrides": [] },
+      "targets": [ { "refId": "A", "expr": "trading_quote_staleness_seconds{job=\"spring-boot\"}", "legendFormat": "{{market}}" } ]
+    },
+    {
+      "id": 14, "type": "timeseries", "title": "외부 API 성공 · 실패",
+      "description": "외부 API 호출의 초당 성공/실패 건수(api·outcome 별). 실패 계열이 성공에 근접하면 외부 의존성 장애. (TradingMetrics.recordExternalCall 필요)",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 23 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [
+        { "matcher": { "id": "byRegexp", "options": ".*FAILURE.*" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+      ] },
+      "targets": [ { "refId": "A", "expr": "sum by (api, outcome) (rate(trading_external_api_seconds_count{job=\"spring-boot\"}[5m]))", "legendFormat": "{{api}} {{outcome}}" } ]
+    },
+    {
+      "id": 15, "type": "timeseries", "title": "주문 처리 시간 (p95 / p99)",
+      "description": "주문 처리 소요 시간 분포. 계좌 락(SELECT FOR UPDATE) 경합이 커지면 상승. _bucket 필요(publishPercentileHistogram). (TradingMetrics.start/stopOrderTimer 필요)",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 23 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(trading_order_execution_seconds_bucket{job=\"spring-boot\"}[5m])))", "legendFormat": "p95" },
+        { "refId": "B", "expr": "histogram_quantile(0.99, sum by (le) (rate(trading_order_execution_seconds_bucket{job=\"spring-boot\"}[5m])))", "legendFormat": "p99" }
+      ]
+    }
+  ]
+}

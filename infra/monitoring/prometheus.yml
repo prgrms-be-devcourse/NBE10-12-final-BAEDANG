@@ -1,0 +1,38 @@
+# ============================================================================
+#  Prometheus 상시 운영 설정
+# ============================================================================
+global:
+  # [왜 15s 인가 — 5s 가 아니라]
+  #   상시 관측의 표준값. 시계열은 스크레이프마다 샘플이 쌓여 디스크를 먹는데,
+  #   5s 로 당기면 저장량이 3배가 되지만 "평소 잘 도나"를 보는 데는 그만한 해상도가
+  #   필요 없다. 15s 면 분 단위 추세·알림 판정에 충분하고, 순간 스파이크는 어차피
+  #   for: 조건과 rate() 윈도로 걸러낸다. 부하 테스트처럼 초 단위 상관이 필요할 때만
+  #   더 짧게 잡는다(그건 별도 스택).
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+# 알림 규칙 로드. 파일을 고치면 curl -X POST http://localhost:9090/-/reload 로
+# 무중단 리로드한다(--web.enable-lifecycle 필요). 글롭은 compose 마운트 경로와 일치.
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
+scrape_configs:
+  # ① 앱(Spring Boot Actuator). 관리 포트 8081, /actuator/prometheus.
+  #    job 이름 spring-boot 는 알림의 up{job="spring-boot"} 선택자와 반드시 일치해야 한다.
+  - job_name: "spring-boot"
+    metrics_path: "/actuator/prometheus"
+    static_configs:
+      # 앱은 호스트에서 IntelliJ 로 직접 실행된다. 컨테이너에서 호스트를 부르는 표준 이름.
+      - targets: ["host.docker.internal:8081"]
+
+  # ② PostgreSQL(postgres-exporter). exporter 컨테이너는 같은 네트워크 안에 있어 서비스명으로 부른다.
+  #    exporter 는 9187 을 노출한다.
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # ③ Prometheus 자기 자신. 스크레이프 지연·규칙 평가 실패 등 관측 파이프라인 자체를 본다.
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
