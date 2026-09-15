@@ -889,6 +889,8 @@ Unlike a stock
 ### `GET /orders/quote/market` 🔒
 Fee & tax preview
 
+Market quotes keep a closed session observed at the start of the session lookup closed for that request; an opening during lookup is reflected in the next quote request. If the original FX snapshot expires before external lookups finish, `EXCHANGE_RATE_NOT_FOUND` takes precedence even when the quote is also stale. No estimate calculated with expired FX is returned.
+
 ```
 ?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
@@ -1249,7 +1251,7 @@ Investment personality report (investment MBTI) for the current active account (
 
 **Investment MBTI — 4 binary axes → 16 types**, value-weighted by evaluation amount: concentration (집중 C / 분산 D, by top-1 weight), market (국내 K / 해외 G), instrument (개별주 S / ETF E), risk (공격 A / 안정 B). `shares` are the deciding 0~1 ratios. **With fewer than 2 holdings the portfolio is `"classified": false`** ("미분류/신규") and `typeCode`·`typeLabel` are null. Axis 4 (risk) is a Phase-1 proxy using leverage/inverse weight only; holding-volatility is deferred.
 
-**`longHeldStocks`** — stocks held at least `holdingPeriodWeeks` (default 4, `report.holding-period-weeks`). "Held since" is the current lot's first buy, reconstructed by replaying filled `trade_order`s (a full sell to zero closes the lot; a later re-buy opens a new one). `returnRate` here is the **per-holding return in the stock's own currency**, `(lastPrice − avgBuyPrice) / avgBuyPrice` (null if no quote). Sorted oldest-held first. Empty until holdings accumulate 4 weeks.
+**`longHeldStocks`** — stocks held at least `holdingPeriodWeeks` (default 4, `report.holding-period-weeks`). "Held since" is the current lot's first buy, reconstructed by replaying individual `trade_execution` rows in executedAt/executionId order (including partial fills) (a full sell to zero closes the lot; a later re-buy opens a new one). `returnRate` here is the **per-holding return in the stock's own currency**, `(lastPrice − avgBuyPrice) / avgBuyPrice` (null if no quote). Sorted oldest-held first. Empty until holdings accumulate 4 weeks.
 
 ---
 

@@ -1,0 +1,98 @@
+name: E2E
+
+on:
+  pull_request:
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: Test suite
+        type: choice
+        options: [full, smoke]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: E2E Chromium
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Determine relevant changes
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          else
+            changed=$(git diff --name-only "$BASE" "$HEAD" -- front back e2e .github/workflows/e2e.yml)
+            if grep -Evq '(^$|\.(md|mdx|txt)$)' <<< "$changed"; then
+              echo 'run=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+      - uses: actions/setup-node@v5
+        if: steps.changes.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            front/package-lock.json
+            e2e/package-lock.json
+      - uses: actions/setup-java@v6
+        if: steps.changes.outputs.run == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.changes.outputs.run == 'true'
+      - name: Install packages and Chromium
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          npm ci --prefix front
+          npm ci --prefix e2e
+          cd e2e
+          npx playwright install --with-deps chromium
+          npm run typecheck
+          npm run test:scripts
+      - name: Run single-worker E2E
+        if: steps.changes.outputs.run == 'true'
+        working-directory: e2e
+        env:
+          EVENT: ${{ github.event_name }}
+          SUITE: ${{ inputs.suite }}
+        run: |
+          if [ "$EVENT" = pull_request ] || [ "$SUITE" = smoke ]; then
+            npm run test:smoke
+          else
+            npm test
+          fi
+      - name: Clean owned resources
+        if: always() && steps.changes.outputs.run == 'true'
+        run: node e2e/scripts/clean.mjs
+      - name: Upload diagnostics
+        if: always() && steps.changes.outputs.run == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-diagnostics
+          include-hidden-files: true
+          retention-days: 7
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+            e2e/.runtime/*.log

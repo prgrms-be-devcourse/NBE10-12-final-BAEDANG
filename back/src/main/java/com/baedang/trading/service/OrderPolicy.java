@@ -115,7 +115,7 @@ public class OrderPolicy {
                     ErrorCode.MARKET_CONTEXT_EXPIRED,
                     ClientOrderRetryPolicy.SAME_CLIENT_ORDER_ID.asData());
         }
-        // 컨텍스트 준비 시각과 환율의 원본 유효기간/수신 TTL은 서로 다릅니다.
+        // 컨텍스트 준비 시각과 환율의 원본 유효기간은 별도로 검증하며 수신 TTL은 없습니다.
         // 잠금 후 신규 주문만 검사하며 만료 시 외부 재조회 없이 같은 ID 재시도를 안내합니다.
         if (context.executionRateEvidence() == null
                 || !context.executionRateEvidence().isValidAt(now.atOffset(ZoneOffset.UTC))

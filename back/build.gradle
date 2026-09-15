@@ -90,3 +90,26 @@ tasks.named('bootJar') {
     enabled = true
     archiveFileName = 'application.jar'
 }
+
+// 브라우저 통합 테스트 전용 런처와 대역은 운영 JAR에 포함하지 않습니다.
+sourceSets {
+    e2e {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    e2eImplementation.extendsFrom implementation
+    e2eRuntimeOnly.extendsFrom runtimeOnly
+}
+tasks.register('e2eRun', JavaExec) {
+    dependsOn e2eClasses
+    classpath = sourceSets.e2e.runtimeClasspath
+    mainClass = 'com.baedang.e2e.E2eLauncher'
+}
+tasks.register('e2eClasspath') {
+    dependsOn e2eClasses
+    doLast {
+        file("$buildDir/e2e-classpath.txt").text = sourceSets.e2e.runtimeClasspath.asPath
+    }
+}
