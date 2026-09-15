@@ -1198,7 +1198,7 @@ void main() {
       expect(find.text('기준월'), findsOneWidget);
       expect(find.text('2024.12'), findsWidgets);
       expect(find.text('영업이익'), findsWidgets);
-      await tester.tap(find.byIcon(Icons.close));
+      await tester.tap(find.text('닫기'));
       await _settle(tester);
     });
 

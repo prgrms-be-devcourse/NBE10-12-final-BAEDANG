@@ -33,7 +33,8 @@ class _FinancialsSectionState extends State<FinancialsSection> {
   /// 웹과 동일: 연간 3개·분기 6개만 미리 보여주고, 오래된 순으로 그린다.
   static const _previewLimit = {'annual': 3, 'quarterly': 6};
 
-  bool _annual = true;
+  /// null이면 데이터 기준 기본값(연간 데이터가 있으면 연간, 아니면 분기).
+  bool? _annual;
 
   @override
   void initState() {
@@ -84,9 +85,10 @@ class _FinancialsSectionState extends State<FinancialsSection> {
           );
         }
 
-        final all =
-            _annual ? financials.annual : financials.quarterly;
-        final limit = _previewLimit[_annual ? 'annual' : 'quarterly']!;
+        // 웹과 동일: 연간이 없고 분기만 있으면 분기를 기본 선택한다.
+        final annual = _annual ?? financials.annual.isNotEmpty;
+        final all = annual ? financials.annual : financials.quarterly;
+        final limit = _previewLimit[annual ? 'annual' : 'quarterly']!;
         final chartPeriods =
             all.take(limit).toList(growable: false).reversed.toList();
 
@@ -101,24 +103,39 @@ class _FinancialsSectionState extends State<FinancialsSection> {
                   Text('재무제표', style: theme.textTheme.titleLarge),
                   const SizedBox(width: 8),
                   if (financials.industryName != null)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: scheme.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        financials.industryName!,
-                        style: TextStyle(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onSurfaceVariant,
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          financials.industryName!,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
                     ),
+                  const Spacer(),
+                  SizedBox(
+                    width: 132,
+                    child: PillTabs<bool>(
+                      options: const [
+                        (label: '연간', value: true),
+                        (label: '분기', value: false),
+                      ],
+                      value: annual,
+                      onChanged: (v) => setState(() => _annual = v),
+                    ),
+                  ),
                 ],
               ),
               if (financials.isStale)
@@ -135,27 +152,12 @@ class _FinancialsSectionState extends State<FinancialsSection> {
               const SizedBox(height: 12),
               _ValuationSummary(financials: financials),
               const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: SizedBox(
-                  width: 132,
-                  child: PillTabs<bool>(
-                    options: const [
-                      (label: '연간', value: true),
-                      (label: '분기', value: false),
-                    ],
-                    value: _annual,
-                    onChanged: (v) => setState(() => _annual = v),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
               if (all.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: 24),
                   child: Center(
                     child: Text(
-                      '${_annual ? '연간' : '분기'} 재무 정보가 아직 없어요.',
+                      '${annual ? '연간' : '분기'} 재무 정보가 아직 없어요.',
                       style: TextStyle(
                         fontSize: 13,
                         color: scheme.onSurfaceVariant,
@@ -381,9 +383,18 @@ class _FinancialChartDialog extends StatelessWidget {
                 Expanded(
                   child: Text(title, style: theme.textTheme.titleMedium),
                 ),
-                IconButton(
+                TextButton(
                   onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
+                  style: TextButton.styleFrom(
+                    backgroundColor: scheme.surfaceContainerHighest,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('닫기', style: TextStyle(fontSize: 11.5)),
                 ),
               ],
             ),
