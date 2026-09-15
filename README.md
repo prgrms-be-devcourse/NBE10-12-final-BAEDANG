@@ -69,7 +69,7 @@ PostgreSQL + TimescaleDB 가 빈 상태로 뜹니다.
 **PostgreSQL 을 따로 설치하지 않아도 됩니다.**
 
 스키마는 백엔드를 기동할 때 Flyway가
-`back/src/main/resources/db/migration/`의 V1, V2, V3… 파일을 순서대로 적용합니다(현재 V15까지).
+`back/src/main/resources/db/migration/`의 V1, V2, V3… 파일을 순서대로 적용합니다.
 
 기동 후 적용 이력을 확인:
 
