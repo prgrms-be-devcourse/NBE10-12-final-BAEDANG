@@ -28,6 +28,8 @@ abstract final class ApiErrorCodes {
   static const String unauthorized = 'UNAUTHORIZED';
   static const String tokenExpired = 'TOKEN_EXPIRED';
   static const String invalidToken = 'INVALID_TOKEN';
+  static const String sessionRevoked = 'SESSION_REVOKED';
+  static const String refreshTokenReused = 'REFRESH_TOKEN_REUSED';
   static const String emailDuplicated = 'EMAIL_DUPLICATED';
   static const String nicknameDuplicated = 'NICKNAME_DUPLICATED';
   static const String userNotFound = 'USER_NOT_FOUND';
@@ -88,8 +90,13 @@ class ApiError {
   /// 서버 `data`(필드 오류, 부족 금액 등). 계약된 값만 보존한다.
   final Map<String, Object?>? data;
 
-  /// refresh token이 확정적으로 무효일 때만 true. 통신 실패는 false다.
-  bool get isSessionInvalid => isTokenExpired || isInvalidToken;
+  /// 세션이 확정적으로 무효일 때만 true. 통신 실패·단순 UNAUTHORIZED는 false다.
+  /// stateful 세션 도입으로 SESSION_REVOKED·REFRESH_TOKEN_REUSED가 추가됐다.
+  bool get isSessionInvalid =>
+      isTokenExpired ||
+      isInvalidToken ||
+      code == ApiErrorCodes.sessionRevoked ||
+      code == ApiErrorCodes.refreshTokenReused;
 
   bool get isTokenExpired => code == ApiErrorCodes.tokenExpired;
 

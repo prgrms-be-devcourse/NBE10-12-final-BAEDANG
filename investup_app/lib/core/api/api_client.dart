@@ -73,13 +73,19 @@ class ApiClient {
       }
       final body = response.data;
       final accessToken = body is Map ? body['accessToken'] : null;
-      if (accessToken is! String || accessToken.isEmpty) {
+      final rotatedRefreshToken = body is Map ? body['refreshToken'] : null;
+      if (accessToken is! String ||
+          accessToken.isEmpty ||
+          rotatedRefreshToken is! String ||
+          rotatedRefreshToken.isEmpty) {
         // ErrorResponse 형태가 아닌 응답. 통신 실패와 달리 세션 유지로 단정하지 않는다.
         throw const ApiException(ApiError.unexpectedResponse);
       }
-      // 현재 refresh 응답에는 accessToken만 있다. 기존 refresh token은 그대로 둔다.
-      final applied = await tokens.applyRefreshedAccessToken(
-        accessToken,
+      // RTR: 서버가 refresh token을 회전한다 — 새 토큰을 저장하지 않으면
+      // 다음 갱신이 REFRESH_TOKEN_REUSED로 세션을 끊는다.
+      final applied = await tokens.applyRotatedTokens(
+        accessToken: accessToken,
+        refreshToken: rotatedRefreshToken,
         generation: generation,
       );
       if (!applied) {

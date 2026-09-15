@@ -185,8 +185,8 @@ class AuthSession extends ChangeNotifier {
     return profile;
   }
 
-  /// 회원 탈퇴. 서버가 토큰을 무효화하지 않으므로(stateless JWT) 성공 후
-  /// 로컬 세션을 반드시 지운다 — 안 지우면 없는 계정으로 요청을 계속 보낸다.
+  /// 회원 탈퇴. 서버는 탈퇴 회원의 세션을 다음 갱신 시 무효화하지만,
+  /// 성공 후 로컬 세션은 반드시 지운다 — 안 지우면 없는 계정으로 요청을 계속 보낸다.
   Future<void> withdraw(String currentPassword) async {
     await _authApi.withdraw(currentPassword: currentPassword);
     await _invalidateSession();
@@ -195,16 +195,18 @@ class AuthSession extends ChangeNotifier {
   /// 로그아웃. 화면 상태를 먼저 비우고, 서버 호출 실패는 무시한다.
   /// 저장된 토큰 삭제 실패는 [StorageException]으로 알린다(로컬 로그아웃은 유지).
   Future<void> logOut() async {
-    final accessToken = _tokens.accessToken;
+    final refreshToken = _tokens.refreshToken;
     _tokens.invalidate();
     _applySignedOut();
     // 로컬 삭제를 서버 응답보다 먼저 끝낸다. 늦은 로그아웃 응답이 이후
     // 로그인이 저장한 토큰을 지우는 일이 없어야 한다.
     await _tokens.clearStoredRefreshToken();
+    if (refreshToken == null) return;
     try {
-      await _authApi.logOut(accessToken: accessToken);
+      // 서버는 stateful이다 — refresh token으로 세션을 폐기시킨다.
+      await _authApi.logOut(refreshToken: refreshToken);
     } on ApiException {
-      // 서버 로그아웃은 stateless다. 통신 실패가 로컬 로그아웃을 막지 않는다.
+      // 통신 실패가 로컬 로그아웃을 막지 않는다 — 세션은 만료 시각에 자연 소멸한다.
     }
   }
 

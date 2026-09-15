@@ -59,7 +59,7 @@ void main() {
     expect(from(DioExceptionType.cancel).kind, ApiErrorKind.cancelled);
   });
 
-  test('세션 무효는 TOKEN_EXPIRED/INVALID_TOKEN으로만 판정한다', () {
+  test('세션 무효는 만료·폐기·재사용 코드로만 판정한다', () {
     const expired = ApiError(
       kind: ApiErrorKind.domain,
       code: ApiErrorCodes.tokenExpired,
@@ -70,6 +70,16 @@ void main() {
       code: ApiErrorCodes.invalidToken,
       message: '무효',
     );
+    const revoked = ApiError(
+      kind: ApiErrorKind.domain,
+      code: ApiErrorCodes.sessionRevoked,
+      message: '폐기',
+    );
+    const reused = ApiError(
+      kind: ApiErrorKind.domain,
+      code: ApiErrorCodes.refreshTokenReused,
+      message: '재사용',
+    );
     const unauthorized = ApiError(
       kind: ApiErrorKind.domain,
       code: ApiErrorCodes.unauthorized,
@@ -78,6 +88,8 @@ void main() {
 
     expect(expired.isSessionInvalid, isTrue);
     expect(invalid.isSessionInvalid, isTrue);
+    expect(revoked.isSessionInvalid, isTrue);
+    expect(reused.isSessionInvalid, isTrue);
     expect(unauthorized.isSessionInvalid, isFalse);
     expect(ApiError.timeoutFailure.isSessionInvalid, isFalse);
   });

@@ -135,7 +135,8 @@ void main() {
     );
     await harness.session.restore();
     expect(refreshCount, 2);
-    expect(harness.storage.stored, 'valid-refresh');
+    // 첫 refresh가 회전시킨 토큰이 저장돼 있다 — 두 번째 실패가 덮지 않는다.
+    expect(harness.storage.stored, 'rotated-refresh');
     expect(harness.session.status, AuthStatus.unavailable);
     expect(harness.session.restoreError?.kind, ApiErrorKind.server);
   });

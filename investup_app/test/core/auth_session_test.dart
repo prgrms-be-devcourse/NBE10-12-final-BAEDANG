@@ -41,7 +41,7 @@ FakeHttpAdapter healthyServer({
 }
 
 void main() {
-  test('저장된 refresh token으로 세션을 복원하고 저장 토큰은 그대로 둔다', () async {
+  test('저장된 refresh token으로 세션을 복원하고 회전된 토큰을 저장한다', () async {
     final harness = TestHarness(
       adapter: healthyServer(),
       storage: FakeTokenStorage(initialRefreshToken: 'stored-refresh'),
@@ -53,9 +53,10 @@ void main() {
     expect(harness.session.profile?.nickname, '사용자');
     expect(harness.session.account?.cashBalance, '49000000');
     expect(harness.tokens.accessToken, 'fresh-access');
-    expect(harness.tokens.refreshToken, 'stored-refresh');
-    expect(harness.storage.stored, 'stored-refresh');
-    expect(harness.storage.writeCount, 0);
+    // RTR: 서버가 회전시킨 refresh token을 메모리·저장소에 반영한다.
+    expect(harness.tokens.refreshToken, 'rotated-refresh');
+    expect(harness.storage.stored, 'rotated-refresh');
+    expect(harness.storage.writeCount, 1);
     expect(harness.countTo('/auth/refresh'), 1);
     expect(harness.session.restoreError, isNull);
   });
@@ -161,7 +162,8 @@ void main() {
 
     expect(harness.session.status, AuthStatus.unavailable);
     expect(harness.session.restoreError?.kind, ApiErrorKind.server);
-    expect(harness.storage.stored, 'stored-refresh');
+    // 회전된 refresh token은 이미 저장돼 있다 — 다음 시작이 이걸로 갱신한다.
+    expect(harness.storage.stored, 'rotated-refresh');
     expect(harness.tokens.accessToken, 'fresh-access');
   });
 
@@ -272,7 +274,7 @@ void main() {
     expect(harness.countTo('/auth/logout'), 1);
   });
 
-  test('로그아웃은 로그인에 쓴 access token을 서버로 보낸다', () async {
+  test('로그아웃은 refresh token을 본문에 담아 서버 세션을 폐기한다', () async {
     final harness = TestHarness(adapter: healthyServer());
     await harness.signIn(
       accessToken: 'access-token',
@@ -281,9 +283,10 @@ void main() {
 
     await harness.session.logOut();
 
+    // stateful 세션은 refresh token 본문으로 폐기한다 — Authorization이 아니다.
     expect(
-      bearerTokenOf(harness.requestsTo('/auth/logout').single),
-      'access-token',
+      harness.requestsTo('/auth/logout').single.data,
+      <String, dynamic>{'refreshToken': 'refresh-token'},
     );
   });
 

@@ -54,13 +54,13 @@ class AuthApi {
     return _client.decode(() => UserProfile.fromJson(json));
   }
 
-  /// 서버는 stateless라 토큰을 실제로 폐기하지 않는다. 통신 실패가 로컬 로그아웃을
-  /// 막지 않게 호출부가 실패를 무시할 수 있다. 로그아웃 직후에는 메모리 토큰이 이미
-  /// 지워져 있으므로, 사용한 access token을 [accessToken]으로 넘겨받는다.
-  Future<void> logOut({String? accessToken}) => _client.postVoid(
+  /// 서버가 stateful 세션을 폐기한다 — 본문의 refresh token이 필수다.
+  /// 통신 실패가 로컬 로그아웃을 막지 않게 호출부가 실패를 무시할 수 있다.
+  /// 호출부는 메모리 토큰을 지우기 전에 refresh token을 넘겨준다.
+  Future<void> logOut({required String refreshToken}) => _client.postVoid(
     _logOut,
-    auth: AuthRequirement.required,
-    bearerToken: accessToken,
+    body: {'refreshToken': refreshToken},
+    auth: AuthRequirement.public,
   );
 
   /// 비밀번호 재설정 메일 요청. 계정 존재 여부와 무관하게 200을 돌려준다.

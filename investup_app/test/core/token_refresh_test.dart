@@ -76,7 +76,7 @@ void main() {
     },
   );
 
-  test('refresh 응답에는 accessToken만 있으므로 저장된 refresh token을 유지한다', () async {
+  test('refresh 응답의 회전된 refresh token을 저장한다(RTR)', () async {
     final harness = TestHarness(
       adapter: expiringServer(
         expiredToken: 'expired-access',
@@ -90,9 +90,11 @@ void main() {
 
     await harness.auth.getMe();
 
-    expect(harness.tokens.refreshToken, 'stored-refresh');
-    expect(harness.storage.stored, 'stored-refresh');
-    expect(harness.storage.writeCount, 1);
+    // 서버가 회전시킨 토큰으로 메모리·저장소를 갱신한다 — 저장하지 않으면
+    // 다음 refresh가 REFRESH_TOKEN_REUSED로 세션을 끊는다.
+    expect(harness.tokens.refreshToken, 'rotated-refresh');
+    expect(harness.storage.stored, 'rotated-refresh');
+    expect(harness.storage.writeCount, 2); // 로그인 1회 + 회전 1회
   });
 
   test('재시도한 요청도 만료면 자동 재시도를 반복하지 않는다', () async {
@@ -127,6 +129,64 @@ void main() {
 
     expect(harness.countTo('/auth/refresh'), 1);
     expect(harness.countTo('/users/me'), 2);
+  });
+
+  test('refresh가 REFRESH_TOKEN_REUSED로 거절되면 세션을 정리한다', () async {
+    final harness = TestHarness(
+      adapter: FakeHttpAdapter((options) async {
+        if (options.uri.path.endsWith('/auth/refresh')) {
+          return FakeResponse.error(
+            401,
+            code: ApiErrorCodes.refreshTokenReused,
+            message: '인증 정보가 재사용되어 로그인이 해제됐어요',
+          );
+        }
+        return FakeResponse.error(
+          401,
+          code: ApiErrorCodes.tokenExpired,
+          message: '로그인이 만료됐어요. 다시 로그인해주세요',
+        );
+      }),
+    );
+    await harness.signIn(
+      accessToken: 'expired-access',
+      refreshToken: 'reused-refresh',
+    );
+
+    await expectLater(harness.auth.getMe(), throwsA(isA<ApiException>()));
+
+    expect(harness.countTo('/auth/refresh'), 1);
+    expect(harness.tokens.hasSession, isFalse);
+    expect(harness.storage.stored, isNull);
+  });
+
+  test('refresh가 SESSION_REVOKED로 거절되면 세션을 정리한다', () async {
+    final harness = TestHarness(
+      adapter: FakeHttpAdapter((options) async {
+        if (options.uri.path.endsWith('/auth/refresh')) {
+          return FakeResponse.error(
+            401,
+            code: ApiErrorCodes.sessionRevoked,
+            message: '다른 곳에서 로그인되어 로그인이 해제됐어요',
+          );
+        }
+        return FakeResponse.error(
+          401,
+          code: ApiErrorCodes.tokenExpired,
+          message: '로그인이 만료됐어요. 다시 로그인해주세요',
+        );
+      }),
+    );
+    await harness.signIn(
+      accessToken: 'expired-access',
+      refreshToken: 'revoked-refresh',
+    );
+
+    await expectLater(harness.auth.getMe(), throwsA(isA<ApiException>()));
+
+    expect(harness.countTo('/auth/refresh'), 1);
+    expect(harness.tokens.hasSession, isFalse);
+    expect(harness.storage.stored, isNull);
   });
 
   test('refresh가 INVALID_TOKEN으로 거절되면 세션을 정리한다', () async {

@@ -60,13 +60,19 @@ class TokenManager extends ChangeNotifier {
     return true;
   });
 
-  /// refresh 응답 반영. refresh token은 그대로 두고 access token만 바꾼다.
-  Future<bool> applyRefreshedAccessToken(
-    String accessToken, {
+  /// refresh 응답 반영. 서버가 stateful RTR로 refresh token을 회전하므로
+  /// 새 refresh token까지 함께 저장한다 — 저장에 성공해야만 새 토큰을 공개한다
+  /// (재시작 시 회전 전 죽은 토큰을 읽는 일을 막는다).
+  Future<bool> applyRotatedTokens({
+    required String accessToken,
+    required String refreshToken,
     required int generation,
   }) => _synchronized(() async {
     if (_isStale(generation)) return false;
+    await _storage.writeRefreshToken(refreshToken);
+    if (_isStale(generation)) return false;
     _accessToken = accessToken;
+    _refreshToken = refreshToken;
     return true;
   });
 

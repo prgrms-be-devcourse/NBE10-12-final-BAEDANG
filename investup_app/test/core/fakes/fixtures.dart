@@ -44,8 +44,15 @@ Map<String, Object?> accountSummaryJson({int accountId = 3, int roundNo = 1}) =>
       'asOf': '2026-09-15T10:00:00+09:00',
     };
 
-Map<String, Object?> accessTokenJson(String accessToken) => <String, Object?>{
+/// POST /auth/refresh 응답 — stateful RTR이라 회전된 refreshToken과 expiresAt을
+/// 함께 내려준다(백엔드 AccessTokenResponse와 같은 모양).
+Map<String, Object?> accessTokenJson(
+  String accessToken, {
+  String refreshToken = 'rotated-refresh',
+}) => <String, Object?>{
   'accessToken': accessToken,
+  'refreshToken': refreshToken,
+  'expiresAt': '2026-09-16T10:00:00+09:00',
 };
 
 Map<String, Object?> rankingJson() => <String, Object?>{
