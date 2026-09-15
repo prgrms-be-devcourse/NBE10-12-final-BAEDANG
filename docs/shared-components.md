@@ -536,3 +536,5 @@ See [authentication.md](authentication.md) for public contracts, deployment vari
 
 `updateNickname` publishes a session-guarded `onProfileUpdated` event and cross-tab profile message.
 Consumers update profile fields only; `AuthProvider.setUser` is reserved for completed signup/login.
+
+Auth calls in api.ts enforce a 15-second browser timeout through AbortController, including response JSON consumption. REQUEST_TIMEOUT preserves authentication; the relay upstream timeout remains 10 seconds.

@@ -17,6 +17,7 @@ let onUserChanged: ((user: AuthUser | null) => void) | null = null;
 let onProfileUpdated: ((profile: UserProfile) => void) | null = null;
 let channel: BroadcastChannel | null = null;
 const AUTH_STAMP = 'baedang-auth-stamp';
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
 function stamp() {
   try { return localStorage.getItem(AUTH_STAMP); } catch { return null; }
@@ -138,24 +139,38 @@ async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
     headers.Authorization = `Bearer ${tokenStore.accessToken}`;
   }
 
+  // 중계 서버의 upstream 제한과 별개로 브라우저 통신도 제한해 Web Lock을 해제합니다.
+  const controller = path.startsWith('/api/auth/') ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS) : null;
+  const signal = controller
+    ? (init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal)
+    : init.signal;
   let res: Response;
+  let json;
   try {
     res = await fetch(path.startsWith('/api/auth/') ? path : `${API_BASE_URL}${path}`, {
       credentials: path.startsWith('/api/auth/') ? 'same-origin' : 'omit',
-      signal: init.signal,
+      signal,
       method: init.method,
       headers,
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
+    json = await res.json().catch(error => {
+      if (controller?.signal.aborted) throw error;
+      return null;
+    });
   } catch {
+    if (controller?.signal.aborted) {
+      throw new ApiError('REQUEST_TIMEOUT', '인증 서버 응답이 늦어지고 있어요. 잠시 후 다시 시도해주세요.');
+    }
     // 백엔드가 안 떠 있거나 CORS 등으로 요청 자체가 안 나간 경우.
     throw new ApiError(
       "NETWORK_ERROR",
       "서버에 연결할 수 없어요. 백엔드가 실행 중인지 확인해주세요."
     );
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
   }
-
-  const json = await res.json().catch(() => null);
 
   if (!res.ok) {
     const code = json?.code ?? "UNKNOWN_ERROR";

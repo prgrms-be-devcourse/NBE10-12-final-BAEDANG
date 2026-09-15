@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getAccountSummary, login, logoutUser, refreshAccessToken, restoreAuth, setAuthEventListeners, syncAuthTokens, updateNickname } from '../api';
+import { getAccountSummary, login, logoutUser, refreshAccessToken, restoreAuth, setAuthEventListeners, syncAuthTokens, updateNickname, signUp } from '../api';
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -8,7 +8,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn());
   syncAuthTokens({ accessToken: 'old' });
 });
-afterEach(() => { setAuthEventListeners({}); vi.unstubAllGlobals(); });
+afterEach(() => { setAuthEventListeners({}); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 it('동시 401 및 선제 갱신은 하나의 진행 중 요청을 공유한다', async () => {
   let resolve!: (response: Response) => void;
@@ -132,4 +132,77 @@ it('닉네임 갱신 중 회전한 Access는 유지하며 프로필 이벤트에
   await getAccountSummary();
   expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('/api/accounts/me'),
     expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer rotated' }) }));
+});
+
+function mockAuthLock() {
+  let queue = Promise.resolve();
+  vi.stubGlobal('navigator', { locks: { request: (_name: string, work: () => Promise<unknown>) => {
+    const next = queue.then(work);
+    queue = next.then(() => {}, () => {});
+    return next;
+  } } });
+}
+function stallUntilAbort(signal: AbortSignal) {
+  return new Promise<never>((_resolve, reject) => {
+    signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+  });
+}
+
+it.each(['headers', 'body'])('인증 %s 수신이 멈추면 15초 후 실패하고 다음 갱신을 허용한다', async phase => {
+  vi.useFakeTimers();
+  mockAuthLock();
+  const expired = vi.fn();
+  setAuthEventListeners({ onAuthExpired: expired });
+  vi.mocked(fetch).mockImplementationOnce(async (_url, init) => {
+    const stalled = () => stallUntilAbort(init!.signal!);
+    return phase === 'headers' ? stalled() : { ok: true, status: 200, json: stalled } as unknown as Response;
+  });
+  const refresh = refreshAccessToken().catch(error => error);
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(14_999);
+  expect(expired).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await refresh).code).toBe('REQUEST_TIMEOUT');
+  expect(expired).not.toHaveBeenCalled();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ accountId: 1 }));
+  await getAccountSummary();
+  expect(fetch).toHaveBeenLastCalledWith(expect.any(String),
+    expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer old' }) }));
+  vi.mocked(fetch).mockResolvedValueOnce(Response.json({ accessToken: 'recovered' }));
+  await expect(refreshAccessToken()).resolves.toEqual({ accessToken: 'recovered' });
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it('멈춘 Refresh의 타임아웃이 Web Lock을 해제해 대기 중 로그아웃을 진행한다', async () => {
+  vi.useFakeTimers();
+  mockAuthLock();
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (url !== '/api/auth/refresh') return new Response(null, { status: 204 });
+    return stallUntilAbort(init!.signal!);
+  });
+  const refresh = refreshAccessToken().catch(error => error);
+  await vi.advanceTimersByTimeAsync(0);
+  const logout = logoutUser();
+  await vi.advanceTimersByTimeAsync(14_999);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await refresh).code).toBe('REQUEST_TIMEOUT');
+  await logout;
+  expect(vi.mocked(fetch).mock.calls.map(([url]) => url)).toEqual(['/api/auth/refresh', '/api/auth/logout']);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it.each(['login', 'signup', 'logout'])('%s 요청도 15초 제한을 적용한다', async action => {
+  vi.useFakeTimers();
+  vi.stubGlobal('navigator', {});
+  vi.mocked(fetch).mockImplementation(async (_url, init) => stallUntilAbort(init!.signal!));
+  const credentials = { email: 'a@example.com', password: 'password', nickname: 'A' };
+  const pending = (action === 'logout' ? logoutUser() : action === 'signup' ? signUp(credentials) : login(credentials))
+    .catch(error => error);
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect((await pending).code).toBe('REQUEST_TIMEOUT');
+  expect(fetch).toHaveBeenCalledTimes(1);
+  if (action === 'logout') expect(localStorage.getItem('baedang-auth-stamp')).toMatch(/^logout:/);
+  expect(vi.getTimerCount()).toBe(0);
 });

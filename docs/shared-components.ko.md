@@ -536,3 +536,5 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 
 `updateNickname`은 요청 세션이 유지될 때만 `onProfileUpdated`와 탭 간 프로필 이벤트를 발행합니다.
 수신자는 프로필 필드만 갱신하며 `AuthProvider.setUser`는 가입·로그인 완료 시에만 사용합니다.
+
+api.ts의 인증 요청은 AbortController로 JSON 본문 수신까지 15초로 제한합니다. REQUEST_TIMEOUT은 인증 상태를 유지하며 중계 서버의 upstream 제한은 기존 10초를 유지합니다.

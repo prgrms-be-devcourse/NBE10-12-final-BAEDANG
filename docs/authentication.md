@@ -132,3 +132,5 @@ late responses, transient failures, relay CSRF/cookie transport, and real browse
 E2E uses an independent browser login session and a separate API inspection session. The existing
 single-worker desktop/mobile trading suite stays enabled. Production HTTPS/cookie delivery must still
 be verified after the real endpoint is configured.
+
+Browser auth requests have a separate 15-second timeout covering headers and body consumption. A timeout aborts the fetch, releases the Web Lock and clears the shared refresh flight. REQUEST_TIMEOUT is transient: it does not clear authentication or automatically replay token rotation; pending logout stays retryable.
