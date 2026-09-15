@@ -1202,6 +1202,34 @@ void main() {
       await _settle(tester);
     });
 
+    // 폰 너비에서 RenderFlex 오버플로가 나면 pump 단계에서 테스트가 실패한다.
+    testWidgets('폰 너비에서 오버플로 없이 렌더링된다', (tester) async {
+      tester.view.physicalSize = const Size(1170, 2532);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+      await tester.tap(find.text('삼성전자'));
+      await _settle(tester);
+      await tester.scrollUntilVisible(
+        find.text('재무제표'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('크게 보기').first);
+      await _settle(tester);
+      expect(find.text('기준월'), findsOneWidget);
+      await tester.tap(find.text('닫기'));
+      await _settle(tester);
+    });
+
     testWidgets('미지원 종목(NVDA)은 재무제표 섹션이 숨는다', (tester) async {
       final harness = _harness();
       await tester.pumpWidget(

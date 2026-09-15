@@ -503,10 +503,14 @@ class _ValuationSummary extends StatelessWidget {
               color: scheme.primary,
             ),
           ),
-          const Spacer(),
-          Text(
-            '최근 연간 EPS 기준',
-            style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              '최근 연간 EPS 기준',
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 11.5, color: scheme.onSurfaceVariant),
+            ),
           ),
         ],
       ),
@@ -831,16 +835,24 @@ class _BarChartPainter extends CustomPainter {
         periods[i].label,
         Offset(center, baseline + 2),
         labelColor,
+        size.width,
       );
     }
   }
 
-  void _drawLabel(Canvas canvas, String text, Offset topCenter, Color color) {
+  void _drawLabel(
+    Canvas canvas,
+    String text,
+    Offset topCenter,
+    Color color,
+    double maxWidth,
+  ) {
     final tp = TextPainter(
       text: TextSpan(text: text, style: TextStyle(fontSize: 11, color: color)),
       textDirection: TextDirection.ltr,
     )..layout();
-    tp.paint(canvas, Offset(topCenter.dx - tp.width / 2, topCenter.dy));
+    final dx = (topCenter.dx - tp.width / 2).clamp(0.0, maxWidth - tp.width);
+    tp.paint(canvas, Offset(dx, topCenter.dy));
   }
 
   @override
@@ -949,7 +961,8 @@ class _LineChartPainter extends CustomPainter {
         ),
         textDirection: TextDirection.ltr,
       )..layout();
-      tp.paint(canvas, Offset(x(i) - tp.width / 2, bottom + 4));
+      final dx = (x(i) - tp.width / 2).clamp(left, right - tp.width);
+      tp.paint(canvas, Offset(dx, bottom + 4));
     }
   }
 

@@ -74,12 +74,15 @@ class ExchangeRateBanner extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      _changeLabel(rate),
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: changeColor(rate.changeRate, scheme),
+                    Flexible(
+                      child: Text(
+                        _changeLabel(rate),
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: changeColor(rate.changeRate, scheme),
+                        ),
                       ),
                     ),
                   ],
