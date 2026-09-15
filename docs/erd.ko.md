@@ -209,7 +209,7 @@ quote_snapshot.prev_close
 
 #### `users` — 회원
 
-> 회원은 Stateless JWT로 인증합니다. 탈퇴는 행 삭제 대신 `WITHDRAWN` 상태로 전환해 account·ledger 외래 키를 보존합니다.
+> 회원은 JWT와 PostgreSQL 로그인 세션의 활성 검증으로 인증합니다. 탈퇴는 행 삭제 대신 `WITHDRAWN` 상태로 전환해 account·ledger 외래 키를 보존합니다.
 > | 컬럼 | 타입 | 설명 |
 > |---|---|---|
 > | `user_id` | BIGINT PK | 내부 식별자. IDENTITY 로 자동 채번. |
@@ -711,3 +711,21 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 기동 5초 후 및 이후 1분 fixed delay로 누락 종가를 복구한다. 정규장 마감 + 10분 이전에 시작한 요청의 당일 일봉은 확정 데이터로 저장하지 않는다. 빈 응답·날짜 누락은 완료로 캐시하지 않는다. V10은 `quote_snapshot.prev_close_date`만 추가한다. 기존 과거 일봉은 차트·주봉에 그대로 포함하되 재검증했다고 간주하지 않는다. 기준가 날짜가 없거나 다르면 DB 일봉 유무와 관계없이 토스에서 다시 받는다. 분봉도 봉 시작 시각으로 정규장만 수용한다.
 
 #178은 마이그레이션을 추가하지 않습니다. 기존 V1 호가는 즉시 조회·체결에서 제외하며 정상 게시·보존기간 정리로 교체합니다. 주문과 과거 체결은 보존합니다. 상하한가는 `quote_snapshot`에서 읽고 주문·호가에 날짜·범위 컬럼을 중복 저장하지 않습니다. 이는 기존 당일 최초 상하한가 불변 정책에 기반합니다.
+
+
+## 인증 세션 (V18)
+
+V16과 V17 마이그레이션은 유지하며, V18에서 `auth_session`을 추가하고 V17의 `users.token_version`을 제거합니다.
+재설정은 같은 트랜잭션에서 사용자의 모든 `auth_session`을 폐기합니다. 커밋 뒤 시작한 인증 검증은
+기존 Access·Refresh를 모두 거절합니다. 인증과 세션 폐기는 `auth_session`만 사용합니다.
+발급·재설정은 사용자부터 잠그고 재설정 토큰을 처리하며, 쿨다운과 토큰 유효성은 잠금 안에서 확인합니다.
+
+`users → auth_session`은 1:N입니다. 기존 회원·계좌·원장·거래 데이터는 변경하지 않습니다.
+UUID PK `id`를 JWT sid로 사용하고 `user_id`는 users FK입니다. 현재 `refresh_token_hash`와
+`refresh_generation`은 필수이며 해시는 SHA-256 64자, 세대는 0 이상입니다.
+`previous_token_hash`, `grace_until`, `encrypted_refresh`는 직전 토큰의 고정 유예와 AES-GCM 후속
+토큰 복구용입니다. 평문 토큰은 저장하지 않습니다. `created_at`, `expires_at`은 필수 TIMESTAMPTZ이고
+만료가 생성보다 늦어야 합니다. `revoked_at`은 nullable TIMESTAMPTZ입니다.
+`user_id`, `expires_at` 인덱스를 둡니다. 사용자 → 세션 순으로 잠그고 전체 세션 폐기는 비밀번호 변경·
+탈퇴와 함께 커밋합니다. 재사용 폐기는 오류 반환 전에 커밋합니다. 매시간 만료 유예 정보를 지우고 절대
+만료 후 7일 지난 세션을 삭제합니다. [인증 정책](authentication.ko.md)을 참고하세요.

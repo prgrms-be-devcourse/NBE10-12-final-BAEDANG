@@ -1,6 +1,11 @@
 package com.baedang.auth.security;
 
 import com.baedang.global.error.ErrorCode;
+import com.baedang.auth.service.AuthSessionService;
+import com.baedang.global.error.BusinessException;
+import org.springframework.dao.DataAccessResourceFailureException;
+import com.baedang.auth.security.JwtTokenProvider.Identity;
+import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.jsonwebtoken.ExpiredJwtException;
@@ -27,6 +32,7 @@ import static org.mockito.Mockito.*;
 
 class JwtAuthenticationFilterTest {
 
+    private AuthSessionService sessions;
     private JwtTokenProvider jwtTokenProvider;
     private RestAuthenticationEntryPoint entryPoint;
     private JwtAuthenticationFilter filter;
@@ -39,7 +45,8 @@ class JwtAuthenticationFilterTest {
         jwtTokenProvider = mock(JwtTokenProvider.class);
         ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         entryPoint = new RestAuthenticationEntryPoint(objectMapper);
-        filter = new JwtAuthenticationFilter(jwtTokenProvider,entryPoint);
+        sessions = mock(AuthSessionService.class);
+        filter = new JwtAuthenticationFilter(jwtTokenProvider, entryPoint, sessions);
         chain = mock(FilterChain.class);
         request = new MockHttpServletRequest();
         response = new MockHttpServletResponse();
@@ -54,7 +61,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("Bearer access token의 userId를 principal로 등록")
     void t1() throws ServletException, IOException {
-        when(jwtTokenProvider.parseAccessToken("valid-token")).thenReturn(7L);
+        when(jwtTokenProvider.accessIdentity("valid-token")).thenReturn(new Identity(7L, UUID.randomUUID(), 0));
         request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer valid-token");
 
         filter.doFilter(request,response,chain);
@@ -79,7 +86,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("만료된 token은 TOKEN_EXPIRED 401을 기록하고 chain을 중단")
     void t3() throws ServletException, IOException {
-        when(jwtTokenProvider.parseAccessToken("expired-token"))
+        when(jwtTokenProvider.accessIdentity("expired-token"))
                 .thenThrow(new ExpiredJwtException(null,null,"expired"));
         request.addHeader(HttpHeaders.AUTHORIZATION,"Bearer expired-token");
 
@@ -94,7 +101,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("변조된 token은 INVALID_TOKEN 401을 기록하고 chain을 중단")
     void t4() throws ServletException, IOException {
-        when(jwtTokenProvider.parseAccessToken("invalid-token"))
+        when(jwtTokenProvider.accessIdentity("invalid-token"))
                 .thenThrow(new JwtException("invalid signature"));
         request.addHeader(HttpHeaders.AUTHORIZATION,"Bearer invalid-token");
 
@@ -124,7 +131,7 @@ class JwtAuthenticationFilterTest {
     @Test
     @DisplayName("인증 이후 downstream 예외를 token 오류로 변환하지 않는다")
     void downstream_예외는_그대로_전파한다() throws Exception {
-        when(jwtTokenProvider.parseAccessToken("valid-token")).thenReturn(7L);
+        when(jwtTokenProvider.accessIdentity("valid-token")).thenReturn(new Identity(7L, UUID.randomUUID(), 0));
         request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer valid-token");
         IllegalArgumentException downstreamFailure = new IllegalArgumentException("domain failure");
         doThrow(downstreamFailure).when(chain).doFilter(request, response);
@@ -133,4 +140,28 @@ class JwtAuthenticationFilterTest {
                 .isSameAs(downstreamFailure);
         assertThat(response.getStatus()).isEqualTo(200);
     }
+    @Test
+    void DB_장애는_503으로_차단하고_인증하지_않는다() throws Exception {
+        Identity identity = new Identity(7L, UUID.randomUUID(), 0);
+        when(jwtTokenProvider.accessIdentity("valid-token")).thenReturn(identity);
+        doThrow(new DataAccessResourceFailureException("unavailable")).when(sessions).requireActive(identity);
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer valid-token");
+        filter.doFilter(request, response, chain);
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getContentAsString()).contains("AUTH_UNAVAILABLE");
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verifyNoInteractions(chain);
+    }
+
+    @Test
+    void 세션_폐기는_401로_차단한다() throws Exception {
+        Identity identity = new Identity(7L, UUID.randomUUID(), 0);
+        when(jwtTokenProvider.accessIdentity("valid-token")).thenReturn(identity);
+        doThrow(new BusinessException(ErrorCode.SESSION_REVOKED)).when(sessions).requireActive(identity);
+        request.addHeader(HttpHeaders.AUTHORIZATION, "Bearer valid-token");
+        filter.doFilter(request, response, chain);
+        assertThat(response.getStatus()).isEqualTo(401);
+        verifyNoInteractions(chain);
+    }
+
 }

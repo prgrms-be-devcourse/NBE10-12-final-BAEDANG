@@ -18,9 +18,9 @@ import type { ReactNode } from "react";
  */
 export function PageBackground({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  // 비밀번호 찾기는 로그인의 하위 흐름이라 로그인과 같은 배경을 쓴다.
+  // 비밀번호 찾기·재설정은 로그인의 하위 흐름이라 로그인과 같은 배경을 쓴다.
   const background =
-    pathname === "/login" || pathname === "/forgot-password"
+    pathname === "/login" || pathname === "/forgot-password" || pathname === "/reset-password"
       ? "var(--loginBg)"
       : pathname === "/signup"
         ? "var(--registerBg)"

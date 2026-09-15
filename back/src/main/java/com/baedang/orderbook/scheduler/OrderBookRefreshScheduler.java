@@ -26,6 +26,8 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.time.LocalDate;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.HashSet;
@@ -47,6 +49,15 @@ import java.util.stream.Collectors;
 public class OrderBookRefreshScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(OrderBookRefreshScheduler.class);
+
+    private static final Duration MISSING_LIMIT_LOG_INTERVAL = Duration.ofMinutes(1);
+    // 전용 단일 스케줄러에서만 접근합니다. 종목별 상태를 장기 보관하지 않습니다.
+    private Instant lastMissingLimitLogAt;
+
+    private static final class RefreshSummary {
+        private int missingLimits;
+        private boolean complete = true;
+    }
 
     private final MarketSessionProvider marketSessionProvider;
     private final StockRepository stockRepository;
@@ -125,12 +136,14 @@ public class OrderBookRefreshScheduler {
         List<Long> activeStockIds = versionRepository.findActiveStockIdsByMarketCountry(country.name());
 
         if (!session.open()) {
+            if (country == MarketCountry.KR) lastMissingLimitLogAt = null;
             for (Long stockId : activeStockIds) {
                 closeStockSafely(stockId);
             }
             return;
         }
 
+        RefreshSummary summary = new RefreshSummary();
         Set<Long> targetIds = new HashSet<>();
         long after = 0L;
         while (true) {
@@ -139,7 +152,7 @@ public class OrderBookRefreshScheduler {
                     PageRequest.of(0, 200));
             targetIds.addAll(targets.stream().map(Stock::getStockId).toList());
             if (targets.isEmpty()) break;
-            refreshPage(targets, session.validUntil());
+            refreshPage(targets, session.validUntil(), summary);
             after = targets.getLast().getStockId();
             if (targets.size() < 200) break;
         }
@@ -152,13 +165,28 @@ public class OrderBookRefreshScheduler {
                 }
             }
         }
+        if (country == MarketCountry.KR && summary.complete) reportMissingLimits(summary.missingLimits);
     }
 
-    private void refreshPage(List<Stock> targets, Instant sessionUntil) {
+    private void reportMissingLimits(int missing) {
+        Instant now = clock.instant();
+        if (missing == 0) {
+            if (lastMissingLimitLogAt != null) {
+                log.info("호가 갱신: KR 당일 상하한가 미확보 0건 (검사 대상 기준)");
+                lastMissingLimitLogAt = null;
+            }
+        } else if (lastMissingLimitLogAt == null || !now.isBefore(lastMissingLimitLogAt.plus(MISSING_LIMIT_LOG_INTERVAL))) {
+            log.info("호가 갱신 보류: KR 당일 상하한가 미확보 {}건 (검사 대상 기준)", missing);
+            lastMissingLimitLogAt = now;
+        }
+    }
+
+    private void refreshPage(List<Stock> targets, Instant sessionUntil, RefreshSummary summary) {
         List<Stock> verified;
         try {
             verified = statuses.refreshBatch(targets);
         } catch (RuntimeException exception) {
+            summary.complete = false;
             log.warn("종목 상태 확인 실패로 호가를 종료합니다", exception);
             targets.forEach(stock -> closeStockSafely(stock.getStockId()));
             return;
@@ -170,13 +198,14 @@ public class OrderBookRefreshScheduler {
                 .stream().collect(Collectors.toMap(QuoteSnapshot::getStockId, Function.identity()));
         for (Stock stock : verified) {
             try {
-                refreshStock(stock, quoteMap.get(stock.getStockId()), sessionUntil, clock.instant());
+                refreshStock(stock, quoteMap.get(stock.getStockId()), sessionUntil, clock.instant(), summary);
             } catch (RuntimeException exception) {
+                summary.complete = false;
                 log.error("종목 호가 갱신 실패: stockId={}", stock.getStockId(), exception);
             }
         }
     }
-    private void refreshStock(Stock stock, QuoteSnapshot quote, Instant sessionValidUntil, Instant now) {
+    private void refreshStock(Stock stock, QuoteSnapshot quote, Instant sessionValidUntil, Instant now, RefreshSummary summary) {
         Long stockId = stock.getStockId();
         if (quote == null || quote.getQuoteAt() == null || quote.getLastPrice() == null) {
             publicationService.closeActive(stockId);
@@ -195,11 +224,22 @@ public class OrderBookRefreshScheduler {
             return;
         }
 
+        TradingPriceLimits limits = TradingPriceLimits.from(quote);
+        LocalDate today = now.atZone(stock.getMarketCountry().zoneId()).toLocalDate();
+        if (stock.getMarketCountry() == MarketCountry.KR
+                && (limits.date() == null || limits.date().isBefore(today)
+                    || limits.lower() == null || limits.upper() == null)) {
+            // 당일 데이터 준비 전에는 기존 호가를 종료하고 다음 회차에서 다시 확인합니다.
+            summary.missingLimits++;
+            publicationService.closeActive(stockId);
+            return;
+        }
+
         StockDescriptor descriptor = StockDescriptor.from(stock);
         long seed = ThreadLocalRandom.current().nextLong();
         GeneratedOrderBook generated;
         try {
-            generated = generator.generate(properties, descriptor, quote.getLastPrice(), quoteAt, now, seed, TradingPriceLimits.from(quote));
+            generated = generator.generate(properties, descriptor, quote.getLastPrice(), quoteAt, now, seed, limits);
         } catch (IllegalArgumentException exception) {
             log.warn("호가 생성 거절(유효 가격/BID 불가): {} ({}) - {}", stock.getSymbol(), stockId, exception.getMessage());
             publicationService.closeActive(stockId);

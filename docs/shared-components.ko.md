@@ -486,7 +486,7 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 
 - `MarketDataPort.fetchPriceLimits` / `TossMarketDataAdapter`는 정확한 GET `/api/v1/price-limits` 경로와 `symbol`을 사용하며 MARKET_DATA 제한을 공유합니다. 응답은 `timestamp`, `upperLimitPrice`, `lowerLimitPrice`, `currency`이며 종목 및 별도 적용일 필드는 없습니다. 2026-09-11 공식 OpenAPI 확인.
 - `PriceLimitLoadService`는 기존 Clock과 MarketTradingDayPolicy를 사용합니다. 장전 갱신 시점 보장이 없어 국내 정규장부터 수집합니다. 데이터 시각의 한국 날짜와 요청 거래일을 검증하고 미래 시각, 국내 null, 정밀도/범위 오류, 역전 가격을 거절합니다. 비율 계산 폴백은 없습니다.
-- `PriceLimitScheduler`는 시작 60초 후 및 처리 완료 후 5분마다 랭킹/활성 지정가 국내 종목을 전용 단일 스레드에서 확인합니다. `toss.enabled=false`이면 외부 수집하지 않습니다. 그룹 제한 외에 상하한가 전용 2 TPS 제한을 공유합니다.
+- `PriceLimitScheduler`는 시작 즉시 및 처리 완료 후 5분마다 랭킹/활성 지정가 국내 종목을 전용 단일 스레드에서 확인합니다. `toss.enabled=false`이면 외부 수집하지 않습니다. 그룹 제한 외에 상하한가 전용 2 TPS 제한을 공유합니다.
 - 상세 조회와 배경 수집은 종목별 진행 중 요청 억제 및 실패 후 1분 대기를 공유합니다. 상태는 최대 1000개이며 만료 실패는 접근 시 제거하고 새 거래일이면 초기화합니다. 진행 중 요청은 제거하지 않으며 용량 부족 시 새 작업을 보류합니다. 단일 인스턴스 정책이며 분산 잠금은 아닙니다.
 - `PriceLimitRepository`는 두 가격과 적용일만 갱신합니다. 시세 행이 없으면 만들지 않고 기존 시세 수집 후 재시도합니다. 과거 및 동일 날짜 응답은 이미 저장한 날짜를 덮어쓰지 않습니다. 이번 단계에서는 당일 정정 및 과거 상하한가 조회를 지원하지 않습니다.
 - V14는 `price_limit_date`만 추가하고 기존 행을 보존합니다. develop의 선행 마이그레이션 순서에 맞춘 버전이며 선행 마이그레이션을 추가하거나 번호를 바꾸지 않습니다.
@@ -512,3 +512,31 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 `OrderBookPricePolicy`가 예상 배열과 완전성 검증을 담당하며 조회·미리보기·게시·잠금 저장소가 공유합니다. 예상 배열이 비는 경우만 빈 레벨을 정상으로 처리합니다. V1은 소비하지 않으며 별도 구현도 남기지 않습니다. 게시자는 stock→version, 소비자는 account→order→version→level→holding 순서를 유지합니다. 소비자에 역방향 stock 잠금을 추가하지 않으며 잠금 대기 후 세션·시각을 재검증합니다.
 
 주문 준비는 `PriceLimitLoadService.ensureForTrading`으로 기존 게이트·대기를 공유합니다. 워커·호가 게시에 주문별 외부 조회를 추가하지 않습니다. 기준값 미확보 시 예약·원장 변경 없이 보류합니다. 당일 최초 기준값 불변 정책을 유지하며 스키마 및 과거 이력을 변경하지 않습니다.
+
+## 브라우저 통합 테스트 패키지
+
+최상위 `e2e/`는 Chromium 단일 worker로 실제 프론트 운영 빌드와 격리된 Spring 애플리케이션을 검증합니다. `back/src/e2e`는 `bootJar`에 포함되지 않는 별도 Gradle 소스셋입니다. 외부 시장 데이터 포트와 Clock만 테스트 환경에서 제공하며, 실제 인증·주문 서비스·마이그레이션을 사용합니다. 시나리오 제어 서버는 루프백과 실행별 키로 접근을 제한합니다.
+
+실행마다 전용 TimescaleDB 컨테이너를 생성합니다. 테스트마다 가변 데이터와 Spring 컨텍스트를 초기화해 캐시·워커 상태를 분리하고, 종료 시 컨텍스트와 실행 소유 서버·컨테이너·볼륨을 정리합니다. 개발 DB는 사용하지 않습니다. 실행 명령, 시나리오 추가, CI 조건과 실패 분석은 [E2E README](../e2e/README.md)를 참고하세요.
+
+
+## 인증 세션 (#203)
+
+| 컴포넌트 | 계약·부작용 |
+| --- | --- |
+| `JwtTokenProvider` | Clock 기반 sid/generation/jti JWT 발급·검증, Access 만료는 세션 만료 이내 |
+| `AuthSessionService.create` | MANDATORY 트랜잭션, 가입·로그인과 함께 세션 생성 |
+| `AuthSessionService.rotate` | 외부 트랜잭션 NEVER, 사용자·세션 잠금과 커밋 후 오류 변환, 직전 토큰 고정 유예 |
+| `requireActive` / `logout` / `revokeAll` | DB 활성 검증 / 현재 세션 폐기 / 호출자 트랜잭션의 전체 세션 폐기 |
+| `RefreshTokenCipher` | 별도 32바이트 AES-GCM 키, 세션에 묶인 후속 토큰 암호화, 토큰 로그 금지 |
+| `api.ts` 인증 함수 / `AuthProvider` | 동일 Origin 중계, 메모리 Access, 공유 갱신·Web Locks·표식 기반 탭 전파·로그아웃 재시도 |
+| Next.js `app/api/auth/[action]/route.ts` | 네 인증 경로만 허용, HttpOnly 쿠키, Origin·JSON 헤더 검증, timeout·리다이렉트·캐시 제한 |
+
+공개 계약·배포 환경변수·미지원 브라우저의 한계는 [인증 정책](authentication.ko.md)을 참고하세요.
+
+`updateNickname`은 요청 세션이 유지될 때만 `onProfileUpdated`와 탭 간 프로필 이벤트를 발행합니다.
+수신자는 프로필 필드만 갱신하며 `AuthProvider.setUser`는 가입·로그인 완료 시에만 사용합니다.
+
+api.ts의 인증 요청은 AbortController로 JSON 본문 수신까지 15초로 제한합니다. REQUEST_TIMEOUT은 인증 상태를 유지하며 중계 서버의 upstream 제한은 기존 10초를 유지합니다.
+
+국내 호가 갱신은 상하한가 날짜가 없거나 과거이거나 한쪽 가격이 누락되면 생성 전에 건너뛰고 활성 호가를 종료합니다. 외부 API를 호출하지 않습니다. 전체 페이지의 검사 가능한 시세를 기준으로 미확보 최초 발생, 지속 중 최대 1분마다, 미확보 0건 전환 시 INFO 요약을 남깁니다. 검사 실패 회차는 요약하지 않습니다. 값이 채워진 잘못된 범위·미래 날짜·범위 밖 현재가는 기존 WARN과 거절을 유지합니다. 미국의 NULL 상하한가는 정상이며, 수집 완료 후 다음 호가 갱신에서 자동으로 생성합니다.

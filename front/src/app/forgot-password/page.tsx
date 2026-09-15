@@ -7,13 +7,10 @@ import { ApiError, requestPasswordReset } from "@/lib/api";
 /**
  * 비밀번호 찾기 화면. `POST /api/auth/password/forgot`(이메일만 받음)을 호출한다.
  *
- * <p>⚠️ 이 화면이 부르는 백엔드 API는 아직 없다 — "일단 프론트엔드 화면만" 구현해
- * 달라는 요청으로 화면부터 만들고, 백엔드는 팀원에게 별도로 요청하기로 했다
- * (2026-09-04). 지금은 제출하면 항상 에러가 난다(`lib/api.ts`의 `requestPasswordReset`
- * 주석에 백엔드가 지켜야 할 계약을 적어뒀다). 백엔드가 붙으면 이 화면은 그대로
- * 동작한다 — 성공(200) 여부만으로 분기하고, 실패 사유를 세분화해서 보여주지
- * 않는다(가입 여부를 노출하지 않기 위해 백엔드가 항상 200을 주는 설계이므로,
- * 화면도 굳이 "그런 이메일 없어요" 같은 분기를 두지 않는다).
+ * <p>성공(200) 여부만으로 분기하고, 실패 사유를 세분화해서 보여주지 않는다 —
+ * 가입 여부를 노출하지 않기 위해 백엔드가 항상 200을 주는 설계라서(계정 열거
+ * 공격 방지), 화면도 굳이 "그런 이메일 없어요" 같은 분기를 두지 않는다. 메일
+ * 속 링크는 `reset-password` 화면으로 이어진다.
  */
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -43,10 +40,9 @@ export default function ForgotPasswordPage() {
       >
         {sent ? (
           <>
-            <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>메일함을 확인해주세요</h1>
-            <p className="mb-6 text-[13.5px] leading-relaxed" style={{ color: "var(--mut)" }}>
-              <b style={{ color: "var(--ink)" }}>{email}</b>(으)로 가입된 계정이 있다면, 비밀번호 재설정 안내를
-              보내드렸어요. 메일이 안 보이면 스팸함도 확인해주세요.
+            <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>메일함을 확인해주세요</h1>
+            <p className="mb-6 text-center text-[13.5px] leading-relaxed" style={{ color: "var(--mut)", whiteSpace: "pre-line" }}>
+              {"비밀번호 재설정 안내를 보내드렸어요.\n메일이 안 보이면 스팸함도 확인해주세요."}
             </p>
             <Link
               href="/login"
@@ -60,8 +56,8 @@ export default function ForgotPasswordPage() {
           </>
         ) : (
           <>
-            <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>비밀번호 찾기</h1>
-            <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+            <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>비밀번호 찾기</h1>
+            <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
               가입하신 이메일로 비밀번호 재설정 안내를 보내드려요
             </p>
 

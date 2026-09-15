@@ -1,8 +1,11 @@
 package com.baedang.auth.controller;
 
 import com.baedang.auth.dto.AccessTokenResponse;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.PasswordResetConfirmRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
@@ -17,16 +20,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
-import java.util.List;
+import java.time.Instant;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.authentication;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -47,7 +49,7 @@ class AuthControllerTest {
 
     @MockitoBean
     private JwtTokenProvider jwtTokenProvider;
-
+    @MockitoBean private AuthSessionService sessions;
 
     @Test
     @DisplayName("회원가입 성공 시 201과 함께 유저, 토큰 정보를 반환")
@@ -59,7 +61,7 @@ class AuthControllerTest {
                 "홍길동",
                 "access-token",
                 "refresh-token",
-                new AuthResponse.AccountInfo(10L, 1, "50000000", "50000000")
+                new AuthResponse.AccountInfo(10L, 1, "50000000", "50000000"), Instant.parse("2026-09-21T00:00:00Z")
         );
 
         when(authService.signUp(any())).thenReturn(response);
@@ -87,7 +89,7 @@ class AuthControllerTest {
                 "홍길동",
                 "access-token",
                 "refresh-token",
-                new AuthResponse.AccountInfo(10L, 1, "50000000", "50000000")
+                new AuthResponse.AccountInfo(10L, 1, "50000000", "50000000"), Instant.parse("2026-09-21T00:00:00Z")
         );
         when(authService.login(any())).thenReturn(response);
 
@@ -109,7 +111,7 @@ class AuthControllerTest {
     void refresh_token으로_새_access_token을_발급한다() throws Exception {
         RefreshTokenRequest request = new RefreshTokenRequest("refresh-token");
         when(authService.refresh(request))
-                .thenReturn(new AccessTokenResponse("new-access"));
+                .thenReturn(new AccessTokenResponse("new-access", "new-refresh", Instant.parse("2026-09-21T00:00:00Z")));
 
         mockMvc.perform(post("/api/auth/refresh")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -129,24 +131,70 @@ class AuthControllerTest {
     }
 
     @Test
-    @DisplayName("인증된 사용자는 stateless logout 시 200과 빈 body를 받는다")
-    void 인증된_사용자는_logout할_수_있다() throws Exception {
+    @DisplayName("Refresh로 현재 세션을 로그아웃하고 빈 응답을 받는다")
+    void logout_with_refresh() throws Exception {
         mockMvc.perform(post("/api/auth/logout")
-                        .with(authenticatedUser(7L)))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"refreshToken\":\"refresh-token\"}"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(""));
+        verify(authService).logout(new RefreshTokenRequest("refresh-token"));
     }
 
     @Test
-    @DisplayName("인증 없이 logout하면 UNAUTHORIZED를 반환한다")
-    void 인증_없이_logout하면_401을_반환한다() throws Exception {
-        mockMvc.perform(post("/api/auth/logout"))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+    @DisplayName("로그아웃에도 Refresh 입력 검증을 적용한다")
+    void logout_requires_refresh() throws Exception {
+        mockMvc.perform(post("/api/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"refreshToken\":\"\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }
 
-    private static RequestPostProcessor authenticatedUser(long userId) {
-        return authentication(new UsernamePasswordAuthenticationToken(
-                userId, null, List.of()));
+    @Test
+    @DisplayName("비밀번호 찾기 요청은 인증 없이도 200을 반환한다")
+    void 비밀번호_찾기_요청은_200을_반환한다() throws Exception {
+        PasswordForgotRequest request = new PasswordForgotRequest("user@example.com");
+
+        mockMvc.perform(post("/api/auth/password/forgot")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(content().string(""));
+
+        verify(authService).requestPasswordReset(request);
+    }
+
+    @Test
+    @DisplayName("비밀번호 찾기 이메일 형식이 잘못되면 INVALID_INPUT을 반환한다")
+    void 비밀번호_찾기_이메일_형식_오류는_400을_반환한다() throws Exception {
+        mockMvc.perform(post("/api/auth/password/forgot")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"not-an-email\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
+    }
+
+    @Test
+    @DisplayName("비밀번호 재설정 요청은 인증 없이도 200을 반환한다")
+    void 비밀번호_재설정_성공시_200을_반환한다() throws Exception {
+        PasswordResetConfirmRequest request = new PasswordResetConfirmRequest("token-value", "NewPassword123!");
+
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(content().string(""));
+
+        verify(authService).resetPassword(request);
+    }
+
+    @Test
+    @DisplayName("재설정 새 비밀번호가 8자 미만이면 INVALID_INPUT을 반환한다")
+    void 비밀번호_재설정_새_비밀번호_형식_오류는_400을_반환한다() throws Exception {
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"abc\",\"newPassword\":\"short\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_INPUT"));
     }
 }

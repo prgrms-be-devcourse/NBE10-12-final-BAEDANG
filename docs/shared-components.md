@@ -486,7 +486,7 @@ The detail stage re-classifies the title and re-checks the stated duration, so a
 
 - `MarketDataPort.fetchPriceLimits` / `TossMarketDataAdapter` use the exact GET `/api/v1/price-limits` route with `symbol`, sharing the existing MARKET_DATA limiter. The response has `timestamp`, `upperLimitPrice`, `lowerLimitPrice`, and `currency`; it has no symbol or explicit trade-date field. Contract: [official OpenAPI](https://openapi.tossinvest.com/openapi-docs/latest/openapi.json), inspected 2026-09-11.
 - `PriceLimitLoadService` uses the existing Clock and MarketTradingDayPolicy. New collection starts during KR regular sessions because a pre-open rollover time is not documented. Validate the source timestamp's Korean date against the requested day and reject future timestamps, null KR prices, invalid precision/range and inverted limits. No percentage-based fallback.
-- `PriceLimitScheduler` starts after 60 seconds and checks ranked/active-limit-order KR stocks every 5 minutes after completion on its own single-thread scheduler. `toss.enabled=false` disables external collection. Requests share a 2 TPS price-limit gate in addition to the broker group limiter.
+- `PriceLimitScheduler` starts immediately and checks ranked/active-limit-order KR stocks every 5 minutes after completion on its own single-thread scheduler. `toss.enabled=false` disables external collection. Requests share a 2 TPS price-limit gate in addition to the broker group limiter.
 - Detail requests share per-stock in-flight suppression and a 1-minute failure cooldown with background recovery. Pending state is capped at 1000; expired failures are removed on access and a new target day clears old failures. Running requests are never evicted. Under capacity pressure new work is deferred. This is single-instance coordination, not a distributed lock.
 - `PriceLimitRepository` updates only the two limits and `price_limit_date`. Missing quote rows are not fabricated; a later attempt follows existing quote collection. Older or same-date writes cannot overwrite an accepted day. No intraday corrections or historical price-limit lookup are supported in this phase.
 - V14 adds only `price_limit_date`, preserving existing rows. The migration version is aligned with the preceding develop migrations; no preceding migrations are added or renumbered here.
@@ -505,6 +505,12 @@ The attempts map and mutable attempt fields are guarded by the same `synchronize
 - Frontend: `front/src/lib/stock-market-events.ts` classifies the day's events for one market. Only KOSPI/KOSDAQ are queried — US and `KR_ETC` have no KIND events. If the lookup fails or has not landed yet, the screen must **not** block on it; the server-side trading transaction stays the authority and the existing `MARKET_TRADING_HALTED` response is the final defense.
 - `MarketEventsBanner` (rankings, KR tab) keeps its history semantics; only the heading distinguishes an active circuit breaker (`지금 매매거래 일시중단 중이에요`) from an active sidecar (`현재 시장조치가 발동 중이에요`) because a sidecar suspends program quotes only.
 
+## Browser integration test package
+
+The root `e2e/` package runs Playwright Chromium with one worker against the real production frontend build and an isolated Spring application. `back/src/e2e` is a separate Gradle source set, excluded from `bootJar`; its launcher replaces external market ports, supplies the existing Clock abstraction, and exposes only loopback, run-key-protected scenario commands. Production controllers, authentication, trading services and migrations remain in use.
+
+Each run creates its own TimescaleDB container. Each test clears mutable data and recreates the Spring context to reset caches and worker state, then seeds a regular-session scenario. Teardown closes the context; the runner removes its owned servers, container and volume. Never point this package at a development database. See [E2E README](../e2e/README.md) for commands, scenario controls, coverage boundaries, CI triggers and diagnostic artifacts.
+
 ## Trading bounds and V2 price arrays (#178)
 
 `TradingPriceLimits` is an immutable, non-persisted value read from existing quote columns. It checks current exchange-local dates for KR and treats US null as unrestricted. `OrderPolicy.validateTradingPrice` is shared by estimates/admission/execution, using existing `TickSizePolicy` for LIMIT ticks. Display's historical-date policy is not a trading fallback.
@@ -512,3 +518,25 @@ The attempts map and mutable attempt fields are guarded by the same `synchronize
 `OrderBookPricePolicy` owns expected arrays and checks snapshot completeness for queries, previews, publication and the locking store. Empty arrays are valid only when the generated price range is empty. Existing V1 is never consumed; no alternate V1 implementation is retained. The publisher still locks stock then version, and the consumer still locks account then order, version, levels and holding. Limits are read without introducing an inverse stock lock in the consumer. Session/time validation is repeated after lock waits.
 
 Order preparation shares `PriceLimitLoadService.ensureForTrading` with the existing gate/cooldown; workers and book publication do not add per-order external limit fetches. Unavailable bounds defer existing orders without reserve or ledger mutations. Same-day limits remain immutable under the existing repository write rule. No schema or history rewrite is introduced.
+
+
+## Authentication sessions (#203)
+
+| Component | Contract / side effects |
+| --- | --- |
+| `JwtTokenProvider` | Issues and parses typed sid/generation/jti JWTs; inject Clock, cap Access at session expiration |
+| `AuthSessionService.create` | MANDATORY transaction; creates a PostgreSQL login session during signup/login |
+| `AuthSessionService.rotate` | NEVER ambient transaction; owns user/session locks and commits before error conversion; fixed predecessor grace |
+| `requireActive` / `logout` / `revokeAll` | DB validation / current-session revocation / caller-transaction all-session revocation |
+| `RefreshTokenCipher` | Separate 32-byte AES-GCM key; session-bound successor encryption, no logging of token/cipher inputs |
+| `api.ts` auth functions / `AuthProvider` | Same-origin relay, memory Access, shared refresh, Web Locks, guarded cross-tab events and pending logout retry |
+| Next.js `app/api/auth/[action]/route.ts` | Four fixed auth actions only; HttpOnly cookie, exact Origin + JSON header, timeout, no redirects/cache |
+
+See [authentication.md](authentication.md) for public contracts, deployment variables and unsupported-browser limits.
+
+`updateNickname` publishes a session-guarded `onProfileUpdated` event and cross-tab profile message.
+Consumers update profile fields only; `AuthProvider.setUser` is reserved for completed signup/login.
+
+Auth calls in api.ts enforce a 15-second browser timeout through AbortController, including response JSON consumption. REQUEST_TIMEOUT preserves authentication; the relay upstream timeout remains 10 seconds.
+
+KR order-book refresh skips generation and closes active books when limit dates are missing/older than today or either bound is missing. This does not trigger broker calls. A market-wide INFO summary is emitted on the first missing observation, at most once per minute while missing, and once on return to zero among eligible inspected quotes. Counts span all target pages; failed inspections suppress the summary. Invalid populated limits, future dates and out-of-range prices still use the existing WARN/rejection path. US null limits remain normal. The next refresh can publish once background collection supplies valid limits.

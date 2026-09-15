@@ -44,17 +44,16 @@ beforeEach(() => {
   vi.restoreAllMocks();
   // auth: true인 요청(getAccountSummary 등)이 로그인 여부와 무관하게 항상
   // 토큰을 갖고 있도록, 매 테스트 전에 고정된 테스트용 토큰으로 맞춰둔다.
-  syncAuthTokens({ accessToken: 'test-access-token', refreshToken: 'test-refresh-token' });
+  syncAuthTokens({ accessToken: 'test-access-token' });
 });
 
 describe('signUp — 성공', () => {
-  it('200 → AuthUser 반환(accessToken/refreshToken 포함)', async () => {
+  it('200 → AuthUser 반환(accessToken 포함)', async () => {
     mockFetch(200, {
       userId: 1,
       email: 'a@b.com',
       nickname: 'tester',
       accessToken: 'access-1',
-      refreshToken: 'refresh-1',
     });
     const user = await signUp({ email: 'a@b.com', password: 'pass1234', nickname: 'tester' });
     expect(user).toEqual({
@@ -62,19 +61,17 @@ describe('signUp — 성공', () => {
       email: 'a@b.com',
       nickname: 'tester',
       accessToken: 'access-1',
-      refreshToken: 'refresh-1',
     });
   });
 });
 
 describe('login — 성공', () => {
-  it('200 → AuthUser 반환(accessToken/refreshToken 포함)', async () => {
+  it('200 → AuthUser 반환(accessToken 포함)', async () => {
     mockFetch(200, {
       userId: 2,
       email: 'b@c.com',
       nickname: 'user2',
       accessToken: 'access-2',
-      refreshToken: 'refresh-2',
     });
     const user = await login({ email: 'b@c.com', password: 'pw' });
     expect(user).toEqual({
@@ -82,7 +79,6 @@ describe('login — 성공', () => {
       email: 'b@c.com',
       nickname: 'user2',
       accessToken: 'access-2',
-      refreshToken: 'refresh-2',
     });
   });
 });
@@ -543,7 +539,7 @@ describe('auth: true 요청 — accessToken 만료 시 조용히 재발급 후 �
     );
   });
 
-  it('재발급 자체가 실패(refreshToken도 무효)하면 원래 만료 에러를 그대로 던지고 인증 만료를 알린다', async () => {
+  it('재발급 자체가 실패(refreshToken도 무효)하면 갱신 실패 에러를 던지고 인증 만료를 알린다', async () => {
     mockFetch(401, { code: 'TOKEN_EXPIRED', message: '로그인이 만료됐어요. 다시 로그인해주세요' }); // 1차 시도
     mockFetch(401, { code: 'INVALID_TOKEN', message: '인증 정보가 올바르지 않아요' }); // /api/auth/refresh 실패
 
@@ -552,7 +548,7 @@ describe('auth: true 요청 — accessToken 만료 시 조용히 재발급 후 �
 
     const err = await getAccountSummary().catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
-    expect(err.code).toBe('TOKEN_EXPIRED'); // 사용자에겐 원래(만료) 에러를 그대로 보여준다.
+    expect(err.code).toBe('INVALID_TOKEN');
     expect(expired).toBe(true);
   });
 
