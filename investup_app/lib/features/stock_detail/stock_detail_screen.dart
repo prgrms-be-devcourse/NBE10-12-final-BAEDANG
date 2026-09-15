@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api/account_api.dart';
 import '../../core/api/api_error.dart';
+import '../../core/api/exchange_rate_api.dart';
+import '../../core/api/market_api.dart';
 import '../../core/api/order_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
@@ -30,6 +32,8 @@ class StockDetailScreen extends StatefulWidget {
     required this.session,
     required this.orders,
     required this.account,
+    required this.exchangeRates,
+    required this.market,
     this.stockId,
     this.stockLikeId,
   });
@@ -40,6 +44,8 @@ class StockDetailScreen extends StatefulWidget {
   final AuthSession session;
   final OrderApi orders;
   final AccountApi account;
+  final ExchangeRateApi exchangeRates;
+  final MarketApi market;
 
   /// 랭킹에서 넘어올 때만 안다. 검색·상세 응답에는 stockId가 없어서
   /// 없으면 찜 버튼을 숨긴다.
@@ -125,6 +131,10 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   /// 서버 주문 트랜잭션이 최종 권위라 여기서는 미리 보여주는 용도다.
   num? _heldQuantity;
 
+  /// USD 종목의 원화 환산에 쓰는 화면 환율(웹 ExchangeRateProvider 역할).
+  double? _usdKrwRate;
+  DateTime? _rateValidFrom;
+
   @override
   void initState() {
     super.initState();
@@ -178,8 +188,24 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
         .getDetail(symbol: widget.symbol, marketCountry: widget.marketCountry)
         .then((d) {
           _detail = d;
+          // USD 종목만 환율이 필요하다 — 국내 종목은 조회하지 않는다.
+          if (d.currency == 'USD' && _usdKrwRate == null) _loadExchangeRate();
           return d;
         });
+  }
+
+  /// 화면 환율 조회 — 실패해도 마지막 정상값을 유지한다(웹과 같은 원칙).
+  Future<void> _loadExchangeRate() async {
+    try {
+      final latest = await widget.exchangeRates.getLatest();
+      if (!mounted) return;
+      setState(() {
+        _usdKrwRate = double.tryParse(latest.rate);
+        _rateValidFrom = latest.validFrom;
+      });
+    } on ApiException {
+      // 다음 갱신 주기에 다시 시도한다.
+    }
   }
 
   bool get _routeVisible => ModalRoute.of(context)?.isCurrent ?? true;
@@ -208,6 +234,8 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
           _loadCandles();
         }
       });
+      // 화면 환율은 1분 주기로 갱신한다(웹 ExchangeRateProvider와 같은 주기).
+      if (detail.currency == 'USD') unawaited(_loadExchangeRate());
     } on ApiException {
       // 다음 주기에 재시도.
     } finally {
@@ -407,19 +435,39 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   }
 
   void _openTrade(StockDetail detail) {
-    if (!widget.session.isAuthenticated) {
-      context.go('/login?from=${Uri.encodeComponent(_selfPath)}');
-      return;
-    }
-    showModalBottomSheet<void>(
+    // 웹처럼 비로그인도 패널을 열어 둘러보게 한다 — 제출할 때만 로그인 안내.
+    showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      builder: (context) => TradePanel(
-        detail: detail,
-        session: widget.session,
-        orders: widget.orders,
-        heldQuantity: _heldQuantity,
-        onOrderDone: _loadHolding,
+      builder: (dialogContext) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 24,
+        ),
+        backgroundColor: Theme.of(dialogContext).colorScheme.surface,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            // 웹 패널 폭(≈360~400px)에 맞춘다.
+            maxWidth: 420,
+            maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.85,
+          ),
+          child: TradePanel(
+            detail: detail,
+            session: widget.session,
+            orders: widget.orders,
+            exchangeRates: widget.exchangeRates,
+            market: widget.market,
+            usdKrwRate: _usdKrwRate,
+            exchangeRateUpdatedAt: _rateValidFrom,
+            heldQuantity: _heldQuantity,
+            onOrderDone: _loadHolding,
+            onNeedAuth: () => context.go(
+              '/login?from=${Uri.encodeComponent(_selfPath)}',
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -479,6 +527,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             book: _book,
             onRefresh: _reload,
             onRetryCandles: () => setState(_loadCandles),
+            usdKrwRate: _usdKrwRate,
           );
         },
       ),
@@ -698,6 +747,7 @@ class _DetailBody extends StatelessWidget {
     required this.book,
     required this.onRefresh,
     required this.onRetryCandles,
+    this.usdKrwRate,
   });
 
   final StockDetail detail;
@@ -714,11 +764,20 @@ class _DetailBody extends StatelessWidget {
   final Future<void> Function() onRefresh;
   final VoidCallback onRetryCandles;
 
+  /// 화면 환율 — USD 종목의 가격을 원화로 크게 보여줄 때 쓴다.
+  final double? usdKrwRate;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final price = detail.price;
+    // 웹은 미국 종목 가격을 원화 환산으로 크게 보여주고 달러 값을 보조로 둔다.
+    final isUsd = detail.currency == 'USD';
+    final lastPriceKrw =
+        toKrw(price?.lastPrice, detail.currency, '${usdKrwRate ?? ''}');
+    final changeKrw =
+        toKrw(price?.changeAmount, detail.currency, '${usdKrwRate ?? ''}');
 
     return PageList(
       onRefresh: onRefresh,
@@ -769,9 +828,25 @@ class _DetailBody extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    formatMoney(price?.lastPrice, detail.currency),
+                    isUsd
+                        ? formatNumber(lastPriceKrw)
+                        : formatMoney(price?.lastPrice, detail.currency),
                     style: theme.textTheme.headlineMedium,
                   ),
+                  if (isUsd) ...[
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        formatUsd(price?.lastPrice),
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(width: 8),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 4),
@@ -787,8 +862,15 @@ class _DetailBody extends StatelessWidget {
               ),
               const SizedBox(height: 4),
               Text(
-                '${formatMoney(price?.changeAmount, detail.currency)} '
-                '(${formatRate(price?.changeRate)})',
+                isUsd
+                    ? (changeKrw == null
+                          ? '등락 정보 없음'
+                          : '${changeKrw >= 0 ? '▲' : '▼'} '
+                                '${changeKrw >= 0 ? '+' : '-'}'
+                                '${formatNumber(changeKrw.abs())} '
+                                '(${formatRate(price?.changeRate)})')
+                    : '${formatMoney(price?.changeAmount, detail.currency)} '
+                          '(${formatRate(price?.changeRate)})',
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
                   color: changeColor(price?.changeRate, scheme),

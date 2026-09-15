@@ -112,6 +112,8 @@ class _InvestUpAppState extends State<InvestUpApp> {
               session: session,
               orders: widget.orders,
               account: widget.account,
+              exchangeRates: widget.exchangeRates,
+              market: widget.market,
               stockId: int.tryParse(params['stockId'] ?? ''),
               stockLikeId: int.tryParse(params['likeId'] ?? ''),
             );

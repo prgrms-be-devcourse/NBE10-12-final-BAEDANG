@@ -26,7 +26,11 @@ String formatRate(String? raw) {
 
 /// 거래 불가 사유 코드(ErrorCode 이름)를 사용자 문구로 바꾼다.
 /// 웹의 TRADABLE_REASON_LABEL과 같은 표를 쓴다.
-String tradableReasonLabel(String? code) => switch (code) {
+String tradableReasonLabel(String? code) =>
+    tradableReasonLabelOrNull(code) ?? '지금은 거래할 수 없어요';
+
+/// 알려진 코드면 문구, 아니면 null — 지정가처럼 다른 기본 문구를 쓰는 곳용.
+String? tradableReasonLabelOrNull(String? code) => switch (code) {
   'MARKET_CLOSED' => '장 마감 · 거래 시간이 아니에요',
   'NOT_IN_UNIVERSE' => '이 종목은 아직 거래를 지원하지 않아요',
   'SUSPENDED' => '거래정지 종목이에요',
@@ -36,7 +40,7 @@ String tradableReasonLabel(String? code) => switch (code) {
   'PRICE_OUT_OF_RANGE' => '주문 가격은 당일 하한가와 상한가 사이여야 해요',
   'INVALID_TICK_SIZE' => '주문 가격이 호가 단위에 맞지 않아요',
   'QUOTE_OUT_OF_PRICE_LIMIT' => '현재가를 다시 확인 중이에요. 잠시 후 다시 시도해주세요',
-  _ => '지금은 거래할 수 없어요',
+  _ => null,
 };
 
 /// 등락률 문자열의 부호에 따른 표시 색. 국내 관례: 상승 빨강, 하락 파랑.
@@ -51,6 +55,13 @@ String formatNumber(Object? raw) {
   final value = raw is num ? raw : double.tryParse('$raw');
   if (value == null) return '-';
   return _grouping.format(value.round());
+}
+
+/// USD 표기 — 웹 formatUsd와 같이 소수 둘째 자리까지 보여준다.
+String formatUsd(Object? raw) {
+  final value = raw is num ? raw : double.tryParse('$raw');
+  if (value == null) return '-';
+  return '\$${value.toStringAsFixed(2)}';
 }
 
 /// USD 값을 환율로 원화 환산한다. 환율이 없거나 0 이하면 환산 불가라 null.

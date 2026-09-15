@@ -200,6 +200,8 @@ GoRouter _router(TestHarness harness) => GoRouter(
           session: harness.session,
           orders: harness.orders,
           account: harness.account,
+          exchangeRates: harness.exchangeRates,
+          market: harness.market,
           stockId: int.tryParse(params['stockId'] ?? ''),
           stockLikeId: int.tryParse(params['likeId'] ?? ''),
         );
@@ -308,22 +310,24 @@ void main() {
     await tester.tap(find.text('거래하기'));
     await _settle(tester);
 
-    // 수량 입력 → 디바운스 뒤 견적이 표시된다.
-    await tester.enterText(find.byType(TextField).last, '2');
-    await tester.pump(const Duration(milliseconds: 500));
+    // 웹처럼 시장가 금액은 클라이언트 미리보기 — 수량 입력만으로 요약이 뜬다.
+    await tester.enterText(find.byType(TextField).first, '2');
     await _settle(tester);
-    expect(find.text('결제 예정'), findsWidgets);
+    expect(find.text('총 차감액'), findsOneWidget);
+    expect(find.text('149,015'), findsWidgets); // 149,000 + 수수료 15
 
-    // 주문 → 확인 다이얼로그 → 주문 실행.
-    await tester.tap(find.text('시장가 매수 주문'));
-    await _settle(tester);
-    await tester.tap(find.widgetWithText(FilledButton, '주문'));
+    // 확인 다이얼로그 없이 바로 주문한다(웹과 동일).
+    // 버튼이 모달 뷰포트 아래에 있을 수 있어 먼저 스크롤해 보이게 한다.
+    await tester.ensureVisible(find.text('매수하기'));
+    await tester.tap(find.text('매수하기'));
     await _settle(tester);
 
-    expect(find.text('체결 완료'), findsOneWidget);
+    expect(find.textContaining('시장가 매수 체결'), findsOneWidget);
     final orders = harness.requestsTo('/api/orders/market');
     expect(orders, hasLength(1));
     expect(orders.single.data['clientOrderId'], isA<String>());
     expect(orders.single.data['accountId'], 3);
+    // 시장가는 견적 API를 부르지 않는다(웹과 동일 — 금액은 클라이언트 계산).
+    expect(harness.countTo('/api/orders/quote/market'), 0);
   });
 }

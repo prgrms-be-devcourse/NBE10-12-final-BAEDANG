@@ -30,6 +30,8 @@ Map<String, Object?> _detailJson() => <String, Object?>{
     'changeAmount': '500',
     'changeRate': '0.006757',
     'realtime': true,
+    'upperLimit': '96850',
+    'lowerLimit': '52150',
   },
   'info': <String, Object?>{},
   'warnings': <Object?>[],
@@ -52,7 +54,7 @@ Map<String, Object?> _limitQuoteJson() => <String, Object?>{
   'availableCash': '50000000',
   'availableQuantity': null,
   'expiresAt': '2026-09-16T10:00:00+09:00',
-  'estimate': <String, Object?>{
+  'limitEstimate': <String, Object?>{
     'grossAmount': '148000',
     'fee': '148',
     'tax': '0',
@@ -491,6 +493,8 @@ GoRouter _router(TestHarness harness) => GoRouter(
           session: harness.session,
           orders: harness.orders,
           account: harness.account,
+          exchangeRates: harness.exchangeRates,
+          market: harness.market,
           stockId: int.tryParse(params['stockId'] ?? ''),
           stockLikeId: int.tryParse(params['likeId'] ?? ''),
         );
@@ -541,21 +545,24 @@ void main() {
       await tester.tap(find.text('지정가'));
       await _settle(tester);
 
-      await tester.enterText(
-        find.widgetWithText(TextField, '지정가'),
-        '74000',
+      // 필드 순서: 주문 수량 → 지정가. 라벨은 입력창 밖 텍스트다(웹과 동일).
+      expect(
+        find.text('주문 가능 범위: 52,150원 ~ 96,850원 (호가 단위 적용)'),
+        findsOneWidget,
       );
-      await tester.enterText(find.widgetWithText(TextField, '수량'), '2');
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.enterText(find.byType(TextField).last, '74000');
+      await tester.enterText(find.byType(TextField).first, '2');
+      await tester.pump(const Duration(milliseconds: 600));
       await _settle(tester);
-      expect(find.text('예약 예정'), findsOneWidget);
+      expect(find.text('예상 동결 예수금'), findsOneWidget);
+      expect(find.textContaining('까지 미체결이면 자동 만료돼요'), findsOneWidget);
 
-      await tester.tap(find.text('지정가 매수 주문'));
-      await _settle(tester);
-      await tester.tap(find.widgetWithText(FilledButton, '주문'));
+      // 모달 내용이 길어 버튼이 뷰포트 아래에 있을 수 있어 먼저 보이게 한다.
+      await tester.ensureVisible(find.text('매수 주문 접수'));
+      await tester.tap(find.text('매수 주문 접수'));
       await _settle(tester);
 
-      expect(find.text('주문 접수 완료 (미체결)'), findsOneWidget);
+      expect(find.textContaining('매수 주문을 접수했어요'), findsOneWidget);
       final orders = harness.requestsTo('/api/orders/limit');
       expect(orders, hasLength(1));
       expect(orders.single.data['limitPrice'], '74000');
@@ -1021,7 +1028,7 @@ void main() {
   });
 
   group('매도 한도', () {
-    testWidgets('보유 수량을 넘는 매도는 견적 없이 막힌다', (tester) async {
+    testWidgets('보유 수량을 넘는 매도는 클라이언트에서 막힌다', (tester) async {
       final harness = _harness(signedIn: true);
       unawaited(harness.session.restore());
       await tester.pumpWidget(
@@ -1039,18 +1046,16 @@ void main() {
       await _settle(tester);
       expect(find.text('보유 10주'), findsOneWidget);
 
-      await tester.enterText(find.widgetWithText(TextField, '수량'), '11');
-      await tester.pump(const Duration(milliseconds: 500));
+      await tester.enterText(find.byType(TextField).first, '11');
       await _settle(tester);
       expect(find.text('보유 수량이 부족해요'), findsWidgets);
-      // 견적 요청은 나가지 않는다.
-      expect(harness.countTo('/api/orders/quote/market'), 0);
 
-      // 보유 안의 수량은 견적을 부른다.
-      await tester.enterText(find.widgetWithText(TextField, '수량'), '5');
-      await tester.pump(const Duration(milliseconds: 500));
+      // 보유 안의 수량은 '매도하기' 버튼이 살아난다 — 시장가는 견적 API를
+      // 부르지 않는다(웹처럼 클라이언트 미리보기).
+      await tester.enterText(find.byType(TextField).first, '5');
       await _settle(tester);
-      expect(harness.countTo('/api/orders/quote/market'), 1);
+      expect(find.text('매도하기'), findsOneWidget);
+      expect(harness.countTo('/api/orders/quote/market'), 0);
     });
   });
 

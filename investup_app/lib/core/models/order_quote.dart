@@ -63,6 +63,7 @@ class LimitOrderQuote {
     this.requestedLimitPrice,
     this.requestedLimitCurrency,
     this.limitPrice,
+    this.acceptanceExchangeRate,
     this.availableCash,
     this.availableQuantity,
     this.expiresAt,
@@ -72,6 +73,7 @@ class LimitOrderQuote {
     this.tax,
     this.netAmount,
     this.reservedCash,
+    this.executionPreview,
   });
 
   /// false면 reason에 불가 사유 코드가 있다.
@@ -79,6 +81,9 @@ class LimitOrderQuote {
   final String? requestedLimitPrice;
   final String? requestedLimitCurrency;
   final String? limitPrice;
+
+  /// 접수 시점 확정 환율(US 종목에 KRW로 입력한 경우 환산에 쓰인 값).
+  final String? acceptanceExchangeRate;
   final String? availableCash;
   final String? availableQuantity;
   final DateTime? expiresAt;
@@ -91,13 +96,18 @@ class LimitOrderQuote {
   final String? netAmount;
   final String? reservedCash;
 
+  /// 호가 기준 즉시 체결 미리보기. 없으면 null.
+  final LimitExecutionPreview? executionPreview;
+
   factory LimitOrderQuote.fromJson(Map<String, Object?> json) {
     final estimate = json.objectOrNull('limitEstimate');
+    final preview = json.objectOrNull('executionPreview');
     return LimitOrderQuote(
       acceptable: json.requireBool('acceptable'),
       requestedLimitPrice: json.stringOrNull('requestedLimitPrice'),
       requestedLimitCurrency: json.stringOrNull('requestedLimitCurrency'),
       limitPrice: json.stringOrNull('limitPrice'),
+      acceptanceExchangeRate: json.stringOrNull('acceptanceExchangeRate'),
       availableCash: json.stringOrNull('availableCash'),
       availableQuantity: json.stringOrNull('availableQuantity'),
       expiresAt: json.dateTimeOrNull('expiresAt'),
@@ -107,8 +117,43 @@ class LimitOrderQuote {
       tax: estimate?.stringOrNull('tax'),
       netAmount: estimate?.stringOrNull('netAmount'),
       reservedCash: estimate?.stringOrNull('reservedCash'),
+      executionPreview: preview == null
+          ? null
+          : LimitExecutionPreview.fromJson(preview),
     );
   }
+}
+
+/// 지정가 주문의 호가 기반 즉시 체결 미리보기.
+class LimitExecutionPreview {
+  const LimitExecutionPreview({
+    required this.status,
+    this.reason,
+    this.expectedFilledQuantity,
+    this.remainingQuantity,
+    this.avgExecutionPrice,
+    this.releasedCash,
+  });
+
+  /// `AVAILABLE` | `UNAVAILABLE` | `NOT_APPLICABLE`
+  final String status;
+  final String? reason;
+  final String? expectedFilledQuantity;
+  final String? remainingQuantity;
+  final String? avgExecutionPrice;
+
+  /// 매수 접수 뒤 실제 체결이 예약금보다 적게 쓰였을 때 돌아오는 예수금.
+  final String? releasedCash;
+
+  factory LimitExecutionPreview.fromJson(Map<String, Object?> json) =>
+      LimitExecutionPreview(
+        status: json.requireString('status'),
+        reason: json.stringOrNull('reason'),
+        expectedFilledQuantity: json.stringOrNull('expectedFilledQuantity'),
+        remainingQuantity: json.stringOrNull('remainingQuantity'),
+        avgExecutionPrice: json.stringOrNull('avgExecutionPrice'),
+        releasedCash: json.stringOrNull('releasedCash'),
+      );
 }
 
 /// POST /orders/market 응답. 시장가 주문은 PENDING 없이 FILLED/REJECTED로 끝난다.
