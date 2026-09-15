@@ -2,7 +2,7 @@
 
 This independent npm package runs Chromium against the real Next.js production build,
 Spring Boot controllers/security/services, and an ephemeral PostgreSQL 18/TimescaleDB.
-Only external market-data ports are replaced. No broker credentials are required.
+External market-data ports are replaced, and SMTP delivery is explicitly disabled. No broker credentials are required.
 
 ## Requirements and commands
 
@@ -25,8 +25,8 @@ npm run clean
 ```
 
 `npm test -- --grep "CB"` selects tests; `npm test -- --repeat-each=2` checks repeatability.
-`npm test -- --project mobile-chromium` runs the five responsive flows only;
-`npm test -- --project chromium` runs the 24 desktop flows.
+`npm test -- --project mobile-chromium` runs the seven responsive flows only;
+`npm test -- --project chromium` runs the 33 desktop flows.
 All modes build the frontend and E2E Java source set first. Ports 13000, 18088 and 18089
 must be free. Existing development servers are never reused. The database port is assigned
 by Docker. Do not invoke Playwright directly: the runner supplies a fresh control key.
@@ -39,8 +39,8 @@ creating its runtime state or starting containers and servers.
 ## Isolation and lifecycle
 
 - Exactly one Playwright worker, `fullyParallel: false`, and no retries or sharding.
-- Desktop Chromium runs 24 scenarios. Mobile Chromium uses touch/mobile emulation at
-  375×812 and runs only `@responsive` scenarios (five runs); the full suite totals 29.
+- Desktop Chromium runs 33 scenarios. Mobile Chromium uses touch/mobile emulation at
+  375×812 and runs only `@responsive` scenarios (seven runs); the full suite totals 40.
   Mobile coverage includes menu navigation, login/logout, ranking-to-detail navigation,
   order confirmation, partial fills, holdings/ledger cards and order cancellation.
   Targeted overflow and viewport assertions cover rankings, detail inputs and account
@@ -119,7 +119,7 @@ ignored by Git; do not publish traces from sessions using real accounts.
 `.github/workflows/e2e.yml` runs smoke on PR updates to develop/main and the full suite
 on pushes to develop/main. Manual runs select smoke or full. A change-detection step
 skips unrelated documentation changes while leaving a completed workflow check.
-Smoke totals 14 runs (11 desktop + 3 mobile); full totals 29 (24 desktop + 5 mobile).
+Smoke totals 16 runs (12 desktop + 4 mobile); full totals 40 (33 desktop + 7 mobile).
 Both projects run serially with one worker and the same per-test cleanup policy.
 Superseded runs of the same PR are cancelled. Cleanup and seven-day diagnostic artifacts
 run even after failure. Require a full run on the final merge candidate manually.
@@ -139,3 +139,18 @@ not the temporary PR merge commit. Re-running a PR smoke job retains the smoke s
 GitHub requires the dispatch workflow to exist on the default branch, so the first PR
 introducing this file cannot rely on the manual button before that requirement is met.
 See [GitHub's manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
+## Frontend regression coverage after the develop merge
+
+- `/` always opens `/intro`, including repeat visits. Dedicated tests enter `/main`
+  through the start link (desktop/mobile) or Enter (desktop). Other flows navigate
+  directly to their target route; the obsolete `iv_intro_seen` bypass is removed.
+- Signup and login cover both the default `/main` destination and explicit `/my`.
+- Favorites use the ranking heart control, real persistence, account list reload,
+  detail navigation, and removal without accidental navigation on both viewports.
+- The personality image opens/closes after two real market purchases and the
+  actual four-week unlock period, advanced through the existing scenario clock.
+- Password reset covers the request acknowledgement, missing/invalid token and
+  mismatched password handling. The launcher forces `mail.enabled=false`, regardless
+  of inherited deployment configuration. SMTP delivery and successful reset through
+  a delivered email link are outside this suite; responses are not fabricated.
