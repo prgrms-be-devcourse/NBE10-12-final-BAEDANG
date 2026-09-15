@@ -486,7 +486,7 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 
 - `MarketDataPort.fetchPriceLimits` / `TossMarketDataAdapter`는 정확한 GET `/api/v1/price-limits` 경로와 `symbol`을 사용하며 MARKET_DATA 제한을 공유합니다. 응답은 `timestamp`, `upperLimitPrice`, `lowerLimitPrice`, `currency`이며 종목 및 별도 적용일 필드는 없습니다. 2026-09-11 공식 OpenAPI 확인.
 - `PriceLimitLoadService`는 기존 Clock과 MarketTradingDayPolicy를 사용합니다. 장전 갱신 시점 보장이 없어 국내 정규장부터 수집합니다. 데이터 시각의 한국 날짜와 요청 거래일을 검증하고 미래 시각, 국내 null, 정밀도/범위 오류, 역전 가격을 거절합니다. 비율 계산 폴백은 없습니다.
-- `PriceLimitScheduler`는 시작 60초 후 및 처리 완료 후 5분마다 랭킹/활성 지정가 국내 종목을 전용 단일 스레드에서 확인합니다. `toss.enabled=false`이면 외부 수집하지 않습니다. 그룹 제한 외에 상하한가 전용 2 TPS 제한을 공유합니다.
+- `PriceLimitScheduler`는 시작 즉시 및 처리 완료 후 5분마다 랭킹/활성 지정가 국내 종목을 전용 단일 스레드에서 확인합니다. `toss.enabled=false`이면 외부 수집하지 않습니다. 그룹 제한 외에 상하한가 전용 2 TPS 제한을 공유합니다.
 - 상세 조회와 배경 수집은 종목별 진행 중 요청 억제 및 실패 후 1분 대기를 공유합니다. 상태는 최대 1000개이며 만료 실패는 접근 시 제거하고 새 거래일이면 초기화합니다. 진행 중 요청은 제거하지 않으며 용량 부족 시 새 작업을 보류합니다. 단일 인스턴스 정책이며 분산 잠금은 아닙니다.
 - `PriceLimitRepository`는 두 가격과 적용일만 갱신합니다. 시세 행이 없으면 만들지 않고 기존 시세 수집 후 재시도합니다. 과거 및 동일 날짜 응답은 이미 저장한 날짜를 덮어쓰지 않습니다. 이번 단계에서는 당일 정정 및 과거 상하한가 조회를 지원하지 않습니다.
 - V14는 `price_limit_date`만 추가하고 기존 행을 보존합니다. develop의 선행 마이그레이션 순서에 맞춘 버전이며 선행 마이그레이션을 추가하거나 번호를 바꾸지 않습니다.
@@ -538,3 +538,5 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 수신자는 프로필 필드만 갱신하며 `AuthProvider.setUser`는 가입·로그인 완료 시에만 사용합니다.
 
 api.ts의 인증 요청은 AbortController로 JSON 본문 수신까지 15초로 제한합니다. REQUEST_TIMEOUT은 인증 상태를 유지하며 중계 서버의 upstream 제한은 기존 10초를 유지합니다.
+
+국내 호가 갱신은 상하한가 날짜가 없거나 과거이거나 한쪽 가격이 누락되면 생성 전에 건너뛰고 활성 호가를 종료합니다. 외부 API를 호출하지 않습니다. 전체 페이지의 검사 가능한 시세를 기준으로 미확보 최초 발생, 지속 중 최대 1분마다, 미확보 0건 전환 시 INFO 요약을 남깁니다. 검사 실패 회차는 요약하지 않습니다. 값이 채워진 잘못된 범위·미래 날짜·범위 밖 현재가는 기존 WARN과 거절을 유지합니다. 미국의 NULL 상하한가는 정상이며, 수집 완료 후 다음 호가 갱신에서 자동으로 생성합니다.
