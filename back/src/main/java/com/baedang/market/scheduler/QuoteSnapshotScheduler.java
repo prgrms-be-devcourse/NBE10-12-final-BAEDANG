@@ -1,5 +1,6 @@
 package com.baedang.market.scheduler;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.service.QuoteSnapshotLoadService;
@@ -30,15 +31,18 @@ public class QuoteSnapshotScheduler {
     private final QuoteSnapshotLoadService quoteSnapshotLoadService;
     private final MarketSessionProvider marketSessionProvider;
     private final Clock clock;
+    private final TradingMetrics metrics;
     private boolean usFirst;
 
     public QuoteSnapshotScheduler(
             QuoteSnapshotLoadService quoteSnapshotLoadService,
-            MarketSessionProvider marketSessionProvider, Clock clock
+            MarketSessionProvider marketSessionProvider, Clock clock,
+            TradingMetrics metrics
     ) {
         this.quoteSnapshotLoadService = quoteSnapshotLoadService;
         this.marketSessionProvider = marketSessionProvider;
         this.clock = clock;
+        this.metrics = metrics;
     }
 
     @Scheduled(fixedDelayString = "${trading.quote-collection.dispatch-interval:25ms}",
@@ -55,7 +59,17 @@ public class QuoteSnapshotScheduler {
     private boolean pollIfMarketOpen(MarketCountry marketCountry, Instant now) {
         try {
             MarketSessionStatus session = marketSessionProvider.currentSession(marketCountry, now);
-            if (session.open()) return quoteSnapshotLoadService.syncQuotes(marketCountry, session.validUntil()) > 0;
+            // 매 tick 개장 여부를 게이지로 갱신한다 — QuoteStale 알림이 이 값과 조인해
+            // 휴장 시장의 staleness 증가를 무시하도록(야간·주말 오탐 방지).
+            metrics.marketOpen(marketCountry.name(), session.open());
+            if (session.open()) {
+                // syncQuotes>0 은 이번 tick 에 실제로 한 페이지를 수집 제출했다는 뜻이다(대부분의
+                // tick 은 스윕 간격에 눌려 0 을 돌려준다). 그 순간을 시세 신선도의 맥박으로 기록한다 —
+                // 폴링 루프가 통째로 멈추면 이 호출이 끊겨 trading_quote_staleness_seconds 가 계속 커진다.
+                boolean reflected = quoteSnapshotLoadService.syncQuotes(marketCountry, session.validUntil()) > 0;
+                if (reflected) metrics.quoteUpdated(marketCountry.name());
+                return reflected;
+            }
             else log.trace("장 휴장 상태로 시세 수집 건너뜀: marketCountry={}", marketCountry);
         } catch (Exception e) {
             log.error("시세 수집 스케줄러 실행 중 오류 발생: marketCountry={}", marketCountry, e);

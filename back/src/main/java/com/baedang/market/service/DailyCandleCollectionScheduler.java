@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.stock.entity.MarketCountry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,13 +23,16 @@ public class DailyCandleCollectionScheduler {
 
     private final DailyCandleCollectionService dailyCandleCollectionService;
     private final Executor dailyCandleTaskExecutor;
+    private final TradingMetrics metrics;
 
     public DailyCandleCollectionScheduler(
             DailyCandleCollectionService dailyCandleCollectionService,
-            @Qualifier("dailyCandleTaskExecutor") Executor dailyCandleTaskExecutor
+            @Qualifier("dailyCandleTaskExecutor") Executor dailyCandleTaskExecutor,
+            TradingMetrics metrics
     ) {
         this.dailyCandleCollectionService = dailyCandleCollectionService;
         this.dailyCandleTaskExecutor = dailyCandleTaskExecutor;
+        this.metrics = metrics;
     }
 
     /** 국내 장 마감 후 15:40부터 17:10까지 30분 간격으로 재시도합니다. */
@@ -50,7 +54,12 @@ public class DailyCandleCollectionScheduler {
 
     private void submit(MarketCountry marketCountry) {
         CompletableFuture.runAsync(
-                () -> dailyCandleCollectionService.collect(marketCountry),
+                () -> {
+                    dailyCandleCollectionService.collect(marketCountry);
+                    // collect() 가 예외 없이 끝난 뒤에만(submit 반환 시점이 아니라 비동기 완료 시점에)
+                    // 마지막 성공 시각을 기록한다. 실패 시엔 exceptionally 로 빠져 기록하지 않는다.
+                    metrics.batchSucceeded("daily-candle");
+                },
                 dailyCandleTaskExecutor
         ).exceptionally(exception -> {
             log.error("[daily-candle] 비동기 수집 실패: market={}", marketCountry, exception);

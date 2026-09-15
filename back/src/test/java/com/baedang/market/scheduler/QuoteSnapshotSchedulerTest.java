@@ -1,9 +1,11 @@
 package com.baedang.market.scheduler;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.service.QuoteSnapshotLoadService;
 import com.baedang.stock.entity.MarketCountry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -21,6 +23,7 @@ public class QuoteSnapshotSchedulerTest {
 
     private static final Instant NOW = Instant.parse("2026-08-28T09:30:00Z");
     private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+    private final TradingMetrics metrics = new TradingMetrics(new SimpleMeterRegistry(), clock);
 
     @Mock
     private QuoteSnapshotLoadService quoteSnapshotLoadService;
@@ -34,7 +37,8 @@ public class QuoteSnapshotSchedulerTest {
         QuoteSnapshotScheduler scheduler = new QuoteSnapshotScheduler(
                 quoteSnapshotLoadService,
                 marketSessionProvider,
-                clock
+                clock,
+                metrics
         );
 
         when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new MarketSessionStatus(true, NOW.plusSeconds(60)));
@@ -52,7 +56,8 @@ public class QuoteSnapshotSchedulerTest {
         QuoteSnapshotScheduler scheduler = new QuoteSnapshotScheduler(
                 quoteSnapshotLoadService,
                 marketSessionProvider,
-                clock
+                clock,
+                metrics
         );
 
         when(marketSessionProvider.currentSession(MarketCountry.KR, NOW)).thenReturn(new MarketSessionStatus(false, NOW));

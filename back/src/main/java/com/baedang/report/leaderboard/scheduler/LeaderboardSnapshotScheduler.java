@@ -1,5 +1,6 @@
 package com.baedang.report.leaderboard.scheduler;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.report.leaderboard.service.LeaderboardSnapshotService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,15 +20,23 @@ public class LeaderboardSnapshotScheduler {
     private static final Logger log = LoggerFactory.getLogger(LeaderboardSnapshotScheduler.class);
 
     private final LeaderboardSnapshotService leaderboardSnapshotService;
+    private final TradingMetrics metrics;
 
-    public LeaderboardSnapshotScheduler(LeaderboardSnapshotService leaderboardSnapshotService) {
+    public LeaderboardSnapshotScheduler(
+            LeaderboardSnapshotService leaderboardSnapshotService,
+            TradingMetrics metrics
+    ) {
         this.leaderboardSnapshotService = leaderboardSnapshotService;
+        this.metrics = metrics;
     }
 
     @Scheduled(cron = "0 30 7 * * *", zone = "Asia/Seoul", scheduler = "leaderboardTaskScheduler")
     public void refreshLeaderboard() {
         try {
             leaderboardSnapshotService.refresh();
+            // 성공했을 때만 마지막 성공 시각을 갱신한다(catch 안에서는 절대 기록 금지) —
+            // DailyBatchNotRun 은 time()-이 값 으로 "제때 돌았는가"를 판정한다.
+            metrics.batchSucceeded("leaderboard-snapshot");
         } catch (Exception e) {
             log.error("리더보드 스냅샷 배치 실행 중 오류", e);
         }

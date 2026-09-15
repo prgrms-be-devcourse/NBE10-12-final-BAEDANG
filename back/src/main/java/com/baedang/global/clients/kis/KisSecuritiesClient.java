@@ -14,6 +14,7 @@ import org.springframework.web.client.RestClientException;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,6 +33,7 @@ public class KisSecuritiesClient {
     private final KisTokenProvider tokenProvider;
     private final ObjectMapper objectMapper;
     private final RetrySleeper retrySleeper;
+    private final TradingMetrics metrics;
     private final EnumMap<KisWhitelist, EnumMap<RequestResult, Counter>> requestCounters;
 
     public KisSecuritiesClient(
@@ -40,9 +42,10 @@ public class KisSecuritiesClient {
             KisRateLimiter rateLimiter,
             KisTokenProvider tokenProvider,
             ObjectMapper objectMapper,
-            MeterRegistry meterRegistry
+            MeterRegistry meterRegistry,
+            TradingMetrics metrics
     ) {
-        this(restClient, properties, rateLimiter, tokenProvider, objectMapper, meterRegistry,
+        this(restClient, properties, rateLimiter, tokenProvider, objectMapper, meterRegistry, metrics,
                 KisSecuritiesClient::sleep);
     }
 
@@ -53,6 +56,7 @@ public class KisSecuritiesClient {
             KisTokenProvider tokenProvider,
             ObjectMapper objectMapper,
             MeterRegistry meterRegistry,
+            TradingMetrics metrics,
             RetrySleeper retrySleeper
     ) {
         this.restClient = restClient;
@@ -60,6 +64,7 @@ public class KisSecuritiesClient {
         this.rateLimiter = rateLimiter;
         this.tokenProvider = tokenProvider;
         this.objectMapper = objectMapper;
+        this.metrics = metrics;
         this.retrySleeper = retrySleeper;
         this.requestCounters = counters(meterRegistry);
     }
@@ -69,7 +74,14 @@ public class KisSecuritiesClient {
         if (endpoint == null) {
             throw new BusinessException(ErrorCode.INTERNAL_ERROR);
         }
+        // 기존 kis.api.requests 카운터는 그대로 두고, ExternalApiFailureRate 알림이 보는 공통
+        // trading_external_api_seconds 도 함께 방출한다. 내부 인증/레이트리밋 재시도까지 포함한
+        // 호출자 관점의 최종 성공/실패가 outcome 으로 집계된다.
+        return metrics.recordExternalCall("kis." + endpoint.name(),
+                () -> send(endpoint, queryParams, responseType));
+    }
 
+    private <T> T send(KisWhitelist endpoint, Map<String, String> queryParams, Class<T> responseType) {
         String requestToken = tokenProvider.getToken();
         boolean authenticationRetried = false;
         boolean rateLimitRetried = false;

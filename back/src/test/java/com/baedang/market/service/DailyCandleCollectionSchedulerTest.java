@@ -1,9 +1,12 @@
 package com.baedang.market.service;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.stock.entity.MarketCountry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.annotation.Scheduled;
 
+import java.time.Clock;
 import java.util.concurrent.Executor;
 import java.util.Arrays;
 
@@ -15,8 +18,9 @@ class DailyCandleCollectionSchedulerTest {
 
     private final DailyCandleCollectionService service = mock(DailyCandleCollectionService.class);
     private final Executor directExecutor = Runnable::run;
+    private final TradingMetrics metrics = new TradingMetrics(new SimpleMeterRegistry(), Clock.systemUTC());
     private final DailyCandleCollectionScheduler scheduler =
-            new DailyCandleCollectionScheduler(service, directExecutor);
+            new DailyCandleCollectionScheduler(service, directExecutor, metrics);
 
     @Test
     void 국내_수집을_전용_Executor에_제출한다() {

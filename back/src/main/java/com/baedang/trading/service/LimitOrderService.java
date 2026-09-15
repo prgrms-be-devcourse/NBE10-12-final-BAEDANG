@@ -2,6 +2,7 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
@@ -25,6 +26,7 @@ import com.baedang.trading.model.OrderMarketContext;
 import com.baedang.trading.model.OrderQuoteQueryContext;
 import com.baedang.trading.model.OrderTerms;
 
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,6 +59,7 @@ public class LimitOrderService {
     private final Clock clock;
     private final OrderMarketDataService marketData;
     private final LimitOrderPreviewService previews;
+    private final TradingMetrics metrics;
 
     public LimitOrderService(
             OrderPolicy policy,
@@ -69,7 +72,8 @@ public class LimitOrderService {
             OrderQuoteQueryService quoteReads,
             Clock clock,
             OrderMarketDataService marketData,
-            LimitOrderPreviewService previews
+            LimitOrderPreviewService previews,
+            TradingMetrics metrics
     ) {
         this.policy = policy;
         this.transactions = transactions;
@@ -82,9 +86,27 @@ public class LimitOrderService {
         this.clock = clock;
         this.marketData = marketData;
         this.previews = previews;
+        this.metrics = metrics;
     }
 
     public OrderDetailResponse place(Long userId, LimitOrderRequest request) {
+        // 사용자 체감 주문 지연 측정. 거절(BusinessException)=REJECTED, 그 밖의 런타임 오류=ERROR.
+        Timer.Sample sample = metrics.startOrderTimer();
+        String result = "SUCCESS";
+        try {
+            return doPlace(userId, request);
+        } catch (BusinessException e) {
+            result = "REJECTED";
+            throw e;
+        } catch (RuntimeException e) {
+            result = "ERROR";
+            throw e;
+        } finally {
+            metrics.stopOrderTimer(sample, result);
+        }
+    }
+
+    private OrderDetailResponse doPlace(Long userId, LimitOrderRequest request) {
         OrderInput base = policy.parseInput(
                 request.accountId(),
                 request.clientOrderId(),
