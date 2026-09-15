@@ -26,7 +26,7 @@ npm run clean
 
 `npm test -- --grep "CB"` selects tests; `npm test -- --repeat-each=2` checks repeatability.
 `npm test -- --project mobile-chromium` runs the five responsive flows only;
-`npm test -- --project chromium` runs the 24 desktop flows.
+`npm test -- --project chromium` runs the 29 desktop flows.
 All modes build the frontend and E2E Java source set first. Ports 13000, 18088 and 18089
 must be free. Existing development servers are never reused. The database port is assigned
 by Docker. Do not invoke Playwright directly: the runner supplies a fresh control key.
@@ -139,3 +139,15 @@ not the temporary PR merge commit. Re-running a PR smoke job retains the smoke s
 GitHub requires the dispatch workflow to exist on the default branch, so the first PR
 introducing this file cannot rely on the manual button before that requirement is met.
 See [GitHub's manual workflow documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
+
+## Stateful authentication (#203)
+
+Browser setup logs in through the real same-origin auth relay and uses HttpOnly cookies.
+API inspection helpers own a separate session and retain both rotated tokens only in test memory.
+The runner supplies loopback `AUTH_BACKEND_URL` / `AUTH_PUBLIC_ORIGIN` and a per-run session encryption key.
+Actuator uses an ephemeral loopback port, avoiding the ordinary backend's 8081.
+Auth coverage includes cookie visibility/CSRF, two-tab restoration and logout, old Access rejection,
+password-change revocation, and the existing desktop/mobile reload flow. All 34 cases use one worker.
+
+The authenticated `/restart` control action rebuilds the Spring application with the same DB, keys and Clock instant; it does not clear scenario data. Auth tests use it to verify persisted sessions and encrypted predecessor-grace replay.

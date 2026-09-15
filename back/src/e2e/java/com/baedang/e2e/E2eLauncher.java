@@ -63,20 +63,26 @@ public final class E2eLauncher {
         if (app != null) { app.close(); app = null; }
     }
 
-    private void start(String market) {
-        close();
+    private void boot() {
         SpringApplication application = new SpringApplication(E2eApplication.class);
         application.setRegisterShutdownHook(false);
         app = application.run(
                 "--server.address=127.0.0.1", "--server.port=18088",
+                "--management.server.address=127.0.0.1", "--management.server.port=0",
                 "--spring.datasource.url=" + jdbcUrl, "--spring.datasource.username=baedang_e2e",
                 "--spring.datasource.password=" + password,
                 "--toss.enabled=true", "--kis.enabled=false", "--krx.market-events.enabled=false",
                 "--toss.load-stock-master=false", "--toss.load-stock-master-detail=false", "--toss.load-stock-ranking=false",
                 "--report.seed.enabled=false", "--cors.allowed-origins=http://127.0.0.1:13000",
+                "--auth.session.encryption-key=" + required("E2E_SESSION_KEY"),
                 "--auth.jwt.secret=" + Base64.getEncoder().encodeToString(token.getBytes(StandardCharsets.UTF_8)),
                 "--logging.level.org.hibernate.SQL=OFF", "--logging.level.root=WARN",
                 "--spring.main.banner-mode=off");
+    }
+
+    private void start(String market) {
+        close();
+        boot();
         clearData();
         haltSequence = 0;
         E2eClock clock = app.getBean(E2eClock.class);
@@ -140,6 +146,13 @@ public final class E2eLauncher {
                 JdbcTemplate jdbc = app.getBean(JdbcTemplate.class);
                 E2eClock clock = app.getBean(E2eClock.class);
                 switch (action) {
+                    case "/restart" -> {
+                        // DB와 실행 키는 유지하고 Spring 빈을 모두 다시 만듭니다.
+                        Instant now = clock.instant();
+                        close();
+                        boot();
+                        app.getBean(E2eClock.class).set(now);
+                    }
                     case "/publish" -> app.getBean(OrderBookRefreshScheduler.class).refreshOrderBooks();
                     case "/tick" -> app.getBean(LimitOrderExecutionWorker.class).tick();
                     case "/advance" -> {
