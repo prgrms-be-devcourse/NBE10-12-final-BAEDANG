@@ -190,12 +190,12 @@ jobs:
             -o ConnectTimeout=20 \
             "$SSH_USER@$HOST" 'bash -s' <<DEPLOY
           set -e
-          docker pull $IMAGE
+          sudo docker pull $IMAGE
 
-          docker stop ${{ env.CONTAINER_1_NAME }} || true
-          docker rm ${{ env.CONTAINER_1_NAME }} || true
+          sudo docker stop ${{ env.CONTAINER_1_NAME }} || true
+          sudo docker rm ${{ env.CONTAINER_1_NAME }} || true
 
-          docker run -d \
+          sudo docker run -d \
             --name ${{ env.CONTAINER_1_NAME }} \
             --network ${{ env.DOCKER_NETWORK }} \
             --restart unless-stopped \
@@ -206,5 +206,5 @@ jobs:
             -p ${{ env.APPLICATION_PORT }}:${{ env.APPLICATION_PORT }} \
             $IMAGE
 
-          docker image prune -af
+          sudo docker image prune -af
           DEPLOY
