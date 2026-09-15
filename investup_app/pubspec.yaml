@@ -1,0 +1,43 @@
+name: investup_app
+description: InvestUP Android/iOS 모의투자 앱.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  dio: ^5.9.2
+  flutter_secure_storage: ^10.0.0
+  flutter_riverpod: ^3.3.1
+  go_router: ^17.1.0
+  shared_preferences: ^2.5.4
+  intl: ^0.20.2
+  decimal: ^3.2.4
+  webview_flutter: ^4.14.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    # 종목 상세 차트 — TradingView lightweight-charts(WebView) + 브리지 페이지.
+    - assets/chart/
+
+# 웹 파비콘(front/src/app/icon.png)으로 생성한다. iOS는 알파를 떼야 해서
+# remove_alpha_ios로 둥근 모서리를 네이비 배경에 평탄화한다.
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  remove_alpha_ios: true
