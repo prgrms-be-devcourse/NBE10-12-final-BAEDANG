@@ -11,6 +11,7 @@ import 'core/api/report_api.dart';
 import 'core/api/stock_api.dart';
 import 'core/auth/auth_session.dart';
 import 'core/models/market_country.dart';
+import 'core/theme/theme_controller.dart';
 import 'features/auth/forgot_password_screen.dart';
 import 'features/auth/login_screen.dart';
 import 'features/auth/signup_screen.dart';
@@ -37,6 +38,7 @@ class InvestUpApp extends StatefulWidget {
     required this.orders,
     required this.exchangeRates,
     required this.reports,
+    required this.theme,
     required this.wiki,
   });
 
@@ -48,6 +50,7 @@ class InvestUpApp extends StatefulWidget {
   final OrderApi orders;
   final ExchangeRateApi exchangeRates;
   final ReportApi reports;
+  final ThemeController theme;
   final WikiTermsSource wiki;
 
   @override
@@ -157,6 +160,7 @@ class _InvestUpAppState extends State<InvestUpApp> {
                   orders: widget.orders,
                   exchangeRates: widget.exchangeRates,
                   reports: widget.reports,
+                  theme: widget.theme,
                 ),
               ),
             ),
@@ -168,19 +172,23 @@ class _InvestUpAppState extends State<InvestUpApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      title: 'InvestUP',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.forBrightness(Brightness.light),
-      darkTheme: AppTheme.forBrightness(Brightness.dark),
-      routerConfig: _router,
-      localizationsDelegates: const [
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-      supportedLocales: const [Locale('ko'), Locale('en')],
-      locale: const Locale('ko'),
+    return ListenableBuilder(
+      listenable: widget.theme,
+      builder: (context, _) => MaterialApp.router(
+        title: 'InvestUP',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.forBrightness(Brightness.light),
+        darkTheme: AppTheme.forBrightness(Brightness.dark),
+        themeMode: widget.theme.mode,
+        routerConfig: _router,
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        supportedLocales: const [Locale('ko'), Locale('en')],
+        locale: const Locale('ko'),
+      ),
     );
   }
 }

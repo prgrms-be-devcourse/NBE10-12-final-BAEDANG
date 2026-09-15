@@ -77,6 +77,13 @@ class _LwCandleChartState extends State<LwCandleChart> {
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // 라이트/다크 전환으로 Theme이 바뀌면 차트 글자·그리드 색을 다시 보낸다.
+    if (_pageReady) _pushData();
+  }
+
   /// Color를 CSS `rgb()/rgba()` 문자열로 — 페이지는 파싱 가능한 구체적 색만 받는다.
   static String _css(Color c) {
     final r = (c.r * 255).round();
