@@ -505,6 +505,12 @@ The attempts map and mutable attempt fields are guarded by the same `synchronize
 - Frontend: `front/src/lib/stock-market-events.ts` classifies the day's events for one market. Only KOSPI/KOSDAQ are queried — US and `KR_ETC` have no KIND events. If the lookup fails or has not landed yet, the screen must **not** block on it; the server-side trading transaction stays the authority and the existing `MARKET_TRADING_HALTED` response is the final defense.
 - `MarketEventsBanner` (rankings, KR tab) keeps its history semantics; only the heading distinguishes an active circuit breaker (`지금 매매거래 일시중단 중이에요`) from an active sidecar (`현재 시장조치가 발동 중이에요`) because a sidecar suspends program quotes only.
 
+## Browser integration test package
+
+The root `e2e/` package runs Playwright Chromium with one worker against the real production frontend build and an isolated Spring application. `back/src/e2e` is a separate Gradle source set, excluded from `bootJar`; its launcher replaces external market ports, supplies the existing Clock abstraction, and exposes only loopback, run-key-protected scenario commands. Production controllers, authentication, trading services and migrations remain in use.
+
+Each run creates its own TimescaleDB container. Each test clears mutable data and recreates the Spring context to reset caches and worker state, then seeds a regular-session scenario. Teardown closes the context; the runner removes its owned servers, container and volume. Never point this package at a development database. See [E2E README](../e2e/README.md) for commands, scenario controls, coverage boundaries, CI triggers and diagnostic artifacts.
+
 ## Trading bounds and V2 price arrays (#178)
 
 `TradingPriceLimits` is an immutable, non-persisted value read from existing quote columns. It checks current exchange-local dates for KR and treats US null as unrestricted. `OrderPolicy.validateTradingPrice` is shared by estimates/admission/execution, using existing `TickSizePolicy` for LIMIT ticks. Display's historical-date policy is not a trading fallback.
@@ -512,3 +518,23 @@ The attempts map and mutable attempt fields are guarded by the same `synchronize
 `OrderBookPricePolicy` owns expected arrays and checks snapshot completeness for queries, previews, publication and the locking store. Empty arrays are valid only when the generated price range is empty. Existing V1 is never consumed; no alternate V1 implementation is retained. The publisher still locks stock then version, and the consumer still locks account then order, version, levels and holding. Limits are read without introducing an inverse stock lock in the consumer. Session/time validation is repeated after lock waits.
 
 Order preparation shares `PriceLimitLoadService.ensureForTrading` with the existing gate/cooldown; workers and book publication do not add per-order external limit fetches. Unavailable bounds defer existing orders without reserve or ledger mutations. Same-day limits remain immutable under the existing repository write rule. No schema or history rewrite is introduced.
+
+
+## Authentication sessions (#203)
+
+| Component | Contract / side effects |
+| --- | --- |
+| `JwtTokenProvider` | Issues and parses typed sid/generation/jti JWTs; inject Clock, cap Access at session expiration |
+| `AuthSessionService.create` | MANDATORY transaction; creates a PostgreSQL login session during signup/login |
+| `AuthSessionService.rotate` | NEVER ambient transaction; owns user/session locks and commits before error conversion; fixed predecessor grace |
+| `requireActive` / `logout` / `revokeAll` | DB validation / current-session revocation / caller-transaction all-session revocation |
+| `RefreshTokenCipher` | Separate 32-byte AES-GCM key; session-bound successor encryption, no logging of token/cipher inputs |
+| `api.ts` auth functions / `AuthProvider` | Same-origin relay, memory Access, shared refresh, Web Locks, guarded cross-tab events and pending logout retry |
+| Next.js `app/api/auth/[action]/route.ts` | Four fixed auth actions only; HttpOnly cookie, exact Origin + JSON header, timeout, no redirects/cache |
+
+See [authentication.md](authentication.md) for public contracts, deployment variables and unsupported-browser limits.
+
+`updateNickname` publishes a session-guarded `onProfileUpdated` event and cross-tab profile message.
+Consumers update profile fields only; `AuthProvider.setUser` is reserved for completed signup/login.
+
+Auth calls in api.ts enforce a 15-second browser timeout through AbortController, including response JSON consumption. REQUEST_TIMEOUT preserves authentication; the relay upstream timeout remains 10 seconds.

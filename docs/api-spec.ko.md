@@ -29,7 +29,7 @@
 
 ### 인증
 
-Stateless JWT (access + refresh) 토큰을 사용해 인증합니다. 보호 엔드포인트는 헤더에 토큰을 담아야 합니다:
+JWT와 PostgreSQL 로그인 세션을 요청마다 함께 검증합니다 ([Stateful/RTR 정책](authentication.ko.md)). 보호 엔드포인트는 헤더에 토큰을 담아야 합니다:
 ```http
 Authorization: Bearer <accessToken>
 ```
@@ -41,8 +41,8 @@ Authorization: Bearer <accessToken>
 
 | 구분 | 대상 |
 |---|---|
-| 비로그인 허용 | 회원가입 · 로그인 · 토큰 갱신 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
-| 🔒 로그인 필수 | 로그아웃 · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 · `/stocks/likes` (POST/GET/DELETE) |
+| Access 불필요 (갱신·로그아웃은 Refresh 필요) | 회원가입 · 로그인 · 토큰 갱신 · 로그아웃 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
+| 🔒 로그인 필수 | `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 · `/stocks/likes` (POST/GET/DELETE) |
 ### 응답 형식
 
 성공 시 데이터를 **그대로** 반환하고, 목록은 커서를 함께 내려줍니다.
@@ -116,6 +116,11 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 ## 인증 · 회원
 
+인증 정책은 [Stateful 인증·RTR](authentication.ko.md)을 따릅니다. 백엔드는 토큰 JSON을 반환하지만
+브라우저에는 Next.js 중계가 Refresh를 HttpOnly 쿠키로만 전달합니다. 가입·로그인·갱신 응답의
+`expiresAt`은 세션 절대 만료이며, 갱신은 Access와 Refresh를 함께 교체합니다. 직전 Refresh에만
+고정 20초 유예를 적용합니다. `SESSION_REVOKED`, `REFRESH_TOKEN_REUSED`, `AUTH_UNAVAILABLE`을 구분합니다.
+
 ### `POST /auth/signup`
 회원가입 + 계좌 개설 + 모의 투자금 지급
 
@@ -136,6 +141,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
   "nickname": "홍길동",
   "accessToken": "eyJhbGciOi...",
   "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z",
   "account": {
     "accountId": 1,
     "roundNo": 1,
@@ -167,7 +173,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `LOGIN_FAILED` | 이메일 또는 비밀번호 불일치, 또는 비활성(탈퇴/휴면) 회원 |
 
 ### `POST /auth/refresh`
-유효한 Refresh Token으로 새 Access Token을 재발급합니다.
+유효한 Refresh Token으로 Access와 Refresh를 함께 교체합니다. 세션 절대 만료는 연장하지 않습니다.
 
 **Request**
 ```json
@@ -179,7 +185,9 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 **Response · 200**
 ```json
 {
-  "accessToken": "eyJhbGciOi..."
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z"
 }
 ```
 
@@ -188,17 +196,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `TOKEN_EXPIRED` | 만료된 Refresh Token |
 | `INVALID_TOKEN` | 위조/형식 불일치 토큰이거나 탈퇴 회원 |
 
-### `POST /auth/logout` 🔒
-Stateless 로그아웃. 서버 세션이 없으므로 클라이언트가 보관 중인 토큰을 파기합니다.
-
-**Response · 200**
-빈 바디.
-
-| 에러 코드 | 상황 |
-|---|---|
-| `UNAUTHORIZED` | 인증 토큰 누락 |
-| `TOKEN_EXPIRED` | 만료된 토큰 |
-| `INVALID_TOKEN` | 유효하지 않은 토큰 |
+### `POST /auth/logout`
+현재 로그인 세션과 해당 Access를 폐기합니다. 백엔드는 `{ "refreshToken": "..." }`를 받아 200 빈 응답을
+반환하고 Access를 요구하지 않습니다. 브라우저 중계는 HttpOnly 쿠키를 읽고 성공 또는 이미 무효인
+세션이면 쿠키를 삭제한 뒤 204를 반환합니다. 비밀번호 변경·탈퇴는 모든 세션을 폐기합니다.
 
 ### `GET /users/me` 🔒
 내 정보 조회
@@ -859,6 +860,8 @@ GET 에러 응답은 주문 접수용 `retryPolicy`를 반환하지 않으며, �
 ### `GET /orders/quote/market` 🔒
 수수료 · 세금 미리보기
 
+시장가 견적은 세션 조회 시작 시 닫힌 시장을 같은 요청 안에서 개장으로 재판정하지 않습니다. 조회 중 개장하면 다음 견적 요청에 반영합니다. 외부 조회 완료 시 원본 환율이 만료되었으면 시세도 오래되었더라도 `EXCHANGE_RATE_NOT_FOUND` 오류가 우선하며, 만료 환율로 계산한 견적은 반환하지 않습니다.
+
 ```
 ?symbol=005930&marketCountry=KR&side=BUY&quantity=10
 ```
@@ -1241,7 +1244,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 |---|---|
 | 검색 범위 | 전 종목(약 8,500개) · `LIKE '%q%'` |
 | 수수료 · 세율 | 수수료 0.01%(매수·매도) · 증권거래세 0.2%(매도만) |
-| 인증 | Stateless JWT access/refresh 토큰 · `Authorization: Bearer <accessToken>` |
+| 인증 | PostgreSQL 세션 + JWT/RTR · Bearer Access · 동일 Origin HttpOnly Refresh ([계약](authentication.ko.md)) |
 | 소수점 거래 | 2주차 — 1주차는 정수 주 단위만. **화면에서 토글 자체를 제거했습니다** |
 | 체결 내역 | 원장 기준 `GET /accounts/me/ledger` |
 | 원장 항목 | 매수 · 매도 · 초기지급 3종. 수수료·세금은 매수·매도 금액에 포함(한 줄) |
@@ -1281,6 +1284,8 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 | `GET /accounts/me/assets/history` | 자산 추이 그래프 (일별 스냅샷) |
 | `GET /accounts/me/report` | 투자 습관 진단 |
 | WebSocket | 실시간 시세 push (폴링 대체) |
+
+장기 보유 종목의 보유 시작 시각은 주문 접수 순서가 아닌 개별 `trade_execution`을 executedAt/executionId 순서로 재생하여 계산합니다. 부분 체결도 포함하며 전량 매도 시 보유 구간이 끝나고 재매수 시 새 구간이 시작됩니다.
 
 **지금 만들지는 않지만 URL 설계가 충돌하지 않게 미리 자리를 잡아둔 것입니다.**
 
@@ -1363,3 +1368,12 @@ LIMIT은 문자열 limitPrice와 limitCurrency를 받습니다. 국내는 KRW �
 주문 준비는 금융 트랜잭션 밖에서 `ensureForTrading`으로 복구를 시도하고 DB를 재조회합니다. 기존 2 TPS 게이트·종목별 중복 억제·실패 1분 대기를 공유하고 게이트 슬롯을 기다리지 않습니다. 허용된 호출은 브로커 제한과 HTTP 타임아웃의 영향을 받습니다. 계좌·호가 잠금 후 외부 호출은 하지 않습니다. 배경 수집은 시작 60초 후, 완료 후 5분 주기를 유지합니다.
 
 V2 구현만 유지합니다. ASK는 기준가보다 큰 가격, BID는 작은 가격에서 시작합니다. 당일 상하한가가 없거나 기준가가 범위 밖이면 게시하지 않습니다. 기존 V1은 즉시 조회·체결에서 제외하고 스케줄러가 V2로 교체합니다. 단일 SQL 스냅샷에 상하한가를 포함하며 양쪽이 비어도 헤더를 반환합니다. 예상 가격 배열로 경계 축소와 레벨 누락·중복을 구분합니다. 정상 빈 방향은 AVAILABLE/NO_LIQUIDITY, 예상 체결 0주입니다. 기존 주문은 예약 자원을 유지하며 접수 정규장 마감에 만료합니다. 익일 이월 및 당일 상하한가 정정은 추가하지 않습니다.
+
+
+## 비밀번호 재설정과 Stateful 인증
+
+브라우저의 `POST /api/auth/password/forgot`, `POST /api/auth/password/reset`은 Next.js의 명시적인 중계 경로를 사용합니다. 정확한 Origin, `X-Auth-Request: 1`, JSON Content-Type을 검증하고 빈 성공 응답과 오류를 전달하며 Refresh 쿠키를 변경하지 않습니다.
+
+발급은 사용자를 먼저 잠그고 쿨다운 확인·이전 토큰 무효화·새 토큰 저장을 직렬화합니다. 재설정은 소유자 ID 조회 후 사용자와 토큰을 순서대로 잠그고 사용·만료 상태를 다시 확인합니다. 비밀번호 변경과 모든 사용자 세션 폐기는 같은 트랜잭션에서 처리합니다.
+
+폐기 커밋 뒤 시작하는 인증 검증은 기존 Access와 Refresh를 거절합니다. 이미 인증된 요청을 소급 취소하지는 않습니다. V18에서 레거시 `token_version` 컬럼을 제거하며 실제 폐기는 `auth_session`으로 처리합니다. [상세 인증 정책](authentication.ko.md)을 참고하세요.

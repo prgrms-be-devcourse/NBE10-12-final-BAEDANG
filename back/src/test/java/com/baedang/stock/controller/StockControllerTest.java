@@ -2,6 +2,7 @@ package com.baedang.stock.controller;
 
 import com.baedang.auth.security.JwtAuthenticationFilter;
 import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
@@ -40,12 +41,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(StockController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 public class StockControllerTest {
+    @MockitoBean private AuthSessionService authSessions;
+
 
     @Autowired
     private MockMvc mockMvc;

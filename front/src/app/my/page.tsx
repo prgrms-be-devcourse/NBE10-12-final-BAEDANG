@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 import { useAuth } from "@/components/AuthProvider";
 import { useExchangeRate } from "@/components/ExchangeRateProvider";
 import { useMarketStatus } from "@/components/MarketStatusProvider";
@@ -18,7 +19,9 @@ import {
   getHoldings,
   getLedger,
   getMyOrders,
+  getStockLikes,
   resetAccount,
+  unlikeStock,
   updateNickname,
   changeUserPassword,
   withdrawAccount,
@@ -27,6 +30,7 @@ import {
   type LedgerItem,
   type MarketCountry,
   type OrderDetailResponse,
+  type StockLikeItem,
 } from "@/lib/api";
 import { INITIAL_CASH } from "@/lib/mock-data";
 import { formatNumber, formatPercent, formatSigned, formatUsd, toDecimal, toKrw } from "@/lib/format";
@@ -41,11 +45,56 @@ const VALUATION_POLL_INTERVAL_MS = 5000;
 
 export default function MyPage() {
   const router = useRouter();
-  const { isLoggedIn, user, setUser, logout } = useAuth();
+  const { isLoggedIn, user, logout } = useAuth();
   const { rate, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
-  const [tab, setTab] = useState<"holdings" | "ledger" | "orders">("holdings");
+  // "포트폴리오 초기화"·"회원 탈퇴" 위험 구역의 배경·글자색을 라이트 모드에서만
+  // 좀 더 세련된 레드 계열로 바꿔달라는 요청 — 다크 모드는 절대 바꾸지 말라고
+  // 명시했으므로, 전역 CSS 변수(--dangerBg/--dangerText/--dangerTextSoft, 다른
+  // 화면(StockDetailClient·OrderDetailModal)에서도 함께 쓰는 값이라 여기서
+  // 바꾸면 그쪽까지 영향을 준다)는 그대로 두고, 라이트 모드일 때만 이
+  // 페이지 안에서 로컬로 새 색을 쓴다(다크 모드는 기존 var(--danger*) 그대로
+  // 참조해 단 하나도 안 바뀐다). 기존 값(oklch 96%/0.02/25 배경,
+  // 50%/0.18/25 글자 — 채도 높은 경고색 느낌)보다 채도를 낮추고 톤을
+  // 와인·버건디 쪽으로 옮겨 더 차분하고 고급스러운 인상을 준다.
+  // 처음엔 hue를 25→10으로 낮췄는데, oklch에서는 hue가 낮을수록(0에 가까울수록)
+  // 오히려 핑크·마젠타 쪽에 가까워진다 — "묘하게 핑크빛이 돈다"는 피드백이 정확히
+  // 이 때문이었다. hue를 원래의 순수한 빨강 쪽(28, 기존 25와 거의 같은 톤)으로
+  // 되돌리고 채도만 낮게 유지해서, 핑크로 새지 않으면서도 기존보다 차분한
+  // "레드"를 만들었다.
+  //
+  // 그런데도 카드 배경(dangerBg)은 여전히 "은근히 핑크빛"이라는 피드백을 다시
+  // 받았다 — 이번엔 hue 문제가 아니라 밝기(lightness) 문제였다. 94%처럼 아주
+  // 밝은 명도에서는 채도를 아무리 낮게 잡아도(0.035) 사람 눈에는 "옅은 빨강"이
+  // 아니라 "분홍"으로 읽힌다(핑크 자체가 본질적으로 "아주 밝은 빨강"이라 그렇다).
+  // 참고 이미지(진한 와인·버건디 톤 카드)의 느낌에 맞춰 명도 88%/채도 0.05로
+  // 낮췄더니, 이번엔 반대로 "진해서 튄다"는 피드백을 받았다 — 카드 배경치고는
+  // 존재감이 너무 강했던 것. 명도를 88%→91%로 다시 올리고 채도도 0.05→0.04로
+  // 살짝 낮춰, 여전히 "분홍"으로 안 보일 만큼은 채도를 유지하면서 카드
+  // 배경다운 은은함을 찾았다(hue는 계속 30, 순빨강 영역 그대로).
+  const dangerBg = theme === "light" ? "oklch(91% 0.04 30)" : "var(--dangerBg)";
+  const dangerText = theme === "light" ? "oklch(40% 0.16 28)" : "var(--dangerText)";
+  const dangerTextSoft = theme === "light" ? "oklch(46% 0.06 28)" : "var(--dangerTextSoft)";
+  // "초기화할게요"/"탈퇴할게요" 확인 버튼 배경을 다크 모드에서만 좀 더 세련된
+  // 레드로 바꿔달라는 요청(이번엔 반대로 다크 모드 한정 — 라이트 모드는 기존
+  // var(--dangerText) 원본 그대로 둔다). 이 두 버튼은 위 danger* 로컬 변수를
+  // 쓰지 않고 var(--dangerText)를 직접 참조하고 있었다 — 전역 변수라 여기서
+  // 바꾸면 StockDetailClient·OrderDetailModal의 에러 문구 색까지 같이
+  // 바뀌므로, 이번에도 전역 변수 대신 이 페이지 로컬 값을 새로 둔다. 다크
+  // 모드 원본(oklch 76%/0.15/22)은 텍스트용으로 밝게 잡은 값이라 버튼
+  // 배경으로 쓰면 옅고 밋밋해 보인다 — 라이트 모드 때와 같은 방향(채도를
+  // 낮추고 hue를 순빨강 쪽인 28로)으로, 명도만 버튼 배경에 맞게 낮춰
+  // 와인빛이 도는 차분한 레드로 만들었다.
+  const dangerButtonBg = theme === "dark" ? "oklch(46% 0.15 28)" : "var(--dangerText)";
+  // 관심 종목 탭의 전일대비 배지 배경(var(--upBg)/--downBg)이 다크 모드에서
+  // 너무 진하다는 요청 — 이 두 변수는 랭킹·보유종목 등 다른 화면과도 공유하는
+  // 전역 값이라 그대로 두고, 이 페이지 로컬로만 다크 모드에서 명도를 올리고
+  // 채도를 낮춘 더 은은한 색을 쓴다(라이트 모드는 기존 var(--upBg)/--downBg
+  // 그대로 — 요청이 다크 모드로 한정됨).
+  const changeUpBg = theme === "dark" ? "oklch(37% 0.06 28)" : "var(--upBg)";
+  const changeDownBg = theme === "dark" ? "oklch(37% 0.055 255)" : "var(--downBg)";
+  const [tab, setTab] = useState<"holdings" | "ledger" | "orders" | "likes">("holdings");
   const [account, setAccount] = useState<AccountSummary | null>(null);
   const [holdings, setHoldings] = useState<HoldingItem[]>([]);
   const [ledger, setLedger] = useState<LedgerItem[]>([]);
@@ -61,6 +110,14 @@ export default function MyPage() {
   const [ordersHasNext, setOrdersHasNext] = useState(false);
   const [ordersLoadingMore, setOrdersLoadingMore] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<OrderDetailResponse | null>(null);
+
+  // ── 관심 종목(찜) ────────────────────────────────────────────────────────────
+  const [likes, setLikes] = useState<StockLikeItem[]>([]);
+  const [likesCursor, setLikesCursor] = useState<string | null>(null);
+  const [likesHasNext, setLikesHasNext] = useState(false);
+  const [likesLoadingMore, setLikesLoadingMore] = useState(false);
+  const [likeRemoving, setLikeRemoving] = useState<Set<number>>(new Set());
+
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
@@ -241,9 +298,17 @@ export default function MyPage() {
     isLoggedIn && !!user && hasActiveOrders
   );
 
-  function handleTabChange(nextTab: "holdings" | "ledger" | "orders") {
+  function handleTabChange(nextTab: "holdings" | "ledger" | "orders" | "likes") {
     setTab(nextTab);
-    if (nextTab === "orders") {
+    if (nextTab === "likes") {
+      getStockLikes()
+        .then((res) => {
+          setLikes(res.items);
+          setLikesCursor(res.nextCursor);
+          setLikesHasNext(res.hasNext);
+        })
+        .catch(() => {});
+    } else if (nextTab === "orders") {
       getMyOrders()
         .then((res) => {
           setOrders(res.items);
@@ -327,6 +392,42 @@ export default function MyPage() {
       .finally(() => setLedgerLoadingMore(false));
   }
 
+  function loadMoreLikes() {
+    if (likesLoadingMore || !likesCursor) return;
+    setLikesLoadingMore(true);
+    getStockLikes({ cursor: likesCursor })
+      .then((res) => {
+        setLikes((prev) => {
+          const existingIds = new Set(prev.map((l) => l.stockLikeId));
+          const additions = res.items.filter((l) => !existingIds.has(l.stockLikeId));
+          return [...prev, ...additions];
+        });
+        setLikesCursor(res.nextCursor);
+        setLikesHasNext(res.hasNext);
+      })
+      .catch(() => {})
+      .finally(() => setLikesLoadingMore(false));
+  }
+
+  // 랭킹 화면의 찜 해제와 같은 원칙 — 서버 응답을 받은 뒤에만 목록에서 지운다
+  // (실패하면 목록에 그대로 남아, 다시 눌러 재시도할 수 있다).
+  function handleUnlike(item: StockLikeItem) {
+    if (likeRemoving.has(item.stockLikeId)) return;
+    setLikeRemoving((prev) => new Set(prev).add(item.stockLikeId));
+    unlikeStock(item.stockLikeId)
+      .then(() => {
+        setLikes((prev) => prev.filter((l) => l.stockLikeId !== item.stockLikeId));
+      })
+      .catch(() => {})
+      .finally(() => {
+        setLikeRemoving((prev) => {
+          const next = new Set(prev);
+          next.delete(item.stockLikeId);
+          return next;
+        });
+      });
+  }
+
   // 주문 취소가 성공하면(모달 안에서) 목록의 해당 행과 모달 둘 다 최신 상태로
   // 바꾸고, 잠겨 있던 예약금/주식 수량이 풀렸으므로 계좌 요약과 보유주식도 다시 조회한다.
   function handleOrderUpdated(updated: OrderDetailResponse) {
@@ -359,9 +460,7 @@ export default function MyPage() {
     if (nextNickname === user.nickname) return; // 바뀐 게 없으면 조용히 아무 것도 안 한다.
     setNicknameSaving(true);
     try {
-      const profile = await updateNickname(nextNickname);
-      // Nav 등 다른 화면도 user.nickname을 그대로 참조하니 여기서 같이 갱신한다.
-      setUser({ ...user, nickname: profile.nickname });
+      await updateNickname(nextNickname);
       setNicknameSaved(true);
     } catch (err) {
       setNicknameError(err instanceof ApiError ? err.message : "닉네임 변경에 실패했어요.");
@@ -385,7 +484,8 @@ export default function MyPage() {
       setCurrentPassword("");
       setNewPassword("");
       setNewPasswordConfirm("");
-      setPasswordSaved(true);
+      logout();
+      router.push("/login?reason=password-changed");
     } catch (err) {
       setPasswordError(err instanceof ApiError ? err.message : "비밀번호 변경에 실패했어요.");
     } finally {
@@ -399,9 +499,7 @@ export default function MyPage() {
     setWithdrawing(true);
     try {
       await withdrawAccount(withdrawPassword);
-      // 탈퇴는 서버 토큰을 무효화하지 않으므로(stateless JWT), 여기서 반드시
-      // 로컬 로그인 상태를 지워야 한다 — 안 그러면 이미 없는 계정으로 계속
-      // 요청을 보내다 에러만 반복해서 보게 된다.
+      // 서버의 전체 세션 폐기에 이어 브라우저 쿠키와 메모리도 정리합니다.
       logout();
       router.push("/");
     } catch (err) {
@@ -414,18 +512,34 @@ export default function MyPage() {
   if (!isLoggedIn || !user) {
     return (
       <Reveal delay={0} className="rounded-[20px] py-20 text-center" style={{ background: "var(--card)" }}>
-        <div className="mb-2 text-[17px] font-bold" style={{ color: "var(--ink)" }}>
-          로그인하고 내 계좌를 확인해보세요
-        </div>
-        <div className="mb-5 text-[14px]" style={{ color: "var(--mut2)" }}>
-          보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요.
-        </div>
+        {/* 랭킹·가이드 화면 문구에 이미 적용한 토스인슈어런스(pd-recruit.tossinsu.com)
+            스타일 Line Reveal을 마이페이지 접속 시 등장하는 문구·컴포넌트에도
+            적용해달라는 요청 — 감싸는 Reveal(카드 전체가 살짝 떠오르는 기존
+            애니메이션)은 그대로 두고, 안쪽 텍스트만 RevealText로 바꿨다. */}
+        <RevealText
+          as="div"
+          className="mb-2 text-[17px] font-bold"
+          style={{ color: "var(--ink)" }}
+          lines={["로그인하고 내 계좌를 확인해보세요"]}
+        />
+        <RevealText
+          as="div"
+          className="mb-5 text-[14px]"
+          style={{ color: "var(--mut2)" }}
+          baseDelayMs={45}
+          lines={["보유 종목, 체결 내역, 모의 투자금은 로그인 후에 볼 수 있어요."]}
+        />
+        {/* 문구뿐 아니라 컴포넌트(버튼)에도 같은 효과를 적용해달라는 요청 —
+            메인 화면 CTA 버튼(page.tsx)과 같은 방식으로 버튼 라벨을
+            RevealText(as="span" display="inline-block")로 감쌌다. 위
+            제목(0ms)·설명(45ms)에 이어서 자연스럽게 90ms·135ms에
+            시작하도록 이어 붙였다. */}
         <div className="flex justify-center gap-2.5">
           <Link href="/login" className="rounded-xl px-5 py-2.5 text-[14px] font-bold" style={{ background: "var(--fill)", color: "var(--ink)" }}>
-            로그인
+            <RevealText as="span" display="inline-block" baseDelayMs={90} lines={["로그인"]} />
           </Link>
           <Link href="/signup" className="rounded-xl px-5 py-2.5 text-[14px] font-bold text-white" style={{ background: "var(--accent)" }}>
-            회원가입
+            <RevealText as="span" display="inline-block" baseDelayMs={135} lines={["회원가입"]} />
           </Link>
         </div>
       </Reveal>
@@ -450,10 +564,19 @@ export default function MyPage() {
 
   return (
     <div>
+      {/* 랭킹·가이드 화면 문구에 이미 적용한 Line Reveal을 마이페이지 접속 시
+          맨 처음 보이는 "내 계좌" 제목·회차 배지에도 적용했다. */}
       <Reveal delay={0}>
         <div className="mb-4.5 flex items-baseline gap-3">
-          <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>내 계좌</h2>
-          <span className="text-[13px]" style={{ color: "var(--mut2)" }}>{account.roundNo}회차</span>
+          <RevealText as="h2" className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }} lines={["내 계좌"]} />
+          <RevealText
+            as="span"
+            display="inline-block"
+            baseDelayMs={45}
+            className="text-[13px]"
+            style={{ color: "var(--mut2)" }}
+            lines={[`${account.roundNo}회차`]}
+          />
         </div>
       </Reveal>
 
@@ -479,13 +602,16 @@ export default function MyPage() {
             { value: "holdings", label: "보유 종목" },
             { value: "orders", label: "주문 내역" },
             { value: "ledger", label: "체결 내역" },
+            { value: "likes", label: "관심 종목" },
           ]}
           value={tab}
-          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders")}
-          trackClassName="mb-4.5 w-[300px] gap-0.5 rounded-full p-[3px]"
+          onChange={(v) => handleTabChange(v as "holdings" | "ledger" | "orders" | "likes")}
+          trackClassName="mb-4.5 w-[380px] max-md:w-full gap-0.5 rounded-full p-[3px]"
+          // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+          // 기존 alpha 값을 절반으로 낮췄다.
           trackStyle={{
-            background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-            border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+            background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+            border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
           }}
           buttonClassName="rounded-full px-0 py-2 text-[13px] font-bold"
           inactiveTextStyle={{ color: "var(--mut)" }}
@@ -501,8 +627,12 @@ export default function MyPage() {
         ) : (
           <>
             <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+              {/* 반응형 웹 적용 — 랭킹 화면 테이블과 같은 문제(고정 80px 칸 +
+                  fr 6칸짜리 그리드가 모바일 폭에서는 남는 공간이 없어 뒤쪽
+                  칸들이 카드 밖으로 잘려 보이지 않음)라 같은 방식으로
+                  고쳤다. md 미만에서는 헤더를 숨기고 행을 카드형으로 쌓는다. */}
               <div
-                className="grid px-5 py-2.5 text-[12px] font-bold"
+                className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
                 style={{
                   gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px",
                   borderBottom: "1px solid var(--line2)",
@@ -523,46 +653,86 @@ export default function MyPage() {
                 const lastPriceKrw = toKrw(h.lastPrice, h.currency, rate);
                 const pnl = toDecimal(h.unrealizedPnl);
                 const isPnlUp = !pnl || pnl.greaterThanOrEqualTo(0);
-                return (
-                  <div
-                    key={h.symbol}
-                    className="grid items-center px-5 py-3 text-[15px]"
-                    style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px", borderBottom: "1px solid var(--line2)" }}
+                const tradeLink = (
+                  <Link
+                    href={`/stocks/${h.symbol}?marketCountry=${isUsd ? "US" : "KR"}`}
+                    className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
+                    style={{ background: "var(--fill)", color: "var(--ink)" }}
                   >
-                    <span className="font-bold" style={{ color: "var(--ink)" }}>
-                      {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
-                    </span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(h.quantity)}</span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                      {formatNumber(avgBuyKrw)}
-                      {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.avgBuyPrice)}</div>}
-                    </span>
-                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                      {h.lastPrice ? (
-                        <>
-                          {formatNumber(lastPriceKrw)}
-                          {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.lastPrice)}</div>}
-                        </>
-                      ) : (
-                        "-"
-                      )}
-                    </span>
-                    <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(h.evaluationAmount)}</span>
-                    <span
-                      className="text-right tabular-nums font-semibold"
-                      style={{ color: isPnlUp ? "var(--up)" : "var(--down)" }}
+                    거래
+                  </Link>
+                );
+                const pnlNode = (
+                  <span
+                    className="tabular-nums font-semibold"
+                    style={{ color: isPnlUp ? "var(--up)" : "var(--down)" }}
+                  >
+                    {formatSigned(h.unrealizedPnl)} <span className="text-[11.5px]">({formatPercent(h.unrealizedPnlRate)})</span>
+                  </span>
+                );
+                return (
+                  <div key={h.symbol} style={{ borderBottom: "1px solid var(--line2)" }}>
+                    {/* 데스크톱(md 이상) — 기존 7칸 그리드 그대로. */}
+                    <div
+                      className="hidden items-center px-5 py-3 text-[15px] md:grid"
+                      style={{ gridTemplateColumns: "1.6fr 1fr 1fr 1fr 1.3fr 1.4fr 80px" }}
                     >
-                      {formatSigned(h.unrealizedPnl)} <span className="text-[11.5px]">({formatPercent(h.unrealizedPnlRate)})</span>
-                    </span>
-                    <span className="text-right">
-                      <Link
-                        href={`/stocks/${h.symbol}?marketCountry=${isUsd ? "US" : "KR"}`}
-                        className="rounded-md px-3.5 py-2 text-[13px] font-semibold"
-                        style={{ background: "var(--fill)", color: "var(--ink)" }}
-                      >
-                        거래
-                      </Link>
-                    </span>
+                      <span className="font-bold" style={{ color: "var(--ink)" }}>
+                        {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
+                      </span>
+                      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(h.quantity)}</span>
+                      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                        {formatNumber(avgBuyKrw)}
+                        {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.avgBuyPrice)}</div>}
+                      </span>
+                      <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                        {h.lastPrice ? (
+                          <>
+                            {formatNumber(lastPriceKrw)}
+                            {isUsd && <div className="text-[10.5px]" style={{ color: "var(--mut2)" }}>{formatUsd(h.lastPrice)}</div>}
+                          </>
+                        ) : (
+                          "-"
+                        )}
+                      </span>
+                      <span className="text-right tabular-nums font-bold" style={{ color: "var(--ink)" }}>{formatNumber(h.evaluationAmount)}</span>
+                      <span className="text-right">{pnlNode}</span>
+                      <span className="text-right">{tradeLink}</span>
+                    </div>
+
+                    {/* 모바일(md 미만) — 2~3줄 카드형. */}
+                    <div className="flex flex-col gap-1.5 px-5 py-3 text-[15px] md:hidden">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 flex-1 truncate font-bold" style={{ color: "var(--ink)" }}>
+                          {h.name} <Tag weightClassName="font-bold">{h.symbol}</Tag>
+                        </span>
+                        <span className="shrink-0">{tradeLink}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-[12.5px]" style={{ color: "var(--mut2)" }}>
+                        <span>보유수량 {formatNumber(h.quantity)}</span>
+                        <span>
+                          평균단가 {formatNumber(avgBuyKrw)}
+                          {isUsd && ` (${formatUsd(h.avgBuyPrice)})`}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="tabular-nums" style={{ color: "var(--ink)" }}>
+                          현재가{" "}
+                          {h.lastPrice ? (
+                            <>
+                              {formatNumber(lastPriceKrw)}
+                              {isUsd && <span className="text-[10.5px]" style={{ color: "var(--mut2)" }}> ({formatUsd(h.lastPrice)})</span>}
+                            </>
+                          ) : (
+                            "-"
+                          )}
+                        </span>
+                        {pnlNode}
+                      </div>
+                      <div className="text-right text-[12.5px] tabular-nums" style={{ color: "var(--mut2)" }}>
+                        평가금액 {formatNumber(h.evaluationAmount)}
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -581,8 +751,10 @@ export default function MyPage() {
       ) : (
         <>
           <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 보유 종목 테이블과 같은 이유로 md 미만에서는
+                헤더를 숨기고 행을 카드형으로 쌓는다. */}
             <div
-              className="grid px-5 py-2.5 text-[12px] font-bold"
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
               style={{
                 gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px",
                 columnGap: "12px",
@@ -597,57 +769,95 @@ export default function MyPage() {
               <span className="text-right">주문시각</span>
               <span />
             </div>
-            {orders.map((order) => (
-              <div
-                key={order.orderId}
-                className="grid items-center px-5 py-3 text-[15px]"
-                style={{ gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px", columnGap: "12px", borderBottom: "1px solid var(--line2)" }}
-              >
-                <span className="font-bold" style={{ color: "var(--ink)" }}>
-                  {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
-                  <div className="mt-1 flex gap-1">
-                    <OrderSideBadge side={order.side} />
-                    <span
-                      className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
-                      style={{ background: "var(--fill)", color: "var(--mut2)" }}
-                    >
-                      {order.orderType === "LIMIT" ? "지정가" : "시장가"}
-                    </span>
-                  </div>
-                </span>
-                <span>
-                  <OrderStatusBadge status={order.status} />
-                </span>
-                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                  {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
-                  {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
-                    <div className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}>
-                      미체결 {formatNumber(order.activeRemainingQuantity)}
-                    </div>
-                  )}
-                </span>
-                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                  {order.orderType === "LIMIT"
-                    ? order.requestedLimitCurrency === "USD"
-                      ? formatUsd(order.requestedLimitPrice)
-                      : `${formatNumber(order.requestedLimitPrice)}원`
-                    : "-"}
-                </span>
-                <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
-                  {new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                </span>
-                <span className="text-right">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedOrder(order)}
-                    className="cursor-pointer rounded-md px-3.5 py-2 text-[13px] font-semibold"
-                    style={{ background: "var(--fill)", color: "var(--ink)" }}
+            {orders.map((order) => {
+              const orderedAtText = new Date(order.orderedAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+              const priceText =
+                order.orderType === "LIMIT"
+                  ? order.requestedLimitCurrency === "USD"
+                    ? formatUsd(order.requestedLimitPrice)
+                    : `${formatNumber(order.requestedLimitPrice)}원`
+                  : "-";
+              const detailButton = (
+                <button
+                  type="button"
+                  onClick={() => setSelectedOrder(order)}
+                  className="cursor-pointer rounded-md px-3.5 py-2 text-[13px] font-semibold"
+                  style={{ background: "var(--fill)", color: "var(--ink)" }}
+                >
+                  상세
+                </button>
+              );
+              return (
+                <div key={order.orderId} style={{ borderBottom: "1px solid var(--line2)" }}>
+                  {/* 데스크톱(md 이상) — 기존 6칸 그리드 그대로. */}
+                  <div
+                    className="hidden items-center px-5 py-3 text-[15px] md:grid"
+                    style={{ gridTemplateColumns: "1.8fr 100px 1fr 1.2fr 1.4fr 80px", columnGap: "12px" }}
                   >
-                    상세
-                  </button>
-                </span>
-              </div>
-            ))}
+                    <span className="font-bold" style={{ color: "var(--ink)" }}>
+                      {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
+                      <div className="mt-1 flex gap-1">
+                        <OrderSideBadge side={order.side} />
+                        <span
+                          className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
+                          style={{ background: "var(--fill)", color: "var(--mut2)" }}
+                        >
+                          {order.orderType === "LIMIT" ? "지정가" : "시장가"}
+                        </span>
+                      </div>
+                    </span>
+                    <span>
+                      <OrderStatusBadge status={order.status} />
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                      {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
+                      {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
+                        <div className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}>
+                          미체결 {formatNumber(order.activeRemainingQuantity)}
+                        </div>
+                      )}
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{orderedAtText}</span>
+                    <span className="text-right">{detailButton}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 px-5 py-3 text-[15px] md:hidden">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="min-w-0 flex-1 truncate font-bold" style={{ color: "var(--ink)" }}>
+                        {order.name} <Tag weightClassName="font-bold">{order.symbol}</Tag>
+                      </span>
+                      <span className="shrink-0">
+                        <OrderStatusBadge status={order.status} />
+                      </span>
+                    </div>
+                    <div className="flex gap-1">
+                      <OrderSideBadge side={order.side} />
+                      <span
+                        className="w-fit rounded-md px-2 py-0.5 text-[11px] font-bold"
+                        style={{ background: "var(--fill)", color: "var(--mut2)" }}
+                      >
+                        {order.orderType === "LIMIT" ? "지정가" : "시장가"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-[13px]">
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>
+                        수량 {formatNumber(order.filledQuantity)}/{formatNumber(order.quantity)}
+                        {(order.status === "PENDING" || order.status === "PARTIALLY_FILLED") && (
+                          <span className="text-[10.5px] font-normal" style={{ color: "var(--mut2)" }}> · 미체결 {formatNumber(order.activeRemainingQuantity)}</span>
+                        )}
+                      </span>
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{orderedAtText}</span>
+                      {detailButton}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
           {ordersHasNext && (
             <button
@@ -662,15 +872,18 @@ export default function MyPage() {
           )}
         </>
       )
-      ) : ledger.length === 0 ? (
+      ) : tab === "ledger" ? (
+      ledger.length === 0 ? (
         <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
           체결 내역이 없어요
         </div>
       ) : (
         <>
           <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 위 두 테이블과 같은 이유로 md 미만에서는
+                헤더를 숨기고 행을 카드형으로 쌓는다. */}
             <div
-              className="grid px-5 py-2.5 text-[12px] font-bold"
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
               style={{
                 gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
                 columnGap: "20px",
@@ -687,30 +900,43 @@ export default function MyPage() {
             {ledger.map((entry) => {
               const amount = toDecimal(entry.amount);
               const isPositive = !amount || amount.greaterThanOrEqualTo(0);
-              return (
-                <div
-                  key={entry.entryId}
-                  className="grid items-center px-5 py-3 text-[15px]"
-                  style={{
-                    gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr",
-                    columnGap: "20px",
-                    borderBottom: "1px solid var(--line2)",
-                  }}
+              const occurredAtText = new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+              const amountNode = (
+                <span
+                  className="tabular-nums font-semibold"
+                  style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
                 >
-                  <span>
-                    <LedgerBadge type={entry.entryType} />
-                  </span>
-                  <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
-                  <span
-                    className="text-right tabular-nums font-semibold"
-                    style={{ color: isPositive ? "var(--up)" : "var(--down)" }}
+                  {formatSigned(entry.amount)}
+                </span>
+              );
+              return (
+                <div key={entry.entryId} style={{ borderBottom: "1px solid var(--line2)" }}>
+                  {/* 데스크톱(md 이상) — 기존 5칸 그리드 그대로. */}
+                  <div
+                    className="hidden items-center px-5 py-3 text-[15px] md:grid"
+                    style={{ gridTemplateColumns: "80px 2.8fr 1fr 1fr 0.9fr", columnGap: "20px" }}
                   >
-                    {formatSigned(entry.amount)}
-                  </span>
-                  <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
-                  <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>
-                    {new Date(entry.occurredAt).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}
-                  </span>
+                    <span>
+                      <LedgerBadge type={entry.entryType} />
+                    </span>
+                    <span className="whitespace-nowrap" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                    <span className="text-right">{amountNode}</span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{formatNumber(entry.balanceAfter)}</span>
+                    <span className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{occurredAtText}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 px-5 py-3 text-[15px] md:hidden">
+                    <div className="flex items-center gap-2">
+                      <LedgerBadge type={entry.entryType} />
+                      <span className="min-w-0 flex-1 truncate" style={{ color: "var(--body)" }}>{entry.memo}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[13px]">
+                      {amountNode}
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>잔액 {formatNumber(entry.balanceAfter)}</span>
+                    </div>
+                    <div className="text-right text-[11.5px] whitespace-nowrap" style={{ color: "var(--mut2)" }}>{occurredAtText}</div>
+                  </div>
                 </div>
               );
             })}
@@ -724,6 +950,124 @@ export default function MyPage() {
               style={{ background: "var(--card)", color: "var(--ink)" }}
             >
               {ledgerLoadingMore ? "불러오는 중…" : "더 보기"}
+            </button>
+          )}
+        </>
+      )
+      ) : likes.length === 0 ? (
+        <div className="rounded-[20px] py-16 text-center text-[13.5px]" style={{ background: "var(--card)", color: "var(--mut2)" }}>
+          찜한 종목이 없어요
+        </div>
+      ) : (
+        <>
+          <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
+            {/* 반응형 웹 적용 — 다른 테이블들과 같은 방식. */}
+            <div
+              className="hidden px-5 py-2.5 text-[12px] font-bold md:grid"
+              style={{
+                gridTemplateColumns: "1.8fr 1fr 1fr 80px",
+                columnGap: "16px",
+                borderBottom: "1px solid var(--line2)",
+                color: "var(--mut2)",
+              }}
+            >
+              <span>종목</span>
+              <span className="text-right">현재가</span>
+              <span className="text-right">전일대비</span>
+              <span />
+            </div>
+            {likes.map((item) => {
+              const isUsd = item.marketCountry === "US";
+              const krwPriceDecimal = toKrw(item.lastPrice, isUsd ? "USD" : "KRW", rate);
+              const krwPrice = krwPriceDecimal ? krwPriceDecimal.round().toNumber() : null;
+              const changeRateDecimal = toDecimal(item.changeRate);
+              const isUp = !changeRateDecimal || changeRateDecimal.greaterThanOrEqualTo(0);
+              const priceText = item.lastPrice == null
+                ? "-"
+                : isUsd ? formatUsd(item.lastPrice) : formatNumber(krwPrice);
+              const changeNode = item.changeRate == null ? (
+                <span className="text-[12.5px]" style={{ color: "var(--mut2)" }}>시세 정보 없음</span>
+              ) : (
+                <span
+                  className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
+                  style={{ background: isUp ? changeUpBg : changeDownBg, color: isUp ? "var(--up)" : "var(--down)" }}
+                >
+                  {isUp ? "▲" : "▼"} {formatPercent(item.changeRate)}
+                </span>
+              );
+              const unlikeButton = (
+                <button
+                  type="button"
+                  // 이 버튼이 행 전체를 감싸는 <Link>(아래) 안에 중첩돼 있어서,
+                  // preventDefault 없이는 찜 해제와 동시에 종목 상세로 이동해버린다
+                  // — 랭킹 화면의 같은 패턴(하트 버튼 in Link)과 동일하게 막는다.
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleUnlike(item);
+                  }}
+                  disabled={likeRemoving.has(item.stockLikeId)}
+                  className="cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                  style={{ color: "var(--heartActive)" }}
+                  aria-label="찜 해제하기"
+                >
+                  {/* 유니코드 하트(♥)는 폰트마다 모양이 들쭉날쭉하고 이 프로젝트
+                      폰트(Pretendard)엔 아예 없어 시스템 이모지 폰트로 대체되어
+                      보였다 — 매끈한 SVG 하트(Heroicons solid heart)로 바꿔서
+                      항상 같은 모양으로 보이게 했다. */}
+                  <svg width="17" height="17" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M9.653 16.915l-.005-.003-.019-.01a20.759 20.759 0 01-1.162-.682 22.045 22.045 0 01-2.582-1.9C4.045 12.733 2 10.352 2 7.5 2 5.015 3.98 3 6.5 3c1.376 0 2.6.611 3.5 1.518A4.987 4.987 0 0113.5 3C16.02 3 18 5.015 18 7.5c0 2.852-2.044 5.233-3.885 6.82a22.049 22.049 0 01-3.744 2.582l-.019.01-.005.003h-.002a.739.739 0 01-.69.001l-.002-.001z" />
+                  </svg>
+                </button>
+              );
+              return (
+                <Link
+                  key={item.stockLikeId}
+                  href={`/stocks/${item.symbol}?marketCountry=${item.marketCountry}`}
+                  // 목록 전체(이름·가격·배지)의 글꼴을 프리텐다드로 명시적으로
+                  // 통일해달라는 요청 — body에 이미 Pretendard가 걸려 있어 보통은
+                  // 상속만으로 충분하지만, 하트 버튼처럼 상속이 어긋나기 쉬운
+                  // 자리가 있었으니 이 행 전체에 폰트를 명시적으로 고정해둔다.
+                  className="font-sans block px-5 py-3 text-[15px] transition-[background] duration-150"
+                  style={{ borderBottom: "1px solid var(--line2)" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "var(--fill)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  {/* 데스크톱(md 이상). */}
+                  <div className="hidden items-center md:grid" style={{ gridTemplateColumns: "1.8fr 1fr 1fr 80px", columnGap: "16px" }}>
+                    <span style={{ color: "var(--ink)" }}>
+                      {item.name} <Tag weightClassName="font-bold">{item.symbol}</Tag>
+                    </span>
+                    <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                    <span className="flex justify-end">{changeNode}</span>
+                    <span className="text-right">{unlikeButton}</span>
+                  </div>
+
+                  {/* 모바일(md 미만) — 카드형. */}
+                  <div className="flex flex-col gap-1.5 md:hidden">
+                    <div className="flex items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate" style={{ color: "var(--ink)" }}>
+                        {item.name} <Tag weightClassName="font-bold">{item.symbol}</Tag>
+                      </span>
+                      <span className="shrink-0">{unlikeButton}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                      {changeNode}
+                    </div>
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+          {likesHasNext && (
+            <button
+              type="button"
+              onClick={loadMoreLikes}
+              disabled={likesLoadingMore}
+              className="mt-2.5 w-full cursor-pointer rounded-xl py-2.5 text-[13px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: "var(--card)", color: "var(--ink)" }}
+            >
+              {likesLoadingMore ? "불러오는 중…" : "더 보기"}
             </button>
           )}
         </>
@@ -748,137 +1092,167 @@ export default function MyPage() {
       </Reveal>
 
       <Reveal delay={0.35} className="mt-7 rounded-[20px] p-6" style={{ background: "var(--card)" }}>
-        <div className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }}>계정 설정</div>
+        <RevealText as="div" className="mb-5 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["계정 설정"]} />
 
-        <form onSubmit={handleChangeNickname} className="mb-6">
-          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
-          <div className="flex max-w-[360px] gap-2">
-            <input
-              type="text"
-              required
-              minLength={2}
-              maxLength={20}
-              value={nicknameInput}
-              onChange={(e) => {
-                setNicknameInput(e.target.value);
-                setNicknameError(null);
-                setNicknameSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <button
-              type="submit"
-              disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
-              className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--accent)" }}
-            >
-              {nicknameSaving ? "변경 중…" : "변경"}
-            </button>
-          </div>
-          {nicknameError && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
-          )}
-          {nicknameSaved && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
-          )}
-        </form>
+        {/* 닉네임 아래에 세로로 쌓여 있던 비밀번호 변경을 닉네임 옆으로
+            배치해달라는 요청 — 구분선(divider)으로 나누던 두 폼을 가로
+            flex로 나란히 놓았다. 좁은 화면(max-md)에서는 겹치지 않도록
+            다시 세로로 쌓이게 했다. */}
+        <div className="flex flex-wrap gap-8 max-md:flex-col">
+          <form onSubmit={handleChangeNickname}>
+            <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>닉네임</label>
+            <div className="flex max-w-[360px] gap-2">
+              <input
+                type="text"
+                required
+                minLength={2}
+                maxLength={20}
+                value={nicknameInput}
+                onChange={(e) => {
+                  setNicknameInput(e.target.value);
+                  setNicknameError(null);
+                  setNicknameSaved(false);
+                }}
+                className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={nicknameSaving || nicknameInput.trim() === user.nickname}
+                className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+              >
+                {nicknameSaving ? "변경 중…" : "변경"}
+              </button>
+            </div>
+            {nicknameError && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{nicknameError}</p>
+            )}
+            {nicknameSaved && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>닉네임을 변경했어요.</p>
+            )}
+          </form>
 
-        <div className="mb-5 h-px" style={{ background: "var(--line)" }} />
-
-        <form onSubmit={handleChangePassword}>
-          <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
-          <div className="flex max-w-[320px] flex-col gap-2">
-            <input
-              type="password"
-              required
-              placeholder="현재 비밀번호"
-              value={currentPassword}
-              onChange={(e) => {
-                setCurrentPassword(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <input
-              type="password"
-              required
-              minLength={8}
-              maxLength={64}
-              placeholder="새 비밀번호 (8자 이상)"
-              value={newPassword}
-              onChange={(e) => {
-                setNewPassword(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <input
-              type="password"
-              required
-              placeholder="새 비밀번호 확인"
-              value={newPasswordConfirm}
-              onChange={(e) => {
-                setNewPasswordConfirm(e.target.value);
-                setPasswordError(null);
-                setPasswordSaved(false);
-              }}
-              className="w-full rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
-              style={{ background: "var(--fill)", color: "var(--ink)" }}
-            />
-            <button
-              type="submit"
-              disabled={passwordSaving}
-              className="cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--accent)" }}
-            >
-              {passwordSaving ? "변경 중…" : "비밀번호 변경"}
-            </button>
-          </div>
-          {passwordError && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
-          )}
-          {passwordSaved && (
-            <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
-          )}
-        </form>
+          {/* 비밀번호 변경 기능을 우측으로 배치해달라는 요청 — ml-auto로
+              같은 줄(flex row)의 오른쪽 끝에 붙였다. 닉네임 폼은 왼쪽에
+              그대로 두고, 남는 공간만큼 이 폼이 오른쪽으로 밀린다. 좁은
+              화면(max-md:flex-col)에서는 세로로 쌓이므로 ml-auto가
+              의미 없어져(자동으로 아래로) 자연스럽게 무시된다. */}
+          <form onSubmit={handleChangePassword} className="ml-auto">
+            <label className="mb-1.5 block text-[13px] font-bold" style={{ color: "var(--mut2)" }}>비밀번호 변경</label>
+            {/* 현재 비밀번호·새 비밀번호·새 비밀번호 확인·버튼이 세로로 쌓여
+                있어 심미적으로 안 좋다는 요청 — flex-col(세로 스택) 대신
+                가로로 나란히 놓았다. 각 입력칸은 세로 스택 때 쓰던
+                w-full(부모 폭 320px에 꽉 참) 대신 고정 폭(w-[168px])을
+                줘서 가로로 늘어놓아도 한 칸씩 적당한 크기를 유지한다.
+                화면이 좁아지면 flex-wrap으로 다음 줄로 넘어간다.
+                간격을 gap-2 → gap-4 → gap-8까지 넓혔다가 gap-1.5(6px)로
+                좁혔는데, "조금만 더" 넓혀달라는 요청으로 gap-2.5(10px)로
+                살짝만 올렸다. */}
+            <div className="flex flex-wrap items-start gap-2.5">
+              <input
+                type="password"
+                required
+                placeholder="현재 비밀번호"
+                value={currentPassword}
+                onChange={(e) => {
+                  setCurrentPassword(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <input
+                type="password"
+                required
+                minLength={8}
+                maxLength={64}
+                placeholder="새 비밀번호 (8자 이상)"
+                value={newPassword}
+                onChange={(e) => {
+                  setNewPassword(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <input
+                type="password"
+                required
+                placeholder="새 비밀번호 확인"
+                value={newPasswordConfirm}
+                onChange={(e) => {
+                  setNewPasswordConfirm(e.target.value);
+                  setPasswordError(null);
+                  setPasswordSaved(false);
+                }}
+                className="w-[168px] rounded-xl px-4 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "var(--fill)", color: "var(--ink)" }}
+              />
+              <button
+                type="submit"
+                disabled={passwordSaving}
+                className="shrink-0 cursor-pointer rounded-xl px-4 py-2.5 text-[13px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                style={{ background: "var(--accent)" }}
+              >
+                {passwordSaving ? "변경 중…" : "비밀번호 변경"}
+              </button>
+            </div>
+            {passwordError && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--dangerText)" }}>{passwordError}</p>
+            )}
+            {passwordSaved && (
+              <p className="mt-1.5 text-[12px]" style={{ color: "var(--up)" }}>비밀번호를 변경했어요.</p>
+            )}
+          </form>
+        </div>
       </Reveal>
 
-      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.4} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: dangerBg }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>포트폴리오 초기화</div>
-            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
-              <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
-            </div>
+            <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["포트폴리오 초기화"]} />
+            <RevealText
+              as="div"
+              className="text-[15px] leading-relaxed"
+              style={{ color: dangerTextSoft }}
+              baseDelayMs={45}
+              lines={[
+                <>
+                  보유 종목과 체결 내역이 모두 정리되고 모의 투자금이{" "}
+                  <b>{formatNumber(INITIAL_CASH)}원</b>으로 되돌아가요. 되돌릴 수 없어요.
+                </>,
+              ]}
+            />
           </div>
           <button
             onClick={() => setResetModalOpen(true)}
             className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
-            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+            style={{ background: "var(--card)", color: dangerText }}
           >
             포트폴리오 초기화
           </button>
         </div>
       </Reveal>
 
-      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: "var(--dangerBg)" }}>
+      <Reveal delay={0.45} className="mt-4 rounded-[20px] px-6 py-5.5" style={{ background: dangerBg }}>
         <div className="flex flex-wrap items-center gap-5">
           <div>
-            <div className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }}>회원 탈퇴</div>
-            <div className="text-[15px] leading-relaxed" style={{ color: "var(--dangerTextSoft)" }}>
-              계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요.
-            </div>
+            <RevealText as="div" className="mb-1 text-[17px] font-bold" style={{ color: "var(--ink)" }} lines={["회원 탈퇴"]} />
+            <RevealText
+              as="div"
+              className="text-[15px] leading-relaxed"
+              style={{ color: dangerTextSoft }}
+              baseDelayMs={45}
+              lines={["계정과 보유 종목·체결 내역이 모두 사라져요. 되돌릴 수 없어요."]}
+            />
           </div>
           <button
             onClick={() => setWithdrawModalOpen(true)}
             className="ml-auto cursor-pointer rounded-xl px-5 py-3 text-[14px] font-bold"
-            style={{ background: "var(--card)", color: "var(--dangerText)" }}
+            style={{ background: "var(--card)", color: dangerText }}
           >
             회원 탈퇴
           </button>
@@ -923,7 +1297,7 @@ export default function MyPage() {
             )}
             <button
               className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerText)" }}
+              style={{ background: dangerButtonBg }}
               onClick={handleWithdraw}
               disabled={withdrawing || !withdrawPassword}
             >
@@ -966,16 +1340,20 @@ export default function MyPage() {
                 {resetError}
               </p>
             )}
+            {/* 두 버튼 모두 cursor-pointer가 빠져 있어서, 마우스를 올려도
+                기본 커서(화살표)만 보이던 문제 — 손가락 커서가 나타나게
+                추가했다. disabled:cursor-not-allowed는 그대로 둬서, 처리
+                중일 때는 여전히 금지 커서로 보인다. */}
             <button
-              className="mb-2 w-full rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
-              style={{ background: "var(--dangerText)" }}
+              className="mb-2 w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              style={{ background: dangerButtonBg }}
               onClick={handleReset}
               disabled={resetting}
             >
               {resetting ? "초기화하는 중…" : "초기화할게요"}
             </button>
             <button
-              className="w-full rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full cursor-pointer rounded-xl px-4 py-3 text-[13.5px] font-bold disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--fill)", color: "var(--ink)" }}
               onClick={() => setResetModalOpen(false)}
               disabled={resetting}
@@ -992,7 +1370,10 @@ export default function MyPage() {
 function SummaryCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "up" | "down" }) {
   return (
     <div className="flex-1 rounded-[20px] px-6 py-5.5" style={{ background: "var(--card)" }}>
-      <div className="text-[13px]" style={{ color: "var(--mut)" }}>{label}</div>
+      {/* 라벨(총 자산·예수금 등)에는 Line Reveal을 적용했다. 값(value)은 5초마다
+          폴링으로 계속 갱신되는 숫자라 매번 다시 올라오면 눈에 거슬리므로
+          Reveal/RevealText 없이 그대로 둔다. */}
+      <RevealText as="div" className="text-[13px]" style={{ color: "var(--mut)" }} lines={[label]} />
       <div
         className="mt-1.5 text-[24px] font-extrabold"
         style={{ color: tone === "up" ? "var(--up)" : tone === "down" ? "var(--down)" : "var(--ink)" }}

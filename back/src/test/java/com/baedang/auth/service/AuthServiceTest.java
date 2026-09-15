@@ -3,32 +3,40 @@ package com.baedang.auth.service;
 import com.baedang.auth.dto.AccessTokenResponse;
 import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
+import com.baedang.auth.dto.PasswordResetConfirmRequest;
+import com.baedang.auth.dto.PasswordForgotRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
-import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.mail.PasswordResetMailSender;
+import com.baedang.auth.service.AuthSessionService.Tokens;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.trading.service.LedgerService;
 import com.baedang.user.entity.Account;
 import com.baedang.user.entity.AccountStatus;
+import com.baedang.user.entity.PasswordResetToken;
 import com.baedang.user.entity.User;
 import com.baedang.user.entity.UserStatus;
 import com.baedang.user.repository.AccountRepository;
+import com.baedang.user.repository.PasswordResetTokenRepository;
 import com.baedang.user.repository.UserRepository;
-import io.jsonwebtoken.ExpiredJwtException;
-import io.jsonwebtoken.JwtException;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -42,8 +50,10 @@ import static org.mockito.Mockito.*;
 class AuthServiceTest {
     private UserRepository userRepository;
     private AccountRepository accountRepository;
+    private PasswordResetTokenRepository passwordResetTokenRepository;
     private LedgerService ledgerService;
-    private JwtTokenProvider jwtTokenProvider;
+    private AuthSessionService sessions;
+    private PasswordResetMailSender passwordResetMailSender;
     private PasswordEncoder passwordEncoder;
     private Clock clock;
     private AuthService authService;
@@ -53,22 +63,35 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
+        TransactionSynchronizationManager.initSynchronization();
         userRepository = mock(UserRepository.class);
         accountRepository = mock(AccountRepository.class);
+        passwordResetTokenRepository = mock(PasswordResetTokenRepository.class);
         ledgerService = mock(LedgerService.class);
-        jwtTokenProvider = mock(JwtTokenProvider.class);
+        sessions = mock(AuthSessionService.class);
+        passwordResetMailSender = mock(PasswordResetMailSender.class);
         passwordEncoder = new BCryptPasswordEncoder();
         clock = Clock.fixed(now, ZoneOffset.UTC);
 
         authService = new AuthService(
                 userRepository,
                 accountRepository,
+                passwordResetTokenRepository,
                 ledgerService,
                 passwordEncoder,
-                jwtTokenProvider,
+                sessions,
+                passwordResetMailSender,
                 initialCash,
+                "http://localhost:3000",
+                Duration.ofMinutes(30),
+                Duration.ofMinutes(1),
                 clock
         );
+    }
+
+    @AfterEach
+    void clearSynchronization() {
+        TransactionSynchronizationManager.clearSynchronization();
     }
 
     @Test
@@ -90,8 +113,7 @@ class AuthServiceTest {
         ReflectionTestUtils.setField(savedAccount, "accountId", 10L);
         when(accountRepository.save(any(Account.class))).thenReturn(savedAccount);
 
-        when(jwtTokenProvider.createAccessToken(1L)).thenReturn("mock-access-token");
-        when(jwtTokenProvider.createRefreshToken(1L)).thenReturn("mock-refresh-token");
+        when(sessions.create(1L)).thenReturn(new Tokens("mock-access-token", "mock-refresh-token", now.plusSeconds(604800)));
 
         AuthResponse response = authService.signUp(request);
 
@@ -108,8 +130,7 @@ class AuthServiceTest {
                 initialCash,
                 1,
                 OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
-        verify(jwtTokenProvider).createAccessToken(1L);
-        verify(jwtTokenProvider).createRefreshToken(1L);
+        verify(sessions).create(1L);
     }
 
     @Test
@@ -140,10 +161,9 @@ class AuthServiceTest {
         Account account = Account.open(1L, 1, initialCash, OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
         ReflectionTestUtils.setField(account, "accountId", 10L);
 
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE)).thenReturn(Optional.of(account));
-        when(jwtTokenProvider.createAccessToken(1L)).thenReturn("mock-access-token");
-        when(jwtTokenProvider.createRefreshToken(1L)).thenReturn("mock-refresh-token");
+        when(sessions.create(1L)).thenReturn(new Tokens("mock-access-token", "mock-refresh-token", now.plusSeconds(604800)));
 
         AuthResponse response = authService.login(new LoginRequest("test@example.com", rawPassword));
 
@@ -156,13 +176,13 @@ class AuthServiceTest {
     @Test
     @DisplayName("없는 email과 틀린 password와 WITHDRAWN user는 모두 LOGIN_FAILED다")
     void t4() {
-        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailForUpdate("none@example.com")).thenReturn(Optional.empty());
         assertThatThrownBy(() -> authService.login(new LoginRequest("none@example.com", "Password123!")))
                 .isInstanceOf(BusinessException.class)
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
 
         User user = User.create("test@example.com", passwordEncoder.encode("Correct123!"), "테스터");
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
         assertThatThrownBy(() -> authService.login(new LoginRequest("test@example.com", "WrongPassword!")))
                 .isInstanceOf(BusinessException.class)
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
@@ -180,12 +200,17 @@ class AuthServiceTest {
         AuthService service = new AuthService(
                 userRepository,
                 accountRepository,
+                passwordResetTokenRepository,
                 ledgerService,
                 encoder,
-                jwtTokenProvider,
+                sessions,
+                passwordResetMailSender,
                 initialCash,
+                "http://localhost:3000",
+                Duration.ofMinutes(30),
+                Duration.ofMinutes(1),
                 clock);
-        when(userRepository.findByEmail("none@example.com")).thenReturn(Optional.empty());
+        when(userRepository.findByEmailForUpdate("none@example.com")).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.login(new LoginRequest("none@example.com", "Password123!")))
                 .isInstanceOf(BusinessException.class)
@@ -204,14 +229,13 @@ class AuthServiceTest {
         );
         ReflectionTestUtils.setField(user, "userId", 1L);
         ReflectionTestUtils.setField(user, "status", UserStatus.DORMANT);
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         assertThatThrownBy(() -> authService.login(
                 new LoginRequest("test@example.com", rawPassword)))
                 .isInstanceOf(BusinessException.class)
                 .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.LOGIN_FAILED);
-        verify(jwtTokenProvider, never()).createAccessToken(anyLong());
-        verify(jwtTokenProvider, never()).createRefreshToken(anyLong());
+        verify(sessions, never()).create(anyLong());
     }
     @Test
     @DisplayName("ACTIVE account가 없으면 ACCOUNT_NOT_FOUND")
@@ -220,7 +244,7 @@ class AuthServiceTest {
         User user = User.create("test@example.com", passwordEncoder.encode(rawPassword), "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
 
-        when(userRepository.findByEmail("test@example.com")).thenReturn(Optional.of(user));
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
         when(accountRepository.findByUserIdAndStatus(1L, AccountStatus.ACTIVE)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> authService.login(new LoginRequest("test@example.com", rawPassword)))
@@ -278,83 +302,179 @@ class AuthServiceTest {
         assertThatThrownBy(() -> authService.signUp(request))
                 .isSameAs(ledgerFailure);
 
-        verify(jwtTokenProvider, never()).createAccessToken(any());
-        verify(jwtTokenProvider, never()).createRefreshToken(any());
+        verify(sessions, never()).create(any());
     }
 
     @Test
-    @DisplayName("유효한 refresh token과 ACTIVE 회원이면 새 access token만 발급")
-    void t7() {
-        User user = User.create(
-                "test@example.com",
-                "encoded-password",
-                "테스터"
-        );
-        ReflectionTestUtils.setField(user, "userId", 7L);
-
-        when(jwtTokenProvider.parseRefreshToken("refresh-token"))
-                .thenReturn(7L);
-        when(userRepository.findByUserIdAndStatus(7L, UserStatus.ACTIVE))
-                .thenReturn(Optional.of(user));
-        when(jwtTokenProvider.createAccessToken(7L))
-                .thenReturn("new-access");
-
-        AccessTokenResponse response =
-                authService.refresh(new RefreshTokenRequest("refresh-token"));
-
-        assertThat(response)
-                .isEqualTo(new AccessTokenResponse("new-access"));
-
-        verify(jwtTokenProvider, never()).createRefreshToken(anyLong());
-
+    void 갱신은_세션서비스에서_발급한_토큰쌍을_반환한다() {
+        when(sessions.rotate("refresh-token"))
+                .thenReturn(new Tokens("new-access", "new-refresh", now.plusSeconds(60)));
+        assertThat(authService.refresh(new RefreshTokenRequest("refresh-token")))
+                .isEqualTo(new AccessTokenResponse("new-access", "new-refresh", now.plusSeconds(60)));
     }
 
     @Test
-    @DisplayName("만료된 refresh token은 TOKEN_EXPIRED")
-    void t8() {
-        when(jwtTokenProvider.parseRefreshToken("expired-refresh"))
-                .thenThrow(mock(ExpiredJwtException.class));
+    void 갱신_실패는_그대로_전달한다() {
+        BusinessException failure = new BusinessException(ErrorCode.REFRESH_TOKEN_REUSED);
+        when(sessions.rotate("used-token")).thenThrow(failure);
+        assertThatThrownBy(() -> authService.refresh(new RefreshTokenRequest("used-token"))).isSameAs(failure);
+    }
+
+    @Test
+    @DisplayName("비밀번호 찾기 요청은 ACTIVE 회원이면 이전 토큰을 무효화하고 새 토큰을 발급해 메일을 보낸다")
+    void 비밀번호_찾기_요청은_ACTIVE_회원에게_메일을_보낸다() {
+        User user = User.create("test@example.com", "encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
+
+        authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+
+        OffsetDateTime expectedNow = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
+        verify(passwordResetTokenRepository).invalidateUnusedByUserId(1L, expectedNow);
+
+        ArgumentCaptor<PasswordResetToken> tokenCaptor = ArgumentCaptor.forClass(PasswordResetToken.class);
+        verify(passwordResetTokenRepository).save(tokenCaptor.capture());
+        assertThat(tokenCaptor.getValue().getUserId()).isEqualTo(1L);
+        assertThat(tokenCaptor.getValue().getExpiresAt()).isEqualTo(expectedNow.plusMinutes(30));
+
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetMailSender).sendResetLink(eq("test@example.com"), urlCaptor.capture());
+        assertThat(urlCaptor.getValue()).startsWith("http://localhost:3000/reset-password?token=");
+    }
+
+    @Test
+    @DisplayName("가장 최근 토큰 발급이 쿨다운(1분) 이내면 메일 폭탄 방지를 위해 아무 것도 하지 않는다")
+    void 쿨다운_이내_재요청은_무시한다() {
+        User user = User.create("test@example.com", "encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
+
+        OffsetDateTime justIssued = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusSeconds(30);
+        PasswordResetToken recentToken = PasswordResetToken.issue(1L, "old-hash", justIssued.plusMinutes(30));
+        ReflectionTestUtils.setField(recentToken, "createdAt", justIssued);
+        when(passwordResetTokenRepository.findFirstByUserIdOrderByCreatedAtDesc(1L))
+                .thenReturn(Optional.of(recentToken));
+
+        authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+
+        verify(passwordResetTokenRepository, never()).invalidateUnusedByUserId(anyLong(), any());
+        verify(passwordResetTokenRepository, never()).save(any());
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+    }
+
+    @Test
+    @DisplayName("가장 최근 토큰 발급이 쿨다운을 지났으면 정상적으로 새 메일을 보낸다")
+    void 쿨다운이_지나면_다시_메일을_보낸다() {
+        User user = User.create("test@example.com", "encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
+
+        OffsetDateTime longAgo = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusMinutes(5);
+        PasswordResetToken oldToken = PasswordResetToken.issue(1L, "old-hash", longAgo.plusMinutes(30));
+        ReflectionTestUtils.setField(oldToken, "createdAt", longAgo);
+        when(passwordResetTokenRepository.findFirstByUserIdOrderByCreatedAtDesc(1L))
+                .thenReturn(Optional.of(oldToken));
+
+        authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+
+        verify(passwordResetTokenRepository).invalidateUnusedByUserId(eq(1L), any());
+        verify(passwordResetTokenRepository).save(any());
+        verify(passwordResetMailSender).sendResetLink(eq("test@example.com"), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 이메일로 비밀번호 찾기를 요청해도 예외 없이 조용히 끝나고 메일을 보내지 않는다")
+    void 존재하지_않는_이메일은_조용히_무시한다() {
+        when(userRepository.findByEmailForUpdate("none@example.com")).thenReturn(Optional.empty());
+
+        authService.requestPasswordReset(new PasswordForgotRequest("none@example.com"));
+
+        verify(passwordResetTokenRepository, never()).save(any());
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+    }
+
+    @Test
+    @DisplayName("WITHDRAWN 회원으로 비밀번호 찾기를 요청해도 메일을 보내지 않는다")
+    void 비활성_회원은_비밀번호_찾기_메일을_받지_않는다() {
+        User user = User.create("test@example.com", "encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        ReflectionTestUtils.setField(user, "status", UserStatus.WITHDRAWN);
+        when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
+
+        authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+        verify(passwordResetTokenRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("유효한 토큰으로 재설정하면 비밀번호를 바꾸고 모든 세션을 폐기한다")
+    void 유효한_토큰으로_비밀번호를_재설정한다() {
+        User user = User.create("test@example.com", "old-encoded", "테스터");
+        ReflectionTestUtils.setField(user, "userId", 1L);
+        PasswordResetToken token = PasswordResetToken.issue(
+                1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
+
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.of(1L));
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
+        when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE)).thenReturn(Optional.of(user));
+
+        authService.resetPassword(new PasswordResetConfirmRequest("raw-token", "NewPassword123!"));
+
+        assertThat(passwordEncoder.matches("NewPassword123!", user.getPasswordHash())).isTrue();
+        verify(passwordResetTokenRepository).invalidateUnusedByUserId(eq(1L), any());
+        verify(sessions).revokeAll(1L);
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_INVALID")
+    void 존재하지_않는_토큰은_거절한다() {
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.empty());
 
         assertThatThrownBy(() ->
-                authService.refresh(new RefreshTokenRequest("expired-refresh"))
-        )
+                authService.resetPassword(new PasswordResetConfirmRequest("bad-token", "NewPassword123!")))
                 .isInstanceOf(BusinessException.class)
-                .matches(exception ->
-                        ((BusinessException) exception).getErrorCode()
-                                == ErrorCode.TOKEN_EXPIRED);
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.PASSWORD_RESET_TOKEN_INVALID);
     }
 
     @Test
-    @DisplayName("access token을 refresh API에 사용하면 INVALID_TOKEN")
-    void t9() {
-        when(jwtTokenProvider.parseRefreshToken("access-token"))
-                .thenThrow(new JwtException("token_type mismatch"));
+    @DisplayName("이미 사용된 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_INVALID")
+    void 이미_사용된_토큰은_거절한다() {
+        PasswordResetToken token = PasswordResetToken.issue(
+                1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
+        token.markUsed(OffsetDateTime.ofInstant(now, ZoneOffset.UTC));
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.of(1L));
+        when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE))
+                .thenReturn(Optional.of(User.create("test@example.com", "encoded", "tester")));
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
 
         assertThatThrownBy(() ->
-                authService.refresh(new RefreshTokenRequest("access-token"))
-        )
+                authService.resetPassword(new PasswordResetConfirmRequest("used-token", "NewPassword123!")))
                 .isInstanceOf(BusinessException.class)
-                .matches(exception ->
-                        ((BusinessException) exception).getErrorCode()
-                                == ErrorCode.INVALID_TOKEN);
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.PASSWORD_RESET_TOKEN_INVALID);
     }
 
     @Test
-    @DisplayName("ACTIVE 회원이 아니면 refresh token을 거절")
-    void t10() {
-        when(jwtTokenProvider.parseRefreshToken("refresh-token"))
-                .thenReturn(7L);
-        when(userRepository.findByUserIdAndStatus(7L, UserStatus.ACTIVE))
-                .thenReturn(Optional.empty());
+    @DisplayName("만료된 토큰으로 재설정하면 PASSWORD_RESET_TOKEN_EXPIRED")
+    void 만료된_토큰은_거절한다() {
+        PasswordResetToken token = PasswordResetToken.issue(
+                1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusMinutes(1));
+        when(passwordResetTokenRepository.findUserIdByTokenHash(any())).thenReturn(Optional.of(1L));
+        when(userRepository.findByUserIdAndStatusForUpdate(1L, UserStatus.ACTIVE))
+                .thenReturn(Optional.of(User.create("test@example.com", "encoded", "tester")));
+        when(passwordResetTokenRepository.findByTokenHashForUpdate(any())).thenReturn(Optional.of(token));
 
         assertThatThrownBy(() ->
-                authService.refresh(new RefreshTokenRequest("refresh-token"))
-        )
+                authService.resetPassword(new PasswordResetConfirmRequest("expired-token", "NewPassword123!")))
                 .isInstanceOf(BusinessException.class)
-                .matches(exception ->
-                        ((BusinessException) exception).getErrorCode()
-                                == ErrorCode.INVALID_TOKEN);
-
-        verify(jwtTokenProvider, never()).createAccessToken(anyLong());
+                .matches(e -> ((BusinessException) e).getErrorCode() == ErrorCode.PASSWORD_RESET_TOKEN_EXPIRED);
     }
 }

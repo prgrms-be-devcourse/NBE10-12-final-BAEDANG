@@ -1,21 +1,33 @@
 "use client";
 
 import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { InvestupIntro } from "./InvestupIntro";
 
-/** `proxy.ts`가 같은 이름의 쿠키로 "이미 봤는지"를 판단한다. */
-export const INTRO_SEEN_COOKIE = "iv_intro_seen";
-
 /**
- * `/intro` 페이지 본문. 화면에 도착하는 즉시(끝까지 보지 않고 나가도) "봤음" 쿠키를
- * 남겨서, 다음부터는 `proxy.ts`가 더 이상 "/"에서 이 화면으로 돌려보내지 않는다.
- * 시작하기 버튼은 실제 메인 화면("/")으로 이동한다.
+ * `/intro` 페이지 본문 — 방문할 때마다(재방문 포함) 무조건 보여주는 서비스 소개
+ * 화면이다(proxy.ts가 "/"를 여기로 무조건 돌려보낸다). 실제 메인 화면은 "/main"으로
+ * 옮겨졌다 — 시작하기 버튼(`InvestupIntro`의 `ctaHref`)이 거기로 보낸다.
+ *
+ * <p>우측 하단 SKIP 버튼은 화면 몰입을 방해한다는 피드백으로 없앴다. 대신 Enter
+ * 키로 건너뛸 수 있게 하고, 그 안내 문구("Enter 키를 누르면 SKIP이
+ * 가능합니다.")는 InvestupIntro의 화살표 위에 함께 넣었다(화살표 자체의 클릭
+ * 이동 기능도 이번에 제거했다 — InvestupIntro 쪽 변경 참고). 실제 키 입력
+ * 처리는 여기(페이지 레벨)에서 한다 — 어느 스크롤 위치에 있든 Enter로 건너뛸
+ * 수 있어야 안내 문구와 실제 동작이 어긋나지 않는다.
  */
 export function IntroScreen() {
-  useEffect(() => {
-    // 1년 — 사실상 "이 브라우저에서는 한 번만" 보여주기 위한 값이다.
-    document.cookie = `${INTRO_SEEN_COOKIE}=1; path=/; max-age=${60 * 60 * 24 * 365}`;
-  }, []);
+  const router = useRouter();
 
-  return <InvestupIntro ctaHref="/" />;
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Enter") {
+        router.push("/main");
+      }
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [router]);
+
+  return <InvestupIntro ctaHref="/main" />;
 }

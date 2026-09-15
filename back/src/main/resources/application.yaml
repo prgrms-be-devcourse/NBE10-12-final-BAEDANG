@@ -56,6 +56,22 @@ spring:
       write-bigdecimal-as-plain: true
     default-property-inclusion: non_null
 
+  # 비밀번호 찾기 재설정 메일 발송(SMTP). host/username/password 가 비어 있어도
+  # (기본값) 기동은 정상이다 — 실제 발송 여부는 아래 mail.enabled 가 결정한다
+  # (PasswordResetMailSender 참고). 실제로 보내려면 .env 에 MAIL_ENABLED=true 와
+  # 이 셋(호스트·발신 계정)을 채우세요.
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
 server:
   port: 8080
   servlet:
@@ -69,6 +85,18 @@ server:
 #   늘어나면 코드를 고치지 말고 .env 의 CORS_ALLOWED_ORIGINS 에 콤마로 추가하세요.
 cors:
   allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+
+# ── 프론트엔드 ───────────────────────────────────────────────────────────────
+#   비밀번호 재설정 메일 속 링크(`/reset-password?token=...`)를 만들 때만 쓴다.
+app:
+  frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:3000}
+
+# ── 메일 발송 게이트 — 비밀번호 찾기 재설정 메일 ────────────────────────────
+#   spring.mail.* (최상단 spring: 블록) 설정과 짝을 이룬다. false(기본값)면
+#   PasswordResetMailSender가 발송을 생략하며 재설정 토큰과 링크를 로그에 남기지 않는다.
+mail:
+  enabled: ${MAIL_ENABLED:false}
+  from: ${MAIL_FROM:no-reply@investup.local}
 
 # ── 토스증권 Open API ────────────────────────────────────────────────────────
 #   개발용 대역(Fake) 구현체가 없으므로 키가 비어 있으면(기본값) 백엔드가 기동하지
@@ -221,11 +249,22 @@ report:
     admin-trigger-enabled: ${REPORT_LEADERBOARD_ADMIN_TRIGGER_ENABLED:false}
 
 auth:
+  session:
+    encryption-key: ${AUTH_SESSION_ENCRYPTION_KEY}
+    rotation-grace: 20s
+    cleanup-delay: 1h
   jwt:
     issuer: baedang
     secret: ${JWT_SECRET}
     access-ttl: ${JWT_ACCESS_TTL:15m}
     refresh-ttl: ${JWT_REFRESH_TTL:7d}
+  # 비밀번호 찾기 이메일 링크의 유효 시간. 지나면 PASSWORD_RESET_TOKEN_EXPIRED.
+  password-reset:
+    token-ttl: ${PASSWORD_RESET_TOKEN_TTL:30m}
+    # 같은 회원에게 재설정 메일을 다시 보내기까지 최소 대기 시간(리뷰 지적, PR #207) —
+    # 이 안에 재요청이 오면 메일도 새 토큰 발급도 없이 조용히 무시한다(응답은 동일하게 200).
+    # 없으면 등록된 이메일을 아는 누구나 그 사람 받은편지함에 무한정 메일을 보낼 수 있다.
+    request-cooldown: ${PASSWORD_RESET_REQUEST_COOLDOWN:1m}
 
 logging:
   level:

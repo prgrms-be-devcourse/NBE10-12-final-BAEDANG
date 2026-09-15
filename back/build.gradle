@@ -23,6 +23,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // 비밀번호 찾기 메일 발송(MailSender). mail.enabled=false(기본값)면 실제로 보내지
+    // 않고 로그만 남기므로, SMTP 계정이 없어도 기동에는 영향이 없다(PasswordResetMailSender 참고).
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
     implementation 'io.jsonwebtoken:jjwt-api:0.13.0'
     implementation 'org.springframework.boot:spring-boot-starter-security'
     implementation 'org.jsoup:jsoup:1.18.3'
@@ -86,4 +89,27 @@ tasks.named('jar') {
 tasks.named('bootJar') {
     enabled = true
     archiveFileName = 'application.jar'
+}
+
+// 브라우저 통합 테스트 전용 런처와 대역은 운영 JAR에 포함하지 않습니다.
+sourceSets {
+    e2e {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    e2eImplementation.extendsFrom implementation
+    e2eRuntimeOnly.extendsFrom runtimeOnly
+}
+tasks.register('e2eRun', JavaExec) {
+    dependsOn e2eClasses
+    classpath = sourceSets.e2e.runtimeClasspath
+    mainClass = 'com.baedang.e2e.E2eLauncher'
+}
+tasks.register('e2eClasspath') {
+    dependsOn e2eClasses
+    doLast {
+        file("$buildDir/e2e-classpath.txt").text = sourceSets.e2e.runtimeClasspath.asPath
+    }
 }

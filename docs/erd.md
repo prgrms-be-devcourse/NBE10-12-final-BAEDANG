@@ -51,7 +51,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | users → stock_like | 1:N |
 | stock → stock_like | 1:N (CASCADE) |
 
-### Table Map (22)
+### Table Map (23)
 
 | Group | Table | Note |
 |---|---|---|
@@ -75,6 +75,7 @@ Blue tables are the **bookkeeping (accounting) side — user money**; white tabl
 | | `stock_financial_sync` | sync timestamps per group for TTL tracking (negative cache support) |
 | **Market Events** | `market_event` | KRX KIND circuit-breaker/sidecar history · append-only |
 | **Stock Likes** | `stock_like` | user stock likes (관심 종목) · unique per user×stock |
+| **Password Reset** | `password_reset_token` | email reset token (비밀번호 찾기) · SHA-256 hash only, no plaintext |
 | **Learning Content** | `wiki_term` | beginner-facing financial term dictionary |
 
 ### MVP Behavior Matrix (confirmed)
@@ -209,7 +210,7 @@ Every column and its intent — focused especially on **why each column exists**
 
 #### `users` — member
 
-> Members authenticate with stateless JWT. Withdrawal changes the user status to `WITHDRAWN` instead of deleting the row so account and ledger foreign keys remain valid.
+> Members authenticate with JWT plus active PostgreSQL login-session validation. Withdrawal changes the user status to `WITHDRAWN` instead of deleting the row so account and ledger foreign keys remain valid.
 > | Column | Type | Description |
 > |---|---|---|
 > | `user_id` | BIGINT PK | internal id. Auto-increment via IDENTITY. |
@@ -593,6 +594,23 @@ One row per user×stock (#169). Registration uses `INSERT ... ON CONFLICT (user_
 
 The unique constraint `uq_stock_like_user_stock (user_id, stock_id)` prevents duplicates. Its index also serves registration lookups, the per-page ranking stock like lookup (`user_id = ? AND stock_id IN (...)`), and the `user_id` filter of the list query. Each user has only a handful of rows, so there is no separate `(user_id, stock_like_id)` sort index. Add one if per-user row counts grow large.
 
+### Password Reset (Flyway V16)
+
+#### `password_reset_token` — email-based password reset token (비밀번호 찾기)
+
+Issued by `POST /api/auth/password/forgot` and consumed by `POST /api/auth/password/reset`. The plaintext token is never stored — only its SHA-256 (hex) hash, same reasoning as `password_hash`: a full table leak must not let anyone reconstruct a working reset link.
+
+| Column                    | Type               | Description                                                                                                                            |
+| ------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `password_reset_token_id` | BIGINT IDENTITY PK | Internal id.                                                                                                                            |
+| `user_id`                 | BIGINT FK          | References `users(user_id)`. No CASCADE, same reasoning as `stock_like.user_id`.                                                       |
+| `token_hash`              | VARCHAR(64) UK     | SHA-256 hex of the raw token carried in the email link.                                                                                |
+| `expires_at`              | TIMESTAMPTZ        | `now() + auth.password-reset.token-ttl` (default 30m) at issuance.                                                                     |
+| `used_at`                 | TIMESTAMPTZ        | NULL while unused. Set when the token is spent (successful reset) or superseded by a newer request for the same user.                 |
+| `created_at`              | TIMESTAMPTZ        | Issuance time (DB default). Also doubles as the request-cooldown clock — a new request within `auth.password-reset.request-cooldown` (default 1m) of the most recent `created_at` for that user is silently ignored (no new row, no mail) to stop one target's inbox from being flooded (#207 review). |
+
+Requesting a reset invalidates that user's other unused tokens (`used_at` set) so only the newest email's link works. Successful reset also revokes all user sessions in the password-change transaction. V18 removes the obsolete `users.token_version` column introduced by V17. Both issuance and reset lock the user before reset-token rows; issuance checks cooldown under this lock and reset revalidates token state after acquiring it.
+
 ## V9–V12 were skipped to avoid clashing with versions claimed by concurrently open PRs.
 
 ## Stock Classification Model
@@ -711,3 +729,25 @@ Change ratios compare the displayed quote's trade date with the exact preceding 
 Recovery runs 5s after startup and every 1m fixed delay thereafter. Today's daily candle is excluded if the request began before regular close + 10m. Empty responses or missing expected dates are not cached as completed refreshes. V10 adds only `quote_snapshot.prev_close_date`. Existing daily history remains visible in charts and weekly aggregates, without claiming retrospective verification. Missing or mismatched references are fetched again even when daily rows exist. Minute bars are also filtered by regular-session opening timestamps.
 
 No migration is added for #178. Existing V1 books become unusable immediately and are replaced/retired through normal publication and retention; orders and historical executions are preserved. Bounds are read from `quote_snapshot`, with no duplicate date/bounds columns on orders or books. This relies on the existing immutable same-day limit policy.
+
+
+## Auth session (V18)
+
+`users → auth_session` is 1:N. No existing member, account, ledger or trade rows are rewritten.
+
+| Column | Type / invariant |
+| --- | --- |
+| id | UUID PK; JWT sid |
+| user_id | BIGINT NOT NULL FK users(user_id); indexed |
+| refresh_token_hash | VARCHAR(64) NOT NULL; SHA-256 of current token |
+| refresh_generation | BIGINT NOT NULL, nonnegative |
+| previous_token_hash | VARCHAR(64), immediate predecessor only |
+| grace_until | TIMESTAMPTZ, fixed deadline |
+| encrypted_refresh | TEXT, AES-GCM successor for grace retry; no plaintext token |
+| created_at / expires_at | TIMESTAMPTZ NOT NULL; expiration greater than creation; expires_at indexed |
+| revoked_at | TIMESTAMPTZ nullable; set once on revocation |
+
+User-first, then session-row locking serializes login, rotation and revocation. All-session revocation
+shares the password-change/withdrawal transaction. Reuse revocation commits before the error response.
+Hourly cleanup clears expired grace material and removes sessions more than 7 days past absolute expiry.
+See [authentication policy](authentication.md) for the 20-second grace, encryption keys and rollout.

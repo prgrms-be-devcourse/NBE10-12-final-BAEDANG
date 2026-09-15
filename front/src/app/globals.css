@@ -69,6 +69,15 @@
   --pillTrackBg: rgba(15, 56, 104, 0.06);
   --pillTrackBorder: rgba(15, 56, 104, 0.12);
   --pillTrackBgHover: rgba(15, 56, 104, 0.1);
+  /* "차트 크게보기" 버튼 배경을 라이트/다크 모드 설정 버튼(헤더의 라이트·다크
+     PillTabs) 뒤 트랙과 같은 밝기로 맞춰달라는 요청 — --pillTrackBg는
+     캔들 기간 필박스 등 다른 곳과 공유하는 값이라 그대로 두고, 이 버튼
+     전용 토큰에 라이트/다크 토글의 trackStyle과 동일한 값(Nav.tsx)을 쓴다. */
+  --chartExpandBtnBg: rgba(15, 56, 104, 0.03);
+  --chartExpandBtnBorder: rgba(15, 56, 104, 0.06);
+  /* 종목 상세 "화면 가이드" 버튼 호버 색 전용 토큰. 라이트 모드는 원래 쓰던
+     --accentText 그대로(라이트에서 둘은 이미 같은 값). */
+  --tourReplayHoverText: var(--accentText);
 }
 
 :root[data-theme="dark"] {
@@ -82,7 +91,14 @@
   --mut: #969696;
   --mut2: #6e6e6e;
   --disabledText: #4f4f4f;
-  --accent: #5fa0d6;
+  /* 다크 모드 accent를 밝은 하늘색(#5fa0d6)에서 국내장/해외장 배지·로그아웃
+     버튼에 먼저 적용했던 더 세련된 남색(#114f8c, 바로 아래 --heroBg와
+     같은 값)으로 통일해달라는 요청 — var(--accent)를 쓰는 모든 버튼·
+     컴포넌트(회원가입/로그인 필박스, 상단 탭, 매수 버튼 등)에 한 번에
+     적용된다. 배지·로그아웃 버튼에 남아 있던 로컬 오버라이드
+     (theme === "dark" ? "#114f8c" : "var(--accent)")는 이제 결과가
+     같아져 중복이라 var(--accent)만 쓰도록 정리했다. */
+  --accent: #114f8c;
   --accentText: #a3d2ef;
   --accentSoft: #1b2a38;
   --onAccentSoftText: #acd5ef;
@@ -132,6 +148,12 @@
   --pillTrackBg: rgba(255, 255, 255, 0.03);
   --pillTrackBorder: rgba(255, 255, 255, 0.06);
   --pillTrackBgHover: rgba(255, 255, 255, 0.07);
+  --chartExpandBtnBg: rgba(255, 255, 255, 0.015);
+  --chartExpandBtnBorder: rgba(255, 255, 255, 0.03);
+  /* "화면 가이드" 버튼에 마우스를 올렸을 때 색이 --accentText(연한 하늘색)로
+     바뀌던 걸, "회원가입" 버튼 배경(var(--accent), 남색)과 같은 색으로
+     바꿔달라는 요청(다크 모드 한정). */
+  --tourReplayHoverText: var(--accent);
 }
 
 /* 명시적 선택이 없을 때만 시스템 다크모드를 따른다 (ThemeProvider가 data-theme을 심는다). */
@@ -147,7 +169,7 @@
     --mut: #969696;
     --mut2: #6e6e6e;
     --disabledText: #4f4f4f;
-    --accent: #5fa0d6;
+    --accent: #114f8c;
     --accentText: #a3d2ef;
     --accentSoft: #1b2a38;
     --onAccentSoftText: #acd5ef;
@@ -194,6 +216,9 @@
     --pillTrackBg: rgba(255, 255, 255, 0.03);
     --pillTrackBorder: rgba(255, 255, 255, 0.06);
     --pillTrackBgHover: rgba(255, 255, 255, 0.07);
+    --chartExpandBtnBg: rgba(255, 255, 255, 0.015);
+    --chartExpandBtnBorder: rgba(255, 255, 255, 0.03);
+    --tourReplayHoverText: var(--accent);
   }
 }
 
@@ -238,6 +263,40 @@ body {
   color: var(--ink);
   font-family: "Pretendard", -apple-system, "Apple SD Gothic Neo", sans-serif;
   transition: background 0.2s, color 0.2s;
+  /* 브라우저는 기본적으로 한글 글자 사이 어디서나 줄바꿈을 허용해서, 카드
+     폭이 좁으면 "포트폴리오" 같은 한 단어가 "포트폴리오 초" / "기화를
+     누르면"처럼 글자 중간에서 끊겨 보이는 문제가 있다 — 이용가이드
+     "1. 모의 투자금 받기" 문단에서 이 현상이 보인다는 요청. word-break:
+     keep-all은 한글에서 단어를 하나의 덩어리로 취급해 공백에서만
+     줄바꿈하게 해서(영어 word-wrap과 같은 동작), 이 문제를 사이트
+     전체에서 한 번에 해결한다.
+     참고: https://developer.mozilla.org/en-US/docs/Web/CSS/word-break */
+  word-break: keep-all;
+}
+
+/* 로그인 화면에서 브라우저가 저장해 둔 이메일을 자동완성으로 클릭하면 입력창
+   배경이 흰색으로 바뀌는 문제(제보, 첨부 스크린샷) — 크로미움 계열 브라우저는
+   자동완성된 입력창에 background-color를 아무리 줘도 무시하고 자체 배경(보통
+   옅은 노란색·흰색)을 강제로 씌운다. 유일한 우회법은 -webkit-box-shadow의
+   inset을 이용해 입력창 안쪽 전체를 원하는 배경색으로 "덮어 칠하는" 것이다
+   (background-color 자체를 바꾸는 게 아니라 그 위에 그림자를 쌓는 방식이라
+   브라우저의 강제 배경 규칙에 안 걸린다). -webkit-text-fill-color도 같이
+   줘야 자동완성 글자색까지 함께 맞아떨어진다(color만으로는 안 먹는다). 이메일
+   입력창들이 공통으로 쓰는 var(--fill)·var(--ink)를 그대로 써서 로그인/
+   회원가입/비밀번호 찾기/마이페이지 등 모든 입력창에 한 번에 적용된다. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--fill) inset;
+  box-shadow: 0 0 0 1000px var(--fill) inset;
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
+  /* 자동완성 시 브라우저가 배경색을 바로 칠하지 않고 아주 긴 트랜지션으로
+     "서서히" 칠하는 것처럼 동작하는 걸 역이용해, 사실상 무한(5000초)
+     트랜지션을 줘서 브라우저의 기본 배경이 아예 안 보이게 한다 —
+     -webkit-box-shadow inset과 함께 쓰는 잘 알려진 우회법이다. */
+  transition: background-color 5000s ease-in-out 0s;
 }
 
 /* Tailwind 유틸리티는 @layer utilities 안에 있는데, 이 파일의 평범한 규칙은 레이어가
@@ -264,8 +323,8 @@ body {
 
   /* 종목 상세 "차트 크게보기" 버튼 호버 효과. */
   .chart-expand-btn {
-    background: var(--pillTrackBg);
-    border: 1px solid var(--pillTrackBorder);
+    background: var(--chartExpandBtnBg);
+    border: 1px solid var(--chartExpandBtnBorder);
   }
   .chart-expand-btn:hover {
     background: var(--pillTrackBgHover);
@@ -313,7 +372,7 @@ body {
     color: var(--mut2);
   }
   .tour-replay-btn:hover {
-    color: var(--accentText);
+    color: var(--tourReplayHoverText);
   }
 }
 

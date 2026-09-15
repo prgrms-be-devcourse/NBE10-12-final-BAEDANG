@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Tag } from "@/components/Tag";
 import { PillTabs } from "@/components/PillTabs";
 import { Reveal } from "@/components/Reveal";
+import { RevealText } from "@/components/RevealText";
 import { StockHoverPreview } from "@/components/StockHoverPreview";
 import { ExchangeRateTrendModal } from "@/components/ExchangeRateTrendModal";
 import { SignupModal } from "@/components/SignupModal";
@@ -312,13 +313,25 @@ export default function RankingsPage() {
 
   return (
     <div>
+      {/* 메인 화면 히어로 문구와 같은 토스인슈어런스(pd-recruit.tossinsu.com)
+          스타일 Line Reveal(아래→위 마스크 등장)을 랭킹 화면 문구에도
+          적용해달라는 요청 — 기존 h2/p를 RevealText로 바꿨다. 감싸는
+          Reveal(delay=0)은 그대로 둬서, 카드 전체는 기존처럼 살짝
+          떠오르고 그 안의 텍스트는 한 줄씩 마스크 안에서 올라온다. */}
       <Reveal delay={0}>
-        <h2 className="text-[28px] font-extrabold" style={{ color: "var(--ink)" }}>
-          주식 종목 랭킹
-        </h2>
-        <p className="mt-2 mb-4.5 text-[15px]" style={{ color: "var(--mut)" }}>
-          거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요
-        </p>
+        <RevealText
+          as="h2"
+          className="text-[28px] font-extrabold"
+          style={{ color: "var(--ink)" }}
+          lines={["주식 종목 랭킹"]}
+        />
+        <RevealText
+          as="p"
+          className="mt-2 mb-4.5 text-[15px]"
+          style={{ color: "var(--mut)" }}
+          baseDelayMs={45}
+          lines={["거래대금 기준 상위 100개 · 무엇을 살지 모르겠다면 여기서 시작하세요"]}
+        />
       </Reveal>
 
       {/* 환율 배너 — 정책상 거래는 원화로만 제공되어, 미국 종목 표시는 이 환율로 환산합니다 */}
@@ -485,9 +498,11 @@ export default function RankingsPage() {
         value={market}
         onChange={switchMarket}
         trackClassName="mb-3 w-[200px] gap-0.5 rounded-full p-[3px]"
+        // 라이트/다크 토글 뒤 트랙과 동일한 스타일로 맞춰달라는 요청 —
+        // 기존 alpha 값을 절반으로 낮췄다.
         trackStyle={{
-          background: theme === "dark" ? "rgba(255,255,255,.03)" : "rgba(15,56,104,.06)",
-          border: theme === "dark" ? "1px solid rgba(255,255,255,.06)" : "1px solid rgba(15,56,104,.12)",
+          background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+          border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
         }}
         buttonClassName="rounded-full py-2 text-[13px] font-bold"
         inactiveTextStyle={{ color: "var(--mut)" }}
@@ -505,9 +520,15 @@ export default function RankingsPage() {
       <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
         {/* 해외 주식 탭에서는 "현재가" 헤더에 원/$ 토글이 들어가서 국내 탭보다
             헤더 행이 더 길어진다(제보) — min-height로 두 탭이 항상 같은 높이가
-            되게 고정한다(토글이 필요로 하는 높이에 맞춘 값). */}
+            되게 고정한다(토글이 필요로 하는 높이에 맞춘 값).
+            반응형 웹 적용 — 이 7칸 그리드(26px·36px·70px 고정 + fr 4칸)는 모바일
+            폭에서는 고정폭 칸들만으로도 이미 공간이 빠듯해 "전일대비"·"거래대금"
+            라벨이 카드 밖으로 잘려 보이지 않는 문제가 있었다. md 미만에서는 이
+            헤더 자체를 숨기고(아래 데이터 행도 같은 폭에서는 그리드 대신 2~3줄
+            카드형 레이아웃으로 바뀌므로 칸별 헤더 라벨이 필요 없다), md 이상에서만
+            기존 그리드 헤더를 그대로 보여준다. */}
         <div
-          className="grid items-center px-5 py-2.5 text-[12px] font-bold"
+          className="hidden items-center px-5 py-2.5 text-[12px] font-bold md:grid"
           style={{
             gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr",
             borderBottom: "1px solid var(--line2)",
@@ -536,9 +557,12 @@ export default function RankingsPage() {
                 value={priceDisplay}
                 onChange={(v) => setPriceDisplay(v as "KRW" | "USD")}
                 trackClassName="w-fit gap-0.5 rounded-full p-[2px]"
+                // 국내/해외 주식 탭 뒤 트랙과 같은 밝기로 맞춰달라는 요청 —
+                // 위 시장 탭 trackStyle과 동일한 값을 쓴다(기존엔 이 토글만
+                // alpha가 더 높아 배경이 눈에 띄게 진해 보였다).
                 trackStyle={{
-                  background: theme === "dark" ? "rgba(255,255,255,.06)" : "rgba(15,56,104,.08)",
-                  border: theme === "dark" ? "1px solid rgba(255,255,255,.08)" : "1px solid rgba(15,56,104,.14)",
+                  background: theme === "dark" ? "rgba(255,255,255,.015)" : "rgba(15,56,104,.03)",
+                  border: theme === "dark" ? "1px solid rgba(255,255,255,.03)" : "1px solid rgba(15,56,104,.06)",
                 }}
                 buttonClassName="rounded-full px-2 py-0.5 text-[10.5px] font-bold"
                 inactiveTextStyle={{ color: "var(--mut2)" }}
@@ -578,12 +602,45 @@ export default function RankingsPage() {
           const badge = CATEGORY_BADGE_STYLE[label];
           const liked = item.stockLikeId != null;
 
+          const priceText = isUsd && priceDisplay === "USD" ? formatUsd(item.lastPrice) : formatNumber(krwPrice);
+          const changeNode =
+            krwChange === null ? (
+              <span className="text-[12.5px]" style={{ color: "var(--mut2)" }}>
+                시세 정보 없음
+              </span>
+            ) : (
+              <span
+                className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
+                style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
+              >
+                {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
+              </span>
+            );
+          const heartButton = (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                toggleLike(item);
+              }}
+              disabled={likeInFlight.has(item.symbol)}
+              className="cursor-pointer text-[16px] leading-none disabled:cursor-not-allowed disabled:opacity-50"
+              style={{
+                color: liked ? "var(--heartActive)" : "var(--mut2)",
+                WebkitTextStroke: "1.3px",
+              }}
+              aria-label={liked ? "찜 해제하기" : "찜하기"}
+            >
+              ♥
+            </button>
+          );
+
           return (
             <Link
               key={item.symbol}
               href={`/stocks/${item.symbol}?marketCountry=${market}`}
-              className="grid items-center px-5 py-3 text-[15px] transition-[background] duration-150"
-              style={{ gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr", borderBottom: "1px solid var(--line2)" }}
+              className="block px-5 py-3 text-[15px] transition-[background] duration-150"
+              style={{ borderBottom: "1px solid var(--line2)" }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = "var(--fill)";
                 setHover({ item, krwPrice, krwChange, x: e.clientX, y: e.clientY });
@@ -594,55 +651,58 @@ export default function RankingsPage() {
                 setHover((h) => (h?.item.symbol === item.symbol ? null : h));
               }}
             >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  toggleLike(item);
-                }}
-                disabled={likeInFlight.has(item.symbol)}
-                className="cursor-pointer text-[16px] leading-none disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  color: liked ? "var(--heartActive)" : "var(--mut2)",
-                  WebkitTextStroke: "1.3px",
-                }}
-                aria-label={liked ? "찜 해제하기" : "찜하기"}
-              >
-                ♥
-              </button>
-              <span className="text-center" style={{ color: "var(--mut2)" }}>{item.rank}</span>
-              <span style={{ color: "var(--ink)" }}>
-                {item.name} <Tag>{item.symbol}</Tag>
-              </span>
-              <span
-                className="mx-auto w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
-                style={badge}
-              >
-                {label}
-              </span>
-              {/* 원화·달러를 늘 같이(두 줄로) 보여주면 국내 주식(한 줄) 행보다 칸이 길어져서
-                  (팀원 제보) 헤더의 원/$ 토글로 뭘 볼지 고르게 하고 한 줄만 보여준다 —
-                  국내 주식 행과 자연스럽게 같은 높이가 된다. */}
-              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                {isUsd && priceDisplay === "USD" ? formatUsd(item.lastPrice) : formatNumber(krwPrice)}
-              </span>
-              <span className="flex justify-end">
-                {krwChange === null ? (
-                  <span className="text-[12.5px]" style={{ color: "var(--mut2)" }}>
-                    시세 정보 없음
+              {/* 데스크톱(md 이상) — 기존 7칸 그리드 그대로. */}
+              <div className="hidden items-center md:grid" style={{ gridTemplateColumns: "26px 36px 1.9fr 70px 1fr 1.2fr 1fr" }}>
+                {heartButton}
+                <span className="text-center" style={{ color: "var(--mut2)" }}>{item.rank}</span>
+                <span style={{ color: "var(--ink)" }}>
+                  {item.name} <Tag>{item.symbol}</Tag>
+                </span>
+                <span
+                  className="mx-auto w-fit rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
+                  style={badge}
+                >
+                  {label}
+                </span>
+                {/* 원화·달러를 늘 같이(두 줄로) 보여주면 국내 주식(한 줄) 행보다 칸이 길어져서
+                    (팀원 제보) 헤더의 원/$ 토글로 뭘 볼지 고르게 하고 한 줄만 보여준다 —
+                    국내 주식 행과 자연스럽게 같은 높이가 된다. */}
+                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                  {priceText}
+                </span>
+                <span className="flex justify-end">{changeNode}</span>
+                <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
+                  {formatKoreanAmount(item.tradingAmount)}
+                </span>
+              </div>
+
+              {/* 모바일(md 미만) — 위 7칸 그리드는 26px·36px·70px 고정 칸만으로도
+                  이미 공간이 빠듯해 "전일대비"·"거래대금" 값이 카드 밖으로 잘려
+                  보이지 않는 문제가 있었다(제보). 같은 정보를 칸으로 나열하는 대신
+                  2줄 카드 형태로 쌓는다 — 첫 줄에 찜·순위·종목명·구분 배지, 둘째
+                  줄에 현재가·전일대비, 셋째 줄에 거래대금. */}
+              <div className="flex flex-col gap-1.5 md:hidden">
+                <div className="flex items-center gap-2">
+                  {heartButton}
+                  <span className="text-[12px]" style={{ color: "var(--mut2)" }}>{item.rank}</span>
+                  <span className="min-w-0 flex-1 truncate" style={{ color: "var(--ink)" }}>
+                    {item.name} <Tag>{item.symbol}</Tag>
                   </span>
-                ) : (
                   <span
-                    className="rounded-lg px-1.5 py-0.5 text-right text-[12.5px] font-semibold tabular-nums"
-                    style={{ background: isUp ? "var(--upBg)" : "var(--downBg)", color: isUp ? "var(--up)" : "var(--down)" }}
+                    className="shrink-0 rounded-lg px-1.5 py-0.5 text-[10.5px] font-bold"
+                    style={badge}
                   >
-                    {isUp ? "▲" : "▼"} {formatSigned(krwChange)} ({formatPercent(item.changeRate)})
+                    {label}
                   </span>
-                )}
-              </span>
-              <span className="text-right tabular-nums" style={{ color: "var(--ink)" }}>
-                {formatKoreanAmount(item.tradingAmount)}
-              </span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="tabular-nums" style={{ color: "var(--ink)" }}>{priceText}</span>
+                  {changeNode}
+                </div>
+                <div className="text-right text-[12.5px] tabular-nums" style={{ color: "var(--mut2)" }}>
+                  거래대금 {formatKoreanAmount(item.tradingAmount)}
+                </div>
+              </div>
             </Link>
           );
         })}

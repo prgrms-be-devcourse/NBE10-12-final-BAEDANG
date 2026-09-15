@@ -24,6 +24,17 @@ function SignupForm() {
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  // 체크박스를 눌렀을 때 뜨는 이용약관 팝업(TermsModal) 뒤 어두운 배경(fixed
+  // inset-0)이 화면 전체가 아니라 이 회원가입 카드 크기로만 좁게 나타나는
+  // 문제 — 카드 자체가 modalPop 애니메이션(transform: translateY·scale)을
+  // fill-mode forwards로 쓰고 있어서, 애니메이션이 끝난 뒤에도 마지막
+  // 키프레임의 transform이 계산값으로 남는다. transform이 none이 아닌
+  // 요소는 그 안의 position: fixed 자손(TermsModal)을 뷰포트가 아니라
+  // 자기 자신 기준으로 가두는 containing block이 된다 — 마이페이지
+  // 투자 성향 리포트 모달에서 겪은 것과 같은 원인이다(Reveal.tsx 참고).
+  // 애니메이션이 끝나면 opacity-0 클래스와 animation을 지운 "settled"
+  // 상태로 전환해 더 이상 containing block이 되지 않게 한다.
+  const [cardSettled, setCardSettled] = useState(false);
 
   const passwordMismatch = passwordConfirm.length > 0 && password !== passwordConfirm;
 
@@ -43,7 +54,11 @@ function SignupForm() {
     try {
       const user = await signUp({ email, password, nickname });
       setUser(user);
-      router.push(next ?? "/");
+      // "/"는 이제 방문할 때마다 무조건 서비스 소개 화면으로 돌려보내므로
+      // (proxy.ts), next 파라미터가 없을 때의 기본 목적지는 실제 메인
+      // 화면("/main")이어야 한다 — 그래야 가입 직후 다시 소개 화면을
+      // 보게 되지 않는다.
+      router.push(next ?? "/main");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -59,11 +74,16 @@ function SignupForm() {
   return (
     <div className="flex min-h-[70vh] items-center justify-center px-6 py-10">
       <div
-        className="w-full max-w-[400px] rounded-[24px] px-8 pt-9 pb-7.5 opacity-0"
-        style={{ background: "var(--card)", animation: "modalPop .55s cubic-bezier(.2,.9,.3,1.05) .05s forwards" }}
+        className={`w-full max-w-[400px] rounded-[24px] px-8 pt-9 pb-7.5${cardSettled ? "" : " opacity-0"}`}
+        style={
+          cardSettled
+            ? { background: "var(--card)" }
+            : { background: "var(--card)", animation: "modalPop .55s cubic-bezier(.2,.9,.3,1.05) .05s forwards" }
+        }
+        onAnimationEnd={() => setCardSettled(true)}
       >
-        <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>회원가입</h1>
-        <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+        <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>회원가입</h1>
+        <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
           가입하면 <b style={{ color: "var(--ink)" }}>모의 투자금 5,000만원</b>을 바로 드려요
         </p>
 

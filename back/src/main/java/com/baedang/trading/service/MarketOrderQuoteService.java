@@ -3,6 +3,8 @@ package com.baedang.trading.service;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
+import com.baedang.market.port.ExecutionExchangeRateSnapshot;
+import com.baedang.market.port.MarketSessionStatus;
 import com.baedang.market.port.MarketSessionProvider;
 import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.Propagation;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 
 @Service
 @Transactional(propagation = Propagation.NEVER)
@@ -79,12 +82,9 @@ public class MarketOrderQuoteService {
                             + ", quoteCurrency=" + queryContext.quote().getCurrency());
         }
 
-        BigDecimal exchangeRate = stock.getMarketCountry() == MarketCountry.KR
-                ? BigDecimal.ONE
-                : exchangeRateProvider.currentUsdKrwRate();
-        if (exchangeRate == null || exchangeRate.signum() <= 0) {
-            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
-        }
+        ExecutionExchangeRateSnapshot snapshot = stock.getMarketCountry() == MarketCountry.KR
+                ? null : exchangeRateProvider.currentUsdKrwSnapshot();
+        BigDecimal exchangeRate = snapshot == null ? BigDecimal.ONE : snapshot.rate();
         MarketOrderAmount amount = amountCalculator.calculate(
                 stock.getMarketCountry(),
                 terms.side(),
@@ -93,7 +93,12 @@ public class MarketOrderQuoteService {
                 exchangeRate
         );
 
+        MarketSessionStatus session = marketSessionProvider.currentSession(stock.getMarketCountry(), clock.instant());
+        // 외부 조회를 모두 마친 시각으로 시세·세션·원본 환율 유효기간을 판정합니다.
         Instant now = clock.instant();
+        if (snapshot != null && !snapshot.isValidAt(now.atOffset(ZoneOffset.UTC))) {
+            throw new BusinessException(ErrorCode.EXCHANGE_RATE_NOT_FOUND);
+        }
         ErrorCode reason = marketOrderPolicy.determineRejection(
                 account,
                 stock,
@@ -102,7 +107,7 @@ public class MarketOrderQuoteService {
                 terms.quantity(),
                 amount,
                 queryContext.availableQuantity(),
-                () -> marketSessionProvider.isOpen(stock.getMarketCountry(), now),
+                () -> session.open() && session.validUntil() != null && now.isBefore(session.validUntil()),
                 now
         );
         if (reason != null) {
