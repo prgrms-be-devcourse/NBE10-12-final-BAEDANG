@@ -153,3 +153,123 @@ Map<String, Object?> marketStatusJson() => <String, Object?>{
   ],
   'serverTime': '2026-09-15T10:00:00+09:00',
 };
+
+Map<String, Object?> personalityReportJson({bool locked = false}) =>
+    locked
+        ? <String, Object?>{
+            'accountId': 3,
+            'roundNo': 1,
+            'locked': true,
+            'unlockAt': '2026-10-10T00:00:00+09:00',
+            'initialCash': null,
+            'cashBalance': null,
+            'stockValue': null,
+            'totalAsset': null,
+            'totalPnl': null,
+            'returnRate': null,
+            'classified': false,
+            'typeCode': null,
+            'typeLabel': null,
+            'shares': null,
+            'holdingCount': 1,
+            'holdingPeriodWeeks': 4,
+            'longHeldStocks': <Object?>[],
+            'asOf': '2026-09-15T09:00:00+09:00',
+          }
+        : <String, Object?>{
+            'accountId': 3,
+            'roundNo': 1,
+            'locked': false,
+            'unlockAt': '2026-09-12T00:00:00+09:00',
+            'initialCash': '50000000',
+            'cashBalance': '30000000',
+            'stockValue': '22000000',
+            'totalAsset': '52000000',
+            'totalPnl': '2000000',
+            'returnRate': '0.04',
+            'classified': true,
+            'typeCode': 'DKSB',
+            'typeLabel': '분산·국내·개별주·안정',
+            'shares': <String, Object?>{
+              'concentration': '0.32',
+              'domestic': '0.85',
+              'individual': '0.90',
+              'aggressive': '0.05',
+            },
+            'holdingCount': 3,
+            'holdingPeriodWeeks': 4,
+            'longHeldStocks': <Object?>[
+              <String, Object?>{
+                'symbol': '005930',
+                'name': '삼성전자',
+                'currency': 'KRW',
+                'avgBuyPrice': '74000',
+                'lastPrice': '74500',
+                'returnRate': '0.006757',
+                'heldSince': '2026-08-15T00:00:00+09:00',
+              },
+            ],
+            'asOf': '2026-09-15T09:00:00+09:00',
+          };
+
+Map<String, Object?> leaderboardJson() => <String, Object?>{
+  'asOf': '2026-09-15T06:00:00+09:00',
+  'participants': 128,
+  'top': <Object?>[
+    <String, Object?>{
+      'rank': 1,
+      'nickname': '투*왕',
+      'returnRate': '0.253',
+    },
+    <String, Object?>{
+      'rank': 2,
+      'nickname': '주*신',
+      'returnRate': '0.182',
+    },
+    <String, Object?>{
+      'rank': 3,
+      'nickname': '분*투',
+      'returnRate': '0.120',
+    },
+  ],
+  'me': <String, Object?>{
+    'rank': 12,
+    'returnRate': '0.012',
+    'topPercent': 10,
+    'neighbors': <Object?>[
+      <String, Object?>{
+        'rank': 11,
+        'nickname': '이*어',
+        'returnRate': '0.015',
+      },
+      <String, Object?>{
+        'rank': 13,
+        'nickname': '초*자',
+        'returnRate': '0.008',
+      },
+    ],
+    'typeCode': 'DKSB',
+    'typeLabel': '분산·국내·개별주·안정',
+    'typeRank': 3,
+    'typeParticipants': 9,
+    'typePercent': 34,
+  },
+};
+
+Map<String, Object?> leaderboardTypesJson() => <String, Object?>{
+  'asOf': '2026-09-15T06:00:00+09:00',
+  'types': <Object?>[
+    <String, Object?>{
+      'typeCode': 'DKSB',
+      'typeLabel': '분산·국내·개별주·안정',
+      'count': 9,
+      'avgReturnRate': '0.021',
+    },
+    <String, Object?>{
+      'typeCode': 'CGSA',
+      'typeLabel': '집중·해외·개별주·공격',
+      'count': 14,
+      'avgReturnRate': '0.112',
+    },
+  ],
+};

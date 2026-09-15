@@ -5,6 +5,7 @@ import '../../core/api/account_api.dart';
 import '../../core/api/api_error.dart';
 import '../../core/api/exchange_rate_api.dart';
 import '../../core/api/order_api.dart';
+import '../../core/api/report_api.dart';
 import '../../core/api/stock_api.dart';
 import '../../core/auth/auth_session.dart';
 import '../../core/auth/token_storage.dart';
@@ -17,6 +18,7 @@ import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
 import 'account_settings.dart';
 import 'order_detail_sheet.dart';
+import 'personality_report_section.dart';
 
 /// 마이 탭. 프로필·계좌 요약·관심 종목·주문 내역·로그아웃을 보여준다.
 class MyScreen extends StatefulWidget {
@@ -27,6 +29,7 @@ class MyScreen extends StatefulWidget {
     required this.account,
     required this.orders,
     required this.exchangeRates,
+    required this.reports,
   });
 
   final AuthSession session;
@@ -34,6 +37,7 @@ class MyScreen extends StatefulWidget {
   final AccountApi account;
   final OrderApi orders;
   final ExchangeRateApi exchangeRates;
+  final ReportApi reports;
 
   @override
   State<MyScreen> createState() => _MyScreenState();
@@ -329,6 +333,13 @@ class _MyScreenState extends State<MyScreen> {
               future: _ordersFuture,
               onTapOrder: _openOrderDetail,
               onRetry: _loadLists,
+            ),
+            const SizedBox(height: 24),
+            // 웹과 같은 자리 — 보유 종목 표 아래, 계정 설정 위.
+            // 당겨서 새로고침·계좌 초기화 때 _ledgerTick과 함께 다시 읽는다.
+            PersonalityReportSection(
+              reports: widget.reports,
+              tick: _ledgerTick,
             ),
             const SizedBox(height: 24),
             AccountSettings(session: widget.session),

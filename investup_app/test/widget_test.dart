@@ -23,6 +23,7 @@ void main() {
         account: harness.account,
         orders: harness.orders,
         exchangeRates: harness.exchangeRates,
+        reports: harness.reports,
         wiki: const BundledWikiTermsSource(),
       ),
     );

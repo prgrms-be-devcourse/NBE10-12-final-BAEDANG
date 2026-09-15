@@ -323,9 +323,10 @@ Map<String, Object?> _usRankingJson() => <String, Object?>{
   'hasNext': false,
 };
 
-TestHarness _harness({bool signedIn = false}) => TestHarness(
-  storage: signedIn ? FakeTokenStorage(initialRefreshToken: 'rt') : null,
-  adapter: FakeHttpAdapter((options) async {
+TestHarness _harness({bool signedIn = false, bool reportLocked = false}) =>
+    TestHarness(
+      storage: signedIn ? FakeTokenStorage(initialRefreshToken: 'rt') : null,
+      adapter: FakeHttpAdapter((options) async {
     final path = options.uri.path;
     if (path == '/api/market/status') {
       return FakeResponse.ok(marketStatusJson());
@@ -407,6 +408,15 @@ TestHarness _harness({bool signedIn = false}) => TestHarness(
     if (path == '/api/accounts/me/orders') {
       return FakeResponse.ok(_ordersJson());
     }
+    if (path == '/api/reports/me') {
+      return FakeResponse.ok(personalityReportJson(locked: reportLocked));
+    }
+    if (path == '/api/reports/leaderboard/types') {
+      return FakeResponse.ok(leaderboardTypesJson());
+    }
+    if (path == '/api/reports/leaderboard') {
+      return FakeResponse.ok(leaderboardJson());
+    }
     if (path == '/api/accounts/me') {
       return FakeResponse.ok(accountSummaryJson());
     }
@@ -466,6 +476,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           account: harness.account,
           orders: harness.orders,
           exchangeRates: harness.exchangeRates,
+          reports: harness.reports,
         ),
       ),
     ),
@@ -571,6 +582,7 @@ void main() {
                     account: harness.account,
                     orders: harness.orders,
                     exchangeRates: harness.exchangeRates,
+                    reports: harness.reports,
                   ),
                 ),
               ),
@@ -646,6 +658,7 @@ void main() {
                     account: harness.account,
                     orders: harness.orders,
                     exchangeRates: harness.exchangeRates,
+                    reports: harness.reports,
                   ),
                 ),
               ),
@@ -697,6 +710,7 @@ void main() {
                     account: harness.account,
                     orders: harness.orders,
                     exchangeRates: harness.exchangeRates,
+                    reports: harness.reports,
                   ),
                 ),
               ),
@@ -724,6 +738,14 @@ void main() {
       expect(harness.session.profile?.nickname, '새닉네임');
 
       // 비밀번호 변경 → PUT users/me/password.
+      // 카드를 통째로 보이게 한 뒤 입력해야 입력→탭 사이에 lazy 항목이
+      // dispose·재생성돼 값이 날아가는 걸 막을 수 있다.
+      await tester.scrollUntilVisible(
+        find.widgetWithText(OutlinedButton, '회원 탈퇴'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
       await tester.enterText(
         find.widgetWithText(TextField, '현재 비밀번호'),
         'oldpassword1',
@@ -736,6 +758,19 @@ void main() {
         find.widgetWithText(TextField, '새 비밀번호 확인'),
         'newpassword1',
       );
+      // scrollUntilVisible은 lazy 항목을 빌드할 때까지만 스크롤하고,
+      // ensureVisible이 빌드된 요소를 뷰 안으로 온전히 올린다.
+      FocusManager.instance.primaryFocus?.unfocus();
+      await _settle(tester);
+      await tester.scrollUntilVisible(
+        find.widgetWithText(FilledButton, '비밀번호 변경'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.ensureVisible(
+        find.widgetWithText(FilledButton, '비밀번호 변경'),
+      );
+      await _settle(tester);
       await tester.tap(
         find.widgetWithText(FilledButton, '비밀번호 변경'),
       );
@@ -767,6 +802,96 @@ void main() {
       await _settle(tester);
       expect(harness.countTo('/api/users/me'), greaterThanOrEqualTo(1));
       expect(harness.session.isAuthenticated, isFalse);
+    });
+  });
+
+  group('투자 성향 리포트', () {
+    MaterialApp myApp(TestHarness harness) => MaterialApp.router(
+      routerConfig: GoRouter(
+        initialLocation: '/my',
+        routes: [
+          GoRoute(
+            path: '/my',
+            builder: (context, state) => Scaffold(
+              body: MyScreen(
+                session: harness.session,
+                stocks: harness.stocks,
+                account: harness.account,
+                orders: harness.orders,
+                exchangeRates: harness.exchangeRates,
+                reports: harness.reports,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    testWidgets('분류된 리포트는 유형·4축·스탯과 리더보드 모달을 보여준다', (
+      tester,
+    ) async {
+      final harness = _harness(signedIn: true);
+      unawaited(harness.session.restore());
+      await tester.pumpWidget(myApp(harness));
+      await _settle(tester);
+
+      await tester.scrollUntilVisible(
+        find.text('투자 성향 리포트'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      expect(find.text('공개'), findsOneWidget);
+      expect(find.text('국장 균형러'), findsOneWidget); // DKSB 별명
+      expect(find.text('분산·국내·개별주·안정'), findsOneWidget);
+      expect(find.text('+4.00%'), findsOneWidget);
+      expect(find.text('4주 이상 보유한 종목'), findsOneWidget);
+
+      // 전체 랭킹 모달: 상위권 + 내 순위 주변 + 내 순위 요약.
+      await tester.scrollUntilVisible(
+        find.text('전체 랭킹 보기'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      await tester.tap(find.text('전체 랭킹 보기'));
+      await _settle(tester);
+      expect(find.text('리더보드'), findsOneWidget);
+      expect(find.text('투*왕'), findsOneWidget);
+      expect(find.text('이*어'), findsOneWidget); // 내 순위 주변
+      expect(find.textContaining('내 순위 12위'), findsOneWidget);
+      expect(find.textContaining('유형 안에서 3위'), findsOneWidget);
+      await tester.tap(find.text('닫기'));
+      await _settle(tester);
+
+      // 유형별 비교 모달: 별명으로 표시하고 내 유형을 표시한다.
+      await tester.tap(find.text('유형별 비교 보기'));
+      await _settle(tester);
+      expect(find.text('유형별 비교'), findsOneWidget);
+      expect(find.text('서학개미 스나이퍼'), findsOneWidget); // CGSA 별명
+      expect(find.text('내 유형'), findsOneWidget); // DKSB 행
+    });
+
+    testWidgets('잠긴 리포트는 잠금 카드와 남은 기간 진행률을 보여준다', (
+      tester,
+    ) async {
+      final harness = _harness(signedIn: true, reportLocked: true);
+      unawaited(harness.session.restore());
+      await tester.pumpWidget(myApp(harness));
+      await _settle(tester);
+
+      await tester.scrollUntilVisible(
+        find.text('투자 성향 리포트'),
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await _settle(tester);
+      expect(find.text('잠김'), findsOneWidget);
+      expect(find.text('투자 성향 리포트는 4주 뒤에 열려요'), findsOneWidget);
+      expect(find.text('아직 공개 전이에요'), findsOneWidget);
+      expect(find.text('지금은 볼 수 없어요'), findsOneWidget);
+      // 잠김 상태에서는 리더보드 버튼이 나오지 않는다.
+      expect(find.text('전체 랭킹 보기'), findsNothing);
     });
   });
 

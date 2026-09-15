@@ -7,6 +7,7 @@ import 'core/api/auth_api.dart';
 import 'core/api/exchange_rate_api.dart';
 import 'core/api/market_api.dart';
 import 'core/api/order_api.dart';
+import 'core/api/report_api.dart';
 import 'core/api/stock_api.dart';
 import 'core/auth/auth_session.dart';
 import 'core/models/market_country.dart';
@@ -35,6 +36,7 @@ class InvestUpApp extends StatefulWidget {
     required this.account,
     required this.orders,
     required this.exchangeRates,
+    required this.reports,
     required this.wiki,
   });
 
@@ -45,6 +47,7 @@ class InvestUpApp extends StatefulWidget {
   final AccountApi account;
   final OrderApi orders;
   final ExchangeRateApi exchangeRates;
+  final ReportApi reports;
   final WikiTermsSource wiki;
 
   @override
@@ -151,6 +154,7 @@ class _InvestUpAppState extends State<InvestUpApp> {
                   account: widget.account,
                   orders: widget.orders,
                   exchangeRates: widget.exchangeRates,
+                  reports: widget.reports,
                 ),
               ),
             ),
