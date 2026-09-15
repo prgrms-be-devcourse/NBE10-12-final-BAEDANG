@@ -15,8 +15,8 @@ import '../../core/models/stock_detail.dart';
 import '../../core/polling.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
-import 'candle_chart.dart';
 import 'financials_section.dart';
+import 'lw_candle_chart.dart';
 import 'trade_panel.dart';
 
 /// 종목 상세. 가격·차트·호가·기본정보를 보여주고, 거래하기에서
@@ -50,25 +50,75 @@ class StockDetailScreen extends StatefulWidget {
   State<StockDetailScreen> createState() => _StockDetailScreenState();
 }
 
-/// 백엔드가 지원하는 interval × range 조합만 노출한다.
-const _ranges = <(String label, String interval, String range)>[
-  ('1일', '1m', '1D'),
-  ('1개월', '1d', '1M'),
-  ('6개월', '1d', '6M'),
-  ('1년', '1d', '1Y'),
-];
+/// 캔들 봉 단위 — 웹 `candle-query.ts`의 `CandleUnit`과 같은 표.
+/// 백엔드 `CandleQueryPolicy`가 허용하는 interval 값과 짝지어 둔다.
+enum _CandleUnit {
+  minute1('1분봉', '1m'),
+  minute5('5분봉', '5m'),
+  minute10('10분봉', '10m'),
+  day('일봉', '1d'),
+  week('1주봉', '1w');
+
+  const _CandleUnit(this.label, this.interval);
+  final String label;
+  final String interval;
+
+  /// 분봉 계열이면 장중 1분마다 캔들을 다시 가져온다(웹과 같은 규칙).
+  bool get isIntraday => interval.endsWith('m');
+}
+
+/// 조회 기간 — 웹 `CandlePeriod`와 같은 표. range가 백엔드 쿼리값이다.
+enum _CandlePeriod {
+  day1('1일', '1D'),
+  week1('1주일', '1W'),
+  month1('1개월', '1M'),
+  month6('6개월', '6M'),
+  year1('1년', '1Y');
+
+  const _CandlePeriod(this.label, this.range);
+  final String label;
+  final String range;
+}
+
+/// 봉 단위마다 고를 수 있는 기간 — 백엔드 허용 조합 그대로. 1개뿐이면
+/// 기간 토글을 숨긴다(웹 `CANDLE_UNIT_PERIODS`와 동일).
+const _unitPeriods = <_CandleUnit, List<_CandlePeriod>>{
+  _CandleUnit.minute1: [_CandlePeriod.day1],
+  _CandleUnit.minute5: [_CandlePeriod.day1, _CandlePeriod.week1],
+  _CandleUnit.minute10: [_CandlePeriod.week1],
+  _CandleUnit.day: [
+    _CandlePeriod.month1,
+    _CandlePeriod.month6,
+    _CandlePeriod.year1,
+  ],
+  _CandleUnit.week: [_CandlePeriod.month6, _CandlePeriod.year1],
+};
+
+/// 봉 단위를 바꿀 때 이전 기간이 새 단위에 없을 수 있어 되돌아갈 기본 기간
+/// (웹 `CANDLE_UNIT_DEFAULT_PERIOD`와 동일).
+const _unitDefaultPeriod = <_CandleUnit, _CandlePeriod>{
+  _CandleUnit.minute1: _CandlePeriod.day1,
+  _CandleUnit.minute5: _CandlePeriod.day1,
+  _CandleUnit.minute10: _CandlePeriod.week1,
+  _CandleUnit.day: _CandlePeriod.month6,
+  _CandleUnit.week: _CandlePeriod.month6,
+};
 
 class _StockDetailScreenState extends State<StockDetailScreen> {
   late Future<StockDetail> _detailFuture;
   StockDetail? _detail;
   Future<CandleSeries>? _candleFuture;
+  CandleSeries? _candles;
   Future<OrderBook>? _bookFuture;
-  int _rangeIndex = 0;
+  OrderBook? _book;
+  _CandleUnit _unit = _CandleUnit.day;
+  _CandlePeriod _period = _CandlePeriod.month6;
   int? _stockLikeId;
   bool _likeBusy = false;
 
   bool _pollInFlight = false;
   late final PollingTimer _pricePoll;
+  late final PollingTimer _bookPoll;
   late final PollingTimer _refreshPoll;
 
   /// 이 종목의 보유 수량. 매도 한도로 쓴다 — 없거나 조회 실패면 null.
@@ -82,6 +132,11 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     _pricePoll = PollingTimer(
       interval: const Duration(seconds: 5),
       onTick: _pollDetail,
+    )..start();
+    // 가상 호가는 서버가 3초 주기로 갱신한다 — 같은 주기로 맞춘다(웹과 동일).
+    _bookPoll = PollingTimer(
+      interval: const Duration(seconds: 3),
+      onTick: _pollBook,
     )..start();
     // 장 마감 뒤 재개장 전환도 잡아야 realtime 플래그가 다시 켜진다.
     _refreshPoll = PollingTimer(
@@ -97,6 +152,7 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   @override
   void dispose() {
     _pricePoll.dispose();
+    _bookPoll.dispose();
     _refreshPoll.dispose();
     super.dispose();
   }
@@ -147,6 +203,10 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
       _detail = detail;
       setState(() {
         _detailFuture = Future.value(detail);
+        // 분봉 차트는 장중 1분 주기로 캔들도 함께 갱신한다(웹과 같은 규칙).
+        if (_unit.isIntraday && detail.price?.realtime == true) {
+          _loadCandles();
+        }
       });
     } on ApiException {
       // 다음 주기에 재시도.
@@ -156,19 +216,45 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   }
 
   void _loadCandles() {
-    _candleFuture = widget.stocks.getCandles(
-      symbol: widget.symbol,
-      marketCountry: widget.marketCountry,
-      interval: _ranges[_rangeIndex].$2,
-      range: _ranges[_rangeIndex].$3,
-    );
+    _candleFuture = widget.stocks
+        .getCandles(
+          symbol: widget.symbol,
+          marketCountry: widget.marketCountry,
+          interval: _unit.interval,
+          range: _period.range,
+        )
+        .then((s) {
+          if (mounted) setState(() => _candles = s);
+          return s;
+        });
   }
 
   void _loadOrderBook() {
-    _bookFuture = widget.stocks.getOrderBook(
-      symbol: widget.symbol,
-      marketCountry: widget.marketCountry,
-    );
+    _bookFuture = widget.stocks
+        .getOrderBook(
+          symbol: widget.symbol,
+          marketCountry: widget.marketCountry,
+        )
+        .then((b) {
+          if (mounted) setState(() => _book = b);
+          return b;
+        });
+  }
+
+  /// 호가 폴링 — 장중(realtime)에만, 화면 깜빡임 없이 데이터만 조용히 바꾼다.
+  /// 실패(장 마감 등)해도 현재 표시를 유지한다(웹 `OrderBookPanel`과 동일).
+  Future<void> _pollBook() async {
+    if (_detail?.price?.realtime != true || !_routeVisible) return;
+    try {
+      final book = await widget.stocks.getOrderBook(
+        symbol: widget.symbol,
+        marketCountry: widget.marketCountry,
+      );
+      if (!mounted) return;
+      setState(() => _book = book);
+    } on ApiException {
+      // 다음 주기에 재시도.
+    }
   }
 
   Future<void> _reload() async {
@@ -188,12 +274,106 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
     }
   }
 
-  void _selectRange(int index) {
-    if (index == _rangeIndex) return;
+  void _selectUnit(_CandleUnit unit) {
+    if (unit == _unit) return;
     setState(() {
-      _rangeIndex = index;
+      _unit = unit;
+      // 이전 기간이 새 단위에서 유효하지 않을 수 있어 그 단위의 기본 기간으로 돌린다.
+      final periods = _unitPeriods[unit]!;
+      if (!periods.contains(_period)) _period = _unitDefaultPeriod[unit]!;
       _loadCandles();
     });
+  }
+
+  void _selectPeriod(_CandlePeriod period) {
+    if (period == _period) return;
+    setState(() {
+      _period = period;
+      _loadCandles();
+    });
+  }
+
+  /// 차트 크게보기 — 웹 `ChartExpandModal`처럼 같은 토글 상태를 공유한다.
+  /// 모달에서 단위·기간을 바꾸면 닫은 뒤에도 유지된다.
+  void _openChartExpand() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setLocal) {
+          return Dialog.fullscreen(
+            backgroundColor: Theme.of(dialogContext).scaffoldBackgroundColor,
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        // 웹 모달 헤더와 같이 종목명+심볼+시장을 보여준다.
+                        Expanded(
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                TextSpan(text: _detail?.name ?? widget.symbol),
+                                TextSpan(
+                                  text: '  ${widget.symbol}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: Theme.of(dialogContext)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            style: Theme.of(dialogContext)
+                                .textTheme
+                                .titleLarge,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(dialogContext).pop(),
+                          child: const Text('닫기'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        child: _ChartSection(
+                          unit: _unit,
+                          period: _period,
+                          candleFuture: _candleFuture,
+                          candles: _candles,
+                          onUnitSelect: (u) {
+                            _selectUnit(u);
+                            setLocal(() {});
+                          },
+                          onPeriodSelect: (p) {
+                            _selectPeriod(p);
+                            setLocal(() {});
+                          },
+                          onExpand: null,
+                          onRetry: () {
+                            setState(_loadCandles);
+                            setLocal(() {});
+                          },
+                          chartHeight:
+                              MediaQuery.sizeOf(dialogContext).height * 0.55,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   String get _selfPath =>
@@ -289,12 +469,16 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
             detail: detail,
             stocks: widget.stocks,
             candleFuture: _candleFuture,
+            candles: _candles,
             bookFuture: _bookFuture,
-            rangeIndex: _rangeIndex,
-            onRangeSelect: _selectRange,
+            unit: _unit,
+            period: _period,
+            onUnitSelect: _selectUnit,
+            onPeriodSelect: _selectPeriod,
+            onExpand: _openChartExpand,
+            book: _book,
             onRefresh: _reload,
             onRetryCandles: () => setState(_loadCandles),
-            onRetryBook: () => setState(_loadOrderBook),
           );
         },
       ),
@@ -323,28 +507,212 @@ class _StockDetailScreenState extends State<StockDetailScreen> {
   }
 }
 
+/// 캔들차트 영역(봉 단위 + 기간 토글 + 차트) — 웹 `CandleChartSection`처럼
+/// 기본 화면과 크게보기 모달이 같은 마크업을 공유한다.
+class _ChartSection extends StatelessWidget {
+  const _ChartSection({
+    required this.unit,
+    required this.period,
+    required this.candleFuture,
+    required this.candles,
+    required this.onUnitSelect,
+    required this.onPeriodSelect,
+    required this.onRetry,
+    this.onExpand,
+    this.chartHeight = 260,
+  });
+
+  final _CandleUnit unit;
+  final _CandlePeriod period;
+  final Future<CandleSeries>? candleFuture;
+  final CandleSeries? candles;
+  final ValueChanged<_CandleUnit> onUnitSelect;
+  final ValueChanged<_CandlePeriod> onPeriodSelect;
+  final VoidCallback onRetry;
+
+  /// 넘기지 않으면 크게보기 버튼을 숨긴다(모달 안에서는 불필요).
+  final VoidCallback? onExpand;
+  final double chartHeight;
+
+  /// KST 기준 `MM.DD` — 백엔드 거래일 경계 정의와 맞춘다.
+  static String _kstMd(DateTime t) {
+    final kst = t.toUtc().add(const Duration(hours: 9));
+    return '${kst.month.toString().padLeft(2, '0')}.'
+        '${kst.day.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final periods = _unitPeriods[unit]!;
+    // 고를 수 있는 기간이 하나뿐이면 기간 토글 자체가 무의미하므로 숨긴다.
+    final hasPeriodChoice = periods.length > 1;
+    // 일봉·1주봉은 마지막 봉 날짜(종가 기준)를, 분봉은 "최근 N봉"을 보여준다.
+    final showsLastCandleDate =
+        unit == _CandleUnit.day || unit == _CandleUnit.week;
+    final lastAt = candles?.items.lastOrNull?.at;
+    final lastLabel = lastAt == null ? null : _kstMd(lastAt);
+    final summary = hasPeriodChoice
+        ? '${unit.label} · ${period.label}'
+            '${showsLastCandleDate && lastLabel != null ? ' · $lastLabel 종가까지' : ''}'
+        : '${unit.label} · 최근 ${candles?.items.length ?? 0}봉';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        PillTabs<_CandleUnit>(
+          options: [
+            for (final u in _CandleUnit.values) (value: u, label: u.label),
+          ],
+          value: unit,
+          onChanged: onUnitSelect,
+        ),
+        const SizedBox(height: 10),
+        // 웹은 한 줄 flex-wrap이라 좁으면 항목이 아래로 감긴다 — Wrap으로 맞춘다.
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          alignment: WrapAlignment.spaceBetween,
+          children: [
+            if (hasPeriodChoice)
+              SizedBox(
+                width: 190,
+                child: PillTabs<_CandlePeriod>(
+                  options: [
+                    for (final p in periods) (value: p, label: p.label),
+                  ],
+                  value: period,
+                  onChanged: onPeriodSelect,
+                ),
+              ),
+            // 라벨+크게보기는 한 덩어리로 묶어 웹의 ml-auto 우측 정렬과 맞춘다.
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (onExpand != null)
+                  // 웹의 "⤢ 차트 크게보기" pill 버튼과 같은 표기.
+                  GestureDetector(
+                onTap: onExpand,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: scheme.primary.withValues(alpha: 0.25),
+                      ),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.open_in_full,
+                          size: 12,
+                          color: scheme.primary,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '차트 크게보기',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: scheme.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        FutureBuilder<CandleSeries>(
+          future: candleFuture,
+          builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Notice(
+                message: snapshot.error is ApiException
+                    ? (snapshot.error! as ApiException).message
+                    : '차트를 불러오지 못했어요',
+                onRetry: onRetry,
+              );
+            }
+            final series = snapshot.data;
+            if (series == null) {
+              return SizedBox(
+                height: chartHeight,
+                child: const Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (series.items.length < 2) {
+              return SizedBox(
+                height: chartHeight,
+                child: Center(
+                  child: Text(
+                    '차트 데이터가 아직 없어요',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              );
+            }
+            return LwCandleChart(items: series.items, height: chartHeight);
+          },
+        ),
+      ],
+    );
+  }
+}
+
 class _DetailBody extends StatelessWidget {
   const _DetailBody({
     required this.detail,
     required this.stocks,
     required this.candleFuture,
+    required this.candles,
     required this.bookFuture,
-    required this.rangeIndex,
-    required this.onRangeSelect,
+    required this.unit,
+    required this.period,
+    required this.onUnitSelect,
+    required this.onPeriodSelect,
+    required this.onExpand,
+    required this.book,
     required this.onRefresh,
     required this.onRetryCandles,
-    required this.onRetryBook,
   });
 
   final StockDetail detail;
   final StockApi stocks;
   final Future<CandleSeries>? candleFuture;
+  final CandleSeries? candles;
   final Future<OrderBook>? bookFuture;
-  final int rangeIndex;
-  final ValueChanged<int> onRangeSelect;
+  final _CandleUnit unit;
+  final _CandlePeriod period;
+  final ValueChanged<_CandleUnit> onUnitSelect;
+  final ValueChanged<_CandlePeriod> onPeriodSelect;
+  final VoidCallback onExpand;
+  final OrderBook? book;
   final Future<void> Function() onRefresh;
   final VoidCallback onRetryCandles;
-  final VoidCallback onRetryBook;
 
   @override
   Widget build(BuildContext context) {
@@ -438,76 +806,92 @@ class _DetailBody extends StatelessWidget {
         ),
         const SizedBox(height: 16),
 
-        // 차트
+        // 차트 — 웹과 같은 봉 단위/기간 2단 토글 + TradingView lightweight-charts.
         AppCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SegmentedButton<int>(
-                segments: [
-                  for (var i = 0; i < _ranges.length; i++)
-                    ButtonSegment(value: i, label: Text(_ranges[i].$1)),
-                ],
-                selected: {rangeIndex},
-                onSelectionChanged: (set) => onRangeSelect(set.first),
-                showSelectedIcon: false,
-              ),
-              const SizedBox(height: 12),
-              FutureBuilder<CandleSeries>(
-                future: candleFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Notice(
-                      message: snapshot.error is ApiException
-                          ? (snapshot.error! as ApiException).message
-                          : '차트를 불러오지 못했어요',
-                      onRetry: onRetryCandles,
-                    );
-                  }
-                  final series = snapshot.data;
-                  if (series == null) {
-                    return const SizedBox(
-                      height: 200,
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  return CandleChart(items: series.items);
-                },
-              ),
-            ],
+          child: _ChartSection(
+            unit: unit,
+            period: period,
+            candleFuture: candleFuture,
+            candles: candles,
+            onUnitSelect: onUnitSelect,
+            onPeriodSelect: onPeriodSelect,
+            onExpand: onExpand,
+            onRetry: onRetryCandles,
           ),
         ),
         const SizedBox(height: 16),
 
-        // 호가
+        // 호가 — 웹 OrderBookPanel과 같은 세로 호가창(뎁스 바 + 가상 호가 뱃지).
         AppCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('호가', style: theme.textTheme.titleLarge),
-              const SizedBox(height: 8),
-              FutureBuilder<OrderBook>(
-                future: bookFuture,
-                builder: (context, snapshot) {
-                  if (snapshot.hasError) {
-                    return Notice(
-                      message: snapshot.error is ApiException
-                          ? (snapshot.error! as ApiException).message
-                          : '호가를 불러오지 못했어요',
-                      onRetry: onRetryBook,
-                    );
-                  }
-                  final book = snapshot.data;
-                  if (book == null) {
-                    return const SizedBox(
-                      height: 80,
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-                  return _OrderBookView(book: book);
-                },
-              ),
-            ],
+          child: FutureBuilder<OrderBook>(
+            future: bookFuture,
+            builder: (context, snapshot) {
+              final b = book ?? snapshot.data;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text('호가', style: theme.textTheme.titleLarge),
+                      if (b?.virtual == true) ...[
+                        const SizedBox(width: 6),
+                        Tooltip(
+                          message: b?.description ?? '가상 호가',
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: scheme.primary.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '가상 호가',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w700,
+                                color: scheme.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  if (b != null)
+                    _OrderBookView(book: b)
+                  else if (snapshot.hasError)
+                    // 503(장 마감 등)이 흔한 영역이라 재시도 버튼 없이 안내만 띄운다.
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      child: Center(
+                        child: Text(
+                          '현재 호가를 조회할 수 없어요 (장 마감 등)',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 40),
+                      child: Center(
+                        child: Text(
+                          '호가 불러오는 중…',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
         const SizedBox(height: 16),
@@ -537,85 +921,143 @@ class _DetailBody extends StatelessWidget {
   }
 }
 
+/// 웹 `OrderBookPanel`의 세로 호가창 — 매도 위→아래(높은 가격 먼저), 기준가,
+/// 매수 순서. 각 행은 잔량 비율만큼 배경이 채워지는 뎁스 바를 가진다.
 class _OrderBookView extends StatelessWidget {
   const _OrderBookView({required this.book});
 
   final OrderBook book;
 
+  // 웹 --up/--down과 같은 값: 매수=빨강(up), 매도=파랑(down).
+  static const _up = Color(0xFFEF4444);
+  static const _down = Color(0xFF3B82F6);
+
+  /// 웹은 KRW 가격을 순수 숫자(formatNumber)로, USD는 `$xx.xx`(formatUsd)로 표시한다.
+  static String _price(String raw, String? currency) {
+    if (currency == 'USD') {
+      final v = double.tryParse(raw);
+      return v == null ? '-' : '\$${v.toStringAsFixed(2)}';
+    }
+    return formatNumber(raw);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final scheme = Theme.of(context).colorScheme;
+    var maxQuantity = 1.0;
+    for (final l in [...book.asks, ...book.bids]) {
+      final q = double.tryParse(l.quantity) ?? 0;
+      if (q > maxQuantity) maxQuantity = q;
+    }
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (book.virtual)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: _Badge(
-              label: book.description ?? '가상 호가',
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
-        // 매도 호가는 위에서 아래로 내려가는 순서(높은 가격이 위)로 보여준다.
+        if (book.asks.isEmpty)
+          _emptySide(context, '매도 호가 없음 · 매수 체결 대기'),
+        // 매도 호가는 높은 가격이 위에 오도록 역순으로 그린다.
         for (final level in book.asks.reversed)
-          _LevelRow(level: level, isAsk: true, scheme: scheme, theme: theme),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Center(
-            child: Text(
-              '기준가 ${formatMoney(book.basePrice, book.currency)}',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: scheme.onSurfaceVariant,
+          _levelRow(context, level, isAsk: true, maxQuantity: maxQuantity),
+        Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                '기준가',
+                style: TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
-            ),
+              Text(
+                _price(book.basePrice ?? '', book.currency),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
           ),
         ),
+        if (book.bids.isEmpty)
+          _emptySide(context, '매수 호가 없음 · 매도 체결 대기'),
         for (final level in book.bids)
-          _LevelRow(level: level, isAsk: false, scheme: scheme, theme: theme),
+          _levelRow(context, level, isAsk: false, maxQuantity: maxQuantity),
       ],
     );
   }
-}
 
-class _LevelRow extends StatelessWidget {
-  const _LevelRow({
-    required this.level,
-    required this.isAsk,
-    required this.scheme,
-    required this.theme,
-  });
+  Widget _emptySide(BuildContext context, String message) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 16),
+    child: Center(
+      child: Text(
+        message,
+        style: TextStyle(
+          fontSize: 12,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    ),
+  );
 
-  final OrderBookLevel level;
-  final bool isAsk;
-  final ColorScheme scheme;
-  final ThemeData theme;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = isAsk ? const Color(0xFFEF4444) : const Color(0xFF3B82F6);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
+  Widget _levelRow(
+    BuildContext context,
+    OrderBookLevel level, {
+    required bool isAsk,
+    required double maxQuantity,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = isAsk ? _down : _up;
+    final qty = double.tryParse(level.quantity) ?? 0;
+    final pct = (qty / maxQuantity).clamp(0.0, 1.0);
+    return Container(
+      height: 28,
+      margin: const EdgeInsets.only(bottom: 2),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
+      child: Stack(
         children: [
-          SizedBox(
-            width: 20,
-            child: Text(
-              '${level.level}',
-              style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          // 잔량 비율만큼 왼쪽부터 채워지는 뎁스 바(웹 --upBg/--downBg에 해당).
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FractionallySizedBox(
+              widthFactor: pct,
+              heightFactor: 1,
+              child: ColoredBox(color: color.withValues(alpha: 0.10)),
             ),
           ),
-          Expanded(
-            child: Text(
-              formatMoney(level.price, null),
-              style: theme.textTheme.bodyMedium?.copyWith(color: color),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _price(level.price, book.currency),
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                      color: color,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    formatNumber(level.quantity),
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          Text(
-            level.quantity,
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
         ],
       ),

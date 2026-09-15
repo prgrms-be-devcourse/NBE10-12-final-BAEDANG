@@ -1247,6 +1247,98 @@ void main() {
     });
   });
 
+  group('캔들 차트', () {
+    testWidgets('봉 단위·기간 토글이 웹과 같은 조합으로 쿼리한다', (tester) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('삼성전자'));
+      await _settle(tester);
+
+      // 웹 초기값: 일봉 · 6개월. 단위 탭 5개 + 일봉의 기간 탭 3개.
+      expect(find.text('1분봉'), findsOneWidget);
+      expect(find.text('5분봉'), findsOneWidget);
+      expect(find.text('10분봉'), findsOneWidget);
+      expect(find.text('일봉'), findsOneWidget);
+      expect(find.text('1주봉'), findsOneWidget);
+      expect(find.text('1개월'), findsOneWidget);
+      expect(find.text('6개월'), findsOneWidget);
+      expect(find.text('1년'), findsOneWidget);
+      // 마지막 봉 날짜 라벨(픽스처 at=2026-09-15 KST).
+      expect(find.textContaining('종가까지'), findsOneWidget);
+
+      final initial = harness
+          .requestsTo('/api/stocks/005930/candles')
+          .last;
+      expect(initial.uri.queryParameters['interval'], '1d');
+      expect(initial.uri.queryParameters['range'], '6M');
+
+      // 5분봉 → 1일/1주일 기간 탭, interval=5m.
+      await tester.tap(find.text('5분봉'));
+      await _settle(tester);
+      expect(find.text('1일'), findsOneWidget);
+      expect(find.text('1주일'), findsOneWidget);
+      expect(find.text('1개월'), findsNothing);
+      var req = harness.requestsTo('/api/stocks/005930/candles').last;
+      expect(req.uri.queryParameters['interval'], '5m');
+      expect(req.uri.queryParameters['range'], '1D');
+
+      await tester.tap(find.text('1주일'));
+      await _settle(tester);
+      req = harness.requestsTo('/api/stocks/005930/candles').last;
+      expect(req.uri.queryParameters['interval'], '5m');
+      expect(req.uri.queryParameters['range'], '1W');
+
+      // 1분봉은 기간이 하나뿐이라 토글이 숨고 "최근 N봉" 라벨이 뜬다.
+      await tester.tap(find.text('1분봉'));
+      await _settle(tester);
+      expect(find.text('1일'), findsNothing);
+      expect(find.textContaining('최근'), findsOneWidget);
+      req = harness.requestsTo('/api/stocks/005930/candles').last;
+      expect(req.uri.queryParameters['interval'], '1m');
+      expect(req.uri.queryParameters['range'], '1D');
+    });
+
+    testWidgets('차트 크게보기 모달이 같은 토글 상태를 공유한다', (tester) async {
+      final harness = _harness();
+      await tester.pumpWidget(
+        MaterialApp.router(routerConfig: _router(harness)),
+      );
+      await _settle(tester);
+
+      await tester.tap(find.text('삼성전자'));
+      await _settle(tester);
+
+      await tester.tap(find.text('차트 크게보기'));
+      await _settle(tester);
+      // 웹 모달처럼 헤더에 종목명+심볼이 뜬다.
+      expect(find.byType(Dialog), findsOneWidget);
+      expect(find.text('닫기'), findsOneWidget);
+
+      // 모달에서 단위를 바꾸면 쿼리가 나가고, 닫은 뒤에도 상태가 유지된다.
+      // 카드에도 같은 탭이 있어 모달 안쪽을 명시한다.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(Dialog),
+          matching: find.text('1분봉'),
+        ),
+      );
+      await _settle(tester);
+      var req = harness.requestsTo('/api/stocks/005930/candles').last;
+      expect(req.uri.queryParameters['interval'], '1m');
+
+      await tester.tap(find.text('닫기'));
+      await _settle(tester);
+      expect(find.byType(Dialog), findsNothing);
+      // 모달에서 고른 1분봉이 카드에도 남아 있다(기간 토글 숨김 상태).
+      expect(find.text('1일'), findsNothing);
+      expect(find.textContaining('최근'), findsOneWidget);
+    });
+  });
+
   group('시세 폴링', () {
     testWidgets('장이 열린 랭킹은 5초마다 다시 조회하고 마감 땐 조용하다', (
       tester,

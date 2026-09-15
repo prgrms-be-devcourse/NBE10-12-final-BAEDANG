@@ -234,7 +234,8 @@ void main() {
     // 호가 카드는 스크롤 아래에 있다.
     await tester.scrollUntilVisible(find.text('호가'), 300);
     await _settle(tester);
-    expect(find.text('현재가 기반 가상 호가·가상 잔량'), findsOneWidget);
+    expect(find.text('가상 호가'), findsOneWidget);
+    expect(find.textContaining('기준가'), findsOneWidget);
   });
 
   testWidgets('비로그인 사용자가 찜을 누르면 로그인으로 간다', (tester) async {

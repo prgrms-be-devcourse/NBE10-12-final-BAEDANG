@@ -1,0 +1,129 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: transparent; }
+  #chart { position: absolute; inset: 0; }
+</style>
+<script src="lightweight-charts.js"></script>
+</head>
+<body>
+<div id="chart"></div>
+<script>
+(function () {
+  'use strict';
+  // docs/erd.md의 거래일 경계 정의와 맞추기 위해 항상 KST로 표시한다(웹과 동일).
+  var TZ = 'Asia/Seoul';
+  var fmtCache = {};
+  function fmt(options) {
+    var key = JSON.stringify(options);
+    if (!fmtCache[key]) {
+      fmtCache[key] = new Intl.DateTimeFormat('ko-KR', Object.assign(options, { timeZone: TZ }));
+    }
+    return fmtCache[key];
+  }
+
+  // 웹 formatKstTickMark와 동일 — TickMarkType은 라이브러리 enum 값을 쓴다.
+  function tickMark(time, tickMarkType) {
+    var T = LightweightCharts.TickMarkType;
+    var d = new Date(time * 1000);
+    switch (tickMarkType) {
+      case T.Year: return fmt({ year: 'numeric' }).format(d);
+      case T.Month: return fmt({ month: 'short' }).format(d);
+      case T.DayOfMonth: return fmt({ month: '2-digit', day: '2-digit' }).format(d);
+      case T.TimeWithSeconds: return fmt({ hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(d);
+      default: return fmt({ hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    }
+  }
+
+  var intraday = false;
+  // 웹 formatKstCrosshairLabel과 동일 — 분봉은 월.일 시:분, 일/주봉은 연.월.일.
+  function crosshairLabel(time) {
+    var d = new Date(time * 1000);
+    return intraday
+      ? fmt({ month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(d)
+      : fmt({ year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+  }
+
+  var chart = null;
+  var candleSeries = null;
+  var volumeSeries = null;
+
+  function boot(colors) {
+    var container = document.getElementById('chart');
+    chart = LightweightCharts.createChart(container, {
+      width: container.clientWidth,
+      height: container.clientHeight,
+      layout: { background: { color: 'transparent' }, textColor: colors.ink },
+      grid: { vertLines: { color: colors.line2 }, horzLines: { color: colors.line2 } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      rightPriceScale: { borderColor: colors.line2 },
+      timeScale: { borderColor: colors.line2, timeVisible: true, secondsVisible: false, tickMarkFormatter: tickMark },
+      localization: { timeFormatter: crosshairLabel },
+    });
+    candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+      upColor: colors.up, downColor: colors.down,
+      borderVisible: false,
+      wickUpColor: colors.up, wickDownColor: colors.down,
+    });
+    volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+      priceFormat: { type: 'volume' },
+      priceScaleId: 'volume',
+    });
+    volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    new ResizeObserver(function (entries) {
+      var w = entries[0] && entries[0].contentRect.width;
+      if (w) chart.applyOptions({ width: w, height: entries[0].contentRect.height });
+    }).observe(container);
+  }
+
+  // 웹 toCandlestickData/toVolumeData의 방어 로직(비유한 숫자 스킵, 시각 중복은
+  // 첫 값 우선, 오름차순 정렬)을 그대로 옮긴다 — 잘못된 값 하나가 차트 전체를 죽인다.
+  function buildPoints(items, colors) {
+    var seen = {};
+    var candles = [], volumes = [];
+    items.forEach(function (c) {
+      var t = c.time, o = c.open, h = c.high, l = c.low, cl = c.close, v = c.volume;
+      if (![t, o, h, l, cl].every(Number.isFinite)) return;
+      if (seen[t]) return;
+      seen[t] = true;
+      candles.push({ time: t, open: o, high: h, low: l, close: cl });
+      if (Number.isFinite(v)) {
+        volumes.push({ time: t, value: Math.max(0, v), color: cl < o ? colors.down : colors.up });
+      }
+    });
+    candles.sort(function (a, b) { return a.time - b.time; });
+    volumes.sort(function (a, b) { return a.time - b.time; });
+    // 연속 두 봉 간격이 하루보다 좁으면 분봉 계열(웹 isIntradayCandles와 동일).
+    intraday = candles.length >= 2 && candles[1].time - candles[0].time < 86400;
+    return { candles: candles, volumes: volumes };
+  }
+
+  // Flutter → JS 진입점. payload: {items:[{time,open,high,low,close,volume}], colors:{...}}
+  window.render = function (json) {
+    try {
+      var payload = typeof json === 'string' ? JSON.parse(json) : json;
+      if (!chart) boot(payload.colors);
+      var colors = payload.colors;
+      chart.applyOptions({
+        layout: { textColor: colors.ink },
+        grid: { vertLines: { color: colors.line2 }, horzLines: { color: colors.line2 } },
+        rightPriceScale: { borderColor: colors.line2 },
+        timeScale: { borderColor: colors.line2 },
+      });
+      candleSeries.applyOptions({ upColor: colors.up, downColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down });
+      var points = buildPoints(payload.items, colors);
+      candleSeries.setData(points.candles);
+      volumeSeries.setData(points.volumes);
+      chart.timeScale().fitContent();
+      ChartChannel.postMessage('rendered:' + points.candles.length);
+    } catch (e) {
+      ChartChannel.postMessage('error:' + e.message);
+    }
+  };
+})();
+</script>
+</body>
+</html>
