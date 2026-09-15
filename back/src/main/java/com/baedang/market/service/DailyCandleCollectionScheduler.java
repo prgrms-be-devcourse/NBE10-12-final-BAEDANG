@@ -55,12 +55,13 @@ public class DailyCandleCollectionScheduler {
     private void submit(MarketCountry marketCountry) {
         CompletableFuture.runAsync(
                 () -> {
-                    dailyCandleCollectionService.collect(marketCountry);
-                    // collect() 가 예외 없이 끝난 뒤에만(submit 반환 시점이 아니라 비동기 완료 시점에)
-                    // 마지막 성공 시각을 기록한다. 실패 시엔 exceptionally 로 빠져 기록하지 않는다.
-                    // KR/US 는 스케줄·실패 지점이 독립적이라 market 태그로 시계열을 분리한다 —
-                    // 한 시장의 성공이 다른 시장의 장애를 가리지 않도록(시장별 알림은 후속 이슈).
-                    metrics.batchSucceeded("daily-candle", marketCountry.name());
+                    // collect() 가 "실제로 당일 데이터가 존재함"을 true 로 돌려줄 때만 성공 시각을 기록한다.
+                    // collect() 는 종목별 예외를 삼키고 전량 미적재에도 정상 반환하므로, 반환값을 봐야
+                    // 거짓 성공(데이터 0건인데 성공 기록)을 막는다(PR #213 리뷰 반영).
+                    // KR/US 는 스케줄·실패 지점이 독립적이라 market 태그로 시계열을 분리한다.
+                    if (dailyCandleCollectionService.collect(marketCountry)) {
+                        metrics.batchSucceeded("daily-candle", marketCountry.name());
+                    }
                 },
                 dailyCandleTaskExecutor
         ).exceptionally(exception -> {

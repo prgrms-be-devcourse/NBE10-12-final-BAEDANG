@@ -8,6 +8,7 @@ import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceQuote;
 import com.baedang.market.repository.QuoteSnapshotRepository;
+import com.baedang.stock.entity.MarketCountry;
 import com.baedang.stock.entity.Stock;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -187,21 +188,29 @@ public class QuoteRefreshCoordinator {
         try {
             List<PriceQuote> quotes = marketData.fetchPrices(stocks.stream().map(Stock::getSymbol).toList());
             int updated = persistence.saveOrUpdate(stocks, quotes, clock.instant().atOffset(ZoneOffset.UTC));
-            for (PriceQuote quote : quotes) {
-                if (quote != null && quote.quoteAt() != null && !quote.quoteAt().toInstant().isAfter(clock.instant())) {
-                    metrics.timer("quote.collection.source.age").record(
-                            Duration.between(quote.quoteAt().toInstant(), clock.instant()));
+            Instant now = clock.instant();
+            // 지표 계산이 시세 수집 본류를 절대 깨뜨리지 않도록 방어적으로 구성한다(Collectors.toMap 은
+            // market 이 null 이면 NPE). market/symbol 이 비면 그 종목은 신선도 집계에서 조용히 뺀다.
+            Map<String, MarketCountry> marketBySymbol = new HashMap<>();
+            for (Stock stock : stocks) {
+                if (stock.getSymbol() != null && stock.getMarketCountry() != null) {
+                    marketBySymbol.putIfAbsent(stock.getSymbol(), stock.getMarketCountry());
                 }
+            }
+            // 시장별 "원본 최신 quoteAt". 저장 성공 여부(updated)가 아니라 원천 시각으로 신선도를 잰다 —
+            // Toss 가 멈춰 같은 quoteAt 을 반복 반환해도(저장은 계속 성공) 이 값이 전진하지 않아 QuoteStale 이 살아난다.
+            Map<MarketCountry, Instant> latestQuoteAtByMarket = new HashMap<>();
+            for (PriceQuote quote : quotes) {
+                if (quote == null || quote.quoteAt() == null) continue;
+                Instant at = quote.quoteAt().toInstant();
+                if (at.isAfter(now)) continue;
+                metrics.timer("quote.collection.source.age").record(Duration.between(at, now));
+                MarketCountry market = marketBySymbol.get(quote.symbol());
+                if (market != null) latestQuoteAtByMarket.merge(market, at, (x, y) -> y.isAfter(x) ? y : x);
             }
             metrics.counter("quote.collection.updated").increment(updated);
             metrics.counter("quote.collection.requested").increment(stocks.size());
-            // 실제 저장이 일어난 경우에만(updated>0) 시장별 시세 신선도를 초기화한다. Toss 조회가
-            // 예외 없이 빈 응답이라 아무것도 저장 못 하면 신선도를 갱신하지 않아 QuoteStale 이 살아난다.
-            // 여기(저장 성공 시점)에서 기록하므로 비동기 조회/저장 실패는 false green 을 만들지 않는다.
-            if (updated > 0) {
-                stocks.stream().map(Stock::getMarketCountry).map(Enum::name).distinct()
-                        .forEach(tradingMetrics::quoteUpdated);
-            }
+            latestQuoteAtByMarket.forEach((market, at) -> tradingMetrics.quoteUpdated(market.name(), at));
             finish(stocks, null);
         } catch (RuntimeException exception) {
             metrics.counter("quote.collection.failures").increment();

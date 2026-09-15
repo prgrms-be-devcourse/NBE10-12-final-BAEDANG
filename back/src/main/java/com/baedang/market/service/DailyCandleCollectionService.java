@@ -61,10 +61,17 @@ public class DailyCandleCollectionService {
         this.universeSize = universeSize;
     }
 
-    /** 장 마감 후 당일 마감 일봉 1개 수집 */
-    public void collect(MarketCountry marketCountry) {
+    /**
+     * 장 마감 후 당일 마감 일봉 1개 수집.
+     *
+     * @return 당일 확정 일봉이 실제로 적재됐거나(성공) 이미 적재돼 있으면 {@code true}.
+     *         전량 미적재(Toss 장애·확정 일봉 미도착)면 {@code false}. 휴장·마감 전·대상 없음 등
+     *         "이번엔 수집할 게 없음"도 {@code false} 로 돌려, 호출자가 배치 성공 지표를 함부로
+     *         갱신하지 않게 한다(거짓 성공 방지, PR #213 리뷰 반영).
+     */
+    public boolean collect(MarketCountry marketCountry) {
         Optional<CollectionContext> contextCandidate = collectionContext(marketCountry);
-        if (contextCandidate.isEmpty()) return;
+        if (contextCandidate.isEmpty()) return false;
         CollectionContext context = contextCandidate.get();
 
         List<Stock> stocks = stockRepository.findRankedByMarketCountry(
@@ -72,7 +79,7 @@ public class DailyCandleCollectionService {
 
         if (stocks.isEmpty()) {
             log.info("[daily-candle] 수집 대상 없음: market={}", marketCountry);
-            return;
+            return false;
         }
 
         List<Long> stockIds = stocks.stream().map(Stock::getStockId).toList();
@@ -85,7 +92,7 @@ public class DailyCandleCollectionService {
         if (targets.isEmpty()) {
             log.info("[daily-candle] 당일 수집 완료 상태: market={} tradeDate={}",
                     marketCountry, context.expectedTradeDate());
-            return;
+            return true; // 이미 당일 확정 일봉이 다 적재됨 = 데이터 존재 = 성공
         }
 
         log.info("[daily-candle] 수집 시작: market={} tradeDate={} targets={}/{}",
@@ -121,9 +128,10 @@ public class DailyCandleCollectionService {
 
         if (successCount == 0) {
             log.warn("[daily-candle] 전량 미적재: market={} — 확정 일봉 미도착 또는 Toss 장애 가능성", marketCountry);
-        } else {
-            log.info("[daily-candle] 수집 완료: market={} success={}/{}", marketCountry, successCount, targets.size());
+            return false; // 대상은 있었는데 하나도 못 적재 = 실패. 배치 성공 지표를 갱신하지 않는다.
         }
+        log.info("[daily-candle] 수집 완료: market={} success={}/{}", marketCountry, successCount, targets.size());
+        return true;
     }
 
     private Optional<CollectionContext> collectionContext(MarketCountry marketCountry) {

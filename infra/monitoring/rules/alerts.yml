@@ -25,15 +25,17 @@ groups:
           description: "1분간 /actuator/prometheus 스크레이프 실패. 앱이 죽었거나 관리포트 8081 이 안 열림."
 
       - alert: DatabaseDown
-        # exporter 가 죽어도, DB 가 죽어도 이 job 은 down 이 된다. pg_up 단독은
-        # exporter 가 죽으면 시계열 자체가 없어 조용해지므로 up 을 본다.
-        expr: up{job="postgres"} == 0
+        # 두 경우를 모두 잡는다:
+        #   up == 0     : exporter 자체가 스크레이프 안 됨(컨테이너 다운 등). pg_up 은 이때 시계열이
+        #                 없어 조용하므로 up 으로 잡는다.
+        #   pg_up == 0  : exporter 는 살아 있는데 DB 연결만 실패. up 은 1 이라 up 단독으론 놓친다.
+        expr: up{job="postgres"} == 0 or pg_up{job="postgres"} == 0
         for: 1m
         labels:
           severity: critical
         annotations:
           summary: "DB 관측 불가 (postgres)"
-          description: "1분간 postgres-exporter 스크레이프 실패. DB 또는 exporter 다운."
+          description: "1분간 postgres-exporter 스크레이프 실패 또는 DB 연결 불가(pg_up=0). DB 또는 exporter 다운."
 
       - alert: AppRestarted
         # process_start_time_seconds 는 프로세스 시작 시각(고정값). 값이 바뀌면 재시작.
@@ -225,16 +227,14 @@ groups:
           summary: "일 배치 미실행 ({{ $labels.job_name }})"
           description: "배치 {{ $labels.job_name }} 가 26시간 넘게 성공하지 않음."
 
-      - alert: DailyCandleBatchNotRun
-        # daily-candle 은 MON-FRI 배치라 금요일 마지막 성공 후 월요일 첫 수집까지 ~58h 의 정상
-        # 공백이 생긴다. time()-임계 단독이면 주말·월요일 새벽마다 오탐한다.
-        # → KR 수집이 끝났어야 할 "평일 UTC 창"에서만 26h 초과를 평가한다.
-        #    KR 수집(15:40~17:10 KST = 06:40~08:10 UTC)은 KST 에 DST 가 없어 연중 고정 →
-        #    UTC 10~14시 게이팅이 안전하다. 이 창 안에서 마지막 성공이 26h 넘게 없으면(=오늘 KR
-        #    수집이 실패/미실행) 울린다. 평일 그 창 밖·주말엔 아예 평가되지 않아 조용하다.
-        # !! 잔여 한계: 공휴일에 배치가 정상적으로 안 도는 날은 그날 창에서 오탐할 수 있다(희소, 허용).
+      # !! daily-candle 은 시장별로 성공 시각이 기록된다(market="KR"|"US"). 한 시장의 성공이 다른
+      #    시장의 실패를 가리지 않도록 시장별로 나눠 평가한다. KR/US 는 수집 시각·달력이 달라 조건도 다르다.
+      - alert: DailyCandleBatchNotRunKr
+        # KR 수집(15:40~17:10 KST = 06:40~08:10 UTC)은 KST 에 DST 가 없어 연중 고정 → KR 수집이
+        # 끝났어야 할 "평일 UTC 10~14시" 창에서만 26h 초과를 평가한다. 주말·창 밖에선 평가되지 않아 조용하다.
+        # !! 잔여 한계: 공휴일 미실행일엔 그날 창에서 오탐할 수 있다(희소, 허용).
         expr: |
-          (time() - max by (job_name) (trading_batch_last_success_timestamp_seconds{job="spring-boot", job_name="daily-candle"})) > 93600
+          (time() - max by (market) (trading_batch_last_success_timestamp_seconds{job="spring-boot", job_name="daily-candle", market="KR"})) > 93600
           and on() (day_of_week() >= 1)
           and on() (day_of_week() <= 5)
           and on() (hour() >= 10)
@@ -243,5 +243,20 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "일봉 수집 배치 미실행 (daily-candle)"
-          description: "평일 KR 수집 창인데 daily-candle 이 26시간 넘게 성공하지 않음."
+          summary: "국내 일봉 수집 배치 미실행 (daily-candle KR)"
+          description: "평일 KR 수집 창인데 daily-candle KR 이 26시간 넘게 성공하지 않음."
+
+      - alert: DailyCandleBatchNotRunUs
+        # US 수집은 미국 현지(NY) 시간이라 DST 가 있고 UTC 일 경계를 저녁에 넘나들어, KR 처럼 안전한
+        # UTC 시간창을 잡기 어렵다. 그래서 시간창 대신 "주말 정상 공백(~72h)을 견디는 임계"만 쓴다:
+        # 80시간(288000s) 넘게 성공이 없으면 미실행으로 본다.
+        # !! 트레이드오프: 감지까지 ~3.3일(KR 의 ~1일보다 둔감). 공휴일이 낀 주는 정상 공백이 더 길어
+        #    오탐 여지가 있다. 국내(KR)는 위 룰로 민감하게 잡고, 부차 시장인 US 만 이 느슨한 임계를 쓴다.
+        #    (DST 를 반영한 시장별 시간창 게이팅은 후속 개선 여지.)
+        expr: (time() - max by (market) (trading_batch_last_success_timestamp_seconds{job="spring-boot", job_name="daily-candle", market="US"})) > 288000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "미국 일봉 수집 배치 미실행 (daily-candle US)"
+          description: "daily-candle US 가 80시간 넘게 성공하지 않음."

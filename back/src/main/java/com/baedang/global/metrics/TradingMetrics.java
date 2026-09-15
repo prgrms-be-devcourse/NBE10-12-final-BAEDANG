@@ -57,23 +57,30 @@ public class TradingMetrics {
     }
 
     /**
-     * 시세가 갱신됐음을 기록한다. 시장(market)별로 마지막 갱신 시각을 저장하고,
-     * gauge 는 스크레이프 시점에 "지금까지 흐른 초"를 계산해 내보낸다.
+     * 시장(market)별로 관측한 <b>원본 시세 시각({@code quoteAt})</b>을 기록한다. gauge 는 스크레이프
+     * 시점에 "그 원본 시각 이후 흐른 초"를 계산해 내보낸다.
+     *
+     * <p>[!! 저장 시각이 아니라 원본 quoteAt 을 재는 이유]
+     *   우리 쪽 저장(collectedAt)이 갱신됐다고 원천 시세가 새로 나온 건 아니다. Toss 가 멈춰
+     *   같은 quoteAt 을 반복 반환해도 저장은 계속 성공하므로, "저장 성공=신선"으로 재면 원천이
+     *   멎어도 QuoteStale 이 침묵한다(false green). 그래서 원본 quoteAt 을 저장하고, 원천이 멈추면
+     *   이 값이 고정돼 staleness 가 계속 커지도록 한다.
      *
      * <p>실패 카운터가 아니라 신선도(경과 시간)를 재는 이유: 폴링 루프가 통째로 멈추면
      * 아무 이벤트도 안 올라오므로, 값이 "올라가지 않는다"가 아니라 "계속 커진다"로
      * 장애가 드러나야 한다.
      */
-    public void quoteUpdated(String market) {
+    public void quoteUpdated(String market, Instant sourceQuoteAt) {
         AtomicReference<Instant> holder = quoteLastUpdate.computeIfAbsent(market, key -> {
-            AtomicReference<Instant> ref = new AtomicReference<>(clock.instant());
+            AtomicReference<Instant> ref = new AtomicReference<>(sourceQuoteAt);
             Gauge.builder(QUOTE_STALENESS, ref, this::elapsedSeconds)
                     .tag("market", key)
-                    .description("마지막 시세 갱신 이후 흐른 시간(초). 계속 커지면 폴링이 멈춘 것")
+                    .description("원본 시세 시각(quoteAt) 이후 흐른 시간(초). 계속 커지면 폴링/원천이 멈춘 것")
                     .register(registry);
             return ref;
         });
-        holder.set(clock.instant());
+        // 더 최신 원본 시각으로만 전진시킨다(뒤로 가는 값은 무시). 원천이 멈추면 값이 고정돼 staleness 가 커진다.
+        holder.getAndUpdate(prev -> (prev == null || sourceQuoteAt.isAfter(prev)) ? sourceQuoteAt : prev);
     }
 
     /**
@@ -151,8 +158,9 @@ public class TradingMetrics {
      *   알림이 침묵할 수 있다(바로 그 "멈춤" 상황인데도). job 이름이 동적이라 absent() 로
      *   깔끔히 못 막는다. 기동 시 각 배치의 gauge 를 0/과거값으로 시드하면 닫힌다.
      */
+    /** 시장 구분이 없는 배치(예: 리더보드 스냅샷). {@code market="all"} 로 기록한다. */
     public void batchSucceeded(String jobName) {
-        recordBatchSuccess(jobName, null);
+        recordBatchSuccess(jobName, "all");
     }
 
     /**
@@ -165,19 +173,20 @@ public class TradingMetrics {
     }
 
     private void recordBatchSuccess(String jobName, String market) {
-        // gauge 시계열은 (job_name, market) 조합마다 하나여야 하므로 맵 키에 market 을 포함한다.
-        String key = market == null ? jobName : jobName + "|" + market;
+        // !! 같은 메트릭 이름의 모든 시계열은 태그 키 집합이 동일해야 한다. 일부는 market 을 달고
+        //    일부는 안 달면 PrometheusMeterRegistry 가 태그 키 충돌로 경고하고, 먼저 등록된 형태만
+        //    남아 다른 시계열이 scrape 에서 누락된다. 그래서 시장 구분이 없는 배치도 market="all" 로
+        //    항상 두 태그(job_name, market)를 채운다.
+        String key = jobName + "|" + market;
         AtomicReference<Instant> holder = batchLastSuccess.computeIfAbsent(key, ignored -> {
             AtomicReference<Instant> ref = new AtomicReference<>(clock.instant());
-            Gauge.Builder<AtomicReference<Instant>> builder = Gauge.builder(BATCH_LAST_SUCCESS, ref, this::epochSeconds)
+            Gauge.builder(BATCH_LAST_SUCCESS, ref, this::epochSeconds)
                     // Prometheus 의 스크레이프 job 라벨과 충돌하지 않도록 태그 키를 job_name 으로 둔다.
                     // 태그 키를 그냥 job 으로 두면 Prometheus 가 exported_job 으로 재라벨해 그룹핑이 깨진다.
                     .tag("job_name", jobName)
-                    .description("배치의 마지막 성공 시각(epoch 초). time()-이 값 이 커지면 미실행");
-            if (market != null) {
-                builder = builder.tag("market", market);
-            }
-            builder.register(registry);
+                    .tag("market", market)
+                    .description("배치의 마지막 성공 시각(epoch 초). time()-이 값 이 커지면 미실행")
+                    .register(registry);
             return ref;
         });
         holder.set(clock.instant());

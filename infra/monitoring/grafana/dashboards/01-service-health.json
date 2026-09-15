@@ -61,7 +61,7 @@
     },
     {
       "id": 5, "type": "stat", "title": "5xx 에러율",
-      "description": "5분간 전체 요청 중 5xx 비율. clamp_min 으로 0 나누기를 막아 저트래픽에서 오탐을 줄인다. 5% 초과면 빨강.",
+      "description": "5분간 전체 요청 중 5xx 비율(실제 비율). 저트래픽에서 clamp_min 으로 분모를 누르면 100% 실패도 작게 표시되므로 쓰지 않는다. 요청이 없으면 0/0=NaN 이라 No data. 5% 초과면 빨강.",
       "datasource": { "type": "prometheus", "uid": "PROM" },
       "gridPos": { "h": 4, "w": 5, "x": 14, "y": 1 },
       "fieldConfig": { "defaults": {
@@ -69,7 +69,7 @@
         "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] }
       }, "overrides": [] },
       "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "targets": [ { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\", status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m])), 1)" } ]
+      "targets": [ { "refId": "A", "expr": "sum(rate(http_server_requests_seconds_count{job=\"spring-boot\", status=~\"5..\"}[5m])) / sum(rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m]))" } ]
     },
     {
       "id": 6, "type": "stat", "title": "응답시간 p95",
@@ -126,13 +126,13 @@
     },
     {
       "id": 11, "type": "table", "title": "느린 엔드포인트 순위 (평균 응답시간)",
-      "description": "평균 = _sum / _count (rate 로 최근 5분). 상위 10개. 어떤 엔드포인트가 전체 지연을 끌어올리는지 본다.",
+      "description": "평균 = _sum / _count (rate 로 최근 5분). 상위 10개. 어떤 엔드포인트가 전체 지연을 끌어올리는지 본다. clamp_min 없이 실제 평균을 쓴다(저트래픽에서 분모를 1로 누르면 평균이 실제보다 작게 왜곡됨). 트래픽 없는 uri 는 0/0=NaN 이라 표에서 빠진다.",
       "datasource": { "type": "prometheus", "uid": "PROM" },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
       "fieldConfig": { "defaults": { "unit": "s", "decimals": 4 }, "overrides": [] },
       "options": { "showHeader": true },
       "targets": [
-        { "refId": "A", "format": "table", "instant": true, "expr": "topk(10, sum by (uri) (rate(http_server_requests_seconds_sum{job=\"spring-boot\"}[5m])) / clamp_min(sum by (uri) (rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m])), 1))" }
+        { "refId": "A", "format": "table", "instant": true, "expr": "topk(10, sum by (uri) (rate(http_server_requests_seconds_sum{job=\"spring-boot\"}[5m])) / sum by (uri) (rate(http_server_requests_seconds_count{job=\"spring-boot\"}[5m])))" }
       ]
     },
 
