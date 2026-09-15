@@ -449,28 +449,13 @@ class _OpenReportCard extends StatelessWidget {
                   Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // 유형 코드 큰 글자 카드 — 웹은 aspect-square 장식 카드,
-                      // 모바일은 가로 배치로 압축한다.
-                      Container(
-                        width: 88,
-                        height: 88,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.primary
-                              .withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Center(
-                          child: Text(
-                            report.typeCode!,
-                            style: TextStyle(
-                              fontFamily: 'monospace',
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 2,
-                              color: theme.colorScheme.primary,
-                            ),
-                          ),
-                        ),
+                      // 유형 이미지 — 웹은 public/personality-types/CODE.webp를
+                      // 보여주고 탭하면 확대 모달을 연다. 이미지가 등록되지
+                      // 않은 유형은 코드 텍스트 카드로 폴백한다.
+                      _TypeImage(
+                        typeCode: report.typeCode!,
+                        personaType: personaType,
+                        size: 88,
                       ),
                       const SizedBox(width: 16),
                       Expanded(
@@ -1644,6 +1629,130 @@ class _TypeComparisonRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 유형 이미지 — 웹 `personaType.image` 카드. 탭하면 확대 다이얼로그를 연다.
+/// 이미지가 없거나 로드에 실패하면 기존 코드 텍스트 카드로 폴백한다.
+class _TypeImage extends StatelessWidget {
+  const _TypeImage({
+    required this.typeCode,
+    required this.personaType,
+    required this.size,
+  });
+
+  final String typeCode;
+  final PersonalityTypeInfo? personaType;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final image = personaType?.image;
+    final fallback = Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Center(
+        child: Text(
+          typeCode,
+          style: TextStyle(
+            fontFamily: 'monospace',
+            fontSize: size * 0.25,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 2,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+      ),
+    );
+    if (image == null) return fallback;
+    return GestureDetector(
+      onTap: () => showDialog<void>(
+        context: context,
+        builder: (context) =>
+            _TypeImageDialog(typeCode: typeCode, personaType: personaType),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Image.asset(
+          image,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => fallback,
+        ),
+      ),
+    );
+  }
+}
+
+/// 유형 이미지 확대 — 웹 `PersonalityImageModal` 대응.
+class _TypeImageDialog extends StatelessWidget {
+  const _TypeImageDialog({required this.typeCode, required this.personaType});
+
+  final String typeCode;
+  final PersonalityTypeInfo? personaType;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final image = personaType?.image;
+    return Dialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        typeCode,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.8,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        personaType?.nickname ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('닫기'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (image != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(18),
+                child: Image.asset(image, fit: BoxFit.cover),
+              ),
+          ],
+        ),
       ),
     );
   }

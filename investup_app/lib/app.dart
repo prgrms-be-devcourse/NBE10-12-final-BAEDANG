@@ -170,6 +170,7 @@ class _InvestUpAppState extends State<InvestUpApp> {
   Widget build(BuildContext context) {
     return MaterialApp.router(
       title: 'InvestUP',
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.forBrightness(Brightness.light),
       darkTheme: AppTheme.forBrightness(Brightness.dark),
       routerConfig: _router,
