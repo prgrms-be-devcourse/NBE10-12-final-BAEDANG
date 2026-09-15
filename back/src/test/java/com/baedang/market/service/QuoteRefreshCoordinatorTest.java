@@ -6,6 +6,7 @@ import com.baedang.market.config.QuoteCollectionProperties;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.MarketDataPort;
 import com.baedang.market.port.PriceQuote;
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.repository.QuoteSnapshotRepository;
 import com.baedang.stock.entity.Stock;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -30,7 +31,8 @@ class QuoteRefreshCoordinatorTest {
     private final List<Runnable> tasks = new ArrayList<>();
     private final QuoteRefreshCoordinator coordinator = new QuoteRefreshCoordinator(data, persistence, snapshots,
             tasks::add, new QuoteCollectionProperties(Duration.ofSeconds(5),
-            Duration.ofSeconds(2), 1, 200, 6), Clock.fixed(NOW, ZoneOffset.UTC), new SimpleMeterRegistry());
+            Duration.ofSeconds(2), 1, 200, 6), Clock.fixed(NOW, ZoneOffset.UTC), new SimpleMeterRegistry(),
+            new TradingMetrics(new SimpleMeterRegistry(), Clock.fixed(NOW, ZoneOffset.UTC)));
 
     @Test
     void 같은종목_배경요청과_사용자요청은_한_HTTP를_공유한다() throws Exception {

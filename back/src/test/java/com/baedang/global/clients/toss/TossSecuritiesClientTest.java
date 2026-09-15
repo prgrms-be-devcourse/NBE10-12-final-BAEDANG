@@ -3,7 +3,9 @@ package com.baedang.global.clients.toss;
 import com.baedang.global.clients.FixedIntervalGate;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +26,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.time.Clock;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
@@ -89,6 +92,7 @@ class TossSecuritiesClientTest {
         client = new TossSecuritiesClient(
                 RestClient.builder(),
                 registry,
+                new TradingMetrics(new SimpleMeterRegistry(), Clock.systemUTC()),
                 "http://localhost:" + wireMockServer.port(),
                 "test-id",
                 "test-secret"

@@ -1,5 +1,6 @@
 package com.baedang.market.service;
 
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.stock.entity.MarketCountry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,13 +23,16 @@ public class DailyCandleCollectionScheduler {
 
     private final DailyCandleCollectionService dailyCandleCollectionService;
     private final Executor dailyCandleTaskExecutor;
+    private final TradingMetrics metrics;
 
     public DailyCandleCollectionScheduler(
             DailyCandleCollectionService dailyCandleCollectionService,
-            @Qualifier("dailyCandleTaskExecutor") Executor dailyCandleTaskExecutor
+            @Qualifier("dailyCandleTaskExecutor") Executor dailyCandleTaskExecutor,
+            TradingMetrics metrics
     ) {
         this.dailyCandleCollectionService = dailyCandleCollectionService;
         this.dailyCandleTaskExecutor = dailyCandleTaskExecutor;
+        this.metrics = metrics;
     }
 
     /** 국내 장 마감 후 15:40부터 17:10까지 30분 간격으로 재시도합니다. */
@@ -50,7 +54,15 @@ public class DailyCandleCollectionScheduler {
 
     private void submit(MarketCountry marketCountry) {
         CompletableFuture.runAsync(
-                () -> dailyCandleCollectionService.collect(marketCountry),
+                () -> {
+                    // collect() 가 "실제로 당일 데이터가 존재함"을 true 로 돌려줄 때만 성공 시각을 기록한다.
+                    // collect() 는 종목별 예외를 삼키고 전량 미적재에도 정상 반환하므로, 반환값을 봐야
+                    // 거짓 성공(데이터 0건인데 성공 기록)을 막는다(PR #213 리뷰 반영).
+                    // KR/US 는 스케줄·실패 지점이 독립적이라 market 태그로 시계열을 분리한다.
+                    if (dailyCandleCollectionService.collect(marketCountry)) {
+                        metrics.batchSucceeded("daily-candle", marketCountry.name());
+                    }
+                },
                 dailyCandleTaskExecutor
         ).exceptionally(exception -> {
             log.error("[daily-candle] 비동기 수집 실패: market={}", marketCountry, exception);

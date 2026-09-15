@@ -14,6 +14,7 @@ import '../../core/models/holding.dart';
 import '../../core/models/ledger.dart';
 import '../../core/models/order_detail.dart';
 import '../../core/models/stock_like.dart';
+import '../../core/theme/theme_controller.dart';
 import '../../formatters.dart';
 import '../../widgets/app_widgets.dart';
 import 'account_settings.dart';
@@ -30,6 +31,7 @@ class MyScreen extends StatefulWidget {
     required this.orders,
     required this.exchangeRates,
     required this.reports,
+    required this.theme,
   });
 
   final AuthSession session;
@@ -38,6 +40,7 @@ class MyScreen extends StatefulWidget {
   final OrderApi orders;
   final ExchangeRateApi exchangeRates;
   final ReportApi reports;
+  final ThemeController theme;
 
   @override
   State<MyScreen> createState() => _MyScreenState();
@@ -222,6 +225,8 @@ class _MyScreenState extends State<MyScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 16),
+              _ThemeCard(controller: widget.theme),
             ],
           );
         }
@@ -341,6 +346,9 @@ class _MyScreenState extends State<MyScreen> {
               reports: widget.reports,
               tick: _ledgerTick,
             ),
+            const SizedBox(height: 24),
+            // 웹 모바일 메뉴의 "화면 테마" 행과 같은 자리 — 계정 설정 위.
+            _ThemeCard(controller: widget.theme),
             const SizedBox(height: 24),
             AccountSettings(session: widget.session),
             const SizedBox(height: 24),
@@ -1158,6 +1166,47 @@ class _StatusChip extends StatelessWidget {
           fontWeight: FontWeight.w700,
           color: color,
         ),
+      ),
+    );
+  }
+}
+
+/// 화면 테마 선택 — 웹 모바일 메뉴의 "화면 테마" 행과 같은 구성이다
+/// (라이트/다크 PillTabs). 선택은 `trading-theme` 키로 저장돼 앱을
+/// 다시 열어도 유지된다.
+class _ThemeCard extends StatelessWidget {
+  const _ThemeCard({required this.controller});
+
+  final ThemeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AppCard(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            '화면 테마',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          SizedBox(
+            width: 132,
+            child: PillTabs<String>(
+              options: const [
+                (value: 'light', label: '라이트'),
+                (value: 'dark', label: '다크'),
+              ],
+              value: controller.isDark(context) ? 'dark' : 'light',
+              onChanged: (v) =>
+                  v == 'dark' ? controller.setDark() : controller.setLight(),
+            ),
+          ),
+        ],
       ),
     );
   }

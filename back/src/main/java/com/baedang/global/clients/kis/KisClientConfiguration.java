@@ -12,6 +12,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 
 import com.baedang.global.clients.FixedIntervalGate;
+import com.baedang.global.metrics.TradingMetrics;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -63,11 +64,16 @@ public class KisClientConfiguration {
             KisRateLimiter rateLimiter,
             KisTokenProvider tokenProvider,
             ObjectProvider<ObjectMapper> objectMapperProvider,
-            ObjectProvider<MeterRegistry> meterRegistryProvider
+            ObjectProvider<MeterRegistry> meterRegistryProvider,
+            ObjectProvider<TradingMetrics> tradingMetricsProvider
     ) {
         ObjectMapper objectMapper = objectMapperProvider.getIfAvailable(ObjectMapper::new);
         MeterRegistry meterRegistry = meterRegistryProvider.getIfAvailable(SimpleMeterRegistry::new);
+        // 다른 협력자와 같은 방어적 패턴: 컨텍스트에 TradingMetrics 빈이 없으면(예: KIS 설정만
+        // 로드하는 슬라이스 테스트) 로컬 인스턴스로 폴백해 이 @Bean 이 독립적으로 생성되게 한다.
+        TradingMetrics tradingMetrics = tradingMetricsProvider.getIfAvailable(
+                () -> new TradingMetrics(meterRegistry, Clock.systemUTC()));
         return new KisSecuritiesClient(
-                restClient, properties, rateLimiter, tokenProvider, objectMapper, meterRegistry);
+                restClient, properties, rateLimiter, tokenProvider, objectMapper, meterRegistry, tradingMetrics);
     }
 }

@@ -3,6 +3,7 @@ package com.baedang.global.clients.kis;
 import com.baedang.global.clients.FixedIntervalGate;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -90,6 +91,7 @@ class KisSecuritiesClientTest {
                 tokenProvider,
                 new ObjectMapper(),
                 meterRegistry,
+                new TradingMetrics(meterRegistry, clock),
                 retrySleeps::add);
     }
 

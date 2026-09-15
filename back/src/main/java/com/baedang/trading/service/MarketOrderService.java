@@ -2,6 +2,7 @@ package com.baedang.trading.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.port.ExecutionExchangeRateProvider;
 import com.baedang.market.port.ExecutionExchangeRateSnapshot;
 import com.baedang.market.port.MarketSessionProvider;
@@ -17,6 +18,7 @@ import com.baedang.trading.model.MarketOrderCommand;
 import com.baedang.trading.model.MarketOrderResult;
 import com.baedang.trading.model.OrderInput;
 import com.baedang.trading.model.OrderMarketContext;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +42,7 @@ public class MarketOrderService {
     private final MarketOrderResponseAssembler responseAssembler;
     private final Clock clock;
     private final OrderMarketDataService marketData;
+    private final TradingMetrics metrics;
 
     public MarketOrderService(
             OrderPolicy orderPolicy,
@@ -49,7 +52,8 @@ public class MarketOrderService {
             ExecutionExchangeRateProvider exchangeRateProvider,
             MarketOrderResponseAssembler responseAssembler,
             Clock clock,
-            OrderMarketDataService marketData
+            OrderMarketDataService marketData,
+            TradingMetrics metrics
     ) {
         this.orderPolicy = orderPolicy;
         this.transactionService = transactionService;
@@ -59,11 +63,30 @@ public class MarketOrderService {
         this.responseAssembler = responseAssembler;
         this.clock = clock;
         this.marketData = marketData;
+        this.metrics = metrics;
     }
 
     /** 주문은 다른 업무 트랜잭션에 참여하지 않고 반드시 최상위 유스케이스로 실행합니다. */
     @Transactional(propagation = Propagation.NEVER)
     public MarketOrderResponse place(Long userId, MarketOrderRequest request) {
+        // 사용자 체감 주문 지연을 측정한다. 거절(BusinessException)은 정상적인 업무 결과이므로
+        // REJECTED 로, 그 밖의 런타임 오류만 ERROR 로 나눠 "느린 건 어떤 결과인가"를 본다.
+        Timer.Sample sample = metrics.startOrderTimer();
+        String result = "SUCCESS";
+        try {
+            return doPlace(userId, request);
+        } catch (BusinessException e) {
+            result = "REJECTED";
+            throw e;
+        } catch (RuntimeException e) {
+            result = "ERROR";
+            throw e;
+        } finally {
+            metrics.stopOrderTimer(sample, result);
+        }
+    }
+
+    private MarketOrderResponse doPlace(Long userId, MarketOrderRequest request) {
         if (request == null) {
             throw new BusinessException(ErrorCode.INVALID_INPUT, Map.of("field", "request"));
         }

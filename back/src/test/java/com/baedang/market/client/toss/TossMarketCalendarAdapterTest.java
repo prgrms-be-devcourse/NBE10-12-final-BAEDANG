@@ -4,14 +4,17 @@ import com.baedang.global.clients.toss.TossRateLimiterRegistry;
 import com.baedang.global.clients.toss.TossSecuritiesClient;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.port.ExchangeRateQuote;
 import com.baedang.market.port.MarketCalendarDay;
 import com.github.tomakehurst.wiremock.WireMockServer;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.client.RestClient;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
@@ -43,7 +46,7 @@ class TossMarketCalendarAdapterTest {
         configureFor("localhost", wireMockServer.port());
         stubFor(post(urlEqualTo("/oauth2/token")).willReturn(okJson(TOKEN_RESPONSE)));
 
-        TossSecuritiesClient client = new TossSecuritiesClient(RestClient.builder(), new TossRateLimiterRegistry(),"http://localhost:" + wireMockServer.port(), "test-id", "test-secret");
+        TossSecuritiesClient client = new TossSecuritiesClient(RestClient.builder(), new TossRateLimiterRegistry(), new TradingMetrics(new SimpleMeterRegistry(), Clock.systemUTC()), "http://localhost:" + wireMockServer.port(), "test-id", "test-secret");
         adapter = new TossMarketCalendarAdapter(client);
     }
 

@@ -52,10 +52,15 @@ String? tradableReasonLabelOrNull(String? code) => switch (code) {
 };
 
 /// 등락률 문자열의 부호에 따른 표시 색. 국내 관례: 상승 빨강, 하락 파랑.
+/// 다크 모드에서는 웹 globals.css의 어두운 배경용 밝은 --up/--down처럼
+/// 한 단계 밝은 색을 쓴다.
 Color changeColor(String? raw, ColorScheme scheme) {
   final value = raw == null ? null : double.tryParse(raw);
   if (value == null || value == 0) return scheme.onSurfaceVariant;
-  return value > 0 ? const Color(0xFFEF4444) : const Color(0xFF3B82F6);
+  final dark = scheme.brightness == Brightness.dark;
+  return value > 0
+      ? (dark ? const Color(0xFFF87171) : const Color(0xFFEF4444))
+      : (dark ? const Color(0xFF60A5FA) : const Color(0xFF3B82F6));
 }
 
 /// 통화 기호 없는 천 단위 숫자(환율·거래대금 등).

@@ -27,6 +27,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -82,7 +83,7 @@ class DailyCandleCollectionServiceTest {
         when(marketDataPort.fetchCandles("005930", CandleInterval.ONE_DAY, 1))
                 .thenReturn(candles);
 
-        service().collect(MarketCountry.KR);
+        assertThat(service().collect(MarketCountry.KR)).isTrue();
 
         verify(persistenceService).upsert(1L, "KRW", MarketCountry.KR, candles, NOW);
     }
@@ -143,7 +144,8 @@ class DailyCandleCollectionServiceTest {
         allowCollection(MarketCountry.KR);
         when(marketDataPort.fetchCandles("EMPTY", CandleInterval.ONE_DAY, 1)).thenReturn(List.of());
 
-        service().collect(MarketCountry.KR);
+        // 대상은 있었는데 전량 미적재(successCount==0) → 거짓 성공 방지를 위해 false 를 돌려준다(#213 리뷰).
+        assertThat(service().collect(MarketCountry.KR)).isFalse();
 
         verify(persistenceService, never()).upsert(any(), anyString(), any(), any(), any());
     }
@@ -155,7 +157,7 @@ class DailyCandleCollectionServiceTest {
         when(stockRepository.findRankedByMarketCountry(any(), any()))
                 .thenReturn(List.of());
 
-        service().collect(MarketCountry.KR);
+        assertThat(service().collect(MarketCountry.KR)).isFalse();
 
         verify(marketDataPort, never()).fetchCandles(anyString(), any(), anyInt());
     }

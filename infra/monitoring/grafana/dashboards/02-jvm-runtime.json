@@ -1,0 +1,113 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "title": "02 · JVM Runtime & Connection Pool",
+  "uid": "jvm-runtime",
+  "tags": ["monitoring", "jvm"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    { "id": 1, "type": "row", "title": "JVM 메모리 · GC · CPU", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
+    {
+      "id": 2, "type": "timeseries", "title": "힙 메모리 (used / committed / max)",
+      "description": "used 가 max 에 붙으면 OOM 위험. committed 는 OS 에서 확보한 양. used 가 max 의 90% 를 넘으면 알림(HeapHigh).",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(jvm_memory_used_bytes{job=\"spring-boot\", area=\"heap\"})", "legendFormat": "used" },
+        { "refId": "B", "expr": "sum(jvm_memory_committed_bytes{job=\"spring-boot\", area=\"heap\"})", "legendFormat": "committed" },
+        { "refId": "C", "expr": "sum(jvm_memory_max_bytes{job=\"spring-boot\", area=\"heap\"})", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "GC 일시정지",
+      "description": "초당 GC 정지시간(rate of _sum)과 단일 최대 정지시간(_max). 정지시간이 길어지면 응답 지연·처리량 저하로 이어진다.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(jvm_gc_pause_seconds_sum{job=\"spring-boot\"}[5m]))", "legendFormat": "정지시간/s" },
+        { "refId": "B", "expr": "max(jvm_gc_pause_seconds_max{job=\"spring-boot\"})", "legendFormat": "최대 정지시간" }
+      ]
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "CPU 사용률",
+      "description": "process=이 앱 프로세스, system=머신 전체. process 가 1.0(=1코어 풀)에 붙으면 CPU 병목.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "process_cpu_usage{job=\"spring-boot\"}", "legendFormat": "process" },
+        { "refId": "B", "expr": "system_cpu_usage{job=\"spring-boot\"}", "legendFormat": "system" }
+      ]
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "스레드 수",
+      "description": "live=전체 살아있는 스레드, daemon=데몬 스레드. 계속 우상향하면 스레드 누수 의심.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 9 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "jvm_threads_live_threads{job=\"spring-boot\"}", "legendFormat": "live" },
+        { "refId": "B", "expr": "jvm_threads_daemon_threads{job=\"spring-boot\"}", "legendFormat": "daemon" }
+      ]
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "톰캣 스레드 사용률",
+      "description": "busy / max 비율. 1.0 에 가까우면 요청 처리 스레드 고갈로 요청이 큐에 쌓인다. mbeanregistry.enabled=true 필요.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 9 },
+      "fieldConfig": { "defaults": {
+        "unit": "percentunit", "min": 0, "max": 1,
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 0.7 }, { "color": "red", "value": 0.9 } ] }
+      }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "sum(tomcat_threads_busy_threads{job=\"spring-boot\"}) / clamp_min(sum(tomcat_threads_config_max_threads{job=\"spring-boot\"}), 1)", "legendFormat": "busy/max" }
+      ]
+    },
+
+    { "id": 7, "type": "row", "title": "HikariCP 커넥션풀", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 17 }, "collapsed": false },
+    {
+      "id": 8, "type": "timeseries", "title": "커넥션 (active / idle / pending / max)",
+      "description": "active=사용 중, idle=놀고 있음, pending=커넥션 기다리는 스레드, max=풀 상한(10). pending>0 이 지속되면 풀 고갈.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [
+        { "matcher": { "id": "byName", "options": "pending" }, "properties": [ { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } } ] }
+      ] },
+      "targets": [
+        { "refId": "A", "expr": "hikaricp_connections_active{job=\"spring-boot\"}", "legendFormat": "active" },
+        { "refId": "B", "expr": "hikaricp_connections_idle{job=\"spring-boot\"}", "legendFormat": "idle" },
+        { "refId": "C", "expr": "hikaricp_connections_pending{job=\"spring-boot\"}", "legendFormat": "pending" },
+        { "refId": "D", "expr": "hikaricp_connections_max{job=\"spring-boot\"}", "legendFormat": "max" }
+      ]
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "커넥션 획득 대기 시간 (평균)",
+      "description": "커넥션 하나를 풀에서 받아오기까지 평균 대기(_sum/_count). connection-timeout(3s)에 근접하면 곧 타임아웃이 터진다.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 4 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(hikaricp_connections_acquire_seconds_sum{job=\"spring-boot\"}[5m]) / clamp_min(rate(hikaricp_connections_acquire_seconds_count{job=\"spring-boot\"}[5m]), 1)", "legendFormat": "avg wait" }
+      ]
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "커넥션 타임아웃 발생 수",
+      "description": "5분 창에서 새로 발생한 커넥션 획득 타임아웃 건수. 0 이 아니면 요청이 커넥션을 못 받아 실패하는 중.",
+      "datasource": { "type": "prometheus", "uid": "PROM" },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "short",
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] }
+      }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "increase(hikaricp_connections_timeout_total{job=\"spring-boot\"}[5m])", "legendFormat": "timeouts/5m" }
+      ]
+    }
+  ]
+}
