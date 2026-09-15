@@ -41,7 +41,7 @@ Authorization: Bearer <accessToken>
 
 | Scope | Target |
 |---|---|
-| public (no Access; refresh/logout require Refresh) | signup · login · refresh · logout · rankings · search · stock detail · chart · FX · guide |
+| public (no Access; refresh/logout require Refresh) | signup · login · refresh · logout · password reset (forgot/reset) · rankings · search · stock detail · chart · FX · guide |
 | 🔒 login required | `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · orders · account · holdings · ledger · portfolio reset · `/stocks/likes` (POST/GET/DELETE) |
 ### Response Format
 
@@ -197,6 +197,45 @@ from its HttpOnly cookie and omits it from response JSON. The absolute session e
 | `SESSION_REVOKED` | session revoked or inactive |
 | `REFRESH_TOKEN_REUSED` | signed predecessor reused outside the fixed 5-second grace, or older generation |
 | `AUTH_UNAVAILABLE` | session database/transport temporarily unavailable (503) |
+
+### `POST /auth/password/forgot`
+Password reset email request (forgot password).
+
+**Request**
+```json
+{
+  "email": "user@example.com"
+}
+```
+
+**Response · 200**
+Empty body. **Always 200, regardless of whether the email is registered** — a different response for an unregistered email would leak account existence (account enumeration attack), same principle as `LOGIN_FAILED`. The actual email is only sent when an ACTIVE user owns that email; the caller sees identical behavior either way.
+
+Issuing a new token invalidates the user's previous unused tokens first, so only the most recent email's link stays valid. The link points at `{FRONTEND_BASE_URL}/reset-password?token=...` and expires after `PASSWORD_RESET_TOKEN_TTL` (30 minutes by default). The raw token is never stored — only its SHA-256 hash (`password_reset_token.token_hash`), same principle as the password hash.
+
+| Error code | When |
+|---|---|
+| `INVALID_INPUT` | invalid email format |
+
+### `POST /auth/password/reset`
+Confirms a new password using the token from the emailed link.
+
+**Request**
+```json
+{
+  "token": "<raw token from the email link>",
+  "newPassword": "NewPassword123!"
+}
+```
+
+**Response · 200**
+Empty body. Using the token also invalidates the user's other outstanding unused tokens (e.g. if the email was requested more than once).
+
+| Error code | When |
+|---|---|
+| `INVALID_INPUT` | new password format policy not met (8~64 chars) |
+| `PASSWORD_RESET_TOKEN_INVALID` | token missing, unknown, or already used |
+| `PASSWORD_RESET_TOKEN_EXPIRED` | token past its TTL |
 
 ### `POST /auth/logout`
 Revokes the current login session, including its Access tokens. Backend body: `{ "refreshToken": "..." }`;

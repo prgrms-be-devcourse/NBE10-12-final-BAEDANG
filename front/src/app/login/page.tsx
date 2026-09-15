@@ -24,7 +24,11 @@ function LoginForm() {
     try {
       const user = await login({ email, password });
       setUser(user);
-      router.push(next ?? "/");
+      // "/"는 이제 방문할 때마다 무조건 서비스 소개 화면으로 돌려보내므로
+      // (proxy.ts), next 파라미터가 없을 때의 기본 목적지는 실제 메인
+      // 화면("/main")이어야 한다 — 그래야 로그인 직후 다시 소개 화면을
+      // 보게 되지 않는다.
+      router.push(next ?? "/main");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "로그인에 실패했어요.");
     } finally {
@@ -38,8 +42,8 @@ function LoginForm() {
         className="w-full max-w-[400px] rounded-[24px] px-8 pt-9 pb-7.5 opacity-0"
         style={{ background: "var(--card)", animation: "modalPop .55s cubic-bezier(.2,.9,.3,1.05) .05s forwards" }}
       >
-        <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>로그인</h1>
-        <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>모의 투자금으로 다시 시작해볼까요?</p>
+        <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>로그인</h1>
+        <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>모의 투자금으로 다시 시작해볼까요?</p>
 
         {searchParams.get("reason") === "password-changed" && (
           <p role="status" className="mb-4 text-sm">비밀번호를 변경했어요. 새 비밀번호로 다시 로그인해주세요.</p>

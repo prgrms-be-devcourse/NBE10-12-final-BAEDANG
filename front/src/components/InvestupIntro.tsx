@@ -975,8 +975,10 @@ export function InvestupIntro({
           )}
         </div>
 
-        <a
-          href="#practices"
+        {/* 클릭하면 다음 섹션(#practices)으로 바로 이동하던 기능을 제거해달라는
+            요청 — <a href="#practices">를 비인터랙티브한 <div>로 바꿨다. 화살표
+            자체(아이콘·위치·bob 애니메이션·charted 기반 등장)는 그대로 둔다. */}
+        <div
           style={{
             position: 'absolute',
             left: '50%',
@@ -991,12 +993,34 @@ export function InvestupIntro({
             opacity: charted ? 1 : 0,
             transition: 'opacity 1s ease',
           }}
-          aria-label="다음 섹션으로"
+          aria-hidden="true"
         >
           <svg width="42" height="20" viewBox="0 0 46 22" fill="none" style={{ animation: 'iv-bob 2.6s ease-in-out infinite' }}>
             <path d="M2 2L23 19L44 2" stroke={T.chevronInk} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
-        </a>
+        </div>
+        {/* 화살표를 클릭하는 대신 Enter 키로 소개 화면을 건너뛸 수 있다는 안내 —
+            화살표와 같은 타이밍(charted)에 자연스럽게 함께 나타난다. 실제 Enter
+            키 처리는 이 컴포넌트가 아니라 페이지 쪽(IntroScreen)이 담당한다. */}
+        <p
+          style={{
+            position: 'absolute',
+            left: '50%',
+            bottom: 64,
+            transform: 'translateX(-50%)',
+            margin: 0,
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: '.02em',
+            color: T.eyebrowInk,
+            whiteSpace: 'nowrap',
+            zIndex: 5,
+            opacity: charted ? 1 : 0,
+            transition: 'opacity 1s ease',
+          }}
+        >
+          Enter 키를 누르면 SKIP이 가능합니다.
+        </p>
       </section>
 
       {/* ══ 02 Steps (메인 화면 "이렇게 사용해요" 섹션과 동일한 문구·디자인·효과) ══ */}

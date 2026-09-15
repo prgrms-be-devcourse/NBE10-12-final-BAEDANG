@@ -229,20 +229,23 @@ export function login(input: { email: string; password: string }): Promise<AuthU
 /**
  * `POST /api/auth/password/forgot` — 비밀번호 찾기 메일 발송 요청.
  *
- * <p>⚠️ 이 엔드포인트는 아직 백엔드에 구현되어 있지 않다(2026-09-04 기준, 프론트
- * 화면만 먼저 만들어달라는 요청으로 화면부터 구현 — 백엔드는 팀원에게 별도 요청
- * 예정). 지금 호출하면 404/네트워크 에러가 나고, `forgot-password` 페이지가
- * 그 경우 일반 에러 문구를 보여준다. 백엔드 구현 시 지켜야 할 계약:
- *
- * <ul>
- *   <li>가입 여부와 무관하게 항상 200을 반환한다 — 존재하지 않는 이메일에 404/
- *       다른 응답을 주면 "이 이메일은 가입 안 돼 있음"을 외부에 노출(계정 열거
- *       공격)하게 된다. 실제 이메일 발송은 존재할 때만 하되, 응답은 똑같이 200.</li>
- *   <li>요청 본문은 `{ email: string }` 하나만 받는다.</li>
- * </ul>
+ * <p>가입 여부와 무관하게 항상 200을 반환한다(계정 열거 공격 방지) — 존재하지
+ * 않는 이메일을 넣어도 이 호출은 그냥 성공한다. 실제 메일 발송은 백엔드가 ACTIVE
+ * 회원일 때만 한다(`docs/api-spec.md` 참고).
  */
 export function requestPasswordReset(email: string): Promise<void> {
   return request<void>("/api/auth/password/forgot", { method: "POST", body: { email } });
+}
+
+/**
+ * `POST /api/auth/password/reset` — 이메일 링크의 토큰으로 새 비밀번호를 확정한다.
+ *
+ * <p>토큰이 없거나 이미 쓰였으면 `PASSWORD_RESET_TOKEN_INVALID`, 유효 시간(기본
+ * 30분)이 지났으면 `PASSWORD_RESET_TOKEN_EXPIRED`가 난다 — `reset-password` 화면이
+ * 이 둘을 구분해서 "다시 요청해주세요" 안내로 보여준다.
+ */
+export function confirmPasswordReset(input: { token: string; newPassword: string }): Promise<void> {
+  return request<void>("/api/auth/password/reset", { method: "POST", body: input });
 }
 
 /** 선제 갱신·새로고침 복원·401 복구가 같은 진행 중 요청을 공유합니다. */

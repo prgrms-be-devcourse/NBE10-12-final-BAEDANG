@@ -5,6 +5,7 @@ import com.baedang.auth.dto.AuthResponse;
 import com.baedang.auth.dto.LoginRequest;
 import com.baedang.auth.dto.RefreshTokenRequest;
 import com.baedang.auth.dto.SignUpRequest;
+import com.baedang.auth.mail.PasswordResetMailSender;
 import com.baedang.auth.security.JwtTokenProvider;
 import com.baedang.auth.service.AuthService;
 import com.baedang.auth.service.AuthSessionService;
@@ -32,6 +33,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -58,6 +60,10 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -117,6 +123,10 @@ class AuthLifecycleIntegrationTest {
 
     @MockitoBean
     private MarketCalendarPort marketCalendarPort;
+
+    /** 실제 메일을 보내지 않고(mail.enabled=false와 별개로 이 빈 자체를 대역으로) 링크만 가로챈다. */
+    @MockitoBean
+    private PasswordResetMailSender passwordResetMailSender;
 
     @BeforeEach
     void setUp() {
@@ -375,6 +385,7 @@ class AuthLifecycleIntegrationTest {
         // 전체 계좌 수도 2개 그대로 (User A 1개, User B 1개)
         assertThat(accountRepository.count()).isEqualTo(2L);
     }
+
     @Test
     @DisplayName("동시 Refresh는 세대를 한 번만 증가시키고 같은 후속 토큰을 반환한다")
     void concurrent_rotation_replays_same_successor() throws Exception {
@@ -583,4 +594,72 @@ class AuthLifecycleIntegrationTest {
         }, executor);
     }
 
+    @Test
+    @DisplayName("비밀번호 찾기 이메일의 토큰으로 재설정하면 새 비밀번호로만 로그인할 수 있고 토큰은 재사용할 수 없다")
+    void 비밀번호_찾기_토큰으로_비밀번호를_재설정한다() throws Exception {
+        SignUpRequest signUpRequest = new SignUpRequest("forgot@example.com", "Password123!", "잊음이");
+        mockMvc.perform(post("/api/auth/signup")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(signUpRequest)))
+                .andExpect(status().isCreated());
+
+        // 1. 비밀번호 찾기 요청 — 실제 메일 발송(mail.enabled)과 무관하게, PasswordResetMailSender에
+        //    실린 링크를 가로채 토큰을 꺼낸다(실제 서비스에서 사용자가 이메일에서 얻는 것과 같은 값).
+        mockMvc.perform(post("/api/auth/password/forgot")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"forgot@example.com\"}"))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
+        verify(passwordResetMailSender).sendResetLink(eq("forgot@example.com"), urlCaptor.capture());
+        String resetUrl = urlCaptor.getValue();
+        assertThat(resetUrl).contains("/reset-password?token=");
+        String token = resetUrl.substring(resetUrl.indexOf("token=") + "token=".length());
+
+        // 2. 토큰으로 새 비밀번호 확정
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("token", token, "newPassword", "ResetPassword123!"))))
+                .andExpect(status().isOk());
+
+        // 3. 옛 비밀번호는 거절, 새 비밀번호는 로그인 성공
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("forgot@example.com", "Password123!"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("LOGIN_FAILED"));
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new LoginRequest("forgot@example.com", "ResetPassword123!"))))
+                .andExpect(status().isOk());
+
+        // 4. 같은 토큰 재사용은 거절
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("token", token, "newPassword", "AnotherPassword123!"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSWORD_RESET_TOKEN_INVALID"));
+    }
+
+    @Test
+    @DisplayName("가입되지 않은 이메일로 비밀번호 찾기를 요청해도 200이며 메일을 보내지 않는다")
+    void 가입되지_않은_이메일은_비밀번호_찾기_메일을_받지_않는다() throws Exception {
+        mockMvc.perform(post("/api/auth/password/forgot")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"none@example.com\"}"))
+                .andExpect(status().isOk());
+
+        verify(passwordResetMailSender, never()).sendResetLink(any(), any());
+    }
+
+    @Test
+    @DisplayName("존재하지 않는 재설정 토큰은 PASSWORD_RESET_TOKEN_INVALID다")
+    void 존재하지_않는_재설정_토큰은_거절된다() throws Exception {
+        mockMvc.perform(post("/api/auth/password/reset")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of("token", "no-such-token", "newPassword", "Password123!"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PASSWORD_RESET_TOKEN_INVALID"));
+    }
 }

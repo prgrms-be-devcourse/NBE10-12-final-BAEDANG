@@ -50,7 +50,9 @@ public class SecurityConfig {
                                 "/api/auth/signup",
                                 "/api/auth/login",
                                 "/api/auth/refresh",
-                                "/api/auth/logout").permitAll()
+                                "/api/auth/logout",
+                                "/api/auth/password/forgot",
+                                "/api/auth/password/reset").permitAll()
                         .requestMatchers(
                                 "/api/orders/**",
                                 "/api/accounts/**",
