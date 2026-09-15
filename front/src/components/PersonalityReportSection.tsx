@@ -14,6 +14,7 @@ import {
 import { formatNumber, formatPercent, formatUsd, toDecimal } from "@/lib/format";
 import { PERSONALITY_AXES, PERSONALITY_TYPES } from "@/lib/personality-types";
 import { Tag } from "./Tag";
+import { useTheme } from "./ThemeProvider";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -51,6 +52,7 @@ export function PersonalityReportSection() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [typeBoardOpen, setTypeBoardOpen] = useState(false);
+  const [imageOpen, setImageOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +96,7 @@ export function PersonalityReportSection() {
           onHelp={() => setHelpOpen(true)}
           onOpenBoard={() => setBoardOpen(true)}
           onOpenTypeBoard={() => setTypeBoardOpen(true)}
+          onOpenImage={() => setImageOpen(true)}
         />
       )}
 
@@ -101,6 +104,12 @@ export function PersonalityReportSection() {
       {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
       {typeBoardOpen && (
         <TypeComparisonModal myTypeCode={report.typeCode} onClose={() => setTypeBoardOpen(false)} />
+      )}
+      {/* 유형 이미지를 더 크게 볼 수 있게 해달라는 요청 — LockedCard에서는 이미지
+          자체가 없어(잠금 상태) 이 모달을 열 방법도 없으니, OpenCard일 때만
+          personaType.image가 있으면 연다. */}
+      {imageOpen && report.typeCode && PERSONALITY_TYPES[report.typeCode]?.image && (
+        <PersonalityImageModal typeCode={report.typeCode} onClose={() => setImageOpen(false)} />
       )}
     </div>
   );
@@ -117,6 +126,7 @@ function CardHeader({
   badge: React.ReactNode;
   onHelp: () => void;
 }) {
+  const { theme } = useTheme();
   return (
     <div
       className="flex items-center justify-between gap-4 px-6 py-5"
@@ -142,7 +152,11 @@ function CardHeader({
           type="button"
           onClick={onHelp}
           className="cursor-pointer rounded-md px-0.5 py-1 text-[12.5px] font-bold"
-          style={{ color: "var(--mut)" }}
+          // 다크 모드에서 헤더 "로그아웃" 버튼과 같은 색으로 맞춰달라는 요청 —
+          // 그 버튼도 var(--accent)를 배경으로 쓰므로 같은 변수를 그대로
+          // 참조한다(값이 나중에 바뀌어도 항상 같이 맞는다). 라이트 모드는
+          // 기존 var(--mut) 그대로 둔다(요청이 다크 모드로 한정됨).
+          style={{ color: theme === "dark" ? "var(--accent)" : "var(--mut)" }}
         >
           성향 판정 기준
         </button>
@@ -246,15 +260,25 @@ function OpenCard({
   onHelp,
   onOpenBoard,
   onOpenTypeBoard,
+  onOpenImage,
 }: {
   report: PersonalityReport;
   onHelp: () => void;
   onOpenBoard: () => void;
   onOpenTypeBoard: () => void;
+  onOpenImage: () => void;
 }) {
+  const { theme } = useTheme();
   const shares = report.shares;
   const returnUp = (toDecimal(report.returnRate)?.greaterThanOrEqualTo(0)) ?? true;
   const personaType = report.typeCode ? PERSONALITY_TYPES[report.typeCode] : undefined;
+  // 4개 축 막대의 채워진 부분(var(--accentSoft))이 라이트 모드에서는 트랙
+  // 배경(var(--fill), #e4eff8)과 색이 거의 같아(#dceefa) 얼마나 채워졌는지
+  // 구분이 잘 안 된다는 제보 — 다크 모드는 두 값의 차이가 커서 문제없다고
+  // 하니 라이트 모드에서만 눈에 띄게 더 어두운 블루로 바꾼다. --accentSoft는
+  // 배지·카드 배경 등 다른 곳과 공유하는 전역 값이라 그대로 두고, 이 막대
+  // 전용 로컬 값만 새로 둔다.
+  const axisFillColor = theme === "light" ? "#9cc4ea" : "var(--accentSoft)";
 
   return (
     <div className="overflow-hidden rounded-[20px]" style={{ background: "var(--card)" }}>
@@ -284,18 +308,20 @@ function OpenCard({
                 (Nav.tsx)와 같은 이유로 next/image 대신 일반 img를 썼다 — 유형에 따라
                 16장 중 하나만 조건부로 그려서 next/image 최적화 이점이 크지 않다. */}
             {personaType?.image ? (
+              // 이미지를 더 자세히 보고 싶다는 요청 — 클릭하면 확대 모달을 연다.
               // eslint-disable-next-line @next/next/no-img-element -- 유형별 16장 중 하나만 조건부로 보여주는 이미지라 next/image 최적화 이점이 없다.
               <img
                 src={personaType.image}
                 alt={`${personaType.nickname} 이미지`}
-                className="aspect-square w-full rounded-[20px] object-cover"
+                className="aspect-square w-full cursor-pointer rounded-[20px] object-cover transition-[filter] duration-150 hover:brightness-95"
+                onClick={onOpenImage}
               />
             ) : (
               <div
                 className="flex aspect-square flex-col items-center justify-center gap-2 rounded-[20px] px-4 text-center"
                 style={{ background: "var(--accentSoft)" }}
               >
-                <span className="font-mono text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
+                <span className="text-[26px] font-extrabold tracking-[.08em]" style={{ color: "var(--onAccentSoftText)" }}>
                   {report.typeCode}
                 </span>
                 <span className="text-[13px] font-bold" style={{ color: "var(--onAccentSoftText)" }}>
@@ -304,8 +330,16 @@ function OpenCard({
               </div>
             )}
             <div className="flex items-center gap-2.5 rounded-2xl px-4 py-3.5" style={{ background: "var(--accent)" }}>
-              <span className="font-mono text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
-              <span className="ml-auto text-[12px] font-bold" style={{ color: "var(--accentText)" }}>{report.typeLabel}</span>
+              <span className="text-[20px] font-extrabold tracking-[.06em] text-white">{report.typeCode}</span>
+              {/* 라이트 모드에서 이 문구(유형 4글자 요약, 예: "분산·해외·개별주·안정형")가
+                  안 보인다는 제보 — var(--accentText)가 라이트 모드에서는 이 배경과
+                  똑같은 var(--accent)(#0f3868)라 글자가 배경에 완전히 묻혔다(다크
+                  모드는 두 값이 달라 우연히 문제가 없었다). 바로 옆 유형 코드
+                  글자(위 span)처럼 이 배경 위에서는 처음부터 흰색(text-white)만
+                  맞는 조합이라, 같은 방식으로 고쳤다. */}
+              {/* 키워드 글자가 옆 유형 코드에 비해 너무 작아 보인다는 피드백 —
+                  12px → 15px로 키웠다. */}
+              <span className="ml-auto text-[15px] font-bold text-white">{report.typeLabel}</span>
             </div>
           </div>
 
@@ -337,7 +371,7 @@ function OpenCard({
                     <div className="relative h-[26px] overflow-hidden rounded-full" style={{ background: "var(--fill)" }}>
                       <div
                         className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-500 ease-out"
-                        style={{ background: "var(--accentSoft)", width: `${fillPercent}%` }}
+                        style={{ background: axisFillColor, width: `${fillPercent}%` }}
                       />
                       <div
                         className="absolute inset-y-0 w-1 rounded-sm transition-[left] duration-500 ease-out"
@@ -510,6 +544,8 @@ const HELP_ITEMS = [
 ];
 
 function HelpModal({ onClose }: { onClose: () => void }) {
+  const { theme } = useTheme();
+  const isDark = theme === "dark";
   return (
     <div
       className="fixed inset-0 z-[150] flex items-center justify-center px-4"
@@ -521,21 +557,11 @@ function HelpModal({ onClose }: { onClose: () => void }) {
         style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-[21px] font-extrabold tracking-[-0.02em]" style={{ color: "var(--ink)" }}>
-              투자 성향은 이렇게 정해져요
-            </h3>
-            <p className="mt-1.5 text-[13px]" style={{ color: "var(--mut2)" }}>4개 축을 조합해 16가지 유형이 나와요</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="report-modal-close-btn cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold"
-            style={{ color: "var(--mut)" }}
-          >
-            닫기
-          </button>
+        <div>
+          <h3 className="text-[21px] font-extrabold tracking-[-0.02em]" style={{ color: "var(--ink)" }}>
+            투자 성향은 이렇게 정해져요
+          </h3>
+          <p className="mt-1.5 text-[13px]" style={{ color: "var(--mut2)" }}>4개 축을 조합해 16가지 유형이 나와요</p>
         </div>
         <div className="mt-4.5 flex flex-col gap-2.5">
           {HELP_ITEMS.map((item) => (
@@ -559,15 +585,76 @@ function HelpModal({ onClose }: { onClose: () => void }) {
             외부 스타일시트 규칙보다도 우선이라 호버 자체가 아예 안
             먹혔다("닫기" 버튼들은 애초에 배경을 인라인으로 주지 않아서
             클래스가 base·hover 배경을 전부 제어한다) — 그래서 인라인
-            background를 지우고 클래스에게 완전히 맡겼다. */}
+            background를 지우고 클래스에게 완전히 맡겼다.
+
+            다크 모드에서는 배경을 검정으로, 호버 시 살짝 밝아지게
+            해달라는 요청 — 검정(#000)은 RGB 채널이 전부 0이라
+            filter: brightness()로는(곱셈이라 0에 뭘 곱해도 0) 절대
+            밝아지지 않는다. 그래서 report-modal-close-btn 클래스(라이트
+            모드 전용으로 남겨둠) 대신, 위에서 이미 겪은 "인라인 style이
+            :hover보다 우선한다" 문제를 피해 onMouseEnter/onMouseLeave로
+            배경색 자체를 직접 두 값 사이로 바꾼다(히어로 CTA 버튼 등
+            이 앱 곳곳의 hover 배경 전환과 같은 방식). */}
         <button
           type="button"
           onClick={onClose}
-          className="report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
-          style={{ color: "var(--ink)" }}
+          className={
+            isDark
+              ? "mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold transition-[background-color] duration-150"
+              : "report-modal-close-btn mt-4.5 w-full cursor-pointer rounded-xl py-3 text-[13.5px] font-bold"
+          }
+          style={isDark ? { background: "#000000", color: "#ffffff" } : { color: "var(--ink)" }}
+          onMouseEnter={isDark ? (e) => (e.currentTarget.style.background = "#262626") : undefined}
+          onMouseLeave={isDark ? (e) => (e.currentTarget.style.background = "#000000") : undefined}
         >
           확인했어요
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** 유형 이미지를 더 자세히 볼 수 있게 확대해서 보여주는 모달. */
+function PersonalityImageModal({ typeCode, onClose }: { typeCode: string; onClose: () => void }) {
+  const personaType = PERSONALITY_TYPES[typeCode];
+  if (!personaType?.image) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[150] flex items-center justify-center px-4"
+      style={{ background: "var(--modalOverlay)", animation: "modalFade .28s" }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-[420px] rounded-[24px] p-5"
+        style={{ background: "var(--card)", animation: "modalPop .4s cubic-bezier(.2,.9,.3,1.1)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-[18px] font-extrabold tracking-[.04em]" style={{ color: "var(--ink)" }}>
+              {typeCode}
+            </h3>
+            <p className="mt-0.5 truncate text-[13px] font-bold" style={{ color: "var(--mut2)" }}>
+              {personaType.nickname}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="report-modal-close-btn shrink-0 cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-semibold"
+            style={{ color: "var(--mut)" }}
+            aria-label="닫기"
+          >
+            닫기
+          </button>
+        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- 유형별 16장 중 하나만 조건부로 보여주는 이미지라 next/image 최적화 이점이 없다. */}
+        <img
+          src={personaType.image}
+          alt={`${personaType.nickname} 이미지`}
+          className="aspect-square w-full rounded-[18px] object-cover"
+        />
       </div>
     </div>
   );
@@ -866,7 +953,7 @@ function TypeComparisonRow({ rank, row, isMyType }: { rank: number; row: Leaderb
       <span className="overflow-hidden text-[14.5px] font-bold text-ellipsis whitespace-nowrap" style={{ color: "var(--ink)" }}>
         {personaType?.nickname ?? row.typeLabel}
       </span>
-      <span className="font-mono text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
+      <span className="text-[11px]" style={{ color: "var(--mut2)" }}>{row.typeCode}</span>
       {isMyType && (
         <span className="flex-none rounded-full px-2 py-0.5 text-[11px] font-bold text-white" style={{ background: "var(--accent)" }}>
           내 유형

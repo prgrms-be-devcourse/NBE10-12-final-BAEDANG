@@ -54,7 +54,11 @@ function SignupForm() {
     try {
       const user = await signUp({ email, password, nickname });
       setUser(user);
-      router.push(next ?? "/");
+      // "/"는 이제 방문할 때마다 무조건 서비스 소개 화면으로 돌려보내므로
+      // (proxy.ts), next 파라미터가 없을 때의 기본 목적지는 실제 메인
+      // 화면("/main")이어야 한다 — 그래야 가입 직후 다시 소개 화면을
+      // 보게 되지 않는다.
+      router.push(next ?? "/main");
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
@@ -78,8 +82,8 @@ function SignupForm() {
         }
         onAnimationEnd={() => setCardSettled(true)}
       >
-        <h1 className="mb-1 text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>회원가입</h1>
-        <p className="mb-5 text-[13.5px]" style={{ color: "var(--mut)" }}>
+        <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>회원가입</h1>
+        <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>
           가입하면 <b style={{ color: "var(--ink)" }}>모의 투자금 5,000만원</b>을 바로 드려요
         </p>
 
