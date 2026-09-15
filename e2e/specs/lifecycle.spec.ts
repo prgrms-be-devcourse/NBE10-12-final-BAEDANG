@@ -69,8 +69,9 @@ test('만료된 access token은 실제 refresh API로 복구된다', async ({ pa
   await page.goto('/my');
   expect((await refresh).ok()).toBeTruthy();
   await expect(page.getByRole('heading', { name: '내 계좌' })).toBeVisible();
-  const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('trading-auth-user') ?? '{}'));
-  expect(stored.accessToken).not.toBe(user.accessToken);
+  const tokens = await (await refresh).json();
+  expect(tokens.accessToken).toBeTruthy();
+  expect(tokens.refreshToken).toBeUndefined();
 });
 
 test('주문 버튼 연속 클릭은 요청과 체결을 한 번만 만든다', async ({ page, request, user }) => {

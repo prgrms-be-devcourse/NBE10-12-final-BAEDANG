@@ -50,6 +50,7 @@ public class SecurityConfig {
                                 "/api/auth/signup",
                                 "/api/auth/login",
                                 "/api/auth/refresh",
+                                "/api/auth/logout",
                                 "/api/auth/password/forgot",
                                 "/api/auth/password/reset").permitAll()
                         .requestMatchers(
@@ -58,8 +59,7 @@ public class SecurityConfig {
                                 "/api/users/**",
                                 "/api/reports/**",
                                 "/api/stocks/likes",
-                                "/api/stocks/likes/**",
-                                "/api/auth/logout").authenticated().anyRequest().permitAll()
+                                "/api/stocks/likes/**").authenticated().anyRequest().permitAll()
                 ).addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }

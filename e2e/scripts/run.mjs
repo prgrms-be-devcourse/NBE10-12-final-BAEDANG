@@ -46,6 +46,8 @@ try {
     await new Promise(resolve => setTimeout(resolve, 200));
   }
   const env = { ...process.env, E2E_RUN_ID: id, E2E_CONTROL_TOKEN: token, E2E_DB_PASSWORD: password,
+    E2E_SESSION_KEY: randomBytes(32).toString('base64'),
+    AUTH_BACKEND_URL: 'http://127.0.0.1:18088', AUTH_PUBLIC_ORIGIN: 'http://127.0.0.1:13000',
     E2E_DB_URL: `jdbc:postgresql://127.0.0.1:${dbPort}/baedang_e2e`,
     NEXT_PUBLIC_API_BASE_URL: 'http://127.0.0.1:18088', NEXT_TELEMETRY_DISABLED: '1' };
   if (windows) await run('cmd.exe', ['/d', '/c', 'gradlew.bat e2eClasspath'], { cwd: path.join(root, 'back'), env });

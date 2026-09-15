@@ -1,6 +1,7 @@
 package com.baedang.user.service;
 
 import com.baedang.auth.dto.UserResponse;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
 import com.baedang.user.dto.ChangePasswordRequest;
@@ -32,15 +33,17 @@ public class UserService {
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
+    private final AuthSessionService sessions;
 
     public UserService(UserRepository userRepository,
                        AccountRepository accountRepository,
                        PasswordEncoder passwordEncoder,
-                       Clock clock) {
+                       Clock clock, AuthSessionService sessions) {
         this.userRepository = userRepository;
         this.accountRepository = accountRepository;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
+        this.sessions = sessions;
     }
 
     @Transactional(readOnly = true)
@@ -83,6 +86,7 @@ public class UserService {
         }
 
         user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
+        sessions.revokeAll(userId);
         log.info("비밀번호 변경 완료 userId={}", userId);
         return UserResponse.from(user);
     }
@@ -101,6 +105,7 @@ public class UserService {
 
         OffsetDateTime withdrawnAt = OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
         user.withdraw();
+        sessions.revokeAll(userId);
         account.close(withdrawnAt);
         log.info("회원 탈퇴 완료 userId={} accountId={}", userId, account.getAccountId());
     }

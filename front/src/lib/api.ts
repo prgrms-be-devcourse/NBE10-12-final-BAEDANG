@@ -1,18 +1,3 @@
-/**
- * 백엔드 API 클라이언트. `back/src/main/java/com/baedang/auth/*`, `.../trading/*` 에
- * 구현된 회원가입·로그인·주문 API를 그대로 호출합니다.
- *
- * <p>백엔드가 stateless JWT 인증을 쓴다 — 로그인/회원가입 응답에 `accessToken`/
- * `refreshToken`이 실려 오고, 이후 보호된 요청(`/api/accounts/**`, `/api/orders/**`,
- * `/api/users/**`)은 `Authorization: Bearer <accessToken>` 헤더로 사용자를 식별한다
- * (구 `X-User-Id` 헤더 방식은 백엔드가 더 이상 받지 않는다 — `SecurityConfig`가
- * 이 경로들을 전부 `authenticated()`로 요구해서, 헤더 없이 부르면 401이 난다).
- *
- * <p>토큰은 이 모듈이 `tokenStore`에 들고 있다가 `auth: true`인 요청에 자동으로
- * 실어 보낸다 — 매 호출부가 토큰을 직접 들고 다닐 필요가 없다. `AuthProvider`가
- * 로그인/로그아웃/새로고침 시점마다 {@link syncAuthTokens}로 이 저장소를 동기화한다.
- */
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
 export type AuthUser = {
@@ -20,31 +5,65 @@ export type AuthUser = {
   email: string;
   nickname: string;
   accessToken: string;
-  refreshToken: string;
 };
 
-type TokenStore = { accessToken: string | null; refreshToken: string | null };
-let tokenStore: TokenStore = { accessToken: null, refreshToken: null };
-
-/** AuthProvider가 로그인/로그아웃/localStorage 복원 시점마다 호출해 토큰 저장소를 맞춘다. */
-export function syncAuthTokens(tokens: { accessToken: string; refreshToken: string } | null) {
-  tokenStore = tokens ? { ...tokens } : { accessToken: null, refreshToken: null };
-}
-
-let onAccessTokenRefreshed: ((accessToken: string) => void) | null = null;
+type TokenStore = { accessToken: string | null };
+let tokenStore: TokenStore = { accessToken: null };
+let authEpoch = 0;
+let refreshFlight: Promise<{ accessToken: string }> | null = null;
+let onAccessTokenRefreshed: ((token: string) => void) | null = null;
 let onAuthExpired: (() => void) | null = null;
+let onUserChanged: ((user: AuthUser | null) => void) | null = null;
+let onProfileUpdated: ((profile: UserProfile) => void) | null = null;
+let channel: BroadcastChannel | null = null;
+const AUTH_STAMP = 'baedang-auth-stamp';
+const AUTH_REQUEST_TIMEOUT_MS = 15_000;
 
-/**
- * `request()`가 만료된 accessToken을 조용히 재발급했을 때(`onAccessTokenRefreshed`)와,
- * refreshToken마저 만료·무효라 재발급 자체가 실패했을 때(`onAuthExpired`) 알림받을
- * 콜백을 등록한다. `AuthProvider`가 각각 localStorage 갱신·강제 로그아웃 처리를 한다.
- */
+function stamp() {
+  try { return localStorage.getItem(AUTH_STAMP); } catch { return null; }
+}
+function markAuthChange(logout = false) {
+  authEpoch++;
+  try { localStorage.setItem(AUTH_STAMP, (logout ? 'logout:' : '') + crypto.randomUUID()); } catch { /* 토큰은 저장하지 않습니다. */ }
+}
+export function syncAuthTokens(tokens: { accessToken: string } | null) {
+  authEpoch++;
+  tokenStore = { accessToken: tokens?.accessToken ?? null };
+}
+export function publishAuthUser(user: AuthUser | null) {
+  syncAuthTokens(user);
+  channel?.postMessage({ type: 'user', user, stamp: stamp() });
+}
 export function setAuthEventListeners(listeners: {
-  onAccessTokenRefreshed?: (accessToken: string) => void;
+  onAccessTokenRefreshed?: (token: string) => void;
   onAuthExpired?: () => void;
+  onUserChanged?: (user: AuthUser | null) => void;
+  onProfileUpdated?: (profile: UserProfile) => void;
 }) {
   onAccessTokenRefreshed = listeners.onAccessTokenRefreshed ?? null;
   onAuthExpired = listeners.onAuthExpired ?? null;
+  onUserChanged = listeners.onUserChanged ?? null;
+  onProfileUpdated = listeners.onProfileUpdated ?? null;
+  channel?.close();
+  channel = null;
+  if (Object.keys(listeners).length && typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
+    channel = new BroadcastChannel('baedang-auth');
+    channel.onmessage = event => {
+      if (event.data?.type === 'user' && event.data.stamp === stamp()) {
+        syncAuthTokens(event.data.user);
+        onUserChanged?.(event.data.user);
+      } else if (event.data?.type === 'profile' && event.data.stamp === stamp()) {
+        onProfileUpdated?.(event.data.profile);
+      }
+    };
+  }
+}
+function invalidAuth(error: unknown) {
+  return error instanceof ApiError && ['UNAUTHORIZED', 'INVALID_TOKEN', 'TOKEN_EXPIRED', 'SESSION_REVOKED', 'REFRESH_TOKEN_REUSED'].includes(error.code);
+}
+async function authLock<T>(work: () => Promise<T>): Promise<T> {
+  if (typeof navigator !== 'undefined' && navigator.locks) return navigator.locks.request('baedang-auth', work);
+  return work();
 }
 
 /**
@@ -110,7 +129,7 @@ type RequestInput = {
 };
 
 async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...init.headers };
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...(path.startsWith('/api/auth/') ? { 'X-Auth-Request': '1' } : {}), ...init.headers };
   if (init.auth) {
     if (!tokenStore.accessToken) {
       throw new ApiError("UNAUTHENTICATED", "로그인이 필요해요.");
@@ -120,23 +139,38 @@ async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
     headers.Authorization = `Bearer ${tokenStore.accessToken}`;
   }
 
+  // 중계 서버의 upstream 제한과 별개로 브라우저 통신도 제한해 Web Lock을 해제합니다.
+  const controller = path.startsWith('/api/auth/') ? new AbortController() : null;
+  const timeout = controller ? setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS) : null;
+  const signal = controller
+    ? (init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal)
+    : init.signal;
   let res: Response;
+  let json;
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, {
-      signal: init.signal,
+    res = await fetch(path.startsWith('/api/auth/') ? path : `${API_BASE_URL}${path}`, {
+      credentials: path.startsWith('/api/auth/') ? 'same-origin' : 'omit',
+      signal,
       method: init.method,
       headers,
       body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
     });
+    json = await res.json().catch(error => {
+      if (controller?.signal.aborted) throw error;
+      return null;
+    });
   } catch {
+    if (controller?.signal.aborted) {
+      throw new ApiError('REQUEST_TIMEOUT', '인증 서버 응답이 늦어지고 있어요. 잠시 후 다시 시도해주세요.');
+    }
     // 백엔드가 안 떠 있거나 CORS 등으로 요청 자체가 안 나간 경우.
     throw new ApiError(
       "NETWORK_ERROR",
       "서버에 연결할 수 없어요. 백엔드가 실행 중인지 확인해주세요."
     );
+  } finally {
+    if (timeout !== null) clearTimeout(timeout);
   }
-
-  const json = await res.json().catch(() => null);
 
   if (!res.ok) {
     const code = json?.code ?? "UNKNOWN_ERROR";
@@ -148,52 +182,48 @@ async function fetchOnce<T>(path: string, init: RequestInput): Promise<T> {
   return json as T;
 }
 
-/**
- * accessToken 수명은 15분(`JWT_ACCESS_TTL`)이라, 오래 켜둔 탭에서는 만료된 채로
- * 요청이 나갈 수 있다 — `AuthProvider`가 주기적으로 조용히 재발급하지만(선제적
- * 갱신), 탭이 오래 백그라운드에 있다 돌아온 직후처럼 그 주기를 놓치는 경우의
- * 안전망으로, 요청이 TOKEN_EXPIRED로 실패하면 여기서 한 번 더 재발급 후 재시도한다.
- * refreshToken마저 무효하면(만료·탈퇴 등) 재로그인이 필요하므로 `onAuthExpired`로
- * 알리고, 사용자에게는 원래의 만료 에러를 그대로 보여준다.
- *
- * <p>`authOptional`도 같은 재발급 로직을 탄다 — `JwtAuthenticationFilter`는 공개
- * 엔드포인트라도 Authorization 헤더가 실려 있으면 검사하므로(백엔드 참고), 만료된
- * 토큰을 실어 보내면 공개 API도 TOKEN_EXPIRED로 실패한다. 다만 재발급마저 실패하면
- * `auth: true`처럼 에러를 던지지 않고, 헤더 없이(로그인 안 한 것처럼) 한 번 더
- * 조용히 재시도한다 — 애초에 로그인 없이도 되는 화면이라 부가 정보만 못 받을 뿐
- * 화면 자체를 에러로 덮을 이유가 없다.
- */
 async function request<T>(path: string, init: RequestInput): Promise<T> {
-  try {
-    return await fetchOnce<T>(path, init);
-  } catch (err) {
-    const sentAuthHeader = init.auth || (init.authOptional && !!tokenStore.accessToken);
-    if (sentAuthHeader && err instanceof ApiError && err.code === "TOKEN_EXPIRED" && tokenStore.refreshToken) {
-      try {
-        const refreshed = await fetchOnce<{ accessToken: string }>("/api/auth/refresh", {
-          method: "POST",
-          body: { refreshToken: tokenStore.refreshToken },
-        });
-        tokenStore = { ...tokenStore, accessToken: refreshed.accessToken };
-        onAccessTokenRefreshed?.(refreshed.accessToken);
-      } catch {
-        tokenStore = { accessToken: null, refreshToken: null };
+  const sentToken = tokenStore.accessToken;
+  const sentEpoch = authEpoch;
+  const sentStamp = stamp();
+  try { return await fetchOnce<T>(path, init); }
+  catch (err) {
+    if ((init.auth || init.authOptional) && sentToken && invalidAuth(err)) {
+      // 이전 사용자의 요청을 새 로그인 사용자의 권한으로 재실행하지 않습니다.
+      if (sentEpoch !== authEpoch || sentStamp !== stamp()) throw err;
+      if (err instanceof ApiError && err.code === 'TOKEN_EXPIRED') {
+        try {
+          if (tokenStore.accessToken === sentToken) await refreshAccessToken();
+          return await fetchOnce<T>(path, init);
+        } catch (refreshError) {
+          if (!invalidAuth(refreshError) || init.auth) throw refreshError;
+        }
+      } else if (sentEpoch === authEpoch && sentStamp === stamp()) {
+        syncAuthTokens(null);
         onAuthExpired?.();
-        if (init.auth) throw err;
-        return await fetchOnce<T>(path, { ...init, authOptional: false });
       }
-      return await fetchOnce<T>(path, init);
+      if (init.authOptional) return fetchOnce<T>(path, { ...init, authOptional: false });
     }
     throw err;
   }
 }
 
-export function signUp(input: { email: string; password: string; nickname: string }): Promise<AuthUser> {
-  return request<AuthUser>("/api/auth/signup", { method: "POST", body: input });
+async function authenticateRequest(path: string, body: unknown): Promise<AuthUser> {
+  return authLock(async () => {
+    await finishPendingLogout();
+    const epoch = authEpoch;
+    const startedStamp = stamp();
+    const user = await fetchOnce<AuthUser>(path, { method: 'POST', body });
+    if (epoch !== authEpoch || startedStamp !== stamp()) throw new ApiError('SESSION_REVOKED', '인증 상태가 변경됐어요.');
+    markAuthChange();
+    return user;
+  });
 }
-
+export function signUp(input: { email: string; password: string; nickname: string }): Promise<AuthUser> {
+  return authenticateRequest('/api/auth/signup', input);
+}
 export function login(input: { email: string; password: string }): Promise<AuthUser> {
-  return request<AuthUser>("/api/auth/login", { method: "POST", body: input });
+  return authenticateRequest('/api/auth/login', input);
 }
 
 /**
@@ -218,26 +248,67 @@ export function confirmPasswordReset(input: { token: string; newPassword: string
   return request<void>("/api/auth/password/reset", { method: "POST", body: input });
 }
 
-/**
- * `POST /api/auth/refresh` — refreshToken으로 새 accessToken을 받는다.
- * `AuthProvider`가 만료 전에 미리(선제적으로) 호출해 세션을 유지하는 용도다 —
- * `request()` 내부의 재시도용 재발급과는 별개의, 명시적으로 호출하는 경로다.
- */
-export function refreshAccessToken(refreshToken: string): Promise<{ accessToken: string }> {
-  return request<{ accessToken: string }>("/api/auth/refresh", { method: "POST", body: { refreshToken } });
+/** 선제 갱신·새로고침 복원·401 복구가 같은 진행 중 요청을 공유합니다. */
+export function refreshAccessToken(): Promise<{ accessToken: string }> {
+  if (refreshFlight) return refreshFlight;
+  const epoch = authEpoch;
+  const startedStamp = stamp();
+  const work = authLock(async () => {
+    if (epoch !== authEpoch || startedStamp !== stamp()) throw new ApiError('SESSION_REVOKED', '인증 상태가 변경됐어요.');
+    const refreshed = await fetchOnce<{ accessToken: string }>('/api/auth/refresh', { method: 'POST', body: {} });
+    if (epoch !== authEpoch || startedStamp !== stamp()) throw new ApiError('SESSION_REVOKED', '인증 상태가 변경됐어요.');
+    tokenStore = { accessToken: refreshed.accessToken };
+    onAccessTokenRefreshed?.(refreshed.accessToken);
+    return refreshed;
+  }).catch(error => {
+    if (epoch === authEpoch && startedStamp === stamp() && invalidAuth(error)) {
+      syncAuthTokens(null);
+      onAuthExpired?.();
+    }
+    throw error;
+  });
+  refreshFlight = work;
+  void work.finally(() => { if (refreshFlight === work) refreshFlight = null; }).catch(() => {});
+  return work;
 }
 
-/**
- * `POST /api/auth/logout` — 프론트-백엔드 연동 점검 중 발견된 미연동 API. 백엔드는
- * stateless JWT라 이 호출 자체가 토큰을 실제로 무효화하진 않는다(`docs/api-spec.md`:
- * "Stateless logout. The client discards local tokens." — 클라이언트가 로컬 토큰을
- * 지우는 것 자체가 로그아웃의 본체). 그래도 서버가 로그아웃 이벤트를 감사 로그로
- * 남기거나, 나중에 토큰 블록리스트가 추가될 가능성에 대비해 문서화된 계약대로
- * 호출은 해준다 — `AuthProvider.logout()`이 로컬 상태를 지우기 전에 best-effort로
- * 부른다(실패해도 로컬 로그아웃 자체는 항상 성공해야 하므로 에러를 던지지 않는다).
- */
-export function logoutUser(): Promise<void> {
-  return request<void>("/api/auth/logout", { method: "POST", auth: true });
+export async function restoreAuth(): Promise<AuthUser | null> {
+  if (stamp()?.startsWith('logout:')) {
+    await authLock(finishPendingLogout);
+    return null;
+  }
+  const epoch = authEpoch;
+  const startedStamp = stamp();
+  try {
+    const { accessToken } = await refreshAccessToken();
+    const profile = await getMe();
+    return epoch === authEpoch && startedStamp === stamp() ? { ...profile, accessToken } : null;
+  } catch (error) {
+    if (invalidAuth(error)) return null;
+    throw error;
+  }
+}
+
+// 실패한 로그아웃은 토큰 없는 표식만 남겨, 재접속 때 인증 복원보다 먼저 재시도합니다.
+async function finishPendingLogout(): Promise<void> {
+  if (!stamp()?.startsWith('logout:')) return;
+  await fetchOnce<void>('/api/auth/logout', { method: 'POST', body: {} });
+  markAuthChange();
+}
+
+export async function logoutUser(): Promise<void> {
+  // 먼저 진행 중 응답을 무효화하되, 쿠키 삭제 요청은 기존 갱신 완료 뒤에 실행합니다.
+  markAuthChange(true);
+  syncAuthTokens(null);
+  onAuthExpired?.();
+  channel?.postMessage({ type: 'user', user: null, stamp: stamp() });
+  await authLock(async () => {
+    await fetchOnce<void>('/api/auth/logout', { method: 'POST', body: {} });
+    if (stamp()?.startsWith('logout:')) {
+      markAuthChange();
+      channel?.postMessage({ type: 'user', user: null, stamp: stamp() });
+    }
+  });
 }
 
 // ── 회원 정보 ──────────────────────────────────────────────────────────────────
@@ -254,8 +325,16 @@ export function getMe(): Promise<UserProfile> {
 }
 
 /** `PATCH /api/users/me` — 닉네임 변경. 중복이면 `NICKNAME_DUPLICATED`. */
-export function updateNickname(nickname: string): Promise<UserProfile> {
-  return request<UserProfile>("/api/users/me", { method: "PATCH", auth: true, body: { nickname } });
+export async function updateNickname(nickname: string): Promise<UserProfile> {
+  const epoch = authEpoch;
+  const startedStamp = stamp();
+  const result = await request<UserProfile>("/api/users/me", { method: "PATCH", auth: true, body: { nickname } });
+  // 성공 응답도 요청 당시 세션에만 반영합니다. 프로필 변경은 인증 토큰을 교체하지 않습니다.
+  if (epoch !== authEpoch || startedStamp !== stamp()) throw new ApiError('SESSION_REVOKED', '인증 상태가 변경됐어요.');
+  const profile = { userId: result.userId, email: result.email, nickname: result.nickname };
+  onProfileUpdated?.(profile);
+  channel?.postMessage({ type: 'profile', profile, stamp: startedStamp });
+  return profile;
 }
 
 /** `PUT /api/users/me/password` — 비밀번호 변경. 현재 비밀번호가 틀리면 `INVALID_PASSWORD`. */
@@ -267,12 +346,7 @@ export function changeUserPassword(currentPassword: string, newPassword: string)
   });
 }
 
-/**
- * `DELETE /api/users/me` — 회원 탈퇴. 계정을 지우지 않고 상태만 WITHDRAWN·CLOSED로
- * 바꾼다(`docs/erd.md`). 백엔드가 토큰을 무효화하진 않으니(stateless JWT), 성공하면
- * 호출부가 반드시 로컬 로그인 상태를 지워야 한다 — 안 지우면 이미 탈퇴한 계정으로
- * 계속 요청을 보내다 USER_NOT_FOUND류 에러만 반복해서 보게 된다.
- */
+/** 탈퇴는 서버의 모든 세션을 폐기합니다. 호출부는 브라우저 쿠키와 메모리도 정리합니다. */
 export function withdrawAccount(currentPassword: string): Promise<void> {
   return request<void>("/api/users/me", { method: "DELETE", auth: true, body: { currentPassword } });
 }

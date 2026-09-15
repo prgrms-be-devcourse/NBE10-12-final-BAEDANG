@@ -45,6 +45,9 @@ function LoginForm() {
         <h1 className="mb-1 text-center text-[22px] font-extrabold" style={{ color: "var(--ink)" }}>로그인</h1>
         <p className="mb-5 text-center text-[13.5px]" style={{ color: "var(--mut)" }}>모의 투자금으로 다시 시작해볼까요?</p>
 
+        {searchParams.get("reason") === "password-changed" && (
+          <p role="status" className="mb-4 text-sm">비밀번호를 변경했어요. 새 비밀번호로 다시 로그인해주세요.</p>
+        )}
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
             <label className="mb-1 block text-[12px]" style={{ color: "var(--mut)" }}>이메일</label>
