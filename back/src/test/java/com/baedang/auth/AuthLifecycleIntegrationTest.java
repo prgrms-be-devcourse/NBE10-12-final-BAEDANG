@@ -14,6 +14,7 @@ import com.baedang.auth.service.AuthSessionService;
 import com.baedang.user.service.UserService;
 import com.baedang.auth.service.AuthSessionService.Tokens;
 import com.baedang.global.error.BusinessException;
+import com.baedang.global.config.AsyncConfig;
 import com.baedang.global.error.ErrorCode;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
@@ -43,6 +44,8 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -65,6 +68,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -118,6 +123,7 @@ class AuthLifecycleIntegrationTest {
 
     @Autowired private UserService userService;
     @Autowired private AuthService auth;
+    @Autowired private TransactionTemplate transactions;
     @Autowired private AuthSessionService sessions;
 
     @MockitoBean
@@ -599,6 +605,72 @@ class AuthLifecycleIntegrationTest {
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token WHERE user_id=? AND used_at IS NULL",
                 Integer.class, signed.userId())).isEqualTo(1);
         verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+    }
+
+    @Test
+    @DisplayName("재설정 발급 트랜잭션이 롤백되면 토큰과 메일이 모두 남지 않는다")
+    void reset_rollback_does_not_send_mail() {
+        AuthResponse signed = sessionUser();
+        transactions.executeWithoutResult(transaction -> {
+            auth.requestPasswordReset(new PasswordForgotRequest(signed.email()));
+            verifyNoInteractions(passwordResetMailSender);
+            transaction.setRollbackOnly();
+        });
+        verifyNoInteractions(passwordResetMailSender);
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token", Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("재설정 메일은 발급 트랜잭션 커밋 전에는 등록하지 않는다")
+    void reset_mail_is_submitted_after_commit() {
+        AuthResponse signed = sessionUser();
+        transactions.executeWithoutResult(transaction -> {
+            auth.requestPasswordReset(new PasswordForgotRequest(signed.email()));
+            verifyNoInteractions(passwordResetMailSender);
+        });
+        verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+        assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token", Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("실제 메일 큐가 포화되어도 가입·미가입 요청은 모두 200이며 토큰 커밋을 유지한다")
+    void saturated_mail_queue_preserves_response_and_commit() throws Exception {
+        AuthResponse signed = sessionUser();
+        ThreadPoolTaskExecutor executor = new AsyncConfig().passwordResetMailExecutor();
+        executor.initialize();
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        try {
+            executor.execute(() -> {
+                started.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();
+            for (int index = 0; index < 50; index++) {
+                executor.execute(() -> {});
+            }
+            assertThat(executor.getThreadPoolExecutor().getQueue().remainingCapacity()).isZero();
+            doAnswer(invocation -> {
+                executor.execute(() -> {});
+                return null;
+            }).when(passwordResetMailSender).sendResetLink(any(), any());
+
+            mockMvc.perform(post("/api/auth/password/forgot").contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new PasswordForgotRequest(signed.email()))))
+                    .andExpect(status().isOk());
+            mockMvc.perform(post("/api/auth/password/forgot").contentType(MediaType.APPLICATION_JSON)
+                            .content(objectMapper.writeValueAsString(new PasswordForgotRequest("absent@example.com"))))
+                    .andExpect(status().isOk());
+            verify(passwordResetMailSender).sendResetLink(eq(signed.email()), any());
+            assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM password_reset_token", Integer.class)).isEqualTo(1);
+        } finally {
+            release.countDown();
+            executor.shutdown();
+        }
     }
 
     private String issueResetToken(String email) {

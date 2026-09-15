@@ -22,6 +22,7 @@ import com.baedang.user.repository.PasswordResetTokenRepository;
 import com.baedang.user.repository.UserRepository;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -29,6 +30,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.sql.SQLException;
@@ -60,6 +63,7 @@ class AuthServiceTest {
 
     @BeforeEach
     void setUp() {
+        TransactionSynchronizationManager.initSynchronization();
         userRepository = mock(UserRepository.class);
         accountRepository = mock(AccountRepository.class);
         passwordResetTokenRepository = mock(PasswordResetTokenRepository.class);
@@ -83,6 +87,11 @@ class AuthServiceTest {
                 Duration.ofMinutes(1),
                 clock
         );
+    }
+
+    @AfterEach
+    void clearSynchronization() {
+        TransactionSynchronizationManager.clearSynchronization();
     }
 
     @Test
@@ -319,6 +328,8 @@ class AuthServiceTest {
         when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
 
         OffsetDateTime expectedNow = OffsetDateTime.ofInstant(now, ZoneOffset.UTC);
         verify(passwordResetTokenRepository).invalidateUnusedByUserId(1L, expectedNow);
@@ -347,6 +358,8 @@ class AuthServiceTest {
                 .thenReturn(Optional.of(recentToken));
 
         authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
 
         verify(passwordResetTokenRepository, never()).invalidateUnusedByUserId(anyLong(), any());
         verify(passwordResetTokenRepository, never()).save(any());
@@ -367,6 +380,8 @@ class AuthServiceTest {
                 .thenReturn(Optional.of(oldToken));
 
         authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
 
         verify(passwordResetTokenRepository).invalidateUnusedByUserId(eq(1L), any());
         verify(passwordResetTokenRepository).save(any());
@@ -393,6 +408,8 @@ class AuthServiceTest {
         when(userRepository.findByEmailForUpdate("test@example.com")).thenReturn(Optional.of(user));
 
         authService.requestPasswordReset(new PasswordForgotRequest("test@example.com"));
+        verifyNoInteractions(passwordResetMailSender);
+        TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
 
         verify(passwordResetMailSender, never()).sendResetLink(any(), any());
         verify(passwordResetTokenRepository, never()).save(any());

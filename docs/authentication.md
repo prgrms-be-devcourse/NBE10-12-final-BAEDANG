@@ -138,3 +138,5 @@ single-worker desktop/mobile trading suite stays enabled. Production HTTPS/cooki
 be verified after the production environment variables and coordinated deployment are applied.
 
 Browser auth requests have a separate 15-second timeout covering headers and body consumption. A timeout aborts the fetch, releases the Web Lock and clears the shared refresh flight. REQUEST_TIMEOUT is transient: it does not clear authentication or automatically replay token rotation; pending logout stays retryable.
+
+Mail submission runs only after the reset-token transaction commits. Rollback sends no mail. Queue saturation or executor shutdown is logged without the reset token/link and does not change the public response. Submission failure does not undo the committed token or cooldown; the user may request again after the existing cooldown. Delivery is best-effort, with no persistent retry queue.

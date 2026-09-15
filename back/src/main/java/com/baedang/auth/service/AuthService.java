@@ -29,6 +29,8 @@ import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -41,6 +43,7 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.concurrent.RejectedExecutionException;
 
 @Service
 public class AuthService {
@@ -243,8 +246,18 @@ public class AuthService {
         passwordResetTokenRepository.save(token);
 
         String resetUrl = frontendBaseUrl + "/reset-password?token=" + rawToken;
-        passwordResetMailSender.sendResetLink(user.getEmail(), resetUrl);
-        log.info("비밀번호 재설정 메일 발급 완료 userId={}", user.getUserId());
+        // 토큰 저장이 커밋된 뒤에만 발송합니다. 롤백된 토큰의 링크가 전달되면 안 됩니다.
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    passwordResetMailSender.sendResetLink(user.getEmail(), resetUrl);
+                } catch (RejectedExecutionException exception) {
+                    // 큐 포화·종료는 가입 여부별 응답 차이를 만들지 않으며 토큰·링크도 기록하지 않습니다.
+                    log.error("[password-reset] 메일 작업 등록 실패: 실행기 포화 또는 종료 userId={}", user.getUserId());
+                }
+            }
+        });
     }
 
     /**
