@@ -3,8 +3,7 @@ import { authenticate, openStock, submit, get } from '../helpers/trading.js';
 import { openNavigation, expectNoHorizontalOverflow } from '../helpers/navigation.js';
 
 test('모바일 메뉴에서 랭킹과 종목 상세로 이동한다 @smoke @responsive', async ({ page }) => {
-  await page.context().addCookies([{ name: 'iv_intro_seen', value: '1', url: 'http://127.0.0.1:13000' }]);
-  await page.goto('/');
+  await page.goto('/main');
   await openNavigation(page);
   await expectNoHorizontalOverflow(page);
   await page.getByRole('button', { name: '랭킹', exact: true }).click();

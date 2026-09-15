@@ -2,7 +2,6 @@ import type { Page, APIRequestContext } from '@playwright/test';
 import { expect, API } from '../fixtures/test.js';
 
 export async function authenticate(page: Page, user: object) {
-  await page.context().addCookies([{ name: 'iv_intro_seen', value: '1', url: 'http://127.0.0.1:13000' }]);
   await page.goto('/login');
   await page.evaluate(value => {
     localStorage.setItem('trading-auth-user', JSON.stringify(value));
