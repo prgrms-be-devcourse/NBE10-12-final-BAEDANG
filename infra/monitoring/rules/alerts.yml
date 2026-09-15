@@ -61,11 +61,17 @@ groups:
           description: "5분간 서버 응답 p95 가 1초를 초과. 값: {{ $value | humanizeDuration }}."
 
       - alert: High5xxRate
+        # 5xx 비율 = 5xx rate / 전체 rate.
+        # !! 분모를 clamp_min(...,1) 로 누르지 않는다 — rate 는 초당값이라 저트래픽(1 RPS 미만)에서
+        #    분모가 1 로 눌려 실제 실패를 정상처럼 표시한다(false negative). 대신 비율은 그대로 두고
+        #    (0/0=NaN 은 비교에서 걸러짐) 최소 요청 수 조건을 and 로 분리해 저트래픽 오탐만 막는다.
         expr: |
           sum(rate(http_server_requests_seconds_count{job="spring-boot", status=~"5.."}[5m]))
           /
-          clamp_min(sum(rate(http_server_requests_seconds_count{job="spring-boot"}[5m])), 1)
+          sum(rate(http_server_requests_seconds_count{job="spring-boot"}[5m]))
           > 0.05
+          and
+          sum(increase(http_server_requests_seconds_count{job="spring-boot"}[5m])) >= 5
         for: 5m
         labels:
           severity: critical
@@ -188,11 +194,17 @@ groups:
           description: "2분간 개장 중인 시장의 시세 신선도가 60s 초과. 폴링 스케줄러 정지 의심."
 
       - alert: ExternalApiFailureRate
+        # 외부 API 실패율 = 실패 rate / 전체 rate.
+        # !! 분모를 clamp_min(...,1) 로 누르지 않는다 — rate 는 초당값이라 저트래픽(1 RPS 미만)에서
+        #    분모가 1 로 눌려, 1분에 1건 전부 실패해도 ~1.67% 로 계산돼 알림이 침묵한다(false negative).
+        #    비율은 그대로 두고(0/0=NaN 은 비교에서 걸러짐) 최소 표본 수 조건을 and 로 분리한다.
         expr: |
           sum(rate(trading_external_api_seconds_count{job="spring-boot", outcome="FAILURE"}[5m]))
           /
-          clamp_min(sum(rate(trading_external_api_seconds_count{job="spring-boot"}[5m])), 1)
+          sum(rate(trading_external_api_seconds_count{job="spring-boot"}[5m]))
           > 0.2
+          and
+          sum(increase(trading_external_api_seconds_count{job="spring-boot"}[5m])) >= 5
         for: 5m
         labels:
           severity: warning

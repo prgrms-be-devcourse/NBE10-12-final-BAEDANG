@@ -2,6 +2,7 @@ package com.baedang.market.service;
 
 import com.baedang.global.error.BusinessException;
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.metrics.TradingMetrics;
 import com.baedang.market.config.QuoteCollectionProperties;
 import com.baedang.market.entity.QuoteSnapshot;
 import com.baedang.market.port.MarketDataPort;
@@ -47,6 +48,7 @@ public class QuoteRefreshCoordinator {
     private final QuoteCollectionProperties properties;
     private final Clock clock;
     private final MeterRegistry metrics;
+    private final TradingMetrics tradingMetrics;
     private final Semaphore backgroundSlots;
     private final Semaphore urgentSlot = new Semaphore(1, true);
     private final Map<Long, CompletableFuture<Void>> inFlight = new HashMap<>();
@@ -54,7 +56,7 @@ public class QuoteRefreshCoordinator {
 
     public QuoteRefreshCoordinator(MarketDataPort marketData, QuoteSnapshotPersistenceService persistence,
             QuoteSnapshotRepository snapshots, @Qualifier("quoteCollectionExecutor") TaskExecutor executor,
-            QuoteCollectionProperties properties, Clock clock, MeterRegistry metrics) {
+            QuoteCollectionProperties properties, Clock clock, MeterRegistry metrics, TradingMetrics tradingMetrics) {
         this.marketData = marketData;
         this.persistence = persistence;
         this.snapshots = snapshots;
@@ -62,6 +64,7 @@ public class QuoteRefreshCoordinator {
         this.properties = properties;
         this.clock = clock;
         this.metrics = metrics;
+        this.tradingMetrics = tradingMetrics;
         this.backgroundSlots = new Semaphore(properties.backgroundConcurrency());
         metrics.gauge("quote.collection.inflight", this, QuoteRefreshCoordinator::inFlightCount);
     }
@@ -192,6 +195,13 @@ public class QuoteRefreshCoordinator {
             }
             metrics.counter("quote.collection.updated").increment(updated);
             metrics.counter("quote.collection.requested").increment(stocks.size());
+            // 실제 저장이 일어난 경우에만(updated>0) 시장별 시세 신선도를 초기화한다. Toss 조회가
+            // 예외 없이 빈 응답이라 아무것도 저장 못 하면 신선도를 갱신하지 않아 QuoteStale 이 살아난다.
+            // 여기(저장 성공 시점)에서 기록하므로 비동기 조회/저장 실패는 false green 을 만들지 않는다.
+            if (updated > 0) {
+                stocks.stream().map(Stock::getMarketCountry).map(Enum::name).distinct()
+                        .forEach(tradingMetrics::quoteUpdated);
+            }
             finish(stocks, null);
         } catch (RuntimeException exception) {
             metrics.counter("quote.collection.failures").increment();

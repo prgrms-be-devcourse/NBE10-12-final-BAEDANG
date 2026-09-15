@@ -108,11 +108,14 @@ public QuoteSnapshotScheduler(TradingMetrics metrics /* ... */) {
     this.metrics = metrics;
 }
 
-// ① 시세 갱신 — 폴링 루프가 한 시장의 시세를 성공적으로 반영할 때마다
+// ① 시세 갱신 — !! "수집 제출"이 아니라 실제 시세 "저장 성공" 시점에 호출한다.
+//    QuoteRefreshCoordinator.fetch() 에서 persist 성공(updated>0) 직후에 부른다. 스케줄러의
+//    syncQuotes()>0 은 비동기 제출을 뜻할 뿐이라, 거기서 부르면 조회/저장이 계속 실패해도
+//    freshness 가 초기화돼 정상처럼 보인다(false green).
 metrics.quoteUpdated("KR");     // → trading_quote_staleness_seconds{market="KR"}
 
-// ①-b 시장 개장 여부 — 매 폴링 tick 마다(개장/휴장 모두). QuoteStale 알림이 staleness 와
-//     and on(market) 로 조인해 "개장 중인 시장"만 보게 해, 휴장(야간·주말) 오탐을 막는다.
+// ①-b 시장 개장 여부 — 매 폴링 tick 마다(개장/휴장 모두, QuoteSnapshotScheduler). QuoteStale 알림이
+//     staleness 와 and on(market) 로 조인해 "개장 중인 시장"만 보게 해, 휴장(야간·주말) 오탐을 막는다.
 metrics.marketOpen("KR", session.open());  // → trading_market_open{market="KR"} (1=개장,0=휴장)
 
 // ② 외부 API 호출 — Supplier 로 감싸면 성공/실패·소요시간이 자동 기록됨(예외는 그대로 전파)
@@ -138,11 +141,15 @@ try {
 }
 
 // ④ 배치 성공 — 배치가 정상적으로 끝났을 때 (마지막 성공 시각을 기록)
-metrics.batchSucceeded("daily-candle");   // → trading_batch_last_success_timestamp_seconds{job_name="daily-candle"}
+metrics.batchSucceeded("leaderboard-snapshot");   // → trading_batch_last_success_timestamp_seconds{job_name="leaderboard-snapshot"}
+// ④-b 시장별로 실패 지점이 나뉜 배치(KR/US 일봉)는 market 태그로 시계열을 분리한다 —
+//     한 시장의 성공이 다른 시장의 장애를 가리지 않도록. (시장별 알림 게이팅은 후속 이슈)
+metrics.batchSucceeded("daily-candle", "KR");  // → trading_batch_last_success_timestamp_seconds{job_name="daily-candle", market="KR"}
 ```
 
-붙일 만한 지점(예): `QuoteSnapshotScheduler`→①, `TossSecuritiesClient`/`KisSecuritiesClient`→②,
-주문 실행 서비스→③, `DailyCandleCollectionScheduler`·`LeaderboardSnapshotScheduler` 등 배치→④.
+붙일 만한 지점(예): 시세 저장 성공(`QuoteRefreshCoordinator.fetch`)→①, 개장 상태(`QuoteSnapshotScheduler`)→①-b,
+`TossSecuritiesClient`/`KisSecuritiesClient`→②, 주문 실행 서비스(`place`)→③,
+`DailyCandleCollectionScheduler`·`LeaderboardSnapshotScheduler` 등 배치→④.
 
 ---
 

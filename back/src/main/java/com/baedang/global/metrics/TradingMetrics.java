@@ -152,14 +152,32 @@ public class TradingMetrics {
      *   깔끔히 못 막는다. 기동 시 각 배치의 gauge 를 0/과거값으로 시드하면 닫힌다.
      */
     public void batchSucceeded(String jobName) {
-        AtomicReference<Instant> holder = batchLastSuccess.computeIfAbsent(jobName, key -> {
+        recordBatchSuccess(jobName, null);
+    }
+
+    /**
+     * 시장별로 실패 지점이 독립적인 배치(예: 국내/미국 일봉 수집)의 마지막 성공 시각을 {@code market}
+     * 태그와 함께 기록한다. 하나의 job_name 에 성공 시각을 합치면 한 시장이 며칠 죽어도 다른 시장의
+     * 성공이 시각을 갱신해 장애가 가려진다 — 시장별로 시계열을 나눠 그 정보를 잃지 않게 한다.
+     */
+    public void batchSucceeded(String jobName, String market) {
+        recordBatchSuccess(jobName, market);
+    }
+
+    private void recordBatchSuccess(String jobName, String market) {
+        // gauge 시계열은 (job_name, market) 조합마다 하나여야 하므로 맵 키에 market 을 포함한다.
+        String key = market == null ? jobName : jobName + "|" + market;
+        AtomicReference<Instant> holder = batchLastSuccess.computeIfAbsent(key, ignored -> {
             AtomicReference<Instant> ref = new AtomicReference<>(clock.instant());
-            Gauge.builder(BATCH_LAST_SUCCESS, ref, this::epochSeconds)
+            Gauge.Builder<AtomicReference<Instant>> builder = Gauge.builder(BATCH_LAST_SUCCESS, ref, this::epochSeconds)
                     // Prometheus 의 스크레이프 job 라벨과 충돌하지 않도록 태그 키를 job_name 으로 둔다.
                     // 태그 키를 그냥 job 으로 두면 Prometheus 가 exported_job 으로 재라벨해 그룹핑이 깨진다.
-                    .tag("job_name", key)
-                    .description("배치의 마지막 성공 시각(epoch 초). time()-이 값 이 커지면 미실행")
-                    .register(registry);
+                    .tag("job_name", jobName)
+                    .description("배치의 마지막 성공 시각(epoch 초). time()-이 값 이 커지면 미실행");
+            if (market != null) {
+                builder = builder.tag("market", market);
+            }
+            builder.register(registry);
             return ref;
         });
         holder.set(clock.instant());

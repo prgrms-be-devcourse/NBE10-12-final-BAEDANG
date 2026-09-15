@@ -61,15 +61,12 @@ public class QuoteSnapshotScheduler {
             MarketSessionStatus session = marketSessionProvider.currentSession(marketCountry, now);
             // 매 tick 개장 여부를 게이지로 갱신한다 — QuoteStale 알림이 이 값과 조인해
             // 휴장 시장의 staleness 증가를 무시하도록(야간·주말 오탐 방지).
+            // !! 시세 신선도(quoteUpdated)는 여기서 기록하지 않는다. syncQuotes>0 은 "비동기 수집
+            //    대상으로 제출했다"는 뜻일 뿐, 실제 Toss 조회·저장은 이후 executor 에서 일어나기 때문이다.
+            //    제출 시점에 신선도를 초기화하면 조회/저장이 계속 실패해도 정상처럼 보인다(false green).
+            //    실제 저장 성공 시점에 QuoteRefreshCoordinator.fetch() 가 quoteUpdated 를 기록한다.
             metrics.marketOpen(marketCountry.name(), session.open());
-            if (session.open()) {
-                // syncQuotes>0 은 이번 tick 에 실제로 한 페이지를 수집 제출했다는 뜻이다(대부분의
-                // tick 은 스윕 간격에 눌려 0 을 돌려준다). 그 순간을 시세 신선도의 맥박으로 기록한다 —
-                // 폴링 루프가 통째로 멈추면 이 호출이 끊겨 trading_quote_staleness_seconds 가 계속 커진다.
-                boolean reflected = quoteSnapshotLoadService.syncQuotes(marketCountry, session.validUntil()) > 0;
-                if (reflected) metrics.quoteUpdated(marketCountry.name());
-                return reflected;
-            }
+            if (session.open()) return quoteSnapshotLoadService.syncQuotes(marketCountry, session.validUntil()) > 0;
             else log.trace("장 휴장 상태로 시세 수집 건너뜀: marketCountry={}", marketCountry);
         } catch (Exception e) {
             log.error("시세 수집 스케줄러 실행 중 오류 발생: marketCountry={}", marketCountry, e);
