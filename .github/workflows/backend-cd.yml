@@ -162,7 +162,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: 인스턴스 퍼블릭 IP 및 러너 IP 조회
+      - name: 인스턴스 퍼블릭 IP 조회
         run: |
           HOST=$(aws ec2 describe-instances \
             --filters "Name=tag:Name,Values=${{ env.INSTANCE_TAG_NAME }}" "Name=instance-state-name,Values=running" \
@@ -171,17 +171,6 @@ jobs:
             echo "실행 중인 인스턴스의 퍼블릭 IP를 찾지 못했습니다." && exit 1
           fi
           echo "HOST=$HOST" >> $GITHUB_ENV
-          RUNNER_IP=$(curl -fsS https://checkip.amazonaws.com)
-          echo "RUNNER_CIDR=$RUNNER_IP/32" >> $GITHUB_ENV
-
-      - name: 러너 IP에 22번 포트 개방
-        run: |
-          # 강제 종료로 남은 규칙이 있으면 중복 오류가 나므로 먼저 지운다
-          aws ec2 revoke-security-group-ingress --group-id "${{ secrets.EC2_SG_ID }}" \
-            --protocol tcp --port 22 --cidr "$RUNNER_CIDR" 2>/dev/null || true
-          aws ec2 authorize-security-group-ingress --group-id "${{ secrets.EC2_SG_ID }}" \
-            --protocol tcp --port 22 --cidr "$RUNNER_CIDR"
-          echo "SSH_PORT_OPENED=true" >> $GITHUB_ENV
 
       - name: Deploy via SSH
         env:
@@ -219,9 +208,3 @@ jobs:
 
           docker image prune -af
           DEPLOY
-
-      - name: 22번 포트 닫기
-        if: always() && env.SSH_PORT_OPENED == 'true'
-        run: |
-          aws ec2 revoke-security-group-ingress --group-id "${{ secrets.EC2_SG_ID }}" \
-            --protocol tcp --port 22 --cidr "$RUNNER_CIDR"
