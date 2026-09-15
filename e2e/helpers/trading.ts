@@ -2,7 +2,6 @@ import type { Page, APIRequestContext } from '@playwright/test';
 import { expect, API, PASSWORD } from '../fixtures/test.js';
 
 export async function authenticate(page: Page, user: { email: string }) {
-  await page.context().addCookies([{ name: 'iv_intro_seen', value: '1', url: 'http://127.0.0.1:13000' }]);
   // 검증용 API와 브라우저는 독립 세션을 사용합니다. 브라우저에는 HttpOnly 쿠키만 심습니다.
   const response = await page.request.post('/api/auth/login', {
     headers: { Origin: 'http://127.0.0.1:13000', 'X-Auth-Request': '1' },

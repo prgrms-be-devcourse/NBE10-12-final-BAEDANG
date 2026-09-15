@@ -29,5 +29,12 @@ test('다음 경로 없이 로그인하면 메인으로 이동한다', async ({ 
   await page.getByPlaceholder('비밀번호를 입력하세요').fill(PASSWORD);
   await page.locator('form').getByRole('button', { name: '로그인', exact: true }).click();
   await expect(page).toHaveURL(/\/main$/);
-  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('trading-auth-user') ?? 'null')?.email)).toBe(user.email);
+  expect(await page.evaluate(() => localStorage.getItem('trading-auth-user'))).toBeNull();
+  expect((await page.context().cookies()).find(cookie => cookie.name === 'baedang_refresh')?.httpOnly).toBe(true);
+  const profile = page.waitForResponse(r => r.url().endsWith('/api/users/me') && r.request().method() === 'GET');
+  await page.goto('/my');
+  const response = await profile;
+  expect(response.ok()).toBeTruthy();
+  expect((await response.json()).email).toBe(user.email);
+  await expect(page.getByRole('heading', { name: '내 계좌' })).toBeVisible();
 });
