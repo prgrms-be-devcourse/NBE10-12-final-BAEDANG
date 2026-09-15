@@ -26,7 +26,7 @@ npm run clean
 
 `npm test -- --grep "CB"` selects tests; `npm test -- --repeat-each=2` checks repeatability.
 `npm test -- --project mobile-chromium` runs the seven responsive flows only;
-`npm test -- --project chromium` runs the 33 desktop flows.
+`npm test -- --project chromium` runs the 38 desktop flows.
 All modes build the frontend and E2E Java source set first. Ports 13000, 18088 and 18089
 must be free. Existing development servers are never reused. The database port is assigned
 by Docker. Do not invoke Playwright directly: the runner supplies a fresh control key.
@@ -39,8 +39,8 @@ creating its runtime state or starting containers and servers.
 ## Isolation and lifecycle
 
 - Exactly one Playwright worker, `fullyParallel: false`, and no retries or sharding.
-- Desktop Chromium runs 33 scenarios. Mobile Chromium uses touch/mobile emulation at
-  375×812 and runs only `@responsive` scenarios (seven runs); the full suite totals 40.
+- Desktop Chromium runs 38 scenarios. Mobile Chromium uses touch/mobile emulation at
+  375×812 and runs only `@responsive` scenarios (seven runs); the full suite totals 45.
   Mobile coverage includes menu navigation, login/logout, ranking-to-detail navigation,
   order confirmation, partial fills, holdings/ledger cards and order cancellation.
   Targeted overflow and viewport assertions cover rankings, detail inputs and account
@@ -119,7 +119,7 @@ ignored by Git; do not publish traces from sessions using real accounts.
 `.github/workflows/e2e.yml` runs smoke on PR updates to develop/main and the full suite
 on pushes to develop/main. Manual runs select smoke or full. A change-detection step
 skips unrelated documentation changes while leaving a completed workflow check.
-Smoke totals 16 runs (12 desktop + 4 mobile); full totals 40 (33 desktop + 7 mobile).
+Smoke totals 16 runs (12 desktop + 4 mobile); full totals 45 (38 desktop + 7 mobile).
 Both projects run serially with one worker and the same per-test cleanup policy.
 Superseded runs of the same PR are cancelled. Cleanup and seven-day diagnostic artifacts
 run even after failure. Require a full run on the final merge candidate manually.
@@ -147,7 +147,7 @@ API inspection helpers own a separate session and retain both rotated tokens onl
 The runner supplies loopback `AUTH_BACKEND_URL` / `AUTH_PUBLIC_ORIGIN` and a per-run session encryption key.
 Actuator uses an ephemeral loopback port, avoiding the ordinary backend's 8081.
 Auth coverage includes cookie visibility/CSRF, two-tab restoration and logout, old Access rejection,
-password-change revocation, and the existing desktop/mobile reload flow. All 34 cases use one worker.
+password-change revocation, and the existing desktop/mobile reload flow. All 45 cases use one worker.
 
 The authenticated `/restart` control action rebuilds the Spring application with the same DB, keys and Clock instant; it does not clear scenario data. Auth tests use it to verify persisted sessions and encrypted predecessor-grace replay.
 

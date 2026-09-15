@@ -5,9 +5,10 @@ English | [한국어](authentication.ko.md)
 ## Deployment and transport
 
 The existing Vercel frontend, EC2 backend and PostgreSQL remain in use. Next.js relays only
-`POST /api/auth/{signup,login,refresh,logout}` to the backend. It is not a general API proxy.
+`POST /api/auth/{signup,login,refresh,logout}` and the two explicit
+`POST /api/auth/password/{forgot,reset}` routes to the backend. It is not a general API proxy.
 Other API calls continue to use `NEXT_PUBLIC_API_BASE_URL` and Bearer Access authentication.
-No Redis, SMTP, password-reset API or infrastructure provisioning is included.
+Password reset uses the backend implementation merged from develop. This auth change does not provision Redis, SMTP or infrastructure.
 
 Vercel server environment variables:
 
@@ -37,7 +38,7 @@ The relay removes Refresh from response JSON. No auth tokens are stored in local
 legacy `trading-auth-user` is removed on mount. A random localStorage stamp coordinates account changes
 and pending logout, without storing tokens or user details.
 
-All four relay routes require an exact Origin match, `X-Auth-Request: 1`, and JSON Content-Type.
+All six relay routes require an exact Origin match, `X-Auth-Request: 1`, and JSON Content-Type.
 Refresh/logout read only the cookie, ignoring any supplied token in the browser body. Upstream requests
 use fixed paths, a 10-second timeout, no redirects and no caching. Responses use `Cache-Control: no-store`.
 Backend auth endpoints remain JSON APIs for the relay and non-browser clients; backend APIs do not consume
@@ -49,6 +50,7 @@ not the PostgreSQL session validation described here.
 | Signup/login | Credentials → user/account, accessToken, refreshToken, expiresAt | Sets cookie; removes refreshToken |
 | Refresh | `{refreshToken}` → accessToken, refreshToken, expiresAt | Body `{}`; reads and replaces cookie |
 | Logout | `{refreshToken}` → 200 empty | Body `{}`; deletes cookie and returns 204 |
+| Password forgot/reset | Email or reset token/new password → 200 empty | Fixed routes; preserves empty success/errors; does not read or change the Refresh cookie |
 | Profile | Bearer Access → `GET /api/users/me` | Direct backend call after refresh on page restoration |
 
 Logout accepts an unexpired, correctly signed Refresh from the same session even if it has rotated;
@@ -61,7 +63,7 @@ a delayed error must not erase a newer login cookie.
 Access defaults to 15 minutes and the session to 7 days from login. Refresh rotation never extends
 the session expiration; Access expiration is capped at the session expiration. JWTs include issuer,
 subject, token_type, sid, generation and a random jti. Pre-migration tokens without sid require login again.
-Each login creates an independent session. Logout revokes that session; password change and withdrawal
+Each login creates an independent session. Logout revokes that session; password change, password reset and withdrawal
 revoke all user sessions in the same transaction as the account change.
 
 Every authenticated request validates the JWT and queries PostgreSQL for an active session and active
@@ -69,7 +71,9 @@ user. There is no session cache. Checks beginning after revocation commits rejec
 requests already authenticated are not retroactively cancelled. Database connection/transaction errors
 fail authentication with 503 `AUTH_UNAVAILABLE`, not an anonymous or authenticated bypass.
 
-Login locks the user before checking its password. Refresh, logout, password change and withdrawal use
+Password-reset issuance locks the user before checking cooldown or invalidating/inserting tokens. Reset first looks up only the owner ID, then locks the user and reset token and rechecks usage/expiry before changing the password and revoking sessions. No token entity is cached before the user lock.
+
+Login locks the user before checking its password. Refresh, logout, password change, password reset and withdrawal use
 the same user-first lock order. Refresh then locks the session row. Signup creates user, account,
 initial ledger entry and session in one transaction. RTR commits its mutation before returning tokens.
 Reuse revocation is committed before throwing the public error, so exception rollback cannot undo it.

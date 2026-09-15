@@ -211,6 +211,8 @@ Password reset email request (forgot password).
 **Response · 200**
 Empty body. **Always 200, regardless of whether the email is registered** — a different response for an unregistered email would leak account existence (account enumeration attack), same principle as `LOGIN_FAILED`. The actual email is only sent when an ACTIVE user owns that email; the caller sees identical behavior either way.
 
+Issuance is serialized per user: the user row is locked before cooldown validation, invalidation and insertion. Reset uses the same user-first lock order and rechecks token usage/expiry after locking.
+
 Issuing a new token invalidates the user's previous unused tokens first, so only the most recent email's link stays valid. The link points at `{FRONTEND_BASE_URL}/reset-password?token=...` and expires after `PASSWORD_RESET_TOKEN_TTL` (30 minutes by default). The raw token is never stored — only its SHA-256 hash (`password_reset_token.token_hash`), same principle as the password hash.
 
 | Error code | When |
@@ -229,7 +231,7 @@ Confirms a new password using the token from the emailed link.
 ```
 
 **Response · 200**
-Empty body. Using the token also invalidates the user's other outstanding unused tokens (e.g. if the email was requested more than once).
+Empty body. Using the token invalidates the user's other unused reset tokens and revokes all `auth_session` rows in the same transaction. Old Access and Refresh are rejected by authentication checks starting after commit; already authenticated requests are not retroactively cancelled. The browser relay forwards this empty response without changing its cookie.
 
 | Error code | When |
 |---|---|
@@ -241,7 +243,7 @@ Empty body. Using the token also invalidates the user's other outstanding unused
 Revokes the current login session, including its Access tokens. Backend body: `{ "refreshToken": "..." }`;
 no Access is required, so logout remains possible after Access expiration. Backend returns 200 with no body.
 The browser relay reads the cookie, deletes it on success/already-invalid session, and returns 204.
-Password change and withdrawal revoke **all** user sessions in their existing transaction.
+Password change, password reset and withdrawal revoke **all** user sessions in their existing transaction.
 
 ### `GET /users/me` 🔒
 My info

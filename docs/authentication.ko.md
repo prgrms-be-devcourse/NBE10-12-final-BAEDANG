@@ -4,9 +4,10 @@
 
 ## 배포와 전송
 
-기존 Vercel·EC2·PostgreSQL을 유지합니다. Next.js는 `POST /api/auth/{signup,login,refresh,logout}`만
+기존 Vercel·EC2·PostgreSQL을 유지합니다. Next.js는 `POST /api/auth/{signup,login,refresh,logout}`과
+명시적인 `POST /api/auth/password/{forgot,reset}` 경로를
 백엔드로 중계하고, 나머지 API는 기존 `NEXT_PUBLIC_API_BASE_URL`에 Bearer Access로 요청합니다.
-Redis·SMTP·비밀번호 재설정·인프라 프로비저닝은 범위에 포함하지 않습니다.
+비밀번호 재설정은 develop에서 병합한 백엔드 구현을 사용합니다. Redis·SMTP·인프라 프로비저닝은 추가하지 않습니다.
 
 Vercel 서버 환경변수 `AUTH_BACKEND_URL`에는 NPMplus의 HTTPS 백엔드 Origin을,
 `AUTH_PUBLIC_ORIGIN`에는 정확한 프론트 Origin을 지정합니다. 직접 호출하는
@@ -27,7 +28,7 @@ Path=/api/auth, host-only 쿠키이며 절대 세션 만료에 맞춰 만료됩�
 제거합니다. 토큰을 localStorage·sessionStorage에 저장하지 않고 기존 `trading-auth-user`도 제거합니다.
 localStorage에는 계정 변경·로그아웃 재시도 조정용 무작위 표식만 저장합니다.
 
-네 중계 경로 모두 정확한 Origin, `X-Auth-Request: 1`, JSON Content-Type을 요구합니다.
+여섯 중계 경로 모두 정확한 Origin, `X-Auth-Request: 1`, JSON Content-Type을 요구합니다.
 Refresh/logout은 브라우저 본문의 토큰을 무시하고 쿠키에서만 읽습니다. 고정 경로, 10초 제한,
 리다이렉트 금지, 요청·응답 no-store를 적용합니다. 백엔드는 중계 서버·API 클라이언트용 JSON 계약을
 유지하고 인증 쿠키를 읽지 않습니다. Spring Security의 STATELESS는 HttpSession을 만들지 않는다는
@@ -38,6 +39,7 @@ Refresh/logout은 브라우저 본문의 토큰을 무시하고 쿠키에서만 
 | 가입/로그인 | 자격증명 → 사용자/계좌, accessToken, refreshToken, expiresAt | Refresh는 쿠키로만 전달 |
 | 갱신 | `{refreshToken}` → accessToken, refreshToken, expiresAt | `{}` 요청, 쿠키 읽기·교체 |
 | 로그아웃 | `{refreshToken}` → 200 빈 응답 | `{}` 요청, 쿠키 삭제, 204 |
+| 비밀번호 찾기/재설정 | 이메일 또는 토큰·새 비밀번호 → 200 빈 응답 | 성공·오류를 전달하며 Refresh 쿠키는 읽거나 변경하지 않음 |
 | 복원 | 갱신 후 Bearer로 `GET /api/users/me` | 사용자 정보를 메모리에 복원 |
 
 로그아웃은 같은 세션의 서명이 유효하고 만료 전인 Refresh면 회전 여부와 무관하게 허용하며 멱등적입니다.
@@ -48,13 +50,18 @@ Refresh/logout은 브라우저 본문의 토큰을 무시하고 쿠키에서만 
 
 Access 기본 15분, 세션 절대 수명 7일입니다. 회전으로 세션 만료를 연장하지 않고 Access도 이를 넘지
 않습니다. JWT는 issuer·subject·token_type·sid·generation·무작위 jti를 포함합니다. sid 없는 기존 토큰은
-재로그인이 필요합니다. 로그인별 독립 세션을 만들고 로그아웃은 현재 세션만, 비밀번호 변경·탈퇴는
+재로그인이 필요합니다. 로그인별 독립 세션을 만들고 로그아웃은 현재 세션만, 비밀번호 변경·재설정·탈퇴는
 사용자의 모든 세션을 같은 트랜잭션에서 폐기합니다.
 
 인증 요청마다 JWT와 DB의 사용자·세션 활성 상태를 확인하며 캐시는 두지 않습니다. 폐기 커밋 뒤 시작한
 검증은 기존 Access를 거절합니다. 이미 인증된 실행 중 요청을 소급 취소하지는 않습니다. DB 장애는
 503으로 거절합니다. 로그인은 사용자 잠금 후 비밀번호를 검증합니다. 갱신·로그아웃·비밀번호 변경·탈퇴도
 사용자 → 세션 순서로 잠급니다. 가입은 사용자·계좌·초기 원장·세션을 함께 커밋합니다.
+
+비밀번호 찾기도 사용자를 먼저 잠근 뒤 쿨다운 확인·기존 토큰 무효화·새 토큰 발급을 처리합니다.
+재설정은 토큰 소유자 ID만 먼저 찾고 사용자 → 토큰 순으로 잠근 뒤 사용·만료 상태를 재검증합니다.
+잠금 전에 토큰 엔티티를 로딩하지 않아 오래된 상태를 재사용하지 않습니다.
+V17의 `token_version`은 호환용으로 유지하며 실제 인증은 V18의 `auth_session` 활성 상태를 검사합니다.
 
 현재 Refresh의 SHA-256 해시·세대가 일치하면 한 번 회전합니다. 회전 시점부터 **5초 동안** 직전 토큰은
 **동일한 후속 Refresh**를 반환하며 회전하거나 유예를 연장하지 않습니다. 후속 토큰은 별도 키의

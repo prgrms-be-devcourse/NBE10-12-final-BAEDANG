@@ -218,7 +218,7 @@ Every column and its intent — focused especially on **why each column exists**
 > | `password_hash` | VARCHAR(255) | **Never store plaintext.** Hash with BCrypt; default `BCryptPasswordEncoder` is enough. Empty/dummy in week 1. |
 > | `nickname` | VARCHAR(50) | display name. Avoids exposing email. |
 > | `status` | VARCHAR(20) | `ACTIVE` / `DORMANT` / `WITHDRAWN`. Withdrawal via physical delete breaks ledger FKs — **handle by status transition only**. |
-> | `token_version` | INT | (Flyway V17) bumped by `User.invalidateSessions()` on password reset, so refresh tokens issued before the reset fail their version check. Access tokens issued before the reset still work until they naturally expire (≤15m) — the auth filter does not check this column. |
+> | `token_version` | INT | (Flyway V17) retained as legacy compatibility metadata and incremented on password reset. Stateful authentication does not compare this value: password reset revokes all `auth_session` rows in the same transaction, rejecting old Access and Refresh on subsequent authentication checks. |
 > | `created_at` `updated_at` | TIMESTAMPTZ | audit common columns. Recommended on all tables. |
 
 #### `account` — mock investment account
@@ -610,7 +610,7 @@ Issued by `POST /api/auth/password/forgot` and consumed by `POST /api/auth/passw
 | `used_at`                 | TIMESTAMPTZ        | NULL while unused. Set when the token is spent (successful reset) or superseded by a newer request for the same user.                 |
 | `created_at`              | TIMESTAMPTZ        | Issuance time (DB default). Also doubles as the request-cooldown clock — a new request within `auth.password-reset.request-cooldown` (default 1m) of the most recent `created_at` for that user is silently ignored (no new row, no mail) to stop one target's inbox from being flooded (#207 review). |
 
-Requesting a reset invalidates that user's other unused tokens (`used_at` set) so only the newest email's link works. Successful reset does the same *and* bumps `users.token_version` (Flyway V17) to invalidate outstanding refresh tokens — see the `users` table above.
+Requesting a reset invalidates that user's other unused tokens (`used_at` set) so only the newest email's link works. Successful reset also revokes all user sessions in the password-change transaction. `users.token_version` (Flyway V17) is still incremented for compatibility, but is not the Stateful revocation mechanism. Both issuance and reset lock the user before reset-token rows; issuance checks cooldown under this lock and reset revalidates token state after acquiring it.
 
 ## V9–V12 were skipped to avoid clashing with versions claimed by concurrently open PRs.
 
@@ -732,7 +732,7 @@ Recovery runs 5s after startup and every 1m fixed delay thereafter. Today's dail
 No migration is added for #178. Existing V1 books become unusable immediately and are replaced/retired through normal publication and retention; orders and historical executions are preserved. Bounds are read from `quote_snapshot`, with no duplicate date/bounds columns on orders or books. This relies on the existing immutable same-day limit policy.
 
 
-## Auth session (V16)
+## Auth session (V18)
 
 `users → auth_session` is 1:N. No existing member, account, ledger or trade rows are rewritten.
 
