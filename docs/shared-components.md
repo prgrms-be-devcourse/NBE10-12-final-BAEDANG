@@ -533,3 +533,6 @@ Order preparation shares `PriceLimitLoadService.ensureForTrading` with the exist
 | Next.js `app/api/auth/[action]/route.ts` | Four fixed auth actions only; HttpOnly cookie, exact Origin + JSON header, timeout, no redirects/cache |
 
 See [authentication.md](authentication.md) for public contracts, deployment variables and unsupported-browser limits.
+
+`updateNickname` publishes a session-guarded `onProfileUpdated` event and cross-tab profile message.
+Consumers update profile fields only; `AuthProvider.setUser` is reserved for completed signup/login.

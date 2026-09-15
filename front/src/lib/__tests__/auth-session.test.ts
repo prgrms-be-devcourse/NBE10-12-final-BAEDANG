@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { getAccountSummary, login, logoutUser, refreshAccessToken, restoreAuth, setAuthEventListeners, syncAuthTokens } from '../api';
+import { getAccountSummary, login, logoutUser, refreshAccessToken, restoreAuth, setAuthEventListeners, syncAuthTokens, updateNickname } from '../api';
 
 beforeEach(() => {
   const storage = new Map<string, string>();
@@ -96,4 +96,40 @@ it('로그인 도중 로그아웃하면 늦은 로그인 응답은 상태에 반
   resolve(Response.json({ accessToken: 'late', userId: 1 }));
   await loggingOut;
   expect((await signingIn).code).toBe('SESSION_REVOKED');
+});
+
+it.each(['other-login', 'same-user-login', 'logout', 'other-tab-stamp'])(
+  '%s 이후 늦은 닉네임 응답은 프로필을 갱신하지 않는다', async transition => {
+    let resolve!: (response: Response) => void;
+    vi.mocked(fetch).mockImplementation(async (_url, init) => init?.method === 'PATCH'
+      ? new Promise<Response>(done => { resolve = done; }) : new Response(null, { status: 204 }));
+    const updated = vi.fn();
+    setAuthEventListeners({ onProfileUpdated: updated });
+    const saving = updateNickname('changed').catch(error => error);
+    if (transition === 'logout') await logoutUser();
+    else if (transition === 'other-tab-stamp') localStorage.setItem('baedang-auth-stamp', 'different-session');
+    else syncAuthTokens({ accessToken: transition === 'other-login' ? 'other-user' : 'same-user-new-session' });
+    resolve(Response.json({ userId: 1, email: 'a@example.com', nickname: 'changed' }));
+    expect((await saving).code).toBe('SESSION_REVOKED');
+    expect(updated).not.toHaveBeenCalled();
+  });
+
+it('닉네임 갱신 중 회전한 Access는 유지하며 프로필 이벤트에는 토큰을 넣지 않는다', async () => {
+  let resolve!: (response: Response) => void;
+  vi.mocked(fetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'PATCH') return new Promise<Response>(done => { resolve = done; });
+    if (url === '/api/auth/refresh') return Response.json({ accessToken: 'rotated' });
+    return Response.json({ accountId: 1 });
+  });
+  const updated = vi.fn();
+  setAuthEventListeners({ onProfileUpdated: updated });
+  const saving = updateNickname('changed');
+  await refreshAccessToken();
+  resolve(Response.json({ userId: 1, email: 'a@example.com', nickname: 'changed', accessToken: 'stale' }));
+  const profile = await saving;
+  expect(profile).toEqual({ userId: 1, email: 'a@example.com', nickname: 'changed' });
+  expect(updated).toHaveBeenCalledWith(profile);
+  await getAccountSummary();
+  expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('/api/accounts/me'),
+    expect.objectContaining({ headers: expect.objectContaining({ Authorization: 'Bearer rotated' }) }));
 });

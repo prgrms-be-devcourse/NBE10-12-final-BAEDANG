@@ -108,6 +108,10 @@ immediately and invalidates late responses. If server logout fails, a token-free
 the next restoration/login to retry logout before restoring authentication. A full reload otherwise
 restores via cookie refresh followed by profile retrieval. Password changes redirect to login with an explanation.
 
+Nickname updates capture the originating session epoch/stamp and discard late success responses after
+login/logout or a cross-tab account change. Profile-only events contain userId/email/nickname, never tokens;
+AuthProvider applies them only to the matching current user while retaining the latest Access.
+
 | Code | Meaning |
 | --- | --- |
 | `TOKEN_EXPIRED` | JWT/session expired; Access can trigger one refresh attempt |

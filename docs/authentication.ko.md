@@ -78,6 +78,10 @@ Web Locks로 탭 간 쿠키 변경을 직렬화하고 BroadcastChannel과 공유
 유지합니다. 로그아웃은 메모리를 즉시 지우고 늦은 응답을 무효화합니다. 서버 로그아웃 실패 표식이 있으면
 다음 복원·로그인 전에 로그아웃부터 재시도합니다. 비밀번호 변경은 안내와 함께 재로그인으로 이동합니다.
 
+닉네임 변경은 요청 당시 세션 epoch·표식을 캡처해 로그인·로그아웃·다른 탭의 계정 변경 후 도착한
+성공 응답도 무시합니다. 프로필 전용 이벤트에는 userId·email·nickname만 담고 토큰을 넣지 않습니다.
+AuthProvider는 현재 사용자와 일치할 때만 반영하며 최신 Access를 유지합니다.
+
 오류는 `TOKEN_EXPIRED`, `INVALID_TOKEN`, `SESSION_REVOKED`, `REFRESH_TOKEN_REUSED`,
 `AUTH_UNAVAILABLE`로 구분합니다. 상세 정의와 검증 범위는 영문 문서의 대응 절과 같습니다.
 V16은 auth_session만 추가하며 기존 회원·계좌·거래 데이터를 보존합니다. 배포 전 토큰은 재로그인이

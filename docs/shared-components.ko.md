@@ -533,3 +533,6 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 | Next.js `app/api/auth/[action]/route.ts` | 네 인증 경로만 허용, HttpOnly 쿠키, Origin·JSON 헤더 검증, timeout·리다이렉트·캐시 제한 |
 
 공개 계약·배포 환경변수·미지원 브라우저의 한계는 [인증 정책](authentication.ko.md)을 참고하세요.
+
+`updateNickname`은 요청 세션이 유지될 때만 `onProfileUpdated`와 탭 간 프로필 이벤트를 발행합니다.
+수신자는 프로필 필드만 갱신하며 `AuthProvider.setUser`는 가입·로그인 완료 시에만 사용합니다.

@@ -15,6 +15,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onAccessTokenRefreshed: accessToken => setUserState(previous => previous ? { ...previous, accessToken } : null),
       onAuthExpired: () => setUserState(null),
       onUserChanged: setUserState,
+      onProfileUpdated: profile => setUserState(previous => previous?.userId === profile.userId
+        ? { ...previous, email: profile.email, nickname: profile.nickname } : previous),
     });
     let disposed = false;
     const restore = () => { void restoreAuth().then(restored => {

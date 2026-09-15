@@ -14,6 +14,7 @@ let refreshFlight: Promise<{ accessToken: string }> | null = null;
 let onAccessTokenRefreshed: ((token: string) => void) | null = null;
 let onAuthExpired: (() => void) | null = null;
 let onUserChanged: ((user: AuthUser | null) => void) | null = null;
+let onProfileUpdated: ((profile: UserProfile) => void) | null = null;
 let channel: BroadcastChannel | null = null;
 const AUTH_STAMP = 'baedang-auth-stamp';
 
@@ -36,10 +37,12 @@ export function setAuthEventListeners(listeners: {
   onAccessTokenRefreshed?: (token: string) => void;
   onAuthExpired?: () => void;
   onUserChanged?: (user: AuthUser | null) => void;
+  onProfileUpdated?: (profile: UserProfile) => void;
 }) {
   onAccessTokenRefreshed = listeners.onAccessTokenRefreshed ?? null;
   onAuthExpired = listeners.onAuthExpired ?? null;
   onUserChanged = listeners.onUserChanged ?? null;
+  onProfileUpdated = listeners.onProfileUpdated ?? null;
   channel?.close();
   channel = null;
   if (Object.keys(listeners).length && typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined') {
@@ -48,6 +51,8 @@ export function setAuthEventListeners(listeners: {
       if (event.data?.type === 'user' && event.data.stamp === stamp()) {
         syncAuthTokens(event.data.user);
         onUserChanged?.(event.data.user);
+      } else if (event.data?.type === 'profile' && event.data.stamp === stamp()) {
+        onProfileUpdated?.(event.data.profile);
       }
     };
   }
@@ -302,8 +307,16 @@ export function getMe(): Promise<UserProfile> {
 }
 
 /** `PATCH /api/users/me` — 닉네임 변경. 중복이면 `NICKNAME_DUPLICATED`. */
-export function updateNickname(nickname: string): Promise<UserProfile> {
-  return request<UserProfile>("/api/users/me", { method: "PATCH", auth: true, body: { nickname } });
+export async function updateNickname(nickname: string): Promise<UserProfile> {
+  const epoch = authEpoch;
+  const startedStamp = stamp();
+  const result = await request<UserProfile>("/api/users/me", { method: "PATCH", auth: true, body: { nickname } });
+  // 성공 응답도 요청 당시 세션에만 반영합니다. 프로필 변경은 인증 토큰을 교체하지 않습니다.
+  if (epoch !== authEpoch || startedStamp !== stamp()) throw new ApiError('SESSION_REVOKED', '인증 상태가 변경됐어요.');
+  const profile = { userId: result.userId, email: result.email, nickname: result.nickname };
+  onProfileUpdated?.(profile);
+  channel?.postMessage({ type: 'profile', profile, stamp: startedStamp });
+  return profile;
 }
 
 /** `PUT /api/users/me/password` — 비밀번호 변경. 현재 비밀번호가 틀리면 `INVALID_PASSWORD`. */

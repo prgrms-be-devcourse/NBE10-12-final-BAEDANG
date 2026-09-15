@@ -42,7 +42,7 @@ const VALUATION_POLL_INTERVAL_MS = 5000;
 
 export default function MyPage() {
   const router = useRouter();
-  const { isLoggedIn, user, setUser, logout } = useAuth();
+  const { isLoggedIn, user, logout } = useAuth();
   const { rate, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
@@ -377,9 +377,7 @@ export default function MyPage() {
     if (nextNickname === user.nickname) return; // 바뀐 게 없으면 조용히 아무 것도 안 한다.
     setNicknameSaving(true);
     try {
-      const profile = await updateNickname(nextNickname);
-      // Nav 등 다른 화면도 user.nickname을 그대로 참조하니 여기서 같이 갱신한다.
-      setUser({ ...user, nickname: profile.nickname });
+      await updateNickname(nextNickname);
       setNicknameSaved(true);
     } catch (err) {
       setNicknameError(err instanceof ApiError ? err.message : "닉네임 변경에 실패했어요.");
