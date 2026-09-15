@@ -518,3 +518,18 @@ QuoteSnapshotPersistenceService는 트랜잭션 밖에서 통화·가격·정규
 최상위 `e2e/`는 Chromium 단일 worker로 실제 프론트 운영 빌드와 격리된 Spring 애플리케이션을 검증합니다. `back/src/e2e`는 `bootJar`에 포함되지 않는 별도 Gradle 소스셋입니다. 외부 시장 데이터 포트와 Clock만 테스트 환경에서 제공하며, 실제 인증·주문 서비스·마이그레이션을 사용합니다. 시나리오 제어 서버는 루프백과 실행별 키로 접근을 제한합니다.
 
 실행마다 전용 TimescaleDB 컨테이너를 생성합니다. 테스트마다 가변 데이터와 Spring 컨텍스트를 초기화해 캐시·워커 상태를 분리하고, 종료 시 컨텍스트와 실행 소유 서버·컨테이너·볼륨을 정리합니다. 개발 DB는 사용하지 않습니다. 실행 명령, 시나리오 추가, CI 조건과 실패 분석은 [E2E README](../e2e/README.md)를 참고하세요.
+
+
+## 인증 세션 (#203)
+
+| 컴포넌트 | 계약·부작용 |
+| --- | --- |
+| `JwtTokenProvider` | Clock 기반 sid/generation/jti JWT 발급·검증, Access 만료는 세션 만료 이내 |
+| `AuthSessionService.create` | MANDATORY 트랜잭션, 가입·로그인과 함께 세션 생성 |
+| `AuthSessionService.rotate` | 외부 트랜잭션 NEVER, 사용자·세션 잠금과 커밋 후 오류 변환, 직전 토큰 고정 유예 |
+| `requireActive` / `logout` / `revokeAll` | DB 활성 검증 / 현재 세션 폐기 / 호출자 트랜잭션의 전체 세션 폐기 |
+| `RefreshTokenCipher` | 별도 32바이트 AES-GCM 키, 세션에 묶인 후속 토큰 암호화, 토큰 로그 금지 |
+| `api.ts` 인증 함수 / `AuthProvider` | 동일 Origin 중계, 메모리 Access, 공유 갱신·Web Locks·표식 기반 탭 전파·로그아웃 재시도 |
+| Next.js `app/api/auth/[action]/route.ts` | 네 인증 경로만 허용, HttpOnly 쿠키, Origin·JSON 헤더 검증, timeout·리다이렉트·캐시 제한 |
+
+공개 계약·배포 환경변수·미지원 브라우저의 한계는 [인증 정책](authentication.ko.md)을 참고하세요.

@@ -29,7 +29,7 @@
 
 ### Auth
 
-Stateless JWT (access + refresh) tokens are used for authentication. Protected endpoints require the token in the header:
+JWT authentication validates an active PostgreSQL session on every request ([Stateful/RTR policy](authentication.md)). Protected endpoints require the token in the header:
 ```http
 Authorization: Bearer <accessToken>
 ```
@@ -41,8 +41,8 @@ Authorization: Bearer <accessToken>
 
 | Scope | Target |
 |---|---|
-| public (no login) | signup · login · refresh · rankings · search · stock detail · chart · FX · guide |
-| 🔒 login required | logout · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · orders · account · holdings · ledger · portfolio reset · `/stocks/likes` (POST/GET/DELETE) |
+| public (no Access; refresh/logout require Refresh) | signup · login · refresh · logout · rankings · search · stock detail · chart · FX · guide |
+| 🔒 login required | `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · orders · account · holdings · ledger · portfolio reset · `/stocks/likes` (POST/GET/DELETE) |
 ### Response Format
 
 Successful responses return the data directly; collections carry a cursor alongside.
@@ -115,6 +115,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 ## Auth & Member
 
+Authentication uses PostgreSQL sessions and RTR. The browser calls the same-origin Next.js auth relay;
+backend JSON and browser cookie contracts differ. See [Authentication](authentication.md) for deployment,
+5-second predecessor grace, locks, errors and migration. Access is memory-only; Refresh is HttpOnly.
+
 ### `POST /auth/signup`
 Signup + account opening + mock-funding deposit
 
@@ -135,6 +139,7 @@ Signup + account opening + mock-funding deposit
   "nickname": "홍길동",
   "accessToken": "eyJhbGciOi...",
   "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z",
   "account": {
     "accountId": 1,
     "roundNo": 1,
@@ -143,7 +148,7 @@ Signup + account opening + mock-funding deposit
   }
 }
 ```
-Signup opens an account and deposits 50M at once. **`users` INSERT → `account` INSERT → `ledger_entry(INITIAL_DEPOSIT)` INSERT must be one transaction.**
+Signup opens an account and deposits 50M at once. **`users` INSERT → `account` INSERT → `ledger_entry(INITIAL_DEPOSIT)` INSERT → `auth_session` INSERT must be one transaction.**
 
 | Error code | When |
 |---|---|
@@ -166,7 +171,8 @@ Response has the same shape as signup (200 OK).
 | `LOGIN_FAILED` | email or password mismatch, or user is inactive/withdrawn |
 
 ### `POST /auth/refresh`
-Reissues access token using a valid refresh token.
+Rotates both tokens using a valid Refresh. Backend JSON is shown below; the browser relay reads Refresh
+from its HttpOnly cookie and omits it from response JSON. The absolute session expiration does not move.
 
 **Request**
 ```json
@@ -178,7 +184,9 @@ Reissues access token using a valid refresh token.
 **Response · 200**
 ```json
 {
-  "accessToken": "eyJhbGciOi..."
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z"
 }
 ```
 
@@ -186,18 +194,15 @@ Reissues access token using a valid refresh token.
 |---|---|
 | `TOKEN_EXPIRED` | refresh token expired |
 | `INVALID_TOKEN` | refresh token invalid, tampered, or user inactive |
+| `SESSION_REVOKED` | session revoked or inactive |
+| `REFRESH_TOKEN_REUSED` | signed predecessor reused outside the fixed 5-second grace, or older generation |
+| `AUTH_UNAVAILABLE` | session database/transport temporarily unavailable (503) |
 
-### `POST /auth/logout` 🔒
-Stateless logout. The client discards local tokens.
-
-**Response · 200**
-Empty body.
-
-| Error code | When |
-|---|---|
-| `UNAUTHORIZED` | missing authentication token |
-| `TOKEN_EXPIRED` | access token expired |
-| `INVALID_TOKEN` | access token invalid |
+### `POST /auth/logout`
+Revokes the current login session, including its Access tokens. Backend body: `{ "refreshToken": "..." }`;
+no Access is required, so logout remains possible after Access expiration. Backend returns 200 with no body.
+The browser relay reads the cookie, deletes it on success/already-invalid session, and returns 204.
+Password change and withdrawal revoke **all** user sessions in their existing transaction.
 
 ### `GET /users/me` 🔒
 My info
@@ -1282,7 +1287,7 @@ Decide these in one team meeting before starting — it avoids mid-implementatio
 |---|---|
 | search scope | all stocks (~8,500) · `LIKE '%q%'` |
 | fee & tax rates | fee 0.01% (buy & sell) · securities transaction tax 0.2% (sell only) |
-| auth | stateless JWT access/refresh tokens · `Authorization: Bearer <accessToken>` |
+| auth | PostgreSQL sessions + JWT/RTR · Bearer Access · same-origin HttpOnly Refresh ([contract](authentication.md)) |
 | fractional trading | week 2 — whole shares only in week 1. **The toggle was removed from the screen entirely** |
 | order history | ledger-based `GET /accounts/me/ledger` |
 | ledger entries | buy · sell · initial-funding only. Fees/taxes included in the amounts (one line) |

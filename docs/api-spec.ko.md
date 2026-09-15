@@ -29,7 +29,7 @@
 
 ### 인증
 
-Stateless JWT (access + refresh) 토큰을 사용해 인증합니다. 보호 엔드포인트는 헤더에 토큰을 담아야 합니다:
+JWT와 PostgreSQL 로그인 세션을 요청마다 함께 검증합니다 ([Stateful/RTR 정책](authentication.ko.md)). 보호 엔드포인트는 헤더에 토큰을 담아야 합니다:
 ```http
 Authorization: Bearer <accessToken>
 ```
@@ -41,8 +41,8 @@ Authorization: Bearer <accessToken>
 
 | 구분 | 대상 |
 |---|---|
-| 비로그인 허용 | 회원가입 · 로그인 · 토큰 갱신 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
-| 🔒 로그인 필수 | 로그아웃 · `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 · `/stocks/likes` (POST/GET/DELETE) |
+| Access 불필요 (갱신·로그아웃은 Refresh 필요) | 회원가입 · 로그인 · 토큰 갱신 · 로그아웃 · 랭킹 · 검색 · 종목 상세 · 차트 · 환율 · 이용 가이드 |
+| 🔒 로그인 필수 | `/users/me` (GET/PATCH/DELETE) · `/users/me/password` (PUT) · 주문 · 계좌 · 보유종목 · 체결내역 · 포트폴리오 초기화 · `/stocks/likes` (POST/GET/DELETE) |
 ### 응답 형식
 
 성공 시 데이터를 **그대로** 반환하고, 목록은 커서를 함께 내려줍니다.
@@ -116,6 +116,11 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 
 ## 인증 · 회원
 
+인증 정책은 [Stateful 인증·RTR](authentication.ko.md)을 따릅니다. 백엔드는 토큰 JSON을 반환하지만
+브라우저에는 Next.js 중계가 Refresh를 HttpOnly 쿠키로만 전달합니다. 가입·로그인·갱신 응답의
+`expiresAt`은 세션 절대 만료이며, 갱신은 Access와 Refresh를 함께 교체합니다. 직전 Refresh에만
+고정 5초 유예를 적용합니다. `SESSION_REVOKED`, `REFRESH_TOKEN_REUSED`, `AUTH_UNAVAILABLE`을 구분합니다.
+
 ### `POST /auth/signup`
 회원가입 + 계좌 개설 + 모의 투자금 지급
 
@@ -136,6 +141,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
   "nickname": "홍길동",
   "accessToken": "eyJhbGciOi...",
   "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z",
   "account": {
     "accountId": 1,
     "roundNo": 1,
@@ -167,7 +173,7 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `LOGIN_FAILED` | 이메일 또는 비밀번호 불일치, 또는 비활성(탈퇴/휴면) 회원 |
 
 ### `POST /auth/refresh`
-유효한 Refresh Token으로 새 Access Token을 재발급합니다.
+유효한 Refresh Token으로 Access와 Refresh를 함께 교체합니다. 세션 절대 만료는 연장하지 않습니다.
 
 **Request**
 ```json
@@ -179,7 +185,9 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 **Response · 200**
 ```json
 {
-  "accessToken": "eyJhbGciOi..."
+  "accessToken": "eyJhbGciOi...",
+  "refreshToken": "eyJhbGciOi...",
+  "expiresAt": "2026-09-21T01:00:00Z"
 }
 ```
 
@@ -188,17 +196,10 @@ SELECT ... FROM stock s JOIN quote_snapshot q USING (stock_id)
 | `TOKEN_EXPIRED` | 만료된 Refresh Token |
 | `INVALID_TOKEN` | 위조/형식 불일치 토큰이거나 탈퇴 회원 |
 
-### `POST /auth/logout` 🔒
-Stateless 로그아웃. 서버 세션이 없으므로 클라이언트가 보관 중인 토큰을 파기합니다.
-
-**Response · 200**
-빈 바디.
-
-| 에러 코드 | 상황 |
-|---|---|
-| `UNAUTHORIZED` | 인증 토큰 누락 |
-| `TOKEN_EXPIRED` | 만료된 토큰 |
-| `INVALID_TOKEN` | 유효하지 않은 토큰 |
+### `POST /auth/logout`
+현재 로그인 세션과 해당 Access를 폐기합니다. 백엔드는 `{ "refreshToken": "..." }`를 받아 200 빈 응답을
+반환하고 Access를 요구하지 않습니다. 브라우저 중계는 HttpOnly 쿠키를 읽고 성공 또는 이미 무효인
+세션이면 쿠키를 삭제한 뒤 204를 반환합니다. 비밀번호 변경·탈퇴는 모든 세션을 폐기합니다.
 
 ### `GET /users/me` 🔒
 내 정보 조회
@@ -1243,7 +1244,7 @@ INSERT INTO ledger_entry (entry_type='INITIAL_DEPOSIT', occurred_at=:resetAt, ..
 |---|---|
 | 검색 범위 | 전 종목(약 8,500개) · `LIKE '%q%'` |
 | 수수료 · 세율 | 수수료 0.01%(매수·매도) · 증권거래세 0.2%(매도만) |
-| 인증 | Stateless JWT access/refresh 토큰 · `Authorization: Bearer <accessToken>` |
+| 인증 | PostgreSQL 세션 + JWT/RTR · Bearer Access · 동일 Origin HttpOnly Refresh ([계약](authentication.ko.md)) |
 | 소수점 거래 | 2주차 — 1주차는 정수 주 단위만. **화면에서 토글 자체를 제거했습니다** |
 | 체결 내역 | 원장 기준 `GET /accounts/me/ledger` |
 | 원장 항목 | 매수 · 매도 · 초기지급 3종. 수수료·세금은 매수·매도 금액에 포함(한 줄) |

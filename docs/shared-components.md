@@ -518,3 +518,18 @@ Each run creates its own TimescaleDB container. Each test clears mutable data an
 `OrderBookPricePolicy` owns expected arrays and checks snapshot completeness for queries, previews, publication and the locking store. Empty arrays are valid only when the generated price range is empty. Existing V1 is never consumed; no alternate V1 implementation is retained. The publisher still locks stock then version, and the consumer still locks account then order, version, levels and holding. Limits are read without introducing an inverse stock lock in the consumer. Session/time validation is repeated after lock waits.
 
 Order preparation shares `PriceLimitLoadService.ensureForTrading` with the existing gate/cooldown; workers and book publication do not add per-order external limit fetches. Unavailable bounds defer existing orders without reserve or ledger mutations. Same-day limits remain immutable under the existing repository write rule. No schema or history rewrite is introduced.
+
+
+## Authentication sessions (#203)
+
+| Component | Contract / side effects |
+| --- | --- |
+| `JwtTokenProvider` | Issues and parses typed sid/generation/jti JWTs; inject Clock, cap Access at session expiration |
+| `AuthSessionService.create` | MANDATORY transaction; creates a PostgreSQL login session during signup/login |
+| `AuthSessionService.rotate` | NEVER ambient transaction; owns user/session locks and commits before error conversion; fixed predecessor grace |
+| `requireActive` / `logout` / `revokeAll` | DB validation / current-session revocation / caller-transaction all-session revocation |
+| `RefreshTokenCipher` | Separate 32-byte AES-GCM key; session-bound successor encryption, no logging of token/cipher inputs |
+| `api.ts` auth functions / `AuthProvider` | Same-origin relay, memory Access, shared refresh, Web Locks, guarded cross-tab events and pending logout retry |
+| Next.js `app/api/auth/[action]/route.ts` | Four fixed auth actions only; HttpOnly cookie, exact Origin + JSON header, timeout, no redirects/cache |
+
+See [authentication.md](authentication.md) for public contracts, deployment variables and unsupported-browser limits.
