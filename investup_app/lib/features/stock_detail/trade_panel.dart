@@ -14,13 +14,13 @@ import '../../core/models/market_country.dart';
 import '../../core/models/order_quote.dart';
 import '../../core/models/stock_detail.dart';
 import '../../formatters.dart';
-import 'order_amount.dart';
 
 /// 웹 StockDetailClient의 거래 패널을 Flutter로 옮긴 것 — 모달로 연다.
 /// 레이아웃·문구·버튼 상태는 웹과 같은 순서/규칙을 따른다.
 ///
-/// - 시장가 금액은 웹처럼 클라이언트가 [calculateOrderAmount]로 미리 계산한다
-///   (실제 확정은 서버). 지정가만 접수 가능 여부·예약금을 서버 미리보기로 본다.
+/// - 금액 계산은 전부 서버가 한다: 시장가는 `GET /orders/quote/market`,
+///   지정가는 `GET /orders/quote/limit` 미리보기를 그대로 보여준다.
+///   클라이언트에서 수수료·세금을 직접 계산하지 않는다.
 /// - 주문 의도 하나에 clientOrderId를 고정한다. 입력이 바뀌면 null로 비우고,
 ///   서버가 `data.retryPolicy`로 NEW_CLIENT_ORDER_ID를 지시하면 새 ID를 만든다.
 class TradePanel extends StatefulWidget {
@@ -73,6 +73,9 @@ class _TradePanelState extends State<TradePanel> {
   Timer? _debounce;
   CancelToken? _quoteToken;
 
+  MarketOrderQuote? _marketQuote;
+  String? _marketQuoteError;
+  bool _marketQuoteLoading = false;
   LimitOrderQuote? _limitQuote;
   String? _limitQuoteError;
   bool _limitQuoteLoading = false;
@@ -153,14 +156,7 @@ class _TradePanelState extends State<TradePanel> {
     return '${kst.year}-${two(kst.month)}-${two(kst.day)}';
   }
 
-  // ── 계산(웹 StockDetailClient와 같은 순서) ──────────────────────────────
-
-  /// USD 종목은 환율, 국내는 1 — 환율이 없으면 null(계산 불가).
-  Decimal? get _pricingRate {
-    if (!_isUsd) return Decimal.one;
-    final rate = _usdKrwRate;
-    return (rate != null && rate > 0) ? Decimal.parse('$rate') : null;
-  }
+  // ── 입력 값 읽기 ────────────────────────────────────────────────────────
 
   int get _quantity => int.tryParse(_quantityController.text) ?? 0;
 
@@ -175,36 +171,6 @@ class _TradePanelState extends State<TradePanel> {
 
   num get _availableQuantity => widget.heldQuantity ?? 0;
 
-  Decimal get _lastPrice =>
-      Decimal.tryParse(widget.detail.price?.lastPrice ?? '') ?? Decimal.zero;
-
-  String get _stockCurrency => _isUsd ? 'USD' : 'KRW';
-
-  /// 시장가 매수 상한 — 주문가능금액으로 살 수 있는 최대 수량.
-  int get _buyMaxQuantity {
-    final rate = _pricingRate;
-    if (rate == null) return 0;
-    return maxAffordableQuantity(
-      price: _lastPrice,
-      currency: _stockCurrency,
-      usdKrwRate: rate,
-      availableCash: _availableCash,
-    );
-  }
-
-  /// 지정가 매수 상한 — 현재가가 아니라 입력한 지정가 기준.
-  int get _limitBuyMaxQuantity {
-    final price = _limitPriceInStockCurrency;
-    final rate = _pricingRate;
-    if (price == null || rate == null) return 0;
-    return maxAffordableQuantity(
-      price: price,
-      currency: _stockCurrency,
-      usdKrwRate: rate,
-      availableCash: _availableCash,
-    );
-  }
-
   /// 종목 통화 기준 지정가 — US 종목에 원화로 입력하면 환율로 대략 환산한다
   /// (실제 접수가는 서버가 접수 시점 환율로 확정).
   Decimal? get _limitPriceInStockCurrency {
@@ -216,42 +182,21 @@ class _TradePanelState extends State<TradePanel> {
     return (price / Decimal.parse('$rate')).toDecimal();
   }
 
-  /// 시장가 금액 미리보기 — 웹처럼 클라이언트에서 계산한다.
-  OrderAmount? get _marketAmount {
-    final rate = _pricingRate;
-    if (rate == null) return null;
-    return calculateOrderAmount(
-      side: _side,
-      quantity: _quantity,
-      price: _lastPrice,
-      currency: _stockCurrency,
-      usdKrwRate: rate,
-    );
-  }
-
-  /// 지정가 클라이언트 근사치 — 서버 미리보기가 오기 전 자리표시자.
-  OrderAmount? get _limitAmount {
-    final price = _limitPriceInStockCurrency;
-    final rate = _pricingRate;
-    if (price == null || rate == null) return null;
-    return calculateOrderAmount(
-      side: _side,
-      quantity: _quantity,
-      price: price,
-      currency: _stockCurrency,
-      usdKrwRate: rate,
-    );
-  }
-
+  /// 시장가 금액 미리보기는 서버 견적만 믿는다 — `executable`/`reason`도
+  /// 서버가 주문 정책으로 판단한 값이다.
   String? get _marketAmountReason {
-    if (_marketAmount == null) return '환율 정보를 불러온 후 주문해주세요';
     if (_quantity <= 0) return '수량은 1주 이상의 정수로 입력해주세요';
     if (_side == 'SELL' && _quantity > _availableQuantity) {
       return '보유 수량이 부족해요';
     }
-    if (_side == 'BUY' && _marketAmount!.netAmount > _availableCash) {
-      return '주문가능금액이 부족해요';
+    // 비로그인은 견적을 조회할 수 없다 — 버튼은 살려두고 제출 시 로그인 유도.
+    if (!widget.session.isAuthenticated) return null;
+    if (_marketQuoteLoading) return '미리보기 확인 중…';
+    final quote = _marketQuote;
+    if (quote != null && !quote.executable) {
+      return tradableReasonLabelOrNull(quote.reason) ?? '지금은 주문할 수 없어요';
     }
+    if (quote == null && _marketQuoteError != null) return _marketQuoteError;
     return null;
   }
 
@@ -283,23 +228,32 @@ class _TradePanelState extends State<TradePanel> {
     return amountReason;
   }
 
-  // ── 지정가 미리보기 ──────────────────────────────────────────────────────
+  // ── 서버 미리보기 ───────────────────────────────────────────────────────
 
-  /// 입력이 멈추면(500ms) 서버 미리보기를 조회한다 — 접수 가능 여부·예약금·만료는
-  /// 클라이언트가 흉내낼 수 없는 서버 전용 판단이라서다(웹과 같은 디바운스).
-  void _scheduleLimitQuote() {
+  /// 입력이 멈추면(500ms) 서버 미리보기를 조회한다 — 금액 계산·접수 가능
+  /// 여부·예약금·만료는 전부 서버 판단이라 클라이언트가 흉내내지 않는다
+  /// (웹과 같은 디바운스). 보유 초과 매도는 웹처럼 클라이언트에서 먼저 막고
+  /// 견적을 부르지 않는다.
+  void _scheduleQuote() {
     _quoteToken?.cancel();
     _debounce?.cancel();
-    final canQuery = _orderType == 'LIMIT' &&
-        widget.session.isAuthenticated &&
+    final overHoldingSell = _side == 'SELL' && _quantity > _availableQuantity;
+    final canQuery = widget.session.isAuthenticated &&
         widget.detail.tradable &&
+        !overHoldingSell &&
         _quantity > 0 &&
-        _limitPriceValid;
+        (_orderType == 'MARKET' || _limitPriceValid);
     if (!canQuery) {
-      if (_limitQuote != null ||
+      if (_marketQuote != null ||
+          _marketQuoteError != null ||
+          _marketQuoteLoading ||
+          _limitQuote != null ||
           _limitQuoteError != null ||
           _limitQuoteLoading) {
         setState(() {
+          _marketQuote = null;
+          _marketQuoteError = null;
+          _marketQuoteLoading = false;
           _limitQuote = null;
           _limitQuoteError = null;
           _limitQuoteLoading = false;
@@ -308,10 +262,53 @@ class _TradePanelState extends State<TradePanel> {
       return;
     }
     setState(() {
-      _limitQuote = null;
-      _limitQuoteLoading = true;
+      if (_orderType == 'MARKET') {
+        _marketQuote = null;
+        _marketQuoteLoading = true;
+      } else {
+        _limitQuote = null;
+        _limitQuoteLoading = true;
+      }
     });
-    _debounce = Timer(const Duration(milliseconds: 500), _fetchLimitQuote);
+    _debounce = Timer(
+      const Duration(milliseconds: 500),
+      () => _orderType == 'MARKET' ? _fetchMarketQuote() : _fetchLimitQuote(),
+    );
+  }
+
+  Future<void> _fetchMarketQuote() async {
+    final token = CancelToken();
+    _quoteToken = token;
+    try {
+      final quote = await widget.orders.getMarketQuote(
+        symbol: widget.detail.symbol,
+        marketCountry: widget.detail.marketCountry,
+        side: _side,
+        quantity: _quantityController.text,
+        cancelToken: token,
+      );
+      if (!mounted || token.isCancelled) return;
+      setState(() {
+        _marketQuote = quote;
+        _marketQuoteError = null;
+        _marketQuoteLoading = false;
+      });
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) return;
+      if (!mounted || token.isCancelled) return;
+      setState(() {
+        _marketQuote = null;
+        _marketQuoteError = '미리보기를 불러오지 못했어요';
+        _marketQuoteLoading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted || token.isCancelled) return;
+      setState(() {
+        _marketQuote = null;
+        _marketQuoteError = e.message;
+        _marketQuoteLoading = false;
+      });
+    }
   }
 
   Future<void> _fetchLimitQuote() async {
@@ -362,25 +359,9 @@ class _TradePanelState extends State<TradePanel> {
     _limitFieldError = null;
   }
 
-  /// 매수 수량은 입력 즉시 상한(주문가능금액 기준 최대 수량)으로 자른다 —
-  /// 비현실적인 금액이 화면에 그대로 보이는 걸 막는 웹과 같은 규칙.
-  void _onQuantityChanged(String raw) {
-    var value = raw;
-    final maxForCap =
-        _orderType == 'LIMIT' ? _limitBuyMaxQuantity : _buyMaxQuantity;
-    final parsed = int.tryParse(value);
-    if (_pricingRate != null &&
-        _side == 'BUY' &&
-        parsed != null &&
-        parsed > maxForCap) {
-      value = '$maxForCap';
-      _quantityController.value = TextEditingValue(
-        text: value,
-        selection: TextSelection.collapsed(offset: value.length),
-      );
-    }
+  void _onQuantityChanged(String _) {
     setState(_resetAttempt);
-    _scheduleLimitQuote();
+    _scheduleQuote();
   }
 
   /// 지정가 입력 필터 — 백엔드가 초과 정밀도를 거절하므로 타이핑 단계에서 막는다.
@@ -404,7 +385,7 @@ class _TradePanelState extends State<TradePanel> {
       );
     }
     setState(_resetAttempt);
-    _scheduleLimitQuote();
+    _scheduleQuote();
   }
 
   void _selectOrderType(String type) {
@@ -413,7 +394,7 @@ class _TradePanelState extends State<TradePanel> {
       _orderType = type;
       _resetAttempt();
     });
-    _scheduleLimitQuote();
+    _scheduleQuote();
   }
 
   void _selectSide(String side) {
@@ -422,7 +403,7 @@ class _TradePanelState extends State<TradePanel> {
       _side = side;
       _resetAttempt();
     });
-    _scheduleLimitQuote();
+    _scheduleQuote();
   }
 
   void _selectLimitCurrency(String currency) {
@@ -432,7 +413,7 @@ class _TradePanelState extends State<TradePanel> {
       _priceController.clear();
       _resetAttempt();
     });
-    _scheduleLimitQuote();
+    _scheduleQuote();
   }
 
   // ── 제출 ────────────────────────────────────────────────────────────────
@@ -677,13 +658,6 @@ class _TradePanelState extends State<TradePanel> {
           const SizedBox(height: 12),
           if (_side == 'SELL')
             _caption('보유 ${formatNumber(_availableQuantity)}주', mut),
-          if (_side == 'BUY')
-            _caption(
-              _pricingRate == null
-                  ? '환율 정보가 없어 최대 매수 수량을 계산할 수 없어요'
-                  : '최대 ${formatNumber(isLimit ? _limitBuyMaxQuantity : _buyMaxQuantity)}주까지 살 수 있어요',
-              mut,
-            ),
 
           if (isLimit) ...[
             Row(
@@ -786,6 +760,7 @@ class _TradePanelState extends State<TradePanel> {
             displayAmount: _displayAmount(),
             limitQuote: _limitQuote,
             limitQuoteLoading: _limitQuoteLoading,
+            isLoggedIn: isLoggedIn,
             currency: detail.currency,
           ),
 
@@ -954,19 +929,21 @@ class _TradePanelState extends State<TradePanel> {
     );
   }
 
-  /// 요약 카드의 환율 줄 — 지정가 미리보기가 있으면 접수 환율을 보여준다(웹 동일).
+  /// 요약 카드의 환율 줄 — 견적이 실제 적용 환율을 내려주면 그 값을 우선한다.
   String _rateLine() {
     if (!_isUsd) return '';
-    final quote = _limitQuote;
-    if (_orderType == 'LIMIT' && quote != null) {
-      return '접수 환율 ${formatNumber(quote.acceptanceExchangeRate)}원 — '
+    final limitQuote = _limitQuote;
+    if (_orderType == 'LIMIT' && limitQuote != null) {
+      return '접수 환율 ${formatNumber(limitQuote.acceptanceExchangeRate)}원 — '
           '실제 체결 시점 환율은 달라질 수 있어요';
     }
+    final appliedRate =
+        _orderType == 'MARKET' ? _marketQuote?.exchangeRate : null;
     final updated = _rateUpdatedAt;
     final base = updated != null
         ? '(${_fmtRateTime(updated)} 기준)'
         : '(환율 정보 없음)';
-    return '적용 환율 ${formatNumber(_usdKrwRate)}원 $base'
+    return '적용 환율 ${formatNumber(appliedRate ?? '${_usdKrwRate ?? ''}')}원 $base'
         '${_rateError ? ' · 화면 환율 갱신 실패, 마지막 정상값이 있으면 유지' : ''}';
   }
 
@@ -977,32 +954,23 @@ class _TradePanelState extends State<TradePanel> {
     return '${two(l.month)}. ${two(l.day)}. ${two(l.hour)}:${two(l.minute)}';
   }
 
-  /// 요약 카드에 보여줄 금액 — 지정가는 서버 미리보기가 오면 그 값, 아니면 근사치.
+  /// 요약 카드에 보여줄 금액 — 전부 서버 견적 값이다(계산은 서버만 한다).
   ({String? gross, String? fee, String? tax, String? net}) _displayAmount() {
     if (_orderType == 'LIMIT') {
       final quote = _limitQuote;
-      if (quote != null) {
-        return (
-          gross: quote.grossAmount,
-          fee: quote.fee,
-          tax: quote.tax,
-          net: quote.netAmount,
-        );
-      }
-      final approx = _limitAmount;
       return (
-        gross: approx?.grossAmount.toString(),
-        fee: approx?.fee.toString(),
-        tax: approx?.tax.toString(),
-        net: approx?.netAmount.toString(),
+        gross: quote?.grossAmount,
+        fee: quote?.fee,
+        tax: quote?.tax,
+        net: quote?.netAmount,
       );
     }
-    final amount = _marketAmount;
+    final quote = _marketQuote;
     return (
-      gross: amount?.grossAmount.toString(),
-      fee: amount?.fee.toString(),
-      tax: amount?.tax.toString(),
-      net: amount?.netAmount.toString(),
+      gross: quote?.grossAmount,
+      fee: quote?.fee,
+      tax: quote?.tax,
+      net: quote?.netAmount,
     );
   }
 
@@ -1166,6 +1134,7 @@ class _SummaryCard extends StatelessWidget {
     required this.displayAmount,
     required this.limitQuote,
     required this.limitQuoteLoading,
+    required this.isLoggedIn,
     required this.currency,
   });
 
@@ -1181,6 +1150,7 @@ class _SummaryCard extends StatelessWidget {
   final ({String? gross, String? fee, String? tax, String? net}) displayAmount;
   final LimitOrderQuote? limitQuote;
   final bool limitQuoteLoading;
+  final bool isLoggedIn;
   final String? currency;
 
   @override
@@ -1205,6 +1175,16 @@ class _SummaryCard extends StatelessWidget {
                 ),
               ),
             ),
+          if (!isLoggedIn)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(
+                '로그인하면 예상 금액을 확인할 수 있어요',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: mut),
+              ),
+            )
+          else ...[
           _row('주문 금액', formatNumber(displayAmount.gross), bold: true),
           _row('수수료 0.01%', formatNumber(displayAmount.fee)),
           _row(
@@ -1267,6 +1247,7 @@ class _SummaryCard extends StatelessWidget {
                 scheme: scheme,
                 mut: mut,
               ),
+          ],
           ],
         ],
       ),

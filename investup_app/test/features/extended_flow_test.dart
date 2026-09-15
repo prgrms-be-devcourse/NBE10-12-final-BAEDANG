@@ -422,6 +422,24 @@ TestHarness _harness({bool signedIn = false, bool reportLocked = false}) =>
     if (path == '/api/accounts/me') {
       return FakeResponse.ok(accountSummaryJson());
     }
+    if (path == '/api/orders/quote/market') {
+      return FakeResponse.ok(<String, Object?>{
+        'symbol': '005930',
+        'marketCountry': 'KR',
+        'side': 'SELL',
+        'quantity': '5',
+        'executedPrice': '74500',
+        'exchangeRate': '1',
+        'grossAmount': '372500',
+        'fee': '37',
+        'tax': '745',
+        'netAmount': '371718',
+        'availableCash': '50000000',
+        'quoteAt': '2026-09-15T10:00:00+09:00',
+        'executable': true,
+        'reason': null,
+      });
+    }
     if (path == '/api/orders/quote/limit') {
       return FakeResponse.ok(_limitQuoteJson());
     }
@@ -1050,12 +1068,11 @@ void main() {
       await _settle(tester);
       expect(find.text('보유 수량이 부족해요'), findsWidgets);
 
-      // 보유 안의 수량은 '매도하기' 버튼이 살아난다 — 시장가는 견적 API를
-      // 부르지 않는다(웹처럼 클라이언트 미리보기).
+      // 보유 안의 수량은 서버 견적이 executable=true를 내려 '매도하기'가 살아난다.
       await tester.enterText(find.byType(TextField).first, '5');
       await _settle(tester);
       expect(find.text('매도하기'), findsOneWidget);
-      expect(harness.countTo('/api/orders/quote/market'), 0);
+      expect(harness.countTo('/api/orders/quote/market'), 1);
     });
   });
 

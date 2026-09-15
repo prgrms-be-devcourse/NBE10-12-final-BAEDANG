@@ -33,13 +33,21 @@ String tradableReasonLabel(String? code) =>
 String? tradableReasonLabelOrNull(String? code) => switch (code) {
   'MARKET_CLOSED' => '장 마감 · 거래 시간이 아니에요',
   'NOT_IN_UNIVERSE' => '이 종목은 아직 거래를 지원하지 않아요',
-  'SUSPENDED' => '거래정지 종목이에요',
-  'LIQUIDATION' => '정리매매 종목이에요',
+  'SUSPENDED' || 'STOCK_SUSPENDED' => '거래정지 종목이에요',
+  'LIQUIDATION' || 'STOCK_LIQUIDATION' => '정리매매 종목이에요',
+  'STOCK_NOT_TRADABLE' => '지금은 거래할 수 없어요',
+  'MARKET_TRADING_HALTED' => '매매거래가 일시중단됐어요',
   'QUOTE_NOT_FOUND' => '시세 정보가 아직 없어요',
+  'STALE_QUOTE' ||
+  'FUTURE_QUOTE' ||
+  'QUOTE_OUT_OF_PRICE_LIMIT' => '현재가를 다시 확인 중이에요. 잠시 후 다시 시도해주세요',
   'PRICE_LIMIT_UNAVAILABLE' => '당일 상하한가를 확인 중이에요. 잠시 후 다시 시도해주세요',
   'PRICE_OUT_OF_RANGE' => '주문 가격은 당일 하한가와 상한가 사이여야 해요',
   'INVALID_TICK_SIZE' => '주문 가격이 호가 단위에 맞지 않아요',
-  'QUOTE_OUT_OF_PRICE_LIMIT' => '현재가를 다시 확인 중이에요. 잠시 후 다시 시도해주세요',
+  'INVALID_QUANTITY' => '수량은 1주 이상의 정수로 입력해주세요',
+  'INSUFFICIENT_CASH' => '주문가능금액이 부족해요',
+  'INSUFFICIENT_QUANTITY' => '보유 수량이 부족해요',
+  'EXCHANGE_RATE_NOT_FOUND' => '환율 정보를 불러온 후 주문해주세요',
   _ => null,
 };
 

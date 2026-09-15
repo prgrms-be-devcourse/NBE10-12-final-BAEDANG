@@ -100,9 +100,9 @@ Map<String, Object?> _quoteJson() => <String, Object?>{
   'executedPrice': '74500',
   'exchangeRate': '1',
   'grossAmount': '149000',
-  'fee': '149',
+  'fee': '15', // 149,000 × 0.01% = 14.9 → HALF_UP 15 (서버 계산)
   'tax': '0',
-  'netAmount': '149149',
+  'netAmount': '149015',
   'availableCash': '50000000',
   'quoteAt': '2026-09-15T10:00:00+09:00',
   'executable': true,
@@ -118,11 +118,11 @@ Map<String, Object?> _orderResultJson() => <String, Object?>{
   'quantity': '2',
   'executedPrice': '74500',
   'grossAmount': '149000',
-  'fee': '149',
+  'fee': '15',
   'tax': '0',
-  'netAmount': '149149',
+  'netAmount': '149015',
   'orderedAt': '2026-09-15T10:00:01+09:00',
-  'account': <String, Object?>{'cashBalanceAfter': '49850851'},
+  'account': <String, Object?>{'cashBalanceAfter': '49850985'},
 };
 
 TestHarness _harness({bool tradable = true, bool signedIn = false}) =>
@@ -310,7 +310,7 @@ void main() {
     await tester.tap(find.text('거래하기'));
     await _settle(tester);
 
-    // 웹처럼 시장가 금액은 클라이언트 미리보기 — 수량 입력만으로 요약이 뜬다.
+    // 시장가 금액은 서버 견적 미리보기 — 수량 입력 뒤 디바운스로 요약이 뜬다.
     await tester.enterText(find.byType(TextField).first, '2');
     await _settle(tester);
     expect(find.text('총 차감액'), findsOneWidget);
@@ -327,7 +327,7 @@ void main() {
     expect(orders, hasLength(1));
     expect(orders.single.data['clientOrderId'], isA<String>());
     expect(orders.single.data['accountId'], 3);
-    // 시장가는 견적 API를 부르지 않는다(웹과 동일 — 금액은 클라이언트 계산).
-    expect(harness.countTo('/api/orders/quote/market'), 0);
+    // 시장가 금액도 서버 견적 API가 계산해서 내려준다.
+    expect(harness.countTo('/api/orders/quote/market'), 1);
   });
 }
