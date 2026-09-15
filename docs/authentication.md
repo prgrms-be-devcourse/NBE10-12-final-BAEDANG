@@ -126,9 +126,9 @@ AuthProvider applies them only to the matching current user while retaining the 
 
 ## Verification and transition
 
-V18 adds only `auth_session`; existing user, account and trade data are preserved. Deploying this
+V18 adds `auth_session` and drops `users.token_version`; existing user, account and trade data are preserved. Deploying this
 contract requires one login for existing users and coordinated frontend/backend releases. A backend
-rollback leaves an unused extra table, but rolling back the frontend alone is incompatible with RTR.
+rollback to code requiring `token_version` needs a separate schema restoration; rolling back the frontend alone is incompatible with RTR.
 
 Tests cover PostgreSQL rotation concurrency, exact grace/expiration boundaries, revocation persistence,
 session isolation, password/withdrawal invalidation, legacy/forged JWT rejection, client refresh sharing,

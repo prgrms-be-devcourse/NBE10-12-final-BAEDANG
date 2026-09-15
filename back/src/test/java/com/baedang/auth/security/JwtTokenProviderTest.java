@@ -39,7 +39,7 @@ class JwtTokenProviderTest {
         Long userId = 7L;
 
         String token = provider.createAccessToken(userId, UUID.randomUUID(), NOW.plusSeconds(604800));
-        Long parsedUserId = provider.parseAccessToken(token);
+        Long parsedUserId = provider.accessIdentity(token).userId();
 
         assertThat(parsedUserId).isEqualTo(userId);
     }
@@ -50,26 +50,9 @@ class JwtTokenProviderTest {
         Long userId = 7L;
 
         String token = provider.createRefreshToken(userId, UUID.randomUUID(), 0, NOW.plusSeconds(604800));
-        Long parsedUserId = provider.parseRefreshToken(token);
+        Long parsedUserId = provider.refreshIdentity(token).userId();
 
         assertThat(parsedUserId).isEqualTo(userId);
-    }
-
-    @Test
-    @DisplayName("버전을 지정한 refresh_token은 그 버전을 그대로 담아 돌려준다")
-    void refresh_token은_지정한_token_version을_담는다() {
-        String token = provider.createRefreshToken(7L, 3);
-
-        assertThat(provider.parseRefreshToken(token)).isEqualTo(7L);
-        assertThat(provider.parseRefreshTokenVersion(token)).isEqualTo(3);
-    }
-
-    @Test
-    @DisplayName("버전 없이 만든 refresh_token(레거시)의 token_version은 0이다")
-    void 버전_없이_만든_refresh_token은_기본값_0이다() {
-        String token = provider.createRefreshToken(7L);
-
-        assertThat(provider.parseRefreshTokenVersion(token)).isZero();
     }
 
     @Test
@@ -79,7 +62,7 @@ class JwtTokenProviderTest {
         Clock futureClock = Clock.fixed(NOW.plus(Duration.ofMinutes(16)), ZoneOffset.UTC);
         JwtTokenProvider futureProvider = new JwtTokenProvider(properties, futureClock);
 
-        assertThatThrownBy(() -> futureProvider.parseAccessToken(token))
+        assertThatThrownBy(() -> futureProvider.accessIdentity(token))
                 .isInstanceOf(ExpiredJwtException.class);
     }
 
@@ -96,7 +79,7 @@ class JwtTokenProviderTest {
         JwtTokenProvider otherProvider = new JwtTokenProvider(otherProps, clock);
         String otherToken = otherProvider.createAccessToken(7L, UUID.randomUUID(), NOW.plusSeconds(604800));
 
-        assertThatThrownBy(() -> provider.parseAccessToken(otherToken))
+        assertThatThrownBy(() -> provider.accessIdentity(otherToken))
                 .isInstanceOf(JwtException.class);
     }
 
@@ -105,7 +88,7 @@ class JwtTokenProviderTest {
     void refresh_token을_access로_검증하면_거절한다() {
         String refreshToken = provider.createRefreshToken(7L, UUID.randomUUID(), 0, NOW.plusSeconds(604800));
 
-        assertThatThrownBy(() -> provider.parseAccessToken(refreshToken))
+        assertThatThrownBy(() -> provider.accessIdentity(refreshToken))
                 .isInstanceOf(JwtException.class);
     }
 
@@ -114,7 +97,7 @@ class JwtTokenProviderTest {
     void access_token을_refresh로_검증하면_거절한다() {
         String accessToken = provider.createAccessToken(7L, UUID.randomUUID(), NOW.plusSeconds(604800));
 
-        assertThatThrownBy(() -> provider.parseRefreshToken(accessToken))
+        assertThatThrownBy(() -> provider.refreshIdentity(accessToken))
                 .isInstanceOf(JwtException.class);
     }
 
@@ -131,7 +114,7 @@ class JwtTokenProviderTest {
                 .signWith(Keys.hmacShaKeyFor(keyBytes), Jwts.SIG.HS256)
                 .compact();
 
-        assertThatThrownBy(() -> provider.parseAccessToken(invalidSubToken))
+        assertThatThrownBy(() -> provider.accessIdentity(invalidSubToken))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 

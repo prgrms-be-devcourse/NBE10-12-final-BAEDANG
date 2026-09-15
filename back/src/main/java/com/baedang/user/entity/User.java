@@ -42,13 +42,6 @@ public class User extends BaseEntity {
     private boolean seed;
 
     /**
-     * V17에서 추가된 레거시 버전입니다. 재설정 시 증가 동작은 호환성을 위해 유지합니다.
-     * 운영 Stateful 인증은 이 값 대신 auth_session의 활성 여부를 확인합니다.
-     */
-    @Column(name = "token_version", nullable = false)
-    private int tokenVersion;
-
-    /**
      * JPA 전용 기본 생성자.
      *
      * <p>Hibernate 가 리플렉션으로 객체를 만들 때 필요합니다. {@code protected} 인
@@ -64,7 +57,6 @@ public class User extends BaseEntity {
         this.nickname = nickname;
         this.status = UserStatus.ACTIVE;
         this.seed = seed;
-        this.tokenVersion = 0;
     }
 
     /**
@@ -99,14 +91,6 @@ public class User extends BaseEntity {
         this.status = UserStatus.WITHDRAWN;
     }
 
-    /**
-     * 호환용 버전만 증가시킵니다. 이 호출만으로 Stateful 세션이 폐기되지는 않습니다.
-     * 실제 비밀번호 변경·재설정·탈퇴는 서비스에서 AuthSessionService.revokeAll을 호출합니다.
-     */
-    public void invalidateSessions() {
-        this.tokenVersion++;
-    }
-
     public Long getUserId() {
         return userId;
     }
@@ -131,7 +115,4 @@ public class User extends BaseEntity {
         return seed;
     }
 
-    public int getTokenVersion() {
-        return tokenVersion;
-    }
 }

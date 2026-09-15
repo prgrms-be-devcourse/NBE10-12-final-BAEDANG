@@ -399,11 +399,10 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("유효한 토큰으로 재설정하면 비밀번호를 바꾸고 모든 세션을 폐기하며 호환 버전을 증가시킨다")
+    @DisplayName("유효한 토큰으로 재설정하면 비밀번호를 바꾸고 모든 세션을 폐기한다")
     void 유효한_토큰으로_비밀번호를_재설정한다() {
         User user = User.create("test@example.com", "old-encoded", "테스터");
         ReflectionTestUtils.setField(user, "userId", 1L);
-        int tokenVersionBefore = user.getTokenVersion();
         PasswordResetToken token = PasswordResetToken.issue(
                 1L, "any-hash", OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusMinutes(10));
 
@@ -416,8 +415,6 @@ class AuthServiceTest {
         assertThat(passwordEncoder.matches("NewPassword123!", user.getPasswordHash())).isTrue();
         verify(passwordResetTokenRepository).invalidateUnusedByUserId(eq(1L), any());
         verify(sessions).revokeAll(1L);
-        // 실제 세션 폐기는 revokeAll이 담당하고, V17의 버전 증가는 호환성 때문에 유지합니다.
-        assertThat(user.getTokenVersion()).isEqualTo(tokenVersionBefore + 1);
     }
 
     @Test

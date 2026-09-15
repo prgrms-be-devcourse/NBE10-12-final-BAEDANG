@@ -218,7 +218,6 @@ Every column and its intent — focused especially on **why each column exists**
 > | `password_hash` | VARCHAR(255) | **Never store plaintext.** Hash with BCrypt; default `BCryptPasswordEncoder` is enough. Empty/dummy in week 1. |
 > | `nickname` | VARCHAR(50) | display name. Avoids exposing email. |
 > | `status` | VARCHAR(20) | `ACTIVE` / `DORMANT` / `WITHDRAWN`. Withdrawal via physical delete breaks ledger FKs — **handle by status transition only**. |
-> | `token_version` | INT | (Flyway V17) retained as legacy compatibility metadata and incremented on password reset. Stateful authentication does not compare this value: password reset revokes all `auth_session` rows in the same transaction, rejecting old Access and Refresh on subsequent authentication checks. |
 > | `created_at` `updated_at` | TIMESTAMPTZ | audit common columns. Recommended on all tables. |
 
 #### `account` — mock investment account
@@ -610,7 +609,7 @@ Issued by `POST /api/auth/password/forgot` and consumed by `POST /api/auth/passw
 | `used_at`                 | TIMESTAMPTZ        | NULL while unused. Set when the token is spent (successful reset) or superseded by a newer request for the same user.                 |
 | `created_at`              | TIMESTAMPTZ        | Issuance time (DB default). Also doubles as the request-cooldown clock — a new request within `auth.password-reset.request-cooldown` (default 1m) of the most recent `created_at` for that user is silently ignored (no new row, no mail) to stop one target's inbox from being flooded (#207 review). |
 
-Requesting a reset invalidates that user's other unused tokens (`used_at` set) so only the newest email's link works. Successful reset also revokes all user sessions in the password-change transaction. `users.token_version` (Flyway V17) is still incremented for compatibility, but is not the Stateful revocation mechanism. Both issuance and reset lock the user before reset-token rows; issuance checks cooldown under this lock and reset revalidates token state after acquiring it.
+Requesting a reset invalidates that user's other unused tokens (`used_at` set) so only the newest email's link works. Successful reset also revokes all user sessions in the password-change transaction. V18 removes the obsolete `users.token_version` column introduced by V17. Both issuance and reset lock the user before reset-token rows; issuance checks cooldown under this lock and reset revalidates token state after acquiring it.
 
 ## V9–V12 were skipped to avoid clashing with versions claimed by concurrently open PRs.
 

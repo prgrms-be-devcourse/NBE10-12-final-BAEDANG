@@ -257,7 +257,6 @@ public class AuthService {
      *
      * <p>비밀번호 변경과 같은 트랜잭션에서 모든 auth_session을 폐기합니다.
      * 커밋 뒤 시작한 인증 검증은 기존 Access도 거절하며, 이미 인증된 요청은 소급 취소하지 않습니다.
-     * User.invalidateSessions는 레거시 버전 증가를 유지하는 용도입니다.
      */
     @Transactional
     public void resetPassword(PasswordResetConfirmRequest request) {
@@ -280,7 +279,6 @@ public class AuthService {
         }
 
         user.changePasswordHash(passwordEncoder.encode(request.newPassword()));
-        user.invalidateSessions();
         sessions.revokeAll(user.getUserId());
         // 방금 쓴 토큰 자신을 포함해, 이 회원의 다른 미사용 토큰(메일을 여러 번
         // 요청했던 경우)까지 한 번에 소비 처리한다.

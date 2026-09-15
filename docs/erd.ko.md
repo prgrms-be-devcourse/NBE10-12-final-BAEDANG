@@ -715,9 +715,9 @@ MARKET은 모두 NULL, LIMIT은 모두 필수입니다. limit_price는 종목 �
 
 ## 인증 세션 (V18)
 
-V16은 비밀번호 재설정 토큰, V17은 레거시 `users.token_version`이며 기존 마이그레이션은 유지합니다.
+V16과 V17 마이그레이션은 유지하며, V18에서 `auth_session`을 추가하고 V17의 `users.token_version`을 제거합니다.
 재설정은 같은 트랜잭션에서 사용자의 모든 `auth_session`을 폐기합니다. 커밋 뒤 시작한 인증 검증은
-기존 Access·Refresh를 모두 거절합니다. `token_version` 증가는 호환용이며 세션 검증에 사용하지 않습니다.
+기존 Access·Refresh를 모두 거절합니다. 인증과 세션 폐기는 `auth_session`만 사용합니다.
 발급·재설정은 사용자부터 잠그고 재설정 토큰을 처리하며, 쿨다운과 토큰 유효성은 잠금 안에서 확인합니다.
 
 `users → auth_session`은 1:N입니다. 기존 회원·계좌·원장·거래 데이터는 변경하지 않습니다.

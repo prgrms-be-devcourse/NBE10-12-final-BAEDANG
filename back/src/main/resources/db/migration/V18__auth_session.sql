@@ -13,3 +13,6 @@ CREATE TABLE auth_session (
 );
 CREATE INDEX idx_auth_session_user ON auth_session(user_id);
 CREATE INDEX idx_auth_session_expiry ON auth_session(expires_at);
+
+-- Stateful 세션으로 대체한 레거시 토큰 버전 컬럼을 제거합니다.
+ALTER TABLE users DROP COLUMN token_version;
