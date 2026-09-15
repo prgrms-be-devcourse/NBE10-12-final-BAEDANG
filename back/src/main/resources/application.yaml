@@ -93,7 +93,7 @@ app:
 
 # ── 메일 발송 게이트 — 비밀번호 찾기 재설정 메일 ────────────────────────────
 #   spring.mail.* (최상단 spring: 블록) 설정과 짝을 이룬다. false(기본값)면
-#   PasswordResetMailSender가 실제로 보내지 않고 재설정 링크를 로그로만 남긴다.
+#   PasswordResetMailSender가 발송을 생략하며 재설정 토큰과 링크를 로그에 남기지 않는다.
 mail:
   enabled: ${MAIL_ENABLED:false}
   from: ${MAIL_FROM:no-reply@investup.local}
@@ -249,6 +249,10 @@ report:
     admin-trigger-enabled: ${REPORT_LEADERBOARD_ADMIN_TRIGGER_ENABLED:false}
 
 auth:
+  session:
+    encryption-key: ${AUTH_SESSION_ENCRYPTION_KEY}
+    rotation-grace: 20s
+    cleanup-delay: 1h
   jwt:
     issuer: baedang
     secret: ${JWT_SECRET}

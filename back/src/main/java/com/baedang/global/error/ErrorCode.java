@@ -39,6 +39,9 @@ public enum ErrorCode {
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요해요"),
     TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "로그인이 만료됐어요. 다시 로그인해주세요"),
     INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "인증 정보가 올바르지 않아요"),
+    SESSION_REVOKED(HttpStatus.UNAUTHORIZED, "로그인이 해제됐어요. 다시 로그인해주세요"),
+    REFRESH_TOKEN_REUSED(HttpStatus.UNAUTHORIZED, "인증 정보가 재사용되어 로그인이 해제됐어요"),
+    AUTH_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "인증 정보를 확인할 수 없어요. 잠시 후 다시 시도해주세요"),
     INVALID_PASSWORD(HttpStatus.BAD_REQUEST, "현재 비밀번호가 올바르지 않아요"),
 
     /** 비밀번호 찾기 링크의 토큰이 없거나, 형식이 맞지 않거나, 이미 사용됐을 때. */

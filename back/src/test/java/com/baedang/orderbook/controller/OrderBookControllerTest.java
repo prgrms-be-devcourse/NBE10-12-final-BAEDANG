@@ -2,6 +2,7 @@ package com.baedang.orderbook.controller;
 
 import com.baedang.auth.security.JwtAuthenticationFilter;
 import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
@@ -32,6 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(OrderBookController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class OrderBookControllerTest {
+    @MockitoBean private AuthSessionService authSessions;
+
 
     @Autowired
     private MockMvc mockMvc;

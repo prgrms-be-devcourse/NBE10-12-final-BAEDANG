@@ -45,7 +45,7 @@ const VALUATION_POLL_INTERVAL_MS = 5000;
 
 export default function MyPage() {
   const router = useRouter();
-  const { isLoggedIn, user, setUser, logout } = useAuth();
+  const { isLoggedIn, user, logout } = useAuth();
   const { rate, hasError: rateError } = useExchangeRate();
   const { isOpen: isMarketOpen } = useMarketStatus();
   const { theme } = useTheme();
@@ -460,9 +460,7 @@ export default function MyPage() {
     if (nextNickname === user.nickname) return; // 바뀐 게 없으면 조용히 아무 것도 안 한다.
     setNicknameSaving(true);
     try {
-      const profile = await updateNickname(nextNickname);
-      // Nav 등 다른 화면도 user.nickname을 그대로 참조하니 여기서 같이 갱신한다.
-      setUser({ ...user, nickname: profile.nickname });
+      await updateNickname(nextNickname);
       setNicknameSaved(true);
     } catch (err) {
       setNicknameError(err instanceof ApiError ? err.message : "닉네임 변경에 실패했어요.");
@@ -486,7 +484,8 @@ export default function MyPage() {
       setCurrentPassword("");
       setNewPassword("");
       setNewPasswordConfirm("");
-      setPasswordSaved(true);
+      logout();
+      router.push("/login?reason=password-changed");
     } catch (err) {
       setPasswordError(err instanceof ApiError ? err.message : "비밀번호 변경에 실패했어요.");
     } finally {
@@ -500,9 +499,7 @@ export default function MyPage() {
     setWithdrawing(true);
     try {
       await withdrawAccount(withdrawPassword);
-      // 탈퇴는 서버 토큰을 무효화하지 않으므로(stateless JWT), 여기서 반드시
-      // 로컬 로그인 상태를 지워야 한다 — 안 그러면 이미 없는 계정으로 계속
-      // 요청을 보내다 에러만 반복해서 보게 된다.
+      // 서버의 전체 세션 폐기에 이어 브라우저 쿠키와 메모리도 정리합니다.
       logout();
       router.push("/");
     } catch (err) {

@@ -2,6 +2,7 @@ package com.baedang.report.controller;
 
 import com.baedang.auth.security.JwtAuthenticationFilter;
 import com.baedang.auth.security.JwtTokenProvider;
+import com.baedang.auth.service.AuthSessionService;
 import com.baedang.auth.security.RestAuthenticationEntryPoint;
 import com.baedang.global.config.SecurityConfig;
 import com.baedang.global.error.BusinessException;
@@ -32,6 +33,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(ReportController.class)
 @Import({SecurityConfig.class, JwtAuthenticationFilter.class, RestAuthenticationEntryPoint.class})
 class ReportControllerTest {
+    @MockitoBean private AuthSessionService authSessions;
+
 
     @Autowired MockMvc mockMvc;
     @MockitoBean PersonalityReportService personalityReportService;

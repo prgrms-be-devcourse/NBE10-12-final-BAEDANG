@@ -20,6 +20,10 @@ public interface PasswordResetTokenRepository extends JpaRepository<PasswordRese
      */
     Optional<PasswordResetToken> findFirstByUserIdOrderByCreatedAtDesc(Long userId);
 
+    // 엔티티를 미리 로딩하지 않아 사용자 잠금 뒤 토큰을 조회할 때 최신 상태를 읽습니다.
+    @Query("select t.userId from PasswordResetToken t where t.tokenHash = :tokenHash")
+    Optional<Long> findUserIdByTokenHash(@Param("tokenHash") String tokenHash);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select t from PasswordResetToken t where t.tokenHash = :tokenHash")
     Optional<PasswordResetToken> findByTokenHashForUpdate(@Param("tokenHash") String tokenHash);

@@ -1,12 +1,16 @@
 import type { Page, APIRequestContext } from '@playwright/test';
-import { expect, API } from '../fixtures/test.js';
+import { expect, API, PASSWORD } from '../fixtures/test.js';
 
-export async function authenticate(page: Page, user: object) {
-  await page.goto('/login');
-  await page.evaluate(value => {
-    localStorage.setItem('trading-auth-user', JSON.stringify(value));
-    localStorage.setItem('stockDetailTourSeen_v1', '1');
-  }, user);
+export async function authenticate(page: Page, user: { email: string }) {
+  // 검증용 API와 브라우저는 독립 세션을 사용합니다. 브라우저에는 HttpOnly 쿠키만 심습니다.
+  const response = await page.request.post('/api/auth/login', {
+    headers: { Origin: 'http://127.0.0.1:13000', 'X-Auth-Request': '1' },
+    data: { email: user.email, password: PASSWORD },
+  });
+  expect(response.ok(), await response.text()).toBeTruthy();
+  await page.goto('/my');
+  await expect(page.getByRole('heading', { name: '내 계좌' })).toBeVisible();
+  await page.evaluate(() => localStorage.setItem('stockDetailTourSeen_v1', '1'));
 }
 export async function openStock(page: Page, country = 'KR') {
   await page.goto(`/stocks/${country === 'KR' ? '005930' : 'AAPL'}?marketCountry=${country}`);
@@ -36,7 +40,9 @@ export async function get(request: APIRequestContext, user: { accessToken: strin
   if (response.status() === 401 && user.refreshToken) {
     const refresh = await request.post(`${API}/api/auth/refresh`, { data: { refreshToken: user.refreshToken } });
     expect(refresh.ok()).toBeTruthy();
-    user.accessToken = (await refresh.json()).accessToken;
+    const tokens = await refresh.json();
+    user.accessToken = tokens.accessToken;
+    user.refreshToken = tokens.refreshToken;
     response = await request.get(`${API}${path}`, { headers: { Authorization: `Bearer ${user.accessToken}` } });
   }
   expect(response.ok(), await response.text()).toBeTruthy();

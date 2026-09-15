@@ -1,6 +1,11 @@
 package com.baedang.auth.security;
 
 import com.baedang.global.error.ErrorCode;
+import com.baedang.global.error.BusinessException;
+import com.baedang.auth.service.AuthSessionService;
+import com.baedang.auth.security.JwtTokenProvider.Identity;
+import org.springframework.dao.DataAccessException;
+import org.springframework.transaction.TransactionException;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
@@ -22,10 +27,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final JwtTokenProvider jwtTokenProvider;
+    private final AuthSessionService sessions;
     private final RestAuthenticationEntryPoint entryPoint;
 
-    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, RestAuthenticationEntryPoint entryPoint) {
+    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider, RestAuthenticationEntryPoint entryPoint, AuthSessionService sessions) {
         this.jwtTokenProvider = jwtTokenProvider;
+        this.sessions = sessions;
         this.entryPoint = entryPoint;
     }
 
@@ -51,7 +58,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         Long userId;
         try {
-            userId = jwtTokenProvider.parseAccessToken(token);
+            Identity identity = jwtTokenProvider.accessIdentity(token);
+            sessions.requireActive(identity);
+            userId = identity.userId();
+        } catch (BusinessException exception) {
+            SecurityContextHolder.clearContext();
+            entryPoint.write(response, exception.getErrorCode());
+            return;
+        } catch (DataAccessException | TransactionException exception) {
+            SecurityContextHolder.clearContext();
+            entryPoint.write(response, ErrorCode.AUTH_UNAVAILABLE);
+            return;
         } catch (ExpiredJwtException e) {
             SecurityContextHolder.clearContext();
             entryPoint.write(response, ErrorCode.TOKEN_EXPIRED);
