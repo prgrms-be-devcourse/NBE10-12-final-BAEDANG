@@ -8,6 +8,7 @@ import 'package:investup_app/features/auth/forgot_password_screen.dart';
 import 'package:investup_app/features/guide/guide_screen.dart';
 import 'package:investup_app/features/guide/wiki_terms.dart';
 import 'package:investup_app/features/guide/wiki_terms_source.dart';
+import 'package:investup_app/core/theme/theme_controller.dart';
 import 'package:investup_app/features/my/my_screen.dart';
 import 'package:investup_app/features/rankings/rankings_screen.dart';
 import 'package:investup_app/features/stock_detail/stock_detail_screen.dart';
@@ -497,6 +498,7 @@ GoRouter _router(TestHarness harness) => GoRouter(
           orders: harness.orders,
           exchangeRates: harness.exchangeRates,
           reports: harness.reports,
+          theme: ThemeController(),
         ),
       ),
     ),
@@ -608,6 +610,7 @@ void main() {
                     orders: harness.orders,
                     exchangeRates: harness.exchangeRates,
                     reports: harness.reports,
+                    theme: ThemeController(),
                   ),
                 ),
               ),
@@ -684,6 +687,7 @@ void main() {
                     orders: harness.orders,
                     exchangeRates: harness.exchangeRates,
                     reports: harness.reports,
+                    theme: ThemeController(),
                   ),
                 ),
               ),
@@ -736,6 +740,7 @@ void main() {
                     orders: harness.orders,
                     exchangeRates: harness.exchangeRates,
                     reports: harness.reports,
+                    theme: ThemeController(),
                   ),
                 ),
               ),
@@ -845,6 +850,7 @@ void main() {
                 orders: harness.orders,
                 exchangeRates: harness.exchangeRates,
                 reports: harness.reports,
+                theme: ThemeController(),
               ),
             ),
           ),

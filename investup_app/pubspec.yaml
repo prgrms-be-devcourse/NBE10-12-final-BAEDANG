@@ -33,6 +33,8 @@ flutter:
   assets:
     # 종목 상세 차트 — TradingView lightweight-charts(WebView) + 브리지 페이지.
     - assets/chart/
+    # 투자 성향 리포트 16유형 이미지 — 웹 front/public/personality-types/와 같은 파일.
+    - assets/personality-types/
 
 # 웹 파비콘(front/src/app/icon.png)으로 생성한다. iOS는 알파를 떼야 해서
 # remove_alpha_ios로 둥근 모서리를 네이비 배경에 평탄화한다.

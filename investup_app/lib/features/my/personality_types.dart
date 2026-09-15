@@ -5,29 +5,38 @@
 /// 코드 순서는 분산(C/D)·시장(K/G)·유형(S/E)·공격성(A/B) — 백엔드
 /// `InvestmentType.code()`와 같다.
 class PersonalityTypeInfo {
-  const PersonalityTypeInfo({required this.nickname, required this.description});
+  const PersonalityTypeInfo({
+    required this.nickname,
+    required this.description,
+    required this.image,
+  });
 
   final String nickname;
   final String description;
+
+  /// 유형별 이미지 애셋 경로(`assets/personality-types/`) — 웹
+  /// `PERSONALITY_TYPES[].image`와 같은 역할이다. 등록되지 않은 유형이 생기면
+  /// null로 두면 되고, 그때는 코드·별명 텍스트 카드로 폴백한다.
+  final String? image;
 }
 
 const Map<String, PersonalityTypeInfo> kPersonalityTypes = {
-  'CKSA': PersonalityTypeInfo(nickname: '코스피 저격수', description: '국내 개별주 한두 종목에 레버리지까지 얹어 한 방을 노리는 승부사'),
-  'CKSB': PersonalityTypeInfo(nickname: '우량주 집사', description: '삼성전자 같은 국내 대형 우량주 하나를 뚝심으로 들고 가는 장기 보유형'),
-  'CKEA': PersonalityTypeInfo(nickname: '레버리지 돌격대', description: '국내 지수 레버리지·인버스 ETF에 집중 베팅하는 방향성 트레이더'),
-  'CKEB': PersonalityTypeInfo(nickname: '코덱스 지킴이', description: '국내 대표 지수 ETF 하나로 시장 전체를 편하게 담는 실속파'),
-  'CGSA': PersonalityTypeInfo(nickname: '서학개미 스나이퍼', description: '테슬라·엔비디아 같은 미국 성장주에 몰빵하는 공격적 서학개미'),
-  'CGSB': PersonalityTypeInfo(nickname: '빅테크 우직러', description: '믿는 미국 우량주 하나를 흔들림 없이 장기 보유하는 뚝심형'),
-  'CGEA': PersonalityTypeInfo(nickname: '나스닥 질주족', description: 'TQQQ류 해외 레버리지 ETF에 집중하는 고위험 질주형'),
-  'CGEB': PersonalityTypeInfo(nickname: 'S&P 뚜벅이', description: '미국 대표 지수 ETF 하나로 우직하게 세계 경제에 올라타는 안정형'),
-  'DKSA': PersonalityTypeInfo(nickname: '코스닥 사냥꾼', description: '여러 국내 종목에 레버리지를 섞어 공격적으로 굴리는 다종목 헌터'),
-  'DKSB': PersonalityTypeInfo(nickname: '국장 균형러', description: '국내 여러 우량주에 고르게 나눠 담는 안정적 분산 투자자'),
-  'DKEA': PersonalityTypeInfo(nickname: '섹터 로테이터', description: '국내 섹터·레버리지 ETF 여러 개를 돌려가며 공격적으로 베팅'),
-  'DKEB': PersonalityTypeInfo(nickname: '인덱스 정석러', description: '국내 지수 ETF를 고르게 나눠 담는 교과서적 분산 안정형'),
-  'DGSA': PersonalityTypeInfo(nickname: '글로벌 헌터', description: '미국 여러 성장주에 레버리지를 섞어 세계를 누비는 공격적 서학개미'),
-  'DGSB': PersonalityTypeInfo(nickname: '글로벌 컬렉터', description: '미국 우량주 여러 개를 고르게 모으는 안정적 글로벌 분산러'),
-  'DGEA': PersonalityTypeInfo(nickname: '월드 레버리지 서퍼', description: '해외 지수·테마 레버리지 ETF 여러 개로 파도를 타는 공격형'),
-  'DGEB': PersonalityTypeInfo(nickname: '올웨더 항해사', description: '전 세계 지수 ETF에 고르게 분산해 어떤 장세든 항해하는 궁극의 안정 분산러'),
+  'CKSA': PersonalityTypeInfo(nickname: '코스피 저격수', description: '국내 개별주 한두 종목에 레버리지까지 얹어 한 방을 노리는 승부사', image: 'assets/personality-types/CKSA.webp'),
+  'CKSB': PersonalityTypeInfo(nickname: '우량주 집사', description: '삼성전자 같은 국내 대형 우량주 하나를 뚝심으로 들고 가는 장기 보유형', image: 'assets/personality-types/CKSB.webp'),
+  'CKEA': PersonalityTypeInfo(nickname: '레버리지 돌격대', description: '국내 지수 레버리지·인버스 ETF에 집중 베팅하는 방향성 트레이더', image: 'assets/personality-types/CKEA.webp'),
+  'CKEB': PersonalityTypeInfo(nickname: '코덱스 지킴이', description: '국내 대표 지수 ETF 하나로 시장 전체를 편하게 담는 실속파', image: 'assets/personality-types/CKEB.webp'),
+  'CGSA': PersonalityTypeInfo(nickname: '서학개미 스나이퍼', description: '테슬라·엔비디아 같은 미국 성장주에 몰빵하는 공격적 서학개미', image: 'assets/personality-types/CGSA.webp'),
+  'CGSB': PersonalityTypeInfo(nickname: '빅테크 우직러', description: '믿는 미국 우량주 하나를 흔들림 없이 장기 보유하는 뚝심형', image: 'assets/personality-types/CGSB.webp'),
+  'CGEA': PersonalityTypeInfo(nickname: '나스닥 질주족', description: 'TQQQ류 해외 레버리지 ETF에 집중하는 고위험 질주형', image: 'assets/personality-types/CGEA.webp'),
+  'CGEB': PersonalityTypeInfo(nickname: 'S&P 뚜벅이', description: '미국 대표 지수 ETF 하나로 우직하게 세계 경제에 올라타는 안정형', image: 'assets/personality-types/CGEB.webp'),
+  'DKSA': PersonalityTypeInfo(nickname: '코스닥 사냥꾼', description: '여러 국내 종목에 레버리지를 섞어 공격적으로 굴리는 다종목 헌터', image: 'assets/personality-types/DKSA.webp'),
+  'DKSB': PersonalityTypeInfo(nickname: '국장 균형러', description: '국내 여러 우량주에 고르게 나눠 담는 안정적 분산 투자자', image: 'assets/personality-types/DKSB.webp'),
+  'DKEA': PersonalityTypeInfo(nickname: '섹터 로테이터', description: '국내 섹터·레버리지 ETF 여러 개를 돌려가며 공격적으로 베팅', image: 'assets/personality-types/DKEA.webp'),
+  'DKEB': PersonalityTypeInfo(nickname: '인덱스 정석러', description: '국내 지수 ETF를 고르게 나눠 담는 교과서적 분산 안정형', image: 'assets/personality-types/DKEB.webp'),
+  'DGSA': PersonalityTypeInfo(nickname: '글로벌 헌터', description: '미국 여러 성장주에 레버리지를 섞어 세계를 누비는 공격적 서학개미', image: 'assets/personality-types/DGSA.webp'),
+  'DGSB': PersonalityTypeInfo(nickname: '글로벌 컬렉터', description: '미국 우량주 여러 개를 고르게 모으는 안정적 글로벌 분산러', image: 'assets/personality-types/DGSB.webp'),
+  'DGEA': PersonalityTypeInfo(nickname: '월드 레버리지 서퍼', description: '해외 지수·테마 레버리지 ETF 여러 개로 파도를 타는 공격형', image: 'assets/personality-types/DGEA.webp'),
+  'DGEB': PersonalityTypeInfo(nickname: '올웨더 항해사', description: '전 세계 지수 ETF에 고르게 분산해 어떤 장세든 항해하는 궁극의 안정 분산러', image: 'assets/personality-types/DGEB.webp'),
 };
 
 /// 각 축의 "높은 쪽"·"낮은 쪽" 글자와 이름 — `InvestmentType`의 4개 enum과 순서가 같다.

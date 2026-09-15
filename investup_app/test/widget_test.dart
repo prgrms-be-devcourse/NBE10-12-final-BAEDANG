@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:investup_app/app.dart';
+import 'package:investup_app/core/theme/theme_controller.dart';
 import 'package:investup_app/features/guide/wiki_terms_source.dart';
 
 import 'core/fakes/fake_http_adapter.dart';
@@ -24,6 +25,7 @@ void main() {
         orders: harness.orders,
         exchangeRates: harness.exchangeRates,
         reports: harness.reports,
+        theme: ThemeController(),
         wiki: const BundledWikiTermsSource(),
       ),
     );
